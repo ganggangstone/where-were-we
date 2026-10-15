@@ -1,0 +1,210 @@
+where-were-we Source-Available License 1.0
+
+Copyright (c) 2026 ganggangstone
+
+The English text is authoritative. The Korean translation below is
+provided for convenience. Both describe the same terms.
+This is a custom license, not the MIT, Apache, or PolyForm license.
+
+1. Scope
+
+"Software" means the original where-were-we code and documentation that a
+copyright holder expressly makes available under this license. "Licensor"
+means each copyright holder granting rights to their own contribution.
+This license covers only rights those holders are authorized to grant.
+
+Third-party components and material with separate license notices are
+excluded. Their own licenses continue to govern them. Nothing in this
+license restricts rights granted by those separate licenses or rights
+available without a license under applicable law.
+
+2. Personal and internal business use
+
+Subject to these terms, you may use, copy, and modify the Software for
+personal purposes and for your organization's internal business operations,
+including operations of a for-profit organization.
+
+Internal use includes use by employees and contractors working on behalf
+of that organization, solely for its internal operations. It does not
+include supplying the Software or its functionality to outside customers
+as a paid product or service.
+
+You do not have to publish internal modifications. Using the Software
+internally to develop your own commercial products or produce reports is
+permitted, provided those products or reports do not distribute the
+Software or provide its functionality as a paid offering.
+
+Delivering or charging for a non-executable report or other output that
+contains no covered Software code is not paid access to the Software,
+provided the recipient is not given access to run or control the Software
+or its functionality through that output or delivery arrangement.
+
+3. Free sharing and modified versions
+
+You may copy, modify, and distribute the Software, including modified
+versions, for free sharing, subject to all of the following conditions:
+
+a. Preserve applicable copyright and third-party notices, and supply a
+   complete copy of these license terms with the distributed version.
+b. Identify the original project as where-were-we by ganggangstone and
+   provide its repository address:
+   https://github.com/ganggangstone/where-were-we
+c. Clearly identify modified versions as modified and describe your changes.
+   Do not present a modified version as an official release or imply the
+   original maintainers endorse it.
+d. Keep the portions covered by this license under these terms. Recipients
+   receive their permission for those portions directly from the relevant
+   Licensors, not a broader permission granted by the distributor.
+e. Do not condition access to the Software on payment, including a required
+   subscription, paid membership, or purchase of a bundle containing it.
+
+These permissions apply to free source and binary distributions. There is
+no requirement to submit an issue or pull request, or to publish the source
+of your modifications, as a condition of these permissions.
+
+4. Paid products and external paid services
+
+This license does not permit selling, renting, or commercially licensing
+copies of the Software or modified versions, including supplying them as
+part of a paid product, bundle, or subscription.
+
+It does not permit offering access to the Software or its functionality
+to outside customers in exchange for payment, including a hosted or
+managed service, API, paid plugin, or white-label version. Providing free
+access to part of such an offering does not permit charging for access to
+the Software or its functionality elsewhere in that offering.
+
+These restrictions apply to modified and unmodified versions. They do not
+remove the permission for internal business use described in section 2.
+Uses outside these permissions require a separate agreement from the
+relevant copyright holders.
+
+5. Ownership, names, and contributions
+
+Copyright holders retain ownership of their respective contributions.
+These terms do not transfer ownership of your own code, data, or reports
+to the Licensors. They do not grant permission to use project names or
+logos as your branding or to claim endorsement. The attribution required
+by section 3 is permitted.
+
+Bug reports and pull requests to the original repository are welcome, but
+acceptance, responses, maintenance, and release dates are not promised.
+Submitting a contribution does not by itself transfer its ownership.
+
+6. No warranty or additional responsibility
+
+To the extent the law permits, the Software is supplied in its current
+condition, with no promises or warranties about its correctness,
+availability, security, suitability for a task, or respect for third-party
+rights. This exclusion also applies to implied warranties imposed by law
+where their exclusion is permitted.
+
+To the extent the law permits, the Licensors and contributors are not
+responsible for claims, costs, or losses resulting from the Software, its
+use, modification, distribution, or inability to be used. No support,
+maintenance, indemnity, or other additional obligation is created by this
+license. Nothing here excludes a liability that the law does not allow to
+be excluded.
+
+7. Conditions and reserved rights
+
+The permissions above depend on compliance with these terms. Rights not
+expressly granted remain with their holders. These terms do not authorize
+you to remove the protections or restrictions applying to covered portions
+when you redistribute them.
+
+----- 한국어 번역 -----
+
+where-were-we 소스 공개 라이선스
+
+Copyright (c) 2026 ganggangstone
+
+영어 본문을 기준으로 삼으며, 아래 한국어 번역은 이해를 돕기 위해
+제공합니다. 두 본문은 같은 조건을 설명합니다. MIT·Apache·PolyForm의
+표준 라이선스가 아닌 이 프로젝트의 별도 조건입니다.
+
+1. 적용 범위
+
+“소프트웨어”는 저작권자가 이 조건으로 제공한다고 명시한 where-were-we의
+자체 코드와 문서를 뜻합니다. “허락자”는 각자 자신의 기여분에 권리를 허락하는
+저작권자입니다. 이 조건은 해당 저작권자가 허락할 권한이 있는 권리에만 적용됩니다.
+
+별도 라이선스가 표시된 제삼자 구성 요소와 자료에는 각자의 라이선스가 적용됩니다.
+이 조건은 그 별도 라이선스나 적용 법률에 따라 이미 누릴 수 있는 권리를 제한하지
+않습니다.
+
+2. 개인 및 회사 내부 사용
+
+이 조건을 지키는 범위에서 개인 목적과 소속 조직의 내부 업무를 위해
+소프트웨어를 사용·복사·수정할 수 있습니다. 영리 조직의 내부 업무도 포함합니다.
+
+그 조직을 위해 일하는 임직원과 계약자가 오직 그 조직의 내부 업무를 위해
+사용하는 경우도 포함합니다. 외부 고객에게 소프트웨어나 그 기능을 유료 제품·
+서비스로 제공하는 것은 내부 사용에 포함되지 않습니다.
+
+내부 수정 사항을 공개할 의무는 없습니다. 소프트웨어 자체를 배포하거나 그 기능을
+유료로 제공하지 않는 한, 자기 상용 제품을 개발하거나 보고서를 만들기 위해
+내부 도구로 사용하는 것은 허용됩니다.
+
+이 조건이 적용되는 소프트웨어 코드가 들어 있지 않은 실행 불가능한 보고서 등의
+결과물을 제공하거나 그 결과물의 대가를 받는 것은 소프트웨어에 대한 유료 접근으로
+보지 않습니다. 단, 그 결과물이나 제공 방식을 통해 받는 사람이 소프트웨어 또는
+그 기능을 실행·조작할 수 있게 해서는 안 됩니다.
+
+3. 무료 공유 및 수정판
+
+다음 조건을 모두 지키면 무료 공유를 위해 소프트웨어를 복사·수정하고,
+원본이나 수정판을 무료로 배포할 수 있습니다.
+
+a. 관련 저작권 표시와 제삼자 고지를 보존하고 이 조건의 전문을 함께 제공합니다.
+b. 원본이 ganggangstone의 where-were-we임을 밝히고 원본 저장소 주소를 제공합니다.
+   https://github.com/ganggangstone/where-were-we
+c. 수정판이라는 사실과 변경 내용을 명확히 표시합니다. 공식 배포판인 것처럼
+   소개하거나 원본 관리자가 보증·추천하는 것처럼 표시하지 않습니다.
+d. 이 조건이 적용되는 부분에는 같은 조건을 유지합니다. 받는 사람의 이용 권한은
+   배포자가 넓혀 주는 것이 아니라 해당 저작권자로부터 직접 주어집니다.
+e. 소프트웨어를 받거나 사용하기 위해 유료 구독·회원권·묶음 상품 구매 등의
+   대가를 요구하지 않습니다.
+
+소스 코드와 실행 파일의 무료 배포 모두에 적용됩니다. 이 허락을 받기 위한 조건으로
+이슈·PR을 보내거나 수정한 소스를 공개할 의무는 없습니다.
+
+4. 유료 제품 및 외부 유료 서비스
+
+소프트웨어나 수정판을 판매·대여하거나 유료로 이용 허락하는 것은 허용하지 않습니다.
+유료 제품·묶음 상품·구독에 포함해 제공하는 것도 포함합니다.
+
+외부 고객에게 소프트웨어나 그 기능을 유료로 제공하는 것도 허용하지 않습니다.
+호스팅·운영 대행 서비스, API, 유료 플러그인, 이름을 바꾼 제품도 포함합니다.
+일부를 무료로 제공하더라도 같은 상품이나 서비스 안에서 소프트웨어나 그 기능에
+접근하는 데 대가를 요구하는 것은 허용되지 않습니다.
+
+수정 여부와 관계없이 적용합니다. 2절에서 허용한 회사 내부 업무 사용을 막는
+조건은 아닙니다. 허락 범위를 벗어나는 사용에는 관련 저작권자의 별도 합의가 필요합니다.
+
+5. 소유권·이름·기여
+
+각 저작권자는 자기 기여분의 소유권을 유지합니다. 사용자의 자체 코드·데이터·
+보고서의 소유권이 허락자에게 넘어가지 않습니다. 프로젝트 이름·로고를 자기 제품의
+브랜드로 사용하거나 공식적인 보증·추천을 주장할 권한은 주지 않습니다.
+3절의 원본 출처 표시는 허용합니다.
+
+원본 저장소에 버그를 제보하거나 PR을 보내는 것을 환영합니다. 답변·반영·유지보수·
+출시 일정은 약속하지 않습니다. 기여했다는 사실만으로 소유권이 이전되지 않습니다.
+
+6. 보증 및 추가 책임 없음
+
+법률이 허용하는 범위에서 소프트웨어는 현재 상태대로 제공하며, 정확성·가용성·
+보안·특정 목적에 대한 적합성·제삼자 권리 침해 여부를 보증하지 않습니다.
+법률상 배제가 허용되는 묵시적 보증도 제외합니다.
+
+법률이 허용하는 범위에서 허락자와 기여자는 소프트웨어의 사용·수정·배포·
+사용 불능 등으로 생긴 청구·비용·손실에 책임을 지지 않습니다. 이 조건은 지원·
+유지보수·배상 보증 등의 추가 의무를 만들지 않습니다. 법률상 배제할 수 없는
+책임까지 제외하는 것은 아닙니다.
+
+7. 조건 준수 및 남는 권리
+
+위 허락은 이 조건을 지키는 것을 전제로 합니다. 명시적으로 주지 않은 권리는
+각 권리자에게 남습니다. 배포할 때 이 조건이 적용되는 부분의 보호나 제한을
+제거할 수 없습니다.

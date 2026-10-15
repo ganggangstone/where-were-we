@@ -1,0 +1,113 @@
+/* 쓰임새. "DESIGN.md 의 어느 값을 어디에 쓰는가"만 정한다. 값은 여기에 직접 적지 않는다.
+   값의 정본: DESIGN.md → (ui/build_tokens.py) → tokens.generated.css → 이 파일 → app.css */
+@import "tokens.generated.css";
+
+:root {
+  /* 바탕 (밝은 모드) */
+  --color-bg-window:var(--colors-canvas-parchment);
+  --color-bg-content:var(--colors-canvas);
+  --color-bg-card:var(--colors-canvas);
+  --color-bg-group:var(--colors-surface-pearl);
+  --color-bg-control:var(--colors-divider-soft);
+  --color-separator:var(--colors-hairline);
+  /* 글자 */
+  --color-text:var(--colors-ink);
+  --color-text-secondary:var(--colors-ink-muted-48);
+  --color-text-tertiary:var(--colors-surface-chip-translucent);
+  --color-text-on-fill:var(--colors-on-primary);
+  /* 누를 수 있는 것은 이 색 하나 */
+  --color-accent:var(--colors-primary);
+  --color-focus:var(--colors-primary-focus);
+  /* 신호색 (DESIGN.md app) */
+  --color-ok:var(--app-signal-ok);
+  --color-warn:var(--app-signal-warn);
+  --color-ai:var(--app-signal-ai);
+  --color-fill-strong:var(--colors-ink);          /* 유틸리티 버튼, "개발에만" 표시 */
+  --color-text-on-strong:var(--colors-on-dark);
+  /* 위쪽 막대는 어느 모드에서나 검정 */
+  --color-bg-toolbar:var(--colors-surface-black);
+  --color-bg-toolbar-control:var(--colors-surface-tile-1);
+  --color-text-on-toolbar:var(--colors-on-dark);
+  --color-text-on-toolbar-muted:var(--colors-body-muted);
+  --color-toolbar-chip-on:var(--colors-on-dark);
+  --color-text-on-toolbar-chip:var(--colors-ink);
+  --color-toolbar-separator:var(--app-hairline-on-dark);
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --color-bg-window:var(--colors-surface-tile-3);
+  --color-bg-content:var(--colors-surface-tile-1);
+  --color-bg-card:var(--colors-surface-tile-2);
+  --color-bg-group:var(--colors-surface-tile-3);
+  --color-bg-control:var(--app-control-on-dark);
+  --color-separator:var(--app-hairline-on-dark);
+  --color-text:var(--colors-body-on-dark);
+  --color-text-secondary:var(--colors-body-muted);
+  --color-text-tertiary:var(--colors-ink-muted-48);
+  --color-accent:var(--colors-primary-on-dark);
+  --color-ok:var(--app-signal-ok-on-dark);
+  --color-warn:var(--app-signal-warn-on-dark);
+  --color-ai:var(--app-signal-ai-on-dark);
+  --color-fill-strong:var(--colors-on-dark);
+  --color-text-on-strong:var(--colors-ink);
+} }
+
+:root {
+  /* 옅은 바탕색 */
+  --color-accent-tint:color-mix(in srgb, var(--color-accent) var(--app-tint), transparent);
+  --color-bg-related:var(--color-accent-tint);
+  --color-ok-tint:color-mix(in srgb, var(--color-ok) var(--app-tint), transparent);
+  --color-warn-tint:color-mix(in srgb, var(--color-warn) var(--app-tint), transparent);
+  --color-ai-tint:color-mix(in srgb, var(--color-ai) var(--app-tint), transparent);
+  /* 블루프린트 네 줄 */
+  --color-lane-screen:var(--color-accent);
+  --color-lane-server:var(--color-text-secondary);
+  --color-lane-store:var(--color-ok);
+  --color-lane-external:var(--color-warn);
+
+  /* 글자 역할. DESIGN.md typography 의 어느 줄을 쓰는가. 굵기는 400 과 600 뿐이다. */
+  --font-sans:var(--typography-caption-family);
+  --font-mono:var(--app-font-mono);
+  --font-title:var(--typography-tagline-weight) var(--typography-tagline-size)/var(--typography-tagline-leading) var(--typography-tagline-family);
+  --tracking-title:var(--typography-tagline-tracking);
+  --font-heading:var(--typography-caption-strong-weight) var(--typography-caption-strong-size)/var(--typography-caption-strong-leading) var(--font-sans);
+  --font-body:var(--typography-caption-weight) var(--typography-caption-size)/var(--typography-caption-leading) var(--font-sans);
+  --tracking-body:var(--typography-caption-tracking);
+  --font-secondary:var(--typography-fine-print-weight) var(--typography-fine-print-size)/var(--app-leading-wrapped) var(--font-sans);
+  --tracking-secondary:var(--typography-fine-print-tracking);
+  --font-micro:var(--typography-micro-legal-weight) var(--typography-micro-legal-size)/var(--typography-micro-legal-leading) var(--font-sans);
+  --tracking-micro:var(--typography-micro-legal-tracking);
+  --size-code:var(--typography-fine-print-size);
+  --weight-strong:var(--typography-caption-strong-weight);
+  --weight-regular:var(--typography-caption-weight);
+
+  /* 간격 */
+  --space-0:var(--rounded-none);
+  --space-1:var(--app-tight);
+  --space-2:var(--spacing-xxs);
+  --space-3:var(--spacing-xs);
+  --space-4:var(--spacing-sm);
+  --space-5:var(--spacing-md);
+  --space-6:var(--spacing-lg);
+  --space-7:var(--spacing-xl);
+  --space-8:var(--spacing-xxl);
+  /* 모서리 */
+  --radius-bar:var(--rounded-xs);
+  --radius-control:var(--rounded-sm);
+  --radius-step:var(--rounded-md);
+  --radius-card:var(--rounded-lg);
+  --radius-pill:var(--rounded-pill);
+  /* 선. 그림자는 쓰지 않는다. */
+  --border-hairline:var(--app-hairline-width) solid var(--color-separator);
+  --border-toolbar:var(--app-hairline-width) solid var(--color-toolbar-separator);
+  --border-hover:var(--app-hairline-width) solid var(--color-text-secondary);
+  --border-ai:var(--app-hairline-width) dashed var(--color-ai);
+  --outline-focus:var(--app-focus-width) solid var(--color-focus);
+  --outline-selected:var(--app-focus-width) solid var(--color-accent);
+  --press:scale(var(--app-press-scale));
+  /* 크기 */
+  --size-inspector:var(--app-inspector-width); --size-column:var(--app-column-width); --size-node:var(--app-node-width); --size-search:var(--app-search-width); --size-status-max:var(--app-status-max);
+  --size-dot:var(--app-dot); --size-badge:var(--app-badge); --size-bar:var(--app-bar); --size-bar-min:var(--app-bar-min); --size-bar-inline:var(--app-bar-inline); --size-desc-min:var(--app-desc-min);
+  --size-wire:var(--app-focus-width);
+  --lane-indent-1:var(--app-lane-indent-1); --lane-indent-2:var(--app-lane-indent-2); --lane-indent-3:var(--app-lane-indent-3);
+  --opacity-dim:var(--app-opacity-dim); --opacity-off:var(--app-opacity-off); --opacity-disabled:var(--app-opacity-disabled);
+}

@@ -1,0 +1,546 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>where were we</title>
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="app.css">
+<script src="vendor/dagre.min.js"></script>
+</head>
+<body>
+<header>
+  <select id="project"></select>
+  <div class="seg" id="view"><button data-v="changes">바뀐 것</button><button data-v="sys">전체 구조</button><button data-v="feat">기능</button><button data-v="map">화면 지도</button><button data-v="focus">이어진 것</button></div>
+  <div class="seg" id="branch"><button data-b="main">운영</button><button data-b="dev">개발</button></div>
+  <button id="refresh" class="btn" title="저장소를 다시 읽는다">↻ 새로고침</button>
+  <span class="status" id="status"></span>
+  <span class="spacer"></span>
+  <button id="agent" class="btn" title="에이전트(Claude Code, Codex 등)에 이 지도를 연결하는 프롬프트">에이전트 연결</button>
+  <input type="search" id="q" placeholder="화면·버튼·하는 일·PR·이슈 번호 찾기">
+</header>
+<main>
+  <div id="map"></div>
+  <div id="insp"></div>
+</main>
+<script>
+const invoke = window.__TAURI__.core.invoke;
+const S = { project:null, branch:'dev', maps:{}, status:null, groups:null, flows:null, sel:null, open:null, step:-1, ev:-1, q:'', view:'changes', chi:0, system:null, node:null, focus:null, feat:null };
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const M = () => S.maps[S.branch];
+
+// ---------- 데이터 다루기 ----------
+// 보여 주는 단위: 리다이렉트는 빼고, /m/… 모바일 판은 주소 뒤가 같은 데스크톱 화면에 붙인다.
+function visibleScreens(m) {
+  if (m._vis) return m._vis;
+  const desk = m.screens.filter(s => !s.redirect && !s.path.startsWith('/m/') && s.path !== '/m').map(s => ({ ...s, mobile: null }));
+  const orphans = [];
+  for (const s of m.screens) {
+    if (s.redirect || !(s.path.startsWith('/m/') || s.path === '/m')) continue;
+    const d = desk.find(x => x.path === (s.path.replace(/^\/m/, '') || '/'));
+    if (d) d.mobile = s; else orphans.push({ ...s, mobile: null });
+  }
+  return m._vis = [...desk, ...orphans];
+}
+const fold = (m, p) => { if (!p || !p.startsWith('/m/')) return p; const t = p.replace(/^\/m/, ''); return m.screens.some(x => x.path === t && !x.redirect) ? t : p; };
+// 화면 이름: 제목(코드 원문) → AI가 붙인 이름(점선) → 주소
+const aiName = (p) => (S.groups && S.groups.names && S.groups.names[p]) || null;
+function label(m, p) { const t = m.screens.find(x => x.path === p); const h = t && t.heading; if (!h) return aiName(p) || p;
+  // 같은 제목을 쓰는 화면이 여럿이면 주소가 가장 짧은 것만 제목 그대로, 나머지는 주소를 붙인다.
+  const same = (m._heads ??= m.screens.reduce((o, x) => { if (x.heading && !x.redirect && !x.path.startsWith('/m/')) (o[x.heading] ??= []).push(x.path); return o; }, {}))[h] || [];
+  return same.length > 1 && p !== same.slice().sort((a, b) => a.length - b.length)[0] ? h + ' · ' + p : h; }
+const isAi = (m, p) => { const t = m.screens.find(x => x.path === p); return !(t && t.heading) && !!aiName(p); };
+const nameHtml = (m, p) => `<span class="${isAi(m, p) ? 'ai' : ''}">${esc(label(m, p))}</span>`;
+// 헤더처럼 화면의 1/3 넘게 들어 있는 부품
+function commonVia(m) {
+  if (m._cv) return m._cv; const c = {};
+  for (const sc of m.screens) { const vs = new Set([...sc.actions.map(a => a.via), ...sc.api_functions.map(a => a.via)].filter(Boolean)); for (const v of vs) c[v] = (c[v] || 0) + 1; }
+  return m._cv = new Set(Object.keys(c).filter(v => c[v] > m.screens.length / 3));
+}
+// 화면 사이 이동 (모바일 접음). common=true 는 메뉴·탭으로 가는 길.
+function edges(m) {
+  if (m._edges) return m._edges; const map = new Map(); const unknown = {}; const nv = {};
+  // 세 화면 넘게 똑같이 들어 있는 부품(위쪽 메뉴, 옆 메뉴, 단계 탭)의 링크는 흐름이 아니라 메뉴로 친다.
+  for (const sc of m.screens) for (const a of sc.actions) if (a.kind === 'nav' && a.via) (nv[a.via] ??= new Set()).add(fold(m, sc.path));
+  for (const sc of m.screens) for (const a of sc.actions) {
+    if (a.kind !== 'nav') continue; const f = fold(m, sc.path); const common = !!(a.via && nv[a.via].size >= 3);
+    const ts = (a.targets || []).filter(t => t.to);
+    if (!ts.length) { if (!common) unknown[f] = (unknown[f] || 0) + 1; continue; }
+    for (const t of ts) { const to = fold(m, t.to); if (to === f) continue; const k = f + '>' + to; const e = map.get(k);
+      if (!e) map.set(k, { from: f, to, label: a.label || '', cond: a.cond || '', common, file: a.file, line: a.line });
+      else { if (!e.label && a.label) e.label = a.label; if (e.common && !common) e.common = false; } }
+  }
+  m._unknown = unknown; return m._edges = [...map.values()];
+}
+const hasInbound = (m, p) => edges(m).some(e => e.to === p);
+// 왼쪽에서 오른쪽 묶음: groups.json(AI 제안)이 있으면 그것, 없으면 주소 첫 조각.
+function groupsOf(m) {
+  const vis = visibleScreens(m); const out = [];
+  if (S.groups) {
+    for (const g of S.groups.groups) { const list = g.screens.map(p => vis.find(s => s.path === p)).filter(Boolean); if (list.length) out.push({ name: g.name, description: g.description, list, ai: true }); }
+    const placed = new Set(S.groups.groups.flatMap(g => g.screens)); const rest = vis.filter(s => !placed.has(s.path)); if (rest.length) out.push({ name: '미분류', description: '아직 묶이지 않은 화면', list: rest });
+  } else { const by = {}; for (const s of vis) (by['/' + (s.path.split('/')[1] || '')] ??= []).push(s); for (const [k, list] of Object.entries(by)) out.push({ name: k, description: '', list }); }
+  return out;
+}
+const flowOf = (r) => (S.flows && S.flows.routes && S.flows.routes[r.file + '::' + r.function]) || null;
+// 화면이 서버에 하는 요청 전부 (모바일 짝 포함, 헤더 부품 제외). 버튼 글자를 아는 요청은 그 글자로.
+function requests(m, path) {
+  m._req ??= {}; if (m._req[path]) return m._req[path];
+  const cv = commonVia(m); const s = m.screens.find(x => x.path === path); const vs = visibleScreens(m).find(x => x.path === path);
+  const parts = vs && vs.mobile ? [s, vs.mobile] : [s]; const labelOf = {};
+  // 버튼 글자를 요청에 붙인다. api 함수를 부르는 버튼은 함수 이름으로, 화면 파일에서 직접 요청을 보내는 버튼은 그 요청의 방식과 주소로 맞춘다.
+  const tag = (k, l) => { const a = labelOf[k] ??= []; if (!a.includes(l)) a.push(l); };
+  for (const p of parts) for (const a of p.actions) if (a.kind === 'api' && a.label) { for (const n of a.api_functions) if (n !== '<inline>') tag(n, a.label); for (const c of a.calls || []) tag(a.file + ' ' + c.method + ' ' + c.path, a.label); }
+  const rows = []; const seen = new Set();
+  for (const p of parts) for (const ref of p.api_functions) {
+    if (ref.via && cv.has(ref.via)) continue;
+    const f = m.api_functions.find(x => x.file === ref.file && x.name === ref.name); if (!f) continue;
+    for (const c of f.calls) for (const b of c.backend) {
+      const r = m.backend_routes.find(x => x.file === b.file && x.line === b.line); if (!r) continue;
+      const k = r.file + ':' + r.line; if (seen.has(k)) continue; seen.add(k);
+      const btns = (r.method !== 'GET' && labelOf[f.name === '<inline>' ? f.file + ' ' + c.method + ' ' + c.path : f.name]) || [];
+      rows.push({ key: r.file + '::' + r.function, btn: btns[0] || null, btns, /* ponytail: 버튼 처리 코드가 다시 읽기까지 부르면 읽는 요청에도 버튼 글자가 붙어서, 읽는 요청에는 안 붙인다. 버튼으로 읽기만 하는 경우는 이름을 잃는다 */ route: r, fn: f, call: c });
+    }
+  }
+  // 한 버튼이 서버 일을 여러 개 시키면 버튼 글자가 같아진다. 그때는 그 일의 이름을 뒤에 붙여 가른다.
+  const cnt = {}; for (const r of rows) if (r.btn) cnt[r.btn] = (cnt[r.btn] || 0) + 1; for (const r of rows) r.dup = !!r.btn && cnt[r.btn] > 1;
+  return m._req[path] = rows;
+}
+const reqName = (r) => (S.groups && S.groups.request_names && S.groups.request_names[r.file + '::' + r.function]) || null;
+const reqLabel = (r) => (r.btn && r.btn + (r.btns.length > 1 ? ` 외 ${r.btns.length - 1}` : '') + (r.dup ? ' · ' + (flowOf(r.route)?.name || reqName(r.route) || r.route.function) : '')) || flowOf(r.route)?.name || reqName(r.route) || r.route.function;
+const reqIsAi = (r) => !r.btn && !!(flowOf(r.route)?.name || reqName(r.route));
+const inMain = (r) => S.maps.main ? S.maps.main.backend_routes.some(x => x.method === r.method && x.path === r.path && x.mounted) : null;
+const openWork = (row) => (S.status ? S.status.open_prs : []).filter(p => p.files.includes(row.route.file) || p.files.includes(row.fn.file));
+// 운영·개발 사이에 이 화면이 다른가 (서버 요청 집합 기준)
+function diffOf(path) {
+  const a = S.maps.main, b = S.maps.dev; if (!a || !b) return null;
+  const sa = a.screens.find(s => s.path === path), sb = b.screens.find(s => s.path === path);
+  if (!sa || !sb) return 'only';
+  const ka = new Set(requests(a, path).map(r => r.route.method + r.route.path)), kb = new Set(requests(b, path).map(r => r.route.method + r.route.path));
+  if (ka.size !== kb.size) return 'diff'; for (const k of ka) if (!kb.has(k)) return 'diff'; return null;
+}
+
+// 이 화면과 이어진 작업: 열린 PR, 앞선 브랜치, 이 맥의 작업 폴더(와 그 폴더의 세션), 이슈, 최근 병합
+const ago = (iso) => { const h = (Date.now() - new Date(iso)) / 36e5; return h < 1 ? Math.max(1, Math.round(h * 60)) + '분 전' : h < 48 ? Math.round(h) + '시간 전' : Math.round(h / 24) + '일 전'; };
+function workOf(path) { const st = S.status || {}; const has = (x) => (x.screens || []).includes(path);
+  return { open: (st.open_prs || []).filter(has), merged: (st.merged_prs || []).filter(has), branches: (st.branches || []).filter(b => has(b) && b.ahead_of_dev && !b.stale && !b.has_open_pr),
+    folders: (st.worktrees || []).filter(w => has(w)), issues: (st.issues || []).filter(has) }; }
+// 직전 지도(P5)와 비교해 사라진 화면과, 남은 화면에서 사라진 서버 요청
+function vanished(m) { const p = S.prev && S.prev[S.branch]; if (!p || p.commit === m.commit) return null; if (p._gone) return p._gone;
+  const now = new Set(m.screens.map(s => s.path)); const screens = visibleScreens(p).filter(s => !now.has(s.path)).map(s => ({ path: s.path, name: label(p, s.path) }));
+  const reqs = []; for (const s of visibleScreens(p)) { if (!now.has(s.path)) continue; const cur = new Set(requests(m, s.path).map(r => r.route.method + ' ' + r.route.path));
+    for (const r of requests(p, s.path)) if (!cur.has(r.route.method + ' ' + r.route.path)) reqs.push({ screen: s.path, name: reqLabel(r), what: r.route.method + ' ' + r.route.path }); }
+  return p._gone = { from: p.commit.slice(0, 8), to: m.commit.slice(0, 8), screens, reqs }; }
+
+// ---------- 불러오기 ----------
+async function loadProject(p, first = true) {
+  S.project = p; S.maps = {};
+  const read = async (n) => { try { return JSON.parse(await invoke('read_map', { project:p, branch:n })); } catch (e) { return null; } };
+  S.maps.main = await read('main'); S.maps.dev = await read('dev'); S.status = await read('status'); S.groups = await read('groups'); S.flows = await read('flows'); S.system = await read('system'); S.jobs = await read('jobs'); S.changes = await read('changes'); S.prev = { dev: await read('dev.prev'), main: await read('main.prev') };
+  if (!S.maps[S.branch]) S.branch = S.maps.dev ? 'dev' : 'main';
+  render(); if (first) doRefresh();
+}
+async function doRefresh() {
+  const m = S.maps.dev || S.maps.main; if (!m || !m.repo) { $('status').textContent = '지도가 없습니다. extract.py 를 먼저 돌리세요.'; return; }
+  $('refresh').disabled = true; $('status').textContent = '저장소를 읽는 중…';
+  try { await invoke('refresh', { project:S.project, repo:m.repo, since:'7' }); await loadProject(S.project, false); $('status').textContent = ''; }
+  catch (e) { $('status').textContent = '실패: ' + String(e).slice(0, 160); }
+  $('refresh').disabled = false;
+}
+
+// ---------- 그리기: 스토리 맵 ----------
+function storyMap(m) {
+  const gs = groupsOf(m); const es = edges(m); const q = S.q.trim().toLowerCase();
+  const inSet = new Set(es.filter(e => e.to === S.sel && !e.common).map(e => e.from)), outSet = new Set(es.filter(e => e.from === S.sel && !e.common).map(e => e.to));
+  const aiCount = (S.groups ? S.groups.groups.length + Object.keys(S.groups.names || {}).length + Object.keys(S.groups.request_names || {}).length : 0) + Object.keys((S.flows && S.flows.routes) || {}).length;
+  let h = `<div class="legend"><span><b class="strong">${visibleScreens(m).length}</b> 화면 · <b class="strong">${gs.length}</b> 묶음</span>
+    <span><i class="dot ok"></i>자동 테스트가 닿는 비율</span><span><span class="ai">보라 점선</span> AI가 붙인 이름 ${aiCount}개</span>
+    ${S.sel && !S.sel.startsWith('!') ? `<span>옅은 카드는 선택 화면과 연결됨 · 라벨의 화살표가 이동 방향</span>` : ''}
+    <span class="spacer"></span><button class="btn plain" id="regroup" title="화면 주소·제목·버튼 글자만 에이전트에 넘겨 묶음과 이름을 다시 받는다">묶음·이름 다시 제안</button></div><div class="cols">`;
+  for (const g of gs) {
+    h += `<div class="col"><h3><span class="${g.ai ? 'ai' : ''}">${esc(g.name)}</span></h3><p>${esc(g.description || '')}</p>`;
+    for (const s of g.list) {
+      const rs = requests(m, s.path); const tested = rs.filter(r => (r.route.tests || []).length).length; const pct = rs.length ? Math.round(tested / rs.length * 100) : 0;
+      const d = diffOf(s.path); const open = new Set(rs.flatMap(r => openWork(r).map(p => p.number))).size;
+      const noWay = !hasInbound(m, s.path) && s.path !== '/' && s.path !== '/login';
+      const hay = q ? [label(m, s.path), s.path, ...rs.map(reqLabel), ...s.actions.map(a => a.label), ...Object.values(workOf(s.path)).flat().map(x => (x.number ? '#' + x.number + ' ' : '') + (x.title || x.name || ''))].join(' ').toLowerCase() : '';
+      const cls = [s.path === S.sel ? 'sel' : '', inSet.has(s.path) ? 'in' : '', outSet.has(s.path) ? 'out' : '', q && !hay.includes(q) ? 'dim' : ''].join(' ');
+      h += `<div class="card ${cls}" data-scr="${esc(s.path)}" title="${esc(s.path)}"><div class="nm">${nameHtml(m, s.path)}</div>
+        ${inSet.has(s.path) || outSet.has(s.path) ? `<div class="meta">${inSet.has(s.path) ? '<span class="pill relation">→ 선택 화면</span>' : ''}${outSet.has(s.path) ? '<span class="pill relation">선택 화면 →</span>' : ''}</div>` : ''}
+        <div class="meta"><span>요청 ${rs.length}</span>${rs.length ? `<span class="bar" title="테스트 ${tested}/${rs.length}"><i style="width:${pct}%"></i></span>` : ''}</div>
+        <div class="meta">${d === 'only' ? `<span class="pill strong">${S.branch === 'dev' ? '개발에만' : '운영에만'}</span>` : d === 'diff' ? '<span class="pill warn">운영과 다름</span>' : ''}${open ? `<span class="pill warn">열린 작업 ${open}</span>` : ''}${noWay ? '<span class="pill warn" title="다른 화면에서 여기로 오는 길을 코드에서 찾지 못했다. 주소를 코드에서 조립하는 이동은 목적지를 못 정해서, 길이 있는데도 이렇게 나올 수 있다">오는 길 못 찾음</span>' : ''}${s.condition ? `<span class="pill" title="${esc(s.condition)}">설정이 켜져야 보임</span>` : ''}${s.mobile ? '<span class="pill">모바일도</span>' : ''}</div></div>`;
+    }
+    h += `</div>`;
+  }
+  const orphans = m.backend_routes_without_screen.length, unres = m.unresolved_calls.length;
+  h += `<div class="col"><h3>화면 밖</h3><p>어느 화면에도 이어지지 않은 것</p>
+    <div class="card ${S.sel === '!orphans' ? 'sel' : ''}" data-scr="!orphans"><div class="nm">아무 화면도 안 부르는 서버 기능</div><div class="meta"><span class="pill warn">${orphans}개</span></div></div>
+    <div class="card ${S.sel === '!unres' ? 'sel' : ''}" data-scr="!unres"><div class="nm">받는 곳을 못 찾은 요청</div><div class="meta"><span class="pill warn">${unres}개</span></div></div>
+    ${S.status && S.status.issues ? `<div class="card ${S.sel === '!issues' ? 'sel' : ''}" data-scr="!issues"><div class="nm">어느 화면에도 연결 안 된 열린 이슈</div><div class="meta"><span class="pill warn">${S.status.issues.filter(i => !i.screens.length).length}개</span><span>열린 이슈 ${S.status.issues.length}개 중</span></div></div>` : ''}
+    ${vanished(m) ? `<div class="card ${S.sel === '!gone' ? 'sel' : ''}" data-scr="!gone"><div class="nm">지난 지도에서 사라진 것</div><div class="meta"><span class="pill ${vanished(m).screens.length + vanished(m).reqs.length ? 'warn' : ''}">화면 ${vanished(m).screens.length} · 서버 요청 ${vanished(m).reqs.length}</span></div></div>` : ''}</div>`;
+  return h + `</div>`;
+}
+
+// ---------- 그리기: 인스펙터 ----------
+const zed = (m, file, line) => `<a class="lnk mono" data-url="zed://file${m.repo}/${file}:${line}" title="Zed로 열기">${esc(file.split('/').pop())}:${line}</a>`;
+function copyText(m, s, row) {
+  const L = [`화면: ${label(m, s.path)} — ${s.path} (${s.file})`];
+  if (row) { L.push(`하는 일: ${reqLabel(row)}`, `요청: ${row.route.method} ${row.route.path}`, `화면 쪽 코드: ${row.fn.file}:${row.call.line}${row.fn.name !== '<inline>' ? ' ' + row.fn.name : ''}`, `서버 쪽 코드: ${row.route.file}:${row.route.line} ${row.route.function}`);
+    if ((row.route.tables || []).length) L.push(`저장소: ${row.route.tables.join(', ')}`); if ((row.route.externals || []).length) L.push(`외부: ${row.route.externals.join(', ')}`);
+    const f = flowOf(row.route); if (f) L.push('단계:', ...f.steps.map((st, i) => `  ${i + 1}. [${st.lane}] ${st.text} (${row.route.file}:${st.line})`)); }
+  L.push(`기준: ${m.ref} ${m.commit}`); return L.join('\n');
+}
+function inspector(m) {
+  if (!S.sel) return `<div class="hint">화면 카드를 누르면<br>그 화면으로 오가는 길, 서버에 하는 일,<br>누르면 생기는 일의 순서, 검증 상태가 여기 나옵니다.</div>`;
+  if (S.sel === '!orphans') return `<h2>아무 화면도 안 부르는 서버 기능</h2><p class="sub">서버에는 있는데 화면의 어느 요청과도 짝이 없다. 만들다 만 것이거나 다른 프로그램이 쓰는 것일 수 있다.</p><div class="sect"><div class="group">` +
+    m.backend_routes_without_screen.map(r => `<div class="row"><div class="grow"><div class="t"><span class="${flowOf(r)?.name || reqName(r) ? 'ai' : ''}">${esc(flowOf(r)?.name || reqName(r) || r.function)}</span></div><div class="s mono">${esc(r.method)} ${esc(r.path)}</div></div>${zed(m, r.file, r.line)}</div>`).join('') + `</div></div>`;
+  if (S.sel === '!unres') return `<h2>받는 곳을 못 찾은 요청</h2><p class="sub">화면이 보내는 요청인데 주소가 코드에서 조립돼 어느 서버 기능으로 가는지 정해지지 않는다.</p><div class="sect"><div class="group">` +
+    m.unresolved_calls.map(u => `<div class="row"><div class="grow"><div class="t mono">${esc(u.method)} ${esc(u.path ?? u.raw)}</div><div class="s mono">${esc(u.api_function.split('/').pop())}:${u.line}</div></div></div>`).join('') + `</div></div>`;
+  const gh = (n, title, url, extra) => `<div class="row click" data-url="${esc(url)}"><div class="grow"><div class="t">#${n} ${esc(title)}</div>${extra ? `<div class="s">${extra}</div>` : ''}</div><span class="chev">↗</span></div>`;
+  if (S.sel === '!issues') { const un = (S.status.issues || []).filter(i => !i.screens.length);
+    return `<h2>연결 안 된 열린 이슈 ${un.length}</h2><p class="sub">이 이슈를 적은 PR 이 없고, 이슈 글에 화면 주소·서버 주소·파일 이름도 나오지 않는다.</p><div class="sect"><div class="group">${un.map(i => gh(i.number, i.title, i.url)).join('')}</div></div>`; }
+  if (S.sel === '!gone') { const g = vanished(m); if (!g) return `<div class="hint">이 브랜치는 비교할 직전 지도가 없습니다.</div>`;
+    return `<h2>지난 지도에서 사라진 것</h2><p class="sub mono">${g.from} → ${g.to}</p><div class="sect"><h4>사라진 화면 ${g.screens.length}</h4><div class="group">${g.screens.map(x => `<div class="row"><div class="grow"><div class="t">${esc(x.name)}</div><div class="s mono">${esc(x.path)}</div></div></div>`).join('') || '<div class="row"><div class="grow empty">없다</div></div>'}</div></div>
+      <div class="sect"><h4>남은 화면에서 사라진 서버 요청 ${g.reqs.length}</h4><div class="group">${g.reqs.map(x => `<div class="row click" data-scr="${esc(x.screen)}"><div class="grow"><div class="t">${esc(x.name)}</div><div class="s">${nameHtml(m, x.screen)} · <span class="mono">${esc(x.what)}</span></div></div></div>`).join('') || '<div class="row"><div class="grow empty">없다</div></div>'}</div></div>`; }
+  const s = m.screens.find(x => x.path === S.sel); if (!s) return `<div class="hint">${S.branch === 'dev' ? '개발' : '운영'}에는 이 화면이 없습니다.</div>`;
+  const es = edges(m); const insAll = es.filter(e => e.to === s.path), outsAll = es.filter(e => e.from === s.path); const unk = (m._unknown || {})[s.path] || 0;
+  const ins = insAll.filter(e => !e.common), outs = outsAll.filter(e => !e.common); const menuIn = insAll.length - ins.length, menuOut = outsAll.length - outs.length;
+  const rs = requests(m, s.path).slice().sort((a, b) => (!!b.btn - !!a.btn) || reqLabel(a).localeCompare(reqLabel(b)));
+  const tested = rs.filter(r => (r.route.tests || []).length).length; const made = rs.filter(r => flowOf(r.route)).length;
+  const way = (e, other, arrow) => `<div class="row click" data-scr="${esc(other)}"><span class="arrow">${arrow}</span><div class="grow"><div class="t">${nameHtml(m, other)}</div><div class="s">${e.common ? '메뉴에서' : esc(e.label || '아이콘 버튼')}${e.cond ? ' · 조건에 따라' : ''}</div></div></div>`;
+  let h = `<div class="head"><div class="grow"><h2>${nameHtml(m, s.path)}</h2><p class="sub mono">${esc(s.path)}</p></div>${S.view === 'focus' ? '' : `<button class="btn quiet" data-f="screen|${esc(s.path)}">이어진 것 보기</button>`}<button class="btn" id="copyS">복사</button></div>`;
+  h += `<div class="sect"><h4>여기로 오는 길 ${ins.length} · 여기서 가는 길 ${outs.length}</h4><div class="group">` +
+    (insAll.length || outsAll.length || unk ? ins.map(e => way(e, e.from, '←')).join('') + outs.map(e => way(e, e.to, '→')).join('') +
+      (menuIn || menuOut ? `<div class="row"><span class="arrow">≡</span><div class="grow"><div class="t">메뉴와 탭</div><div class="s">${menuIn ? '메뉴에서 여기로 올 수 있다' : '메뉴에는 이 화면이 없다'}${menuOut ? ` · 메뉴로 ${menuOut}곳에 갈 수 있다` : ''}</div></div></div>` : '') + (unk ? `<div class="row"><span class="arrow">?</span><div class="grow"><div class="t">어디로 가는지 코드만으로 못 정한 이동 ${unk}개</div></div></div>` : '')
+      : `<div class="row"><div class="grow empty">코드에서 확인되는 길이 없다. 주소를 직접 쳐야 열리거나 아직 어디에도 이어지지 않았다.</div></div>`) + `</div></div>`;
+  const w = workOf(s.path); const nWork = w.open.length + w.branches.length + w.folders.length + w.issues.length;
+  if (nWork || w.merged.length) { h += `<div class="sect"><h4>이 화면과 이어진 작업 ${nWork}${w.merged.length ? ` · 최근 7일 병합 ${w.merged.length}` : ''}</h4><div class="group">`;
+    h += w.open.map(p => gh(p.number, p.title, p.url, `열린 PR · ${esc(p.author || '')} · ${ago(p.updated_at)}`)).join('');
+    h += w.branches.map(b => `<div class="row"><div class="grow"><div class="t mono">${esc(b.name)}</div><div class="s">PR 없는 브랜치 · 개발보다 ${b.ahead_of_dev}커밋 앞섬 · ${esc(b.author || '')} · ${b.age_days}일 전</div></div></div>`).join('');
+    h += w.folders.map(f => `<div class="row"><div class="grow"><div class="t mono">${esc(f.path.split('/').pop())}</div><div class="s">이 맥의 작업 폴더 · ${esc(f.branch)} · 커밋 안 한 변경 ${f.uncommitted.length}${f.session_count ? ` · Claude Code 세션 ${f.session_count}개, 마지막 ${ago(f.sessions[0].last)}` : ' · 이 맥에서 찾은 세션 없음'}</div></div>${f.sessions && f.sessions.length ? `<button class="btn quiet" data-copytext="${esc(`cd ${f.path} && claude --resume ${f.sessions[0].id}`)}" title="마지막 세션을 이어서 여는 명령을 복사한다">세션 명령 복사</button>` : ''}</div>`).join('');
+    h += w.issues.map(i => gh(i.number, i.title, i.url, `열린 이슈 · ${i.via === 'pr' ? '이어짐: ' + esc(i.hits.join(', ')) : '<span class="ai">후보</span>: 이슈 글에 ' + esc(i.hits.join(', ')) + ' 가 나온다'}`)).join('');
+    h += w.merged.slice(0, 5).map(p => gh(p.number, p.title, p.url, `병합 · ${ago(p.merged_at)}`)).join('') + (w.merged.length > 5 ? `<div class="row"><div class="grow empty">병합 ${w.merged.length - 5}개 더</div></div>` : '');
+    h += `</div></div>`; }
+  h += `<div class="sect"><h4>이 화면이 서버에 하는 일 ${rs.length}<span class="bar inline" title="테스트 ${tested}/${rs.length}"><i style="width:${rs.length ? tested / rs.length * 100 : 0}%"></i></span><span class="regular">테스트 ${tested}/${rs.length}</span></h4>
+    <div class="legend tight"><span><i class="dot ok"></i>자동 테스트 있음</span><span><i class="dot strong"></i>개발에만 있음</span><span><i class="dot warn"></i>열린 작업 있음</span></div><div class="group">`;
+  if (!rs.length) h += `<div class="row"><div class="grow empty">서버를 부르는 곳이 코드에서 확인되지 않는다.</div></div>`;
+  for (const r of rs) {
+    const t = (r.route.tests || []).length; const im = inMain(r.route); const ow = openWork(r); const isOpen = S.open === r.key;
+    h += `<div class="row click" data-req="${esc(r.key)}"><span title="자동 테스트 ${t}개"><i class="dot ${t ? 'ok' : ''}"></i></span><span title="${im === false ? '개발에만 있음' : '운영에도 있음'}"><i class="dot ${im === false ? 'strong' : ''}"></i></span><span title="${esc(ow.map(p => '#' + p.number + ' ' + p.title).join('\n') || '열린 작업 없음')}"><i class="dot ${ow.length ? 'warn' : ''}"></i></span>
+      <div class="grow"><div class="t"><span class="${reqIsAi(r) ? 'ai' : ''}">${esc(reqLabel(r))}</span></div></div><span class="chev">${isOpen ? '⌄' : '›'}</span></div>`;
+    if (isOpen) h += detail(m, s, r);
+  }
+  h += `</div>${rs.length > made ? `<div class="ctl"><button class="btn primary" id="mk">누르면 생기는 일 만들기 (${rs.length - made}개 남음)</button><span id="mklog">AI가 코드를 읽는다. 한 번에 12개</span></div>` : ''}</div>`;
+  return h;
+}
+const LANE = { '화면': 0, '서버': 1, '저장소': 2, '외부': 3 };
+function detail(m, s, r) {
+  const f = flowOf(r.route); const rt = r.route; const ins = (rt.inputs || []).map(i => i.split(':')[0]);
+  let h = `<div class="detail"><div class="flowline">${ins.length ? ins.map(i => `<span class="pill">${esc(i)}</span>`).join('') : '<span class="pill">입력 없음</span>'}<span class="arrow">→</span><span class="pill ai">${esc(reqLabel(r))}</span><span class="arrow">→</span>` +
+    ((rt.tables || []).map(t => `<span class="pill ok click" data-f="table|${esc(t)}" title="이 저장소를 쓰는 곳 보기">${esc(t)}</span>`).join('') + (rt.externals || []).map(t => `<span class="pill warn" title="외부 서비스">${esc(t)}</span>`).join('') || '<span class="pill">저장·외부 없음</span>') + `</div>`;
+  const files = [rt.file, ...(rt.services || [])]; const other = copyDiffs().filter(d => files.includes(d.path));
+  if (other.length) h += `<div class="empty">${esc(other[0].node.name)} 안에는 이 요청이 거치는 파일의 다른 판이 있다: ${[...new Set(other.map(d => d.path.split('/').pop()))].map(esc).join(', ')} (${new Set(other.map(d => d.branch)).size}개 사본)</div>`;
+  for (const { node, job, exact } of jobsOf(r.key)) h += `<div class="sect"><h4>이 요청 뒤에 ${esc(node.name)}이 이어서 하는 일${exact ? '' : ' (같은 서비스 파일을 거쳐서 이어진 것으로 추정)'}</h4><div class="tw"><b class="strong">${esc(job.name)}</b> ${esc(job.what)}</div><div class="s">시작: ${esc(job.starts_when)}</div>${job.steps.map((st, i) => `<div class="step l${st.lane === '저장소' ? 2 : st.lane === '외부' ? 3 : 1}"><span class="n">${i + 1}</span><div class="grow"><div class="tx">${esc(st.text)}</div><div class="s">${zed(m, st.file, st.line)}</div></div></div>`).join('')}</div>`;
+  if (r.btns.length > 1) h += `<div class="empty">이 일을 하는 버튼 ${r.btns.length}개: ${r.btns.map(esc).join(', ')}</div>`;
+  const shared = (rt.tables || []).filter(t => progs(t).length); const users = (routeUse(m)[r.key] || []).length;
+  if (shared.length) h += `<div class="empty">${esc([...new Set(shared.flatMap(t => progs(t).map(n => n.name)))].join(', '))}도 서버를 거치지 않고 이 저장소를 직접 읽고 쓴다: ${shared.map(esc).join(', ')}</div>`;
+  if (f && f.steps.length) {
+    const steps = [{ lane: '화면', text: r.btn ? `"${r.btn}" 을 누른다` : '화면이 요청을 보낸다', start: true }, ...f.steps];
+    h += `<div class="lanes"><span class="screen">화면</span><span class="server">서버</span><span class="store">저장소</span><span class="external">외부</span></div>` + steps.map((st, i) => {
+      const cur = S.step === i; const off = S.step >= 0 && !cur;
+      return `<div class="step l${LANE[st.lane] ?? 1} ${cur ? 'cur' : ''} ${off ? 'off' : ''} ${st.uncertain ? 'unsure' : ''}" data-step="${i}"><span class="n">${i || '▶'}</span><div class="grow"><div class="tx">${esc(st.text)}${st.uncertain ? ' (코드만으로는 확신 못 함)' : ''}</div>${S.ev === i && !st.start ? `<div class="ev mono">${esc(st.quote)}<br>${zed(m, rt.file, st.line)}</div>` : ''}</div></div>`; }).join('') +
+      `<div class="ctl"><button class="btn quiet" id="prev">◀</button><button class="btn quiet" id="next">다음 ▶</button><span>${S.step >= 0 ? `${S.step}/${steps.length - 1}` : '한 단계씩 보기'}</span><span class="spacer"></span><span class="ai">AI가 쓴 문장</span><span>· 근거 줄 대조 통과</span></div>`;
+  } else h += `<div class="empty">누르면 생기는 일의 순서는 아직 만들지 않았다. 아래 버튼으로 만든다.</div>`;
+  h += `<details><summary>연결된 코드</summary><div class="kv mono">${esc(rt.method)} ${esc(rt.path)}</div><div class="kv">화면 쪽 ${zed(m, r.fn.file, r.call.line)} · 서버 쪽 ${zed(m, rt.file, rt.line)} <span class="mono">${esc(rt.function)}</span></div>
+    <div class="kv">${(rt.tests || []).length ? `자동 테스트 ${rt.tests.length}개: <span class="mono">${rt.tests.map(t => esc(t.split('/').pop())).join(', ')}</span>` : `<b>테스트 코드가 안 보인다면?</b> 지도는 정해 둔 규칙으로만 테스트를 잇는다. 에이전트에게 찾게 하는 글을 복사해 붙여 넣으면, 에이전트가 테스트를 찾아 규칙을 고치거나 하나씩 남긴다. <button class="btn quiet" data-tp="${esc(rt.method + ' ' + rt.path + ' (' + rt.file + '::' + rt.function + ')')}">프롬프트 복사</button><span id="tpDone"></span>`}</div></details>
+    <div class="ctl"><button class="btn quiet" data-copy="${esc(r.key)}">이 일 복사</button>${S.focus && S.focus.t === 'route' ? '' : `<button class="btn plain" data-f="route|${esc(r.key)}">이 서버 기능을 쓰는 화면 ${users}곳</button>`}<span id="copied"></span></div></div>`;
+  return h;
+}
+
+// ---------- 그리기: 전체 구조 (system.json) ----------
+// 따로 켜지는 프로그램이 상자, 주고받는 것이 선. 선은 누르지 않아도 보이고 번호로 아래 목록과 잇는다.
+const WIRES = `<svg id="wires"><defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z"/></marker></defs></svg>`;
+const NEED = { ops: '운영 머신에 접속해야 확인됨', read: '아직 읽지 않음' };
+const ORIGIN = { repo: ['이 저장소', ''], other: ['다른 저장소', 'warn'], copy: ['사본을 끼워 씀', 'warn'], none: ['코드 없음', 'warn'] };
+const evHtml = (m, evs) => (evs || []).map(e => e.repo ? `<div class="kv">${esc(e.repo)} ${esc(e.file)}</div>` :
+  `<div class="kv">${zed(m, e.file, e.line)}${e.ok === false ? ' <span class="pill warn">근거 줄이 바뀜</span>' : ''}</div>`).join('');
+const needHtml = (u) => `<div class="row"><span class="arrow">${u.needs === 'ops' ? '🔒' : '?'}</span><div class="grow"><div class="tw">${esc(u.text)}</div><div class="s">${NEED[u.needs]}</div></div></div>`;
+function sysView(m) {
+  const y = S.system; if (!y) return `<div class="hint">전체 구조가 아직 없습니다.<br>에이전트가 저장소의 설명서·실행 설정·코드를 읽어 상자와 선을 적습니다. 몇 분 걸립니다.<br><br><button class="btn primary" id="remakeSys">전체 구조 만들기</button></div>`; const stale = y.checked && m.commit && !m.commit.startsWith(y.checked);
+  const LINKS = sysLinks(y); const near = new Set(LINKS.filter(l => l.from === S.node || l.to === S.node).flatMap(l => [l.from, l.to]));
+  let h = `<div class="legend"><span><b class="strong">${y.nodes.filter(n => n.kind !== 'user').length}</b> 덩어리 · 바깥 서비스 <b class="strong">${y.externals.length}</b></span>
+    <span>실선은 부르거나 읽고 쓰는 길, 점선은 코드나 설정을 같이 쓰는 사이</span><span>🔒 ${NEED.ops}</span>
+    <span class="spacer"></span><button class="btn plain" id="remakeSys" title="에이전트가 저장소를 다시 읽어 상자와 선을 새로 적는다. 몇 분 걸린다">다시 읽기</button><span>${esc(y.written)} · 근거 대조 ${esc(y.checked || '안 함')}${stale ? ' <span class="pill warn">지도와 기준 커밋이 다름</span>' : ''}</span></div>
+    <div class="sysrow"><div class="graph" id="sys">${WIRES}`;
+  for (const n of y.nodes) {
+    const o = ORIGIN[n.origin]; const lock = (n.unknown || []).some(u => u.needs === 'ops');
+    h += `<div class="card node ${n.kind} ${n.id === S.node ? 'sel' : ''} ${S.node && !near.has(n.id) && n.id !== S.node ? 'dim' : ''}" data-node="${esc(n.id)}" data-w="${esc(n.id)}"><div class="nm">${esc(n.name)}${lock ? ' 🔒' : ''}</div>
+      <div class="s">${esc(n.what)}</div><div class="meta">${o && n.kind !== 'store' ? `<span class="pill ${o[1]}">${o[0]}</span>` : ''}${(n.uses || []).map(u => `<span class="pill">${esc(y.externals.find(x => x.id === u).name)}</span>`).join('')}</div></div>`;
+  }
+  h += `</div><div class="fcol extcol"><div class="zone">바깥 서비스 ${y.externals.length}</div>`;
+  y.externals.forEach((x, i) => { const users = y.nodes.filter(n => (n.uses || []).includes(x.id));
+    h += `<div class="card node external ${S.node && !users.some(n => n.id === S.node) ? 'dim' : ''}"><div class="nm">${esc(x.name)}</div><div class="s">${esc(x.what)}</div><div class="s">쓰는 곳: ${users.map(n => esc(n.name)).join(', ') || '없음'}</div></div>`; });
+  h += `</div></div><div class="sect"><h4>선 ${LINKS.length}개</h4><div class="group">` + LINKS.map((l, i) => { const a = y.nodes.find(n => n.id === l.from), b = y.nodes.find(n => n.id === l.to);
+    return `<div class="row ${S.node && l.from !== S.node && l.to !== S.node ? 'dim' : ''}"><span class="wn inline">${i + 1}</span><div class="grow"><div class="tw"><b class="strong">${esc(a.name)} → ${esc(b.name)}</b> ${esc(l.label)}</div></div>${l.sure === 'doc' ? '<span class="pill">문서로만 확인</span>' : l.sure === 'calc' ? '<span class="pill">사본 비교로 계산</span>' : ''}${evHtml(m, l.ev)}</div>`; }).join('') + `</div></div>
+    <div class="sect"><h4>그림에 없지만 도는 것</h4><div class="group">` + y.others.map(o => `<div class="row"><div class="grow"><div class="tw"><b class="strong">${esc(o.name)}</b> ${esc(o.what)}</div></div>${evHtml(m, o.ev)}</div>`).join('') + `</div></div>`;
+  return h;
+}
+function sysInspector(m) {
+  const y = S.system; if (!y) return ''; const n = y.nodes.find(x => x.id === S.node);
+  if (!n) { const all = [...y.nodes.flatMap(x => (x.unknown || []).map(u => ({ ...u, text: x.name + ': ' + u.text }))), ...(y.unknown || [])];
+    return `<h2>전체 구조</h2><p class="sub">따로 켜지는 프로그램 하나가 상자 하나다. 상자를 누르면 그 상자와 이어진 것만 남는다.</p>
+      <div class="sect"><h4>아직 모르는 것 ${all.length}</h4><div class="group">${all.map(needHtml).join('')}</div></div>`; }
+  const ls = sysLinks(y).map((l, i) => ({ ...l, i })).filter(l => l.from === n.id || l.to === n.id); const nm = (id) => y.nodes.find(x => x.id === id).name;
+  let h = `<div class="head"><div class="grow"><h2>${esc(n.name)}</h2><p class="sub">${esc(n.what)}</p></div>${n.detail === 'map' ? '<button class="btn" id="toMap">화면 지도 보기</button>' : ''}</div>`;
+  if (n.origin) h += `<div class="sect"><h4>코드가 오는 곳</h4><div class="group"><div class="row"><div class="grow"><div class="tw">${esc(n.origin_text)}</div></div><span class="pill ${ORIGIN[n.origin][1]}">${ORIGIN[n.origin][0]}</span></div></div></div>`;
+  h += `<div class="sect"><h4>이어진 선 ${ls.length}</h4><div class="group">${ls.map(l => `<div class="row click" data-node="${esc(l.from === n.id ? l.to : l.from)}"><span class="wn inline">${l.i + 1}</span><div class="grow"><div class="tw"><b class="strong">${l.from === n.id ? '→ ' + esc(nm(l.to)) : '← ' + esc(nm(l.from))}</b> ${esc(l.label)}</div></div></div>`).join('') || '<div class="row"><div class="grow empty">없다</div></div>'}</div></div>`;
+  if ((n.uses || []).length) h += `<div class="sect"><h4>쓰는 바깥 서비스</h4><div class="flowline">${n.uses.map(u => `<span class="pill">${esc(y.externals.find(x => x.id === u).name)}</span>`).join('')}</div></div>`;
+  const jn = S.jobs && S.jobs.nodes[n.id];
+  if (n.code && n.id !== 'backend' && n.kind === 'program') h += `<div class="sect"><h4>하는 일 ${jn ? jn.jobs.length : ''}</h4>${jn ? `<div class="group">${jn.jobs.map(j => `<div class="row"><div class="grow"><div class="tw"><b class="strong">${esc(j.name)}</b> ${esc(j.what)}</div><div class="s">시작: ${esc(j.starts_when)}${j.routes.length ? ` · 이 일을 시작하게 하는 서버 기능 ${j.routes.length}` : ''}</div></div></div>`).join('')}</div>` : ''}<div class="ctl"><button class="btn quiet" id="mkJobs" data-node="${esc(n.id)}">${jn ? '다시 읽기' : '하는 일 읽기'}</button><span id="jobslog">에이전트가 이 프로그램의 코드를 읽는다. 몇 분 걸린다</span></div></div>`;
+  const prs = n.code ? [...((S.status || {}).open_prs || []).map(p => ({ ...p, o: 1 })), ...((S.status || {}).merged_prs || [])].filter(p => p.files.some(f => ownerOf(f) === n)) : [];
+  if (prs.length) h += `<div class="sect"><h4>이 프로그램의 코드를 건드린 PR ${prs.length} (열린 것과 최근 7일 병합)</h4><div class="group">${prs.slice(0, 8).map(p => `<div class="row click" data-url="${esc(p.url)}"><div class="grow"><div class="t">#${p.number} ${esc(p.title)}</div><div class="s">${p.o ? '열린 PR' : '병합 ' + ago(p.merged_at)}</div></div><span class="chev">↗</span></div>`).join('')}${prs.length > 8 ? `<div class="row"><div class="grow empty">${prs.length - 8}개 더</div></div>` : ''}</div></div>`;
+  if ((n.copies || []).length) h += `<div class="sect"><h4>사본 ${n.copies.length}</h4><div class="group">${n.copies.map(c => { const d = c.files.filter(f => !f.same); return `<div class="row"><div class="grow"><div class="tw mono">${esc(c.branch)}</div><div class="s">이 저장소 파일 ${c.files.length}개가 들어 있고 ${d.length}개가 ${c.against === 'origin/main' ? '운영' : '개발'} 브랜치의 판과 다르다</div>${d.map(f => `<div class="s mono">${esc(f.path)}</div>`).join('')}</div></div>`; }).join('')}</div></div>`;
+  if ((n.tables || []).length) h += `<div class="sect"><h4>코드에서 직접 닿는 저장소 ${n.tables.length}</h4><div class="flowline">${n.tables.map(t => `<span class="pill ok click" data-f="table|${esc(t)}">${esc(t)}</span>`).join('')}</div></div>`;
+  if ((n.unknown || []).length) h += `<div class="sect"><h4>아직 모르는 것</h4><div class="group">${n.unknown.map(needHtml).join('')}</div></div>`;
+  return h + `<div class="sect"><h4>근거</h4>${evHtml(m, n.ev)}</div>`;
+}
+// 상자 위치를 재서 선과 번호를 얹는다. 위치는 화면 크기에 따라 달라져 여기서만 계산한다.
+function drawWires() {
+  const box = $('sys'); const links = S._wires; if (!box || !links || !box.getBoundingClientRect) return; const o = box.getBoundingClientRect(); const svg = $('wires');
+  const rect = (id) => { const r = box.querySelector(`[data-w="${id}"]`).getBoundingClientRect(); return { x: r.left - o.left, y: r.top - o.top, w: r.width, h: r.height }; };
+  const edge = (r, tx, ty) => { const cx = r.x + r.w / 2, cy = r.y + r.h / 2, dx = tx - cx, dy = ty - cy; const k = Math.min(dx ? Math.abs(r.w / 2 / dx) : Infinity, dy ? Math.abs(r.h / 2 / dy) : Infinity); return [cx + dx * k, cy + dy * k]; };
+  box.querySelectorAll('.wn').forEach(e => e.remove()); svg.querySelectorAll('line, path.wire').forEach(e => e.remove());
+  if (box.classList.contains('graph') && window.dagre) return drawGraph(box, svg, links);
+  for (const l of links) { const a = rect(l.from), b = rect(l.to); const [x1, y1] = l.h ? [a.x + a.w, a.y + a.h / 2] : edge(a, b.x + b.w / 2, b.y + b.h / 2), [x2, y2] = l.h ? [b.x, b.y + b.h / 2] : edge(b, a.x + a.w / 2, a.y + a.h / 2); /* h: 옆줄끼리는 오른쪽 변에서 왼쪽 변으로 */
+    const ln = document.createElementNS('http://www.w3.org/2000/svg', 'line'); for (const [k, v] of Object.entries({ x1, y1, x2, y2, ...(l.noend ? {} : { 'marker-end': 'url(#ah)' }), ...(l.start ? { 'marker-start': 'url(#ah)' } : {}), class: 'wire ' + (l.style || '') + (l.dim ? ' dim' : '') })) ln.setAttribute(k, v); svg.appendChild(ln);
+    if (l.n) { const t = document.createElement('span'); t.className = 'wn' + (l.dim ? ' dim' : ''); t.textContent = l.n; t.style.left = x1 + (x2 - x1) * 0.35 + 'px'; t.style.top = y1 + (y2 - y1) * 0.35 + 'px'; /* 가운데에 두면 엇갈리는 두 선의 번호가 겹친다 */ box.appendChild(t); } }
+}
+window.onresize = drawWires;
+// 상자 자리를 dagre 로 잡는다(왼쪽에서 오른쪽, 선이 상자를 피해 꺾인다). 상자 크기는 그린 뒤에 잰다.
+function drawGraph(box, svg, links) {
+  const gap = parseFloat(getComputedStyle(box).getPropertyValue('--space-8')) || 48;
+  const g = new dagre.graphlib.Graph({ multigraph: true }); g.setGraph({ rankdir: 'LR', nodesep: gap / 2, ranksep: gap, edgesep: gap / 3, marginx: 0, marginy: 0 }); g.setDefaultEdgeLabel(() => ({}));
+  const els = {}; box.querySelectorAll('[data-w]').forEach(el => { els[el.dataset.w] = el; g.setNode(el.dataset.w, { width: el.offsetWidth, height: el.offsetHeight }); });
+  links.forEach((l, i) => g.setEdge(l.from, l.to, {}, 'e' + i)); dagre.layout(g);
+  for (const [id, el] of Object.entries(els)) { const n = g.node(id); el.style.left = n.x - n.width / 2 + 'px'; el.style.top = n.y - n.height / 2 + 'px'; }
+  box.style.width = g.graph().width + 'px'; box.style.height = g.graph().height + 'px';
+  links.forEach((l, i) => { const pts = g.edge(l.from, l.to, 'e' + i).points; const d = pts.map((p, k) => (k ? 'L' : 'M') + p.x + ' ' + p.y).join(' ');
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path'); for (const [k, v] of Object.entries({ d, fill: 'none', ...(l.noend ? {} : { 'marker-end': 'url(#ah)' }), ...(l.start ? { 'marker-start': 'url(#ah)' } : {}), class: 'wire ' + (l.style || '') + (l.dim ? ' dim' : '') })) path.setAttribute(k, v); svg.appendChild(path);
+    if (l.n) { const p = pts[Math.floor(pts.length / 2)]; const t = document.createElement('span'); t.className = 'wn' + (l.dim ? ' dim' : ''); t.textContent = l.n; t.style.left = p.x + 'px'; t.style.top = p.y + 'px'; box.appendChild(t); } });
+}
+
+// ---------- 그리기: 바뀐 것 (새로고침할 때마다 refresh.py 가 changes.json 에 한 건씩 남긴다) ----------
+const when = (iso) => { const d = new Date(iso); return `${d.getMonth() + 1}월 ${d.getDate()}일 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
+const KIND = { 기능: '', 구조: 'ok', 시스템: 'warn' };
+// 같은 요청이 여러 화면에 생기면 한 줄로 모으고 화면을 알약으로 붙인다
+const byReq = (list) => { const o = new Map(); for (const x of list || []) { const k = x.what + '|' + x.name; if (!o.has(k)) o.set(k, { name: x.name, what: x.what, screens: [] }); o.get(k).screens.push([x.screen, x.screen_name]); } return [...o.values()]; };
+function changesView(m) {
+  const c = S.changes; if (!c || !c.entries.length) return `<div class="hint">아직 기록이 없습니다.<br>↻ 새로고침을 누르면 지난 새로고침 뒤에 달라진 것이 여기에 쌓입니다.</div>`;
+  const e = c.entries[Math.min(S.chi, c.entries.length - 1)]; const b = e.branches[S.branch];
+  let h = `<div class="legend"><span>새로고침할 때마다 지난 새로고침 뒤에 달라진 것을 한 건씩 남긴다. 마지막 새로고침 ${when(c.last_refresh)}</span></div>
+    <div class="flowline">${c.entries.slice(0, 12).map((x, i) => `<span class="pill ${i === S.chi ? 'strong' : ''} click" data-chi="${i}">${when(x.at)}</span>`).join('')}</div>
+    <h2>${when(e.since)} 이후</h2><p class="sub">들어온 PR ${e.prs.length}${b ? ` · ${S.branch === 'dev' ? '개발' : '운영'} 브랜치 <span class="mono">${esc(b.from)} → ${esc(b.to)}</span>` : ` · ${S.branch === 'dev' ? '개발' : '운영'} 브랜치 코드는 이 사이에 그대로`}</p>`;
+  const go = (p, name) => `<span class="pill click" data-goscr="${esc(p)}">${esc(name || label(m, p))}</span>`;
+  const sect = (title, items, row) => items && items.length ? `<div class="sect"><h4>${title} ${items.length}</h4><div class="group">${items.map(row).join('')}</div></div>` : '';
+  if (b) { h += `<div class="sect"><h4>구조가 달라진 것</h4></div>`;
+    const n = ['screens_added', 'screens_removed', 'requests_added', 'requests_removed', 'flows_added', 'flows_removed', 'routes_added_no_screen'].reduce((a, k) => a + (b[k] || []).length, 0);
+    if (!n) h += `<p class="empty">코드는 바뀌었지만 화면·서버 요청·화면 사이 길은 그대로다.</p>`;
+    h += sect('새 화면', b.screens_added, x => `<div class="row"><div class="grow"><div class="t">${go(x.path, x.name)}</div><div class="s">${esc(x.group || '묶음 없음')} · <span class="mono">${esc(x.path)}</span></div></div></div>`);
+    h += sect('사라진 화면', b.screens_removed, x => `<div class="row"><div class="grow"><div class="t">${esc(x.name)}</div><div class="s mono">${esc(x.path)}</div></div></div>`);
+    h += sect('화면에 새로 생긴 서버 요청', byReq(b.requests_added), x => `<div class="row"><div class="grow"><div class="t">${esc(x.name)} <span class="s mono">${esc(x.what)}</span></div><div class="flowline">${x.screens.map(([p, n]) => go(p, n)).join('')}</div></div></div>`);
+    h += sect('화면에서 사라진 서버 요청', byReq(b.requests_removed), x => `<div class="row"><div class="grow"><div class="t">${esc(x.name)} <span class="s mono">${esc(x.what)}</span></div><div class="flowline">${x.screens.map(([p, n]) => go(p, n)).join('')}</div></div></div>`);
+    h += sect('새로 생긴 화면 사이 길', b.flows_added, x => `<div class="row"><div class="grow"><div class="t">${go(x.from, x.from_name)} → ${go(x.to, x.to_name)}</div><div class="s">${esc(x.label || '아이콘 버튼')}</div></div></div>`);
+    h += sect('끊긴 화면 사이 길', b.flows_removed, x => `<div class="row"><div class="grow"><div class="t">${esc(x.from_name)} → ${esc(x.to_name)}</div><div class="s">${esc(x.label || '아이콘 버튼')}</div></div></div>`);
+    h += sect('화면이 부르지 않는 새 서버 기능', b.routes_added_no_screen, x => `<div class="row"><div class="grow"><div class="t">${esc(x.name)}</div><div class="s mono">${esc(x.what)} · ${esc(x.file.split('/').pop())}</div></div></div>`); }
+  const st = e.ai_stale || {}; if (st.system || st.jobs)
+    h += `<div class="sect"><h4>AI가 적은 것 중 근거 줄이 바뀐 것</h4><div class="group">${st.system ? `<div class="row"><div class="grow"><div class="t">전체 구조 근거 ${st.system}줄</div><div class="s">코드가 바뀌어 그 줄에 그 글자가 없다. 다시 읽기 전에는 그 상자·선을 믿지 않는다</div></div><button class="btn quiet" id="remakeSys">다시 읽기</button></div>` : ''}${st.jobs ? `<div class="row"><div class="grow"><div class="t">서버 밖 프로그램이 하는 일 근거 ${st.jobs}줄</div><div class="s">전체 구조에서 그 상자를 골라 다시 읽는다</div></div></div>` : ''}</div></div>`;
+  // PR: 기능 묶음별로, 묶음에 안 걸리면 서버 밖 프로그램별로, 그것도 아니면 "지도에 자리가 없는 PR"
+  const by = new Map(); for (const p of e.prs) { const keys = p.groups.length ? p.groups : p.programs.length ? p.programs : ['지도에 자리가 없는 PR']; for (const k of keys) { if (!by.has(k)) by.set(k, []); by.get(k).push(p); } }
+  h += `<div class="sect"><h4>들어온 PR ${e.prs.length}</h4><p class="empty">묶음이 여럿에 걸치는 PR 은 묶음마다 나온다. 무엇이 왜 바뀌었는지는 아침 브리핑이 쓴다. 여기서는 지도의 어디에 닿는지를 본다.</p></div>`;
+  for (const [k, ps] of [...by].sort((a, b) => (a[0] === '지도에 자리가 없는 PR') - (b[0] === '지도에 자리가 없는 PR') || b[1].length - a[1].length))
+    h += `<div class="sect"><h4>${esc(k)} ${ps.length}</h4><div class="group">${ps.map(p => `<div class="row"><div class="grow"><div class="tw click" data-url="${esc(p.url)}">#${p.number} ${esc(p.title)} ↗</div>
+      <div class="flowline">${p.kinds.map(x => `<span class="pill ${KIND[x]}">${x}</span>`).join('')}${p.base !== 'dev' ? `<span class="pill strong">${esc(p.base)}</span>` : ''}${p.screens.slice(0, 6).map(x => go(x)).join('')}${p.screens.length > 6 ? `<span class="s">화면 ${p.screens.length - 6}곳 더</span>` : ''}${p.issues.map(n => `<span class="pill">이슈 #${n}</span>`).join('')}<span class="s">${esc(p.author || '')} · ${when(p.merged_at)} · 파일 ${p.files}</span></div></div></div>`).join('')}</div></div>`;
+  return h;
+}
+function changesInspector(m) {
+  const c = S.changes; const e = c && c.entries[Math.min(S.chi, c.entries.length - 1)]; if (!e) return '';
+  const k = (x) => e.prs.filter(p => p.kinds.includes(x)).length; const b = e.branches[S.branch];
+  return `<h2>${when(e.at)} 새로고침</h2><p class="sub">${when(e.since)} 이후</p><div class="sect"><div class="group">
+    <div class="row"><div class="grow">들어온 PR</div><b class="strong">${e.prs.length}</b></div>
+    <div class="row"><div class="grow"><span class="pill">기능</span> 화면이 달라짐</div>${k('기능')}</div><div class="row"><div class="grow"><span class="pill ok">구조</span> 서버 코드의 흐름</div>${k('구조')}</div><div class="row"><div class="grow"><span class="pill warn">시스템</span> DB·배포·설정·서버 밖 프로그램</div>${k('시스템')}</div>
+    <div class="row"><div class="grow">지도에 자리가 없는 PR</div>${e.prs.filter(p => !p.groups.length && !p.programs.length).length}</div>
+    ${b ? `<div class="row"><div class="grow">새 화면 · 사라진 화면</div>${b.screens_added.length} · ${b.screens_removed.length}</div><div class="row"><div class="grow">새 요청 · 사라진 요청</div>${b.requests_added.length} · ${b.requests_removed.length}</div><div class="row"><div class="grow">새 길 · 끊긴 길</div>${b.flows_added.length} · ${b.flows_removed.length}</div>` : ''}
+  </div></div><p class="empty">화면 이름을 누르면 화면 지도에서 그 화면이 열린다.</p>`;
+}
+
+// ---------- 그리기: 기능 (묶음이 상자, 묶음 사이를 넘어가는 길과 주고받는 데이터가 선) ----------
+function featureGraph(m) {
+  if (m._fg) return m._fg; const gs = groupsOf(m); const gOf = {}; gs.forEach((g, i) => g.list.forEach(s => gOf[s.path] = i));
+  const pair = new Map(); const get = (a, b) => { const k = Math.min(a, b) + '|' + Math.max(a, b); if (!pair.has(k)) pair.set(k, { a: Math.min(a, b), b: Math.max(a, b), ways: [], ab: new Set(), ba: new Set() }); return pair.get(k); };
+  for (const e of edges(m)) { const a = gOf[e.from], b = gOf[e.to]; if (e.common || a == null || b == null || a === b) continue; get(a, b).ways.push(e); }
+  // 묶음 절반 넘게 쓰는 저장소는 "모두가 쓰는 데이터"로 따로 둔다. 선으로 그리면 모든 묶음이 서로 이어진다.
+  const common = []; const tu = tableUse(m);
+  for (const [t, u] of Object.entries(tu)) { const w = new Set([...u.w.keys()].map(p => gOf[p])), r = new Set([...u.r.keys()].map(p => gOf[p]));
+    if (new Set([...w, ...r]).size > gs.length / 2) { common.push(t); continue; }
+    for (const a of w) for (const b of r) if (a !== b) { const l = get(a, b); (l.a === a ? l.ab : l.ba).add(t); } }
+  const links = [...pair.values()].map(l => ({ ...l, fwd: l.ways.filter(e => gOf[e.from] === l.a).length, back: l.ways.filter(e => gOf[e.from] === l.b).length }));
+  // 자리: 가장 많은 묶음과 이어진 것을 가운데, 나머지는 둘레에. 서로 이어진 묶음이 둘레에서 이웃하도록 센 선부터 줄을 세운다.
+  // ponytail: 둘레 자리는 8개다. 묶음이 9개를 넘으면 아래 줄에 그냥 놓는다. 둘레에서 두 칸 떨어진 묶음끼리의 선은 상자를 스칠 수 있다.
+  const deg = gs.map((_, i) => links.filter(l => l.a === i || l.b === i).length); const hub = deg.indexOf(Math.max(...deg));
+  const w = (x, y) => { const l = links.find(l => (l.a === x && l.b === y) || (l.a === y && l.b === x)); return l ? l.ways.length * 2 + l.ab.size + l.ba.size : 0; };
+  let rest = gs.map((_, i) => i).filter(i => i !== hub); const chain = [];
+  while (rest.length) { let best = null;
+    for (const r of rest) for (const [end, at] of chain.length ? [[chain[0], 'front'], [chain[chain.length - 1], 'back']] : [[null, 'back']]) { const v = end == null ? Math.max(...rest.map(o => w(r, o))) : w(r, end); if (!best || v > best.v) best = { r, at, v }; }
+    if (!best.v && chain.length) { const k = chain.findIndex(c => w(best.r, c)); best.at = k >= 0 && k < chain.length / 2 ? 'front' : 'back'; }
+    best.at === 'front' ? chain.unshift(best.r) : chain.push(best.r); rest = rest.filter(x => x !== best.r); }
+  const RING = [[1, 3], [1, 2], [2, 2], [3, 2], [3, 3], [3, 4], [2, 4], [1, 4]]; const pos = gs.map(() => ({ col: 2, row: 3 }));
+  chain.forEach((g, k) => { pos[g] = k < 8 ? { col: RING[k][0], row: RING[k][1] } : { col: (k - 8) % 3 + 1, row: 5 + Math.floor((k - 8) / 3) }; });
+  const stat = gs.map(g => { const rs = g.list.flatMap(s => requests(m, s.path)); return { reqs: rs.length, tested: rs.filter(r => (r.route.tests || []).length).length,
+    ext: [...new Set(rs.flatMap(r => r.route.externals || []))].filter(x => x !== 'HTTP 호출').sort(), tables: new Set(rs.flatMap(r => r.route.tables || [])) }; });
+  return m._fg = { gs, links, common: common.sort(), pos, stat };
+}
+function featView(m) {
+  const f = featureGraph(m); const sel = S.feat; const near = (i) => sel == null || i === sel || f.links.some(l => (l.a === sel && l.b === i) || (l.b === sel && l.a === i)); const on = (l) => sel == null || l.a === sel || l.b === sel;
+  let h = `<div class="legend"><span><b class="strong">${f.gs.length}</b> 기능 묶음 · 화면 <b class="strong">${visibleScreens(m).length}</b></span><span>가운데가 가장 많은 묶음과 이어진 것</span><span>실선은 화면에서 화면으로 넘어가는 길, 점선은 데이터만 주고받는 사이</span><span><span class="ai">보라 점선</span> 묶음과 이름은 AI가 붙였다</span></div><div class="sys three" id="sys">${WIRES}`;
+  f.gs.forEach((g, i) => { const st = f.stat[i];
+    h += `<div class="card node gc${f.pos[i].col} gr${f.pos[i].row} ${i === sel ? 'sel' : ''} ${near(i) ? '' : 'dim'}" data-feat="${i}" data-w="G${i}"><div class="nm"><span class="${g.ai ? 'ai' : ''}">${esc(g.name)}</span></div><div class="s">${esc(g.description || '')}</div>
+      <div class="meta"><span>화면 ${g.list.length} · 서버에 하는 일 ${st.reqs}</span>${st.reqs ? `<span class="bar" title="테스트 ${st.tested}/${st.reqs}"><i style="width:${Math.round(st.tested / st.reqs * 100)}%"></i></span>` : ''}</div><div class="meta">${st.ext.map(x => `<span class="pill">${esc(x)}</span>`).join('')}</div></div>`; });
+  h += `</div><div class="sect"><h4>선 ${f.links.length}개</h4><div class="group">` + f.links.map((l, i) => { const data = [...new Set([...l.ab, ...l.ba])];
+    return `<div class="row ${on(l) ? '' : 'dim'}"><span class="wn inline">${i + 1}</span><div class="grow"><div class="tw"><b class="strong">${esc(f.gs[l.a].name)} ${l.fwd && l.back ? '↔' : l.back ? '←' : l.fwd ? '→' : '···'} ${esc(f.gs[l.b].name)}</b> ${l.ways.length ? `넘어가는 길 ${l.ways.length}` : '넘어가는 길은 없고 데이터만'}${data.length ? ` · 주고받는 데이터 ${data.length}` : ''}</div></div></div>`; }).join('') + `</div></div>`;
+  return h;
+}
+function featInspector(m) {
+  const f = featureGraph(m); const i = S.feat;
+  if (i == null || !f.gs[i]) return `<h2>기능</h2><p class="sub">화면을 하는 일에 따라 묶은 것이 상자 하나다. 상자를 누르면 그 안의 화면과, 다른 묶음과 무엇으로 이어지는지가 나온다.</p>`;
+  const g = f.gs[i], st = f.stat[i]; const ls = f.links.map((l, n) => ({ ...l, n })).filter(l => l.a === i || l.b === i);
+  let h = `<h2><span class="${g.ai ? 'ai' : ''}">${esc(g.name)}</span></h2><p class="sub">${esc(g.description || '')}</p>
+    <div class="sect"><h4>화면 ${g.list.length}</h4><div class="group">${g.list.map(s => `<div class="row click" data-goscr="${esc(s.path)}"><div class="grow"><div class="t">${nameHtml(m, s.path)}</div></div><span class="s">서버에 하는 일 ${requests(m, s.path).length}</span><span class="chev">›</span></div>`).join('')}</div></div>
+    <div class="sect"><h4>다른 묶음과 이어진 것 ${ls.length}</h4><div class="group">`;
+  for (const l of ls) { const o = l.a === i ? l.b : l.a; const out = l.ways.filter(e => g.list.some(s => s.path === e.from)), inn = l.ways.filter(e => !g.list.some(s => s.path === e.from)); const data = [...new Set([...l.ab, ...l.ba])];
+    const way = (e) => `<div class="s">${nameHtml(m, e.from)} → ${nameHtml(m, e.to)}${e.label ? ' · ' + esc(e.label) : ''}</div>`;
+    h += `<div class="row"><span class="wn inline">${l.n + 1}</span><div class="grow"><div class="tw"><b class="strong">${esc(f.gs[o].name)}</b></div>${out.length ? `<div class="s strong">여기서 가는 길 ${out.length}</div>${out.map(way).join('')}` : ''}${inn.length ? `<div class="s strong">여기로 오는 길 ${inn.length}</div>${inn.map(way).join('')}` : ''}
+      ${data.length ? `<div class="s strong">주고받는 데이터 ${data.length}</div><div class="flowline">${data.map(t => `<span class="pill ok click" data-f="table|${esc(t)}">${esc(t)}</span>`).join('')}</div>` : ''}</div></div>`; }
+  h += (ls.length ? '' : '<div class="row"><div class="grow empty">없다</div></div>') + `</div></div>`;
+  if (st.ext.length) h += `<div class="sect"><h4>쓰는 바깥 서비스</h4><div class="flowline">${st.ext.map(x => `<span class="pill">${esc(x)}</span>`).join('')}</div></div>`;
+  return h;
+}
+
+// ---------- 그리기: 이어진 것 (고른 것 하나를 가운데 두고 닿는 것만) ----------
+const put = (mp, k, v) => { if (!mp.has(k)) mp.set(k, []); mp.get(k).push(v); };
+// 저장소마다: 바꾸는 요청(GET 이 아닌 것)과 읽는 요청(GET)을 화면별로. 읽기·바꾸기는 요청 방식으로만 가른다.
+function tableUse(m) { if (m._tu) return m._tu; const t = {};
+  for (const s of visibleScreens(m)) for (const r of requests(m, s.path)) for (const tb of r.route.tables || []) put((t[tb] ??= { w: new Map(), r: new Map() })[r.route.method === 'GET' ? 'r' : 'w'], s.path, r);
+  return m._tu = t; }
+function routeUse(m) { if (m._ru) return m._ru; const u = {}; for (const s of visibleScreens(m)) for (const r of requests(m, s.path)) (u[r.key] ??= []).push({ s, r }); return m._ru = u; }
+// 파일 → 그 파일이 속한 상자 (code 폴더가 가장 길게 맞는 것)
+const ownerOf = (path) => { let best = null, len = -1; for (const n of (S.system ? S.system.nodes : [])) for (const c of n.code || []) if ((path + '/').startsWith(c.replace(/\/$/, '') + '/') && c.length > len) { best = n; len = c.length; } return best; };
+// 사본 안의 이 저장소 파일 중 이 저장소의 판과 다른 것: [{path, branch}]
+const copyDiffs = () => (S.system ? S.system.nodes : []).flatMap(n => (n.copies || []).flatMap(c => c.files.filter(f => !f.same).map(f => ({ path: f.path, branch: c.branch, node: n }))));
+// 선: 에이전트가 적은 것 + 계산한 것(사본에 다른 판이 든 파일의 주인 상자로 점선)
+function sysLinks(y) { const out = [...y.links]; const by = {};
+  for (const d of copyDiffs()) { const o = ownerOf(d.path); if (!o || o.id === d.node.id) continue; ((by[d.node.id + '>' + o.id] ??= { from: d.node.id, to: o.id, files: new Set() }).files).add(d.path); }
+  for (const l of Object.values(by)) out.push({ from: l.from, to: l.to, style: 'copy', sure: 'calc', label: `${y.nodes.find(n => n.id === l.to).name}의 파일 ${l.files.size}개가 다른 판으로 들어 있다. 같은 파일이 두 판으로 함께 돈다`, ev: [] });
+  return out; }
+const jobsOf = (key) => S.jobs ? Object.entries(S.jobs.nodes).flatMap(([id, v]) => v.jobs.filter(j => j.routes.some(r => r.key === key)).map(j => ({ node: (S.system ? S.system.nodes : []).find(n => n.id === id) || { name: id }, job: j, exact: j.routes.find(r => r.key === key).exact }))) : [];
+const progs = (table) => (S.system ? S.system.nodes : []).filter(n => (n.tables || []).includes(table));
+function setFocus(f) { const i = f.indexOf('|'); const t = f.slice(0, i), id = f.slice(i + 1); S.focus = { t, id }; S.view = 'focus'; S.step = -1; S.ev = -1;
+  if (t === 'screen') { S.sel = id; S.open = null; } if (t === 'route') { const u = routeUse(M())[id]; if (u) { S.sel = u[0].s.path; S.open = id; } }
+  render(); $('map').scrollTop = 0; $('insp').scrollTop = 0; }
+function focusData(m) {
+  const { t, id } = S.focus; const scr = (p, sub) => ({ f: 'screen|' + p, name: label(m, p), ai: isAi(m, p), sub });
+  if (t === 'screen') { const es = edges(m).filter(e => !e.common); const way = (e) => (e.label || '아이콘 버튼') + (e.cond ? ' · 조건에 따라' : '');
+    const tbs = [...new Set(requests(m, id).flatMap(r => r.route.tables || []))].sort();
+    return { kind: '화면', name: label(m, id), sub: id, chips: tbs, lt: '여기로 오는 화면', rt: '여기서 가는 화면', left: es.filter(e => e.to === id).map(e => scr(e.from, way(e))), right: es.filter(e => e.from === id).map(e => scr(e.to, way(e))),
+      note: '메뉴와 탭으로 오가는 길은 뺐다. 가운데 알약은 이 화면이 닿는 저장소다.' }; }
+  if (t === 'table') { const u = tableUse(m)[id] || { w: new Map(), r: new Map() }; const row = (word) => ([p, rs]) => scr(p, `${word} ${rs.length}: ${reqLabel(rs[0])}${rs.length > 1 ? ' 외' : ''}`);
+    return { kind: '저장소', name: id, sub: '', lt: '이 저장소를 바꾸는 쪽', rt: '이 저장소를 읽는 화면', left: [...progs(id).map(n => ({ name: n.name, sub: '서버를 거치지 않고 직접 읽고 쓴다' })), ...[...u.w].map(row('바꾸는 요청'))], right: [...u.r].map(row('읽는 요청')),
+      note: '읽기와 바꾸기는 요청 방식으로만 갈랐다. 읽는 요청이 안에서 값을 바꾸는 경우는 가려내지 못한다.' }; }
+  const u = routeUse(m)[id] || []; const r = u[0] && u[0].r; if (!r) return null;
+  return { kind: '서버 기능', name: reqLabel(r), ai: reqIsAi(r), sub: r.route.method + ' ' + r.route.path, lt: '이 서버 기능을 부르는 화면', rt: '닿는 저장소와 바깥 서비스', left: u.map(x => scr(x.s.path, x.r.btn ? `"${x.r.btn}" 버튼` : '버튼 글자를 못 찾음')),
+    right: [...(r.route.tables || []).map(tb => ({ f: 'table|' + tb, name: tb, sub: '저장소' })), ...(r.route.externals || []).map(e => ({ name: e, sub: '바깥 서비스' }))], note: '' };
+}
+function focusView(m) {
+  const d = S.focus && focusData(m);
+  if (!d) { const tu = tableUse(m); const all = [...new Set([...Object.values(m.models || {}), ...Object.keys(tu)])].map(t => ({ t, w: tu[t] ? tu[t].w.size : 0, r: tu[t] ? tu[t].r.size : 0, p: progs(t) })).sort((a, b) => (b.w + b.r) - (a.w + a.r) || a.t.localeCompare(b.t));
+    return `<div class="legend"><span>고른 것 하나를 가운데 두고 그것과 닿는 것만 그린다. 화면은 화면 지도에서, 서버 기능은 화면의 요청에서 고른다. 저장소는 아래에서 고른다.</span></div>
+      <div class="sect"><h4>저장소 ${all.length}</h4><div class="group">` + all.map(x => `<div class="row click" data-f="table|${esc(x.t)}"><div class="grow"><div class="t mono">${esc(x.t)}</div></div><span class="s">${x.w + x.r ? `바꾸는 화면 ${x.w} · 읽는 화면 ${x.r}` : '화면에서 닿지 않음'}</span>${x.p.map(n => `<span class="pill warn">${esc(n.name)}도 직접 씀</span>`).join('')}</div>`).join('') + `</div></div>`; }
+  const card = (c, w) => `<div class="card node ${c.f ? '' : 'plain'}" data-w="${w}" ${c.f ? `data-f="${esc(c.f)}"` : ''}><div class="nm"><span class="${c.ai ? 'ai' : ''}">${esc(c.name)}</span></div><div class="s">${esc(c.sub || '')}</div></div>`;
+  const col = (title, list, k) => `<div class="fcol"><div class="zone">${title} ${list.length}</div>${list.map((c, i) => card(c, k + i)).join('') || '<div class="empty">없다</div>'}</div>`;
+  return `<div class="legend"><button class="btn plain" id="unfocus">‹ 저장소 목록</button><span>옆 카드를 누르면 그것이 가운데로 온다.</span><span>${esc(d.note)}</span></div><div class="focus" id="sys">${WIRES}${col(d.lt, d.left, 'L')}
+    <div class="fcol"><div class="zone">${d.kind}</div><div class="card node sel" data-w="C"><div class="nm"><span class="${d.ai ? 'ai' : ''}">${esc(d.name)}</span></div><div class="s mono">${esc(d.sub)}</div>${d.chips ? `<div class="meta">${d.chips.map(t => `<span class="pill ok click" data-f="table|${esc(t)}">${esc(t)}</span>`).join('')}</div>` : ''}</div></div>${col(d.rt, d.right, 'R')}</div>`;
+}
+function focusInspector(m) {
+  if (!S.focus) return `<div class="hint">저장소를 고르면<br>그 저장소를 바꾸는 쪽과 읽는 쪽이 나옵니다.</div>`;
+  const { t, id } = S.focus; if (t === 'screen') return inspector(m);
+  if (t === 'route') { const u = (routeUse(m)[id] || [])[0]; return u ? `<h2><span class="${reqIsAi(u.r) ? 'ai' : ''}">${esc(reqLabel(u.r))}</span></h2><p class="sub">서버 기능</p><div class="sect"><div class="group">${detail(m, u.s, u.r)}</div></div>` : ''; }
+  const u = tableUse(m)[id] || { w: new Map(), r: new Map() }; const list = (mp) => [...mp].flatMap(([p, rs]) => rs.map(r => `<div class="row click" data-f="route|${esc(r.key)}"><span title="자동 테스트"><i class="dot ${(r.route.tests || []).length ? 'ok' : ''}"></i></span><div class="grow"><div class="t"><span class="${reqIsAi(r) ? 'ai' : ''}">${esc(reqLabel(r))}</span></div><div class="s">${esc(label(m, p))}</div></div></div>`)).join('') || '<div class="row"><div class="grow empty">없다</div></div>';
+  const n = (mp) => [...mp.values()].reduce((a, b) => a + b.length, 0);
+  return `<h2 class="mono">${esc(id)}</h2><p class="sub">저장소${progs(id).map(x => ' · ' + esc(x.name) + '도 직접 읽고 쓴다').join('')}</p>
+    <div class="sect"><h4>바꾸는 요청 ${n(u.w)}</h4><div class="group">${list(u.w)}</div></div><div class="sect"><h4>읽는 요청 ${n(u.r)}</h4><div class="group">${list(u.r)}</div></div>`;
+}
+
+// ---------- 묶어서 그리기 ----------
+function render() {
+  const m = M();
+  document.querySelectorAll('#branch button').forEach(b => { b.classList.toggle('on', b.dataset.b === S.branch); const bm = S.maps[b.dataset.b];
+    b.innerHTML = (b.dataset.b === 'main' ? '운영' : '개발') + (bm ? '' : '<small>없음</small>'); });
+  const view = S.view === 'changes' ? 'changes' : S.view === 'sys' ? 'sys' : S.view === 'focus' ? 'focus' : S.view === 'feat' ? 'feat' : 'map'; const sys = view === 'sys';
+  document.querySelectorAll('#view button').forEach(b => { b.classList.toggle('on', b.dataset.v === view); if (b.dataset.v === 'focus') b.hidden = view !== 'focus'; });
+  if (!m) { $('map').innerHTML = `<div class="hint">이 프로젝트의 지도가 없습니다.</div>`; $('insp').innerHTML = ''; return; }
+  const top = $('map').scrollTop, left = $('map').scrollLeft, itop = $('insp').scrollTop;
+  $('map').innerHTML = view === 'changes' ? changesView(m) : sys ? sysView(m) : view === 'focus' ? focusView(m) : view === 'feat' ? featView(m) : storyMap(m); $('insp').innerHTML = view === 'changes' ? changesInspector(m) : sys ? sysInspector(m) : view === 'focus' ? focusInspector(m) : view === 'feat' ? featInspector(m) : inspector(m);
+  S._wires = null;
+  if (view === 'focus' && S.focus) { const d = focusData(m); S._wires = d ? [...d.left.map((_, i) => ({ from: 'L' + i, to: 'C', h: true })), ...d.right.map((_, i) => ({ from: 'C', to: 'R' + i, h: true }))] : null; drawWires(); }
+  if (view === 'feat') { const f = featureGraph(m); S._wires = f.links.map((l, i) => ({ from: 'G' + (l.back && !l.fwd ? l.b : l.a), to: 'G' + (l.back && !l.fwd ? l.a : l.b), n: i + 1, style: l.ways.length ? '' : 'copy', noend: !l.ways.length, start: !!(l.fwd && l.back), dim: S.feat != null && l.a !== S.feat && l.b !== S.feat })); drawWires();
+    document.querySelectorAll('[data-feat]').forEach(el => el.onclick = () => { S.feat = S.feat === +el.dataset.feat ? null : +el.dataset.feat; render(); });
+    document.querySelectorAll('[data-goscr]').forEach(el => el.onclick = () => { S.view = 'map'; S.sel = el.dataset.goscr; S.open = null; render(); }); }
+  document.querySelectorAll('[data-chi]').forEach(el => el.onclick = () => { S.chi = +el.dataset.chi; render(); });
+  if (view !== 'feat') document.querySelectorAll('[data-goscr]').forEach(el => el.onclick = () => { S.view = 'map'; S.sel = el.dataset.goscr; S.open = null; render(); });
+  document.querySelectorAll('.tw[data-url]').forEach(el => el.onclick = () => invoke('open_url', { url: el.dataset.url }));
+  document.querySelectorAll('[data-f]').forEach(el => el.onclick = (e) => { e.stopPropagation(); setFocus(el.dataset.f); });
+  if ($('unfocus')) $('unfocus').onclick = () => { S.focus = null; render(); };
+  $('map').scrollTop = top; $('map').scrollLeft = left; $('insp').scrollTop = itop;
+  if ($('mkJobs')) $('mkJobs').onclick = async () => { const b = $('mkJobs'); b.disabled = true; $('jobslog').textContent = '에이전트가 코드를 읽는 중… 몇 분'; try { await invoke('make_jobs', { project: S.project, node: b.dataset.node }); await loadProject(S.project, false); } catch (e) { $('jobslog').textContent = '실패: ' + String(e).slice(0, 160); b.disabled = false; } };
+  if ($('remakeSys')) $('remakeSys').onclick = async () => { $('remakeSys').disabled = true; $('status').textContent = '에이전트가 저장소를 읽는 중… 몇 분'; try { await invoke('make_system', { project: S.project }); await loadProject(S.project, false); $('status').textContent = ''; } catch (e) { $('status').textContent = '실패: ' + String(e).slice(0, 160); $('remakeSys').disabled = false; } };
+  if (sys && S.system) { S._wires = sysLinks(S.system).map((l, i) => ({ ...l, n: i + 1, dim: !!S.node && l.from !== S.node && l.to !== S.node })); drawWires(); document.querySelectorAll('[data-node]').forEach(el => el.onclick = () => { S.node = S.node === el.dataset.node ? null : el.dataset.node; render(); });
+    if ($('toMap')) $('toMap').onclick = () => { S.view = 'map'; render(); } }
+  const pick = (p) => { if (view === 'focus') return setFocus('screen|' + p); S.sel = p; S.open = null; S.step = -1; S.ev = -1; render(); $('insp').scrollTop = 0; };
+  document.querySelectorAll('[data-scr]').forEach(el => el.onclick = () => pick(el.dataset.scr));
+  document.querySelectorAll('[data-req]').forEach(el => el.onclick = () => { S.open = S.open === el.dataset.req ? null : el.dataset.req; S.step = -1; S.ev = -1; render(); });
+  document.querySelectorAll('[data-step]').forEach(el => el.onclick = () => { const i = +el.dataset.step; S.ev = S.ev === i ? -1 : i; render(); });
+  document.querySelectorAll('.row[data-url]').forEach(el => el.onclick = () => invoke('open_url', { url: el.dataset.url }));
+  document.querySelectorAll('[data-copytext]').forEach(b => b.onclick = (e) => { e.stopPropagation(); navigator.clipboard.writeText(b.dataset.copytext); b.textContent = '복사됨'; });
+  document.querySelectorAll('a[data-url]').forEach(a => a.onclick = (e) => { e.stopPropagation(); invoke('open_url', { url: a.dataset.url }); });
+  const s = m.screens.find(x => x.path === S.sel); const rows = s ? requests(m, s.path) : [];
+  const stepCount = () => { const r = rows.find(x => x.key === S.open); const f = r && flowOf(r.route); return f ? f.steps.length : 0; };
+  if ($('next')) $('next').onclick = () => { S.step = S.step >= stepCount() ? -1 : S.step + 1; S.ev = -1; render(); };
+  if ($('prev')) $('prev').onclick = () => { S.step = S.step <= 0 ? -1 : S.step - 1; S.ev = -1; render(); };
+  const copy = async (text, el) => { await navigator.clipboard.writeText(text); el.textContent = '복사됨'; setTimeout(() => render(), 900); };
+  if ($('copyS')) $('copyS').onclick = () => copy(copyText(m, s), $('copyS'));
+  // 테스트가 안 이어진 서버 기능: 에이전트에게 테스트를 찾게 하는 글(mapcore.tests_prompt)을 복사한다
+  document.querySelectorAll('[data-tp]').forEach(b => b.onclick = async () => {
+    try { await navigator.clipboard.writeText(await invoke('tests_prompt', { project: S.project, route: b.dataset.tp })); $('tpDone').textContent = ' 복사됨'; }
+    catch (err) { $('tpDone').textContent = ' 복사하지 못했다: ' + err; } });
+  document.querySelectorAll('[data-copy]').forEach(b => b.onclick = () => copy(copyText(m, s, rows.find(x => x.key === b.dataset.copy)), b));
+  if ($('mk')) $('mk').onclick = async () => { $('mk').disabled = true; $('mklog').textContent = '에이전트가 코드를 읽는 중… 1~2분'; try { await invoke('make_steps', { project:S.project, branch:S.branch, screen:s.path }); await loadProject(S.project, false); } catch (e) { $('mklog').textContent = '실패: ' + String(e).slice(0, 160); $('mk').disabled = false; } };
+  if ($('regroup')) $('regroup').onclick = async () => { $('regroup').disabled = true; $('status').textContent = '묶음과 이름을 제안받는 중…'; try { await invoke('suggest_groups', { project:S.project, branch:S.branch }); await loadProject(S.project, false); $('status').textContent = ''; } catch (e) { $('status').textContent = '실패: ' + String(e).slice(0, 160); } };
+}
+
+$('q').oninput = () => { S.q = $('q').value; render(); };
+$('refresh').onclick = doRefresh;
+// 에이전트 연결: 프롬프트를 복사해 자기 에이전트에 붙이면 에이전트가 등록과 전역 지침 추가를 한다
+$('agent').onclick = async () => { let t; try { t = await invoke('setup_prompt'); } catch (e) { t = '프롬프트를 만들지 못했다: ' + e; }
+  $('insp').innerHTML = `<h2>에이전트 연결</h2><p class="sub">아래 글을 복사해 쓰는 에이전트(Claude Code, Codex 등)에 붙여 넣으면, 에이전트가 MCP 서버를 등록하고 전역 지침에 사용 규칙을 넣는다. 설정 파일을 바꾸기 전에 허락을 구하게 되어 있다.</p><div class="ctl"><button class="btn primary" id="cpAgent">복사</button><span id="cpDone"></span></div><pre class="prompt mono">${esc(t)}</pre>`;
+  $('cpAgent').onclick = async () => { await navigator.clipboard.writeText(t); $('cpDone').textContent = '복사됨'; }; };
+document.querySelectorAll('#branch button').forEach(b => b.onclick = () => { if (S.maps[b.dataset.b]) { S.branch = b.dataset.b; S.open = null; render(); } });
+document.querySelectorAll('#view button').forEach(b => b.onclick = () => { S.view = b.dataset.v; render(); });
+$('project').onchange = () => loadProject($('project').value);
+(async () => {
+  const ps = await invoke('list_projects');
+  $('project').innerHTML = ps.map(p => `<option>${esc(p)}</option>`).join('') || '<option>(없음)</option>';
+  if (ps.length) loadProject(ps[0]);
+})();
+</script>
+</body>
+</html>
