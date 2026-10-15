@@ -6,10 +6,15 @@ check_same.js 가 같은 지도에서 두 쪽의 숫자(화면별 서버 요청 
 규칙: 리다이렉트는 빼고 /m/… 모바일 판은 같은 주소의 데스크톱 화면에 붙인다. 화면의 1/3 넘게 들어 있는 부품이 부르는 요청은
 그 화면의 요청에서 뺀다. 세 화면 넘게 똑같이 들어 있는 부품의 링크는 메뉴로 치고 흐름에서 뺀다.
 """
-import json, os, re, sys
+import json, os, re, shlex, sys
 from collections import defaultdict
 
 ROOT = os.path.expanduser("~/.where-were-we")
+
+
+def python_command(script, *args):
+    """Use the same interpreter and isolation flags for nested backend scripts."""
+    return [sys.executable, '-I', '-B', script, *args]
 
 
 def projects():
@@ -284,7 +289,10 @@ assert call_regex("<module>.<function>(").search("await ProjectRouter.delete_pro
 # ---------- 에이전트 연결 프롬프트 (앱의 "에이전트 연결" 버튼과 README 가 이것 하나를 쓴다) ----------
 def setup_prompt():
     here = os.path.dirname(os.path.abspath(__file__))
-    py, server = os.path.join(here, ".venv", "bin", "python"), os.path.join(here, "mcp_server.py")
+    py, server = sys.executable, os.path.join(here, "mcp_server.py")
+    command = python_command(server)
+    shell_command = shlex.join(command)
+    toml_command, toml_args = json.dumps(py, ensure_ascii=False), json.dumps(command[1:], ensure_ascii=False)
     repos = []
     for p in projects():
         m = _read(p, "dev") or {}
@@ -295,12 +303,12 @@ def setup_prompt():
     return f"""where-were-we(코드 구조 지도)를 너에게 연결하고 내 작업 방식에 맞게 설정해 줘. 아래를 순서대로 하고, 설정 파일을 바꾸기 전에는 바꿀 내용을 보여 주고 내 허락을 받아.
 
 1. MCP 서버를 등록한다. 지금 네가 어느 에이전트인지 보고 맞는 것 하나만 한다.
-   - Claude Code: claude mcp add --scope user where-were-we -- {py} {server}
+   - Claude Code: claude mcp add --scope user where-were-we -- {shell_command}
    - Codex: ~/.codex/config.toml 에 아래를 추가한다.
      [mcp_servers.where-were-we]
-     command = "{py}"
-     args = ["{server}"]
-   - 다른 에이전트: 그 에이전트의 MCP 설정 방식대로, 명령 `{py}` 와 인자 `{server}` 를 stdio 서버로 등록한다.
+     command = {toml_command}
+     args = {toml_args}
+   - 다른 에이전트: 그 에이전트의 MCP 설정 방식대로, 명령 `{py}` 와 인자 {toml_args} 를 stdio 서버로 등록한다.
 2. 등록이 끝나면 where-were-we 의 projects 도구를 불러 연결을 확인하고 결과를 보여 준다. 도구가 안 보이면 새 세션에서 다시 확인해야 하는지 알려 준다.
 3. 내 전역 지침 파일(Claude Code 는 ~/.claude/CLAUDE.md, Codex 는 ~/.codex/AGENTS.md, 다른 에이전트는 그 에이전트의 전역 지침)에 아래 단락을 넣는다. 비슷한 단락이 이미 있으면 새로 덧붙이지 말고 그 자리를 고친다.
 

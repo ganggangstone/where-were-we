@@ -3866,6 +3866,7 @@ dependencies = [
 name = "where-were-we"
 version = "0.1.0"
 dependencies = [
+ "semver",
  "serde",
  "serde_json",
  "tauri",

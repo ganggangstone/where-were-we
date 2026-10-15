@@ -4,7 +4,9 @@
   "version": "0.1.0",
   "identifier": "dev.ganggangstone.where-were-we",
   "build": {
-    "frontendDist": "../ui"
+    "frontendDist": "../ui",
+    "beforeBuildCommand": "python3 scripts/prepare-runtime.py",
+    "beforeDevCommand": { "script": "python3 scripts/prepare-runtime.py", "wait": true }
   },
   "app": {
     "windows": [
@@ -24,6 +26,10 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "resources": {
+      "runtime/": "runtime/"
+    },
+    "macOS": { "minimumSystemVersion": "11.0" },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

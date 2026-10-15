@@ -199,7 +199,7 @@ def find(query: str, project: str = "") -> str:
 @app.tool(description="새로고침: git fetch 뒤 바뀐 브랜치의 지도를 다시 뽑고 PR·이슈·세션을 모아 달라진 것을 기록한다. 1~2분 걸린다. 지도 파일만 쓰고 대상 저장소에는 쓰지 않는다.")
 def refresh(project: str = "") -> str:
     p = need(project)
-    r = subprocess.run([sys.executable, os.path.join(HERE, "refresh.py"), p], capture_output=True, text=True, timeout=900)
+    r = subprocess.run(mapcore.python_command(os.path.join(HERE, "refresh.py"), p), capture_output=True, text=True, timeout=900)
     return (r.stdout[-1500:] if r.returncode == 0 else "실패: " + r.stderr[-800:]) + "\n\n" + changes(p)
 
 

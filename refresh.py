@@ -19,7 +19,7 @@ NOW = datetime.now(timezone.utc)
 
 
 def run(*a):
-    p = subprocess.run([sys.executable, *a], capture_output=True, text=True)
+    p = subprocess.run(mapcore.python_command(*a), capture_output=True, text=True)
     if p.returncode: sys.exit(p.stderr[-800:])
     return p.stdout
 

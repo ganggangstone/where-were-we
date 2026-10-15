@@ -43,7 +43,13 @@ let browser;
       static now() { return data.now; }
     };
     window.__TAURI__ = { core: { invoke: async (command, args) => {
-      if (command === 'list_projects') return [data.project];
+      if (command === 'app_version') return '0.1.0';
+      if (command === 'check_release') {
+        window.__releaseChecks = (window.__releaseChecks || 0) + 1;
+        if (window.__releaseFailure) throw Error('Offline fixture');
+        return window.__releaseReply || { current: '0.1.0', latest: null };
+      }
+      if (command === 'list_projects') return window.__emptyProjects ? [] : [data.project];
       if (command === 'read_map') {
         if (!(args.branch in data.maps)) throw Error('No demo fixture: ' + args.branch);
         return JSON.stringify(data.maps[args.branch]);
@@ -51,6 +57,10 @@ let browser;
       if (command === 'refresh') return 'Demo only: no repository was accessed.';
       if (command === 'setup_prompt') return data.setup;
       if (command === 'tests_prompt') return '가상 시나리오: 반품 API의 테스트를 찾아 연결해 주세요.';
+      if (command === 'make_system') {
+        window.__pendingCalls = (window.__pendingCalls || 0) + 1;
+        return new Promise(resolve => { window.__finishSystem = resolve; });
+      }
       throw Error('Not available in the capture: ' + command);
     } } };
     document.addEventListener('DOMContentLoaded', () => {
@@ -89,6 +99,129 @@ let browser;
   }
   await page.goto(base);
   await page.waitForFunction(() => document.querySelector('#status').textContent === '' && document.querySelector('#map h2'));
+  if (process.argv.includes('--check-updates')) {
+    assert.equal(await page.locator('#updates').count(), 1, 'Version and update control');
+    await page.waitForFunction(() => window.__releaseChecks === 1);
+    await page.locator('#updates').click();
+    await page.waitForSelector('#release-dialog[open]');
+    assert.match(await page.locator('#release-dialog').innerText(), /0\.1\.0/);
+    await page.evaluate(() => { window.__releaseReply = { current: '0.1.0', latest: {
+      version: '0.2.0', newer: true,
+      url: 'https://github.com/ganggangstone/where-were-we/releases/tag/v0.2.0',
+      notes: '### 한국어\n- 가상 변경\n\n### English\n- Fictional change\n<img src=x onerror="throw Error(1)">'
+    } }; });
+    await page.locator('#checkRelease').click();
+    await page.waitForFunction(() => document.querySelector('#release-banner').textContent.includes('0.2.0'));
+    assert.match(await page.locator('#release-dialog').innerText(), /Fictional change/);
+    assert.equal(await page.locator('#release-dialog img').count(), 0, 'Notes are rendered as text');
+    assert.equal(await page.locator('#upgradeCommand').textContent(), 'brew update && brew upgrade --cask ganggangstone/tap/where-were-we');
+    const knownRelease = await page.evaluate(() => JSON.parse(localStorage.getItem('where-were-we.release-check')).result);
+    await page.locator('#closeRelease').click();
+    await page.reload();
+    await page.waitForSelector('#release-banner:not([hidden])');
+    assert.equal(await page.evaluate(() => window.__releaseChecks || 0), 0, 'Cached checks do not hit the network again');
+    await page.locator('#updates').click();
+    await page.evaluate(() => { window.__releaseFailure = true; });
+    await page.locator('#checkRelease').click();
+    await page.waitForFunction(() => document.querySelector('#release-dialog').textContent.includes('확인하지 못했어요'));
+    await page.locator('#closeRelease').click();
+    await page.locator('#language [data-lang="en"]').click();
+    await page.locator('#updates').click();
+    assert.match(await page.locator('#release-dialog').innerText(), /Could not check/);
+    await page.locator('#autoRelease').uncheck();
+    await page.locator('#closeRelease').click();
+    await page.reload();
+    await page.waitForSelector('#map h2');
+    await page.locator('#updates').click();
+    assert.equal(await page.locator('#autoRelease').isChecked(), false);
+    assert.equal(await page.evaluate(() => window.__releaseChecks || 0), 0, 'Opting out prevents automatic requests');
+    await page.locator('#checkRelease').click();
+    await page.waitForFunction(() => window.__releaseChecks === 1);
+    await page.evaluate(() => {
+      localStorage.setItem('where-were-we.release-auto', 'true');
+      localStorage.setItem('where-were-we.release-check', '{broken');
+    });
+    await page.reload();
+    await page.waitForSelector('#map h2');
+    await page.waitForFunction(() => window.__releaseChecks === 1, null, { timeout: 2000 });
+    await page.evaluate(now => localStorage.setItem('where-were-we.release-check', JSON.stringify({current:'0.1.0', at:now, result:{broken:true}, failed:false})), fixture.now);
+    await page.reload();
+    await page.waitForFunction(() => window.__releaseChecks === 1, null, { timeout: 2000 });
+    await page.evaluate(({now, result}) => localStorage.setItem('where-were-we.release-check', JSON.stringify({current:'0.1.0', at:now - 86400001, result, failed:false})), {now:fixture.now, result:knownRelease});
+    await page.addInitScript(() => { window.__releaseFailure = true; });
+    await page.reload();
+    await page.waitForSelector('#release-banner:not([hidden])');
+    await page.locator('#updates').click();
+    await page.waitForFunction(() => document.querySelector('#release-dialog').textContent.includes('Could not check'));
+    assert.match(await page.locator('#release-dialog').innerText(), /Showing information from an earlier check/);
+    assert.deepEqual(errors, []);
+    assert.deepEqual(blocked, []);
+    console.log('Update checks passed: versions, notes, escaping, cache, failures, language, opt-out, manual checks.');
+    return;
+  }
+  if (process.argv.includes('--check-language')) {
+    assert.equal(await page.locator('html').getAttribute('lang'), 'ko');
+    assert.equal(await page.locator('#language [data-lang="en"]').count(), 1, 'English language control');
+    await page.locator('[data-v="map"]').click();
+    await page.locator('[data-scr="/orders/:id"]').click();
+    await page.locator('#language [data-lang="en"]').click();
+    assert.equal(await page.locator('html').getAttribute('lang'), 'en');
+    assert.equal(await page.locator('[data-v="map"]').innerText(), 'Screen map');
+    assert.equal(await page.locator('#insp h2').innerText(), '주문 상세', 'Source project title must be preserved');
+    assert.equal(await page.locator('[data-scr="/orders/:id"]').evaluate(el => el.classList.contains('sel')), true, 'Selection survives language change');
+    assert.match(await page.locator('#insp').innerText(), /Requests/);
+    await page.locator('[data-v="sys"]').click();
+    assert.equal(await page.locator('#insp h2').innerText(), 'System');
+    await page.locator('[data-v="feat"]').click();
+    assert.equal(await page.locator('#insp h2').innerText(), 'Features');
+    await page.locator('[data-v="changes"]').click();
+    assert.match(await page.locator('#map').innerText(), /New screens/);
+    await page.locator('#agent').click();
+    assert.equal(await page.locator('#insp h2').innerText(), 'Connect agent');
+    assert.equal(await page.locator('#insp pre').textContent(), fixture.setup, 'Generated prompt stays verbatim');
+    await page.locator('#language [data-lang="ko"]').click();
+    assert.equal(await page.locator('#insp h2').innerText(), '에이전트 연결');
+    assert.equal(await page.locator('#insp pre').textContent(), fixture.setup, 'Open prompt survives switching');
+    await page.locator('#language [data-lang="en"]').click();
+    await page.setViewportSize({ width: 1480, height: 900 });
+    assert.equal(await page.locator('header').evaluate(el => el.scrollWidth <= el.clientWidth), true, 'English toolbar fits');
+    await page.reload();
+    await page.waitForSelector('#map h2');
+    assert.equal(await page.locator('html').getAttribute('lang'), 'en', 'Language survives reload');
+    await page.locator('#language [data-lang="ko"]').click();
+    assert.equal(await page.locator('[data-v="map"]').innerText(), '화면 지도');
+    await page.evaluate(() => localStorage.setItem('where-were-we.language', 'unsupported'));
+    await page.reload();
+    await page.waitForSelector('#map h2');
+    assert.equal(await page.locator('html').getAttribute('lang'), 'ko', 'Unknown preference falls back to Korean');
+    await page.addInitScript(() => {
+      Object.defineProperty(window, 'localStorage', { get() { throw new DOMException('Unavailable', 'SecurityError'); } });
+    });
+    await page.reload();
+    await page.waitForSelector('#map h2');
+    assert.equal(await page.locator('html').getAttribute('lang'), 'ko', 'Unavailable storage falls back to Korean');
+    await page.locator('#language [data-lang="en"]').click();
+    assert.equal(await page.locator('html').getAttribute('lang'), 'en', 'Session switching works without storage');
+    await page.locator('[data-v="sys"]').click();
+    await page.locator('#remakeSys').click();
+    assert.equal(await page.locator('#remakeSys').isDisabled(), true);
+    await page.locator('#language [data-lang="ko"]').click();
+    assert.equal(await page.locator('#remakeSys').isDisabled(), true, 'Pending analysis stays disabled after language change');
+    assert.equal(await page.evaluate(() => window.__pendingCalls), 1);
+    await page.evaluate(() => window.__finishSystem('Done'));
+    await page.waitForFunction(() => !document.querySelector('#remakeSys').disabled);
+    await page.addInitScript(() => { window.__emptyProjects = true; });
+    await page.reload();
+    await page.waitForSelector('#project [data-empty]', { state: 'attached' });
+    await page.locator('#language [data-lang="en"]').click();
+    assert.equal(await page.locator('#project').innerText(), '(None)', 'Empty project label switches to English');
+    await page.locator('#language [data-lang="ko"]').click();
+    assert.equal(await page.locator('#project').innerText(), '(없음)', 'Empty project label switches to Korean');
+    assert.deepEqual(errors, []);
+    assert.deepEqual(blocked, []);
+    console.log('Language checks passed: default, switching, source text, selection, prompts, persistence, invalid/unavailable storage, toolbar.');
+    return;
+  }
   await page.setViewportSize({ width: 1760, height: 1100 });
   await still('changes');
   await page.setViewportSize({ width: 1760, height: 900 });

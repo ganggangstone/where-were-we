@@ -10,6 +10,10 @@ git과 GitHub를 읽어 서비스가 어떤 프로그램으로 이루어졌는�
 
 ## 화면
 
+앱은 한국어로 시작합니다. 상단의 **한국어 / English**로 언어를 바꾸면 선택을 이 기기에 저장합니다. 프로젝트에서 읽은 화면 이름·코드·AI 설명과 서버에서 생성한 연결·테스트 안내문은 원문을 유지합니다.
+
+The app starts in Korean. Use **한국어 / English** in the toolbar to switch languages; your preference is saved on this device. Project names, code, AI explanations, and backend-generated setup/test prompts remain in their original language.
+
 | 화면 | 보여 주는 것 |
 |---|---|
 | 바뀐 것 | 지난 새로고침 뒤에 생기거나 사라진 화면·서버 요청·화면 사이 길, 들어온 PR이 닿는 곳 |
@@ -84,9 +88,82 @@ cd src-tauri && cargo build && ./target/debug/where-were-we
 
 전체 구조는 앱의 "전체 구조 만들기" 버튼이 만듭니다(에이전트가 저장소를 몇 분 읽습니다).
 
+### 설치형 앱 빌드 / Packaged macOS app
+
+설치형 앱에는 Python과 MCP 라이브러리, 지도 수집 스크립트가 함께 들어갑니다. 사용자가 Python·Rust나 원본 코드 폴더를 준비할 필요가 없도록 구성합니다. git·GitHub CLI(`gh auth login`)·Claude Code(AI 기능 사용 시)는 별도로 필요합니다. MCP를 실행하는 에이전트의 PATH에서도 이 명령들을 찾을 수 있어야 합니다. 현재 Homebrew 설치 정의와 공개 릴리즈는 준비 전입니다.
+
+The macOS bundle includes Python, MCP dependencies, and the collection scripts. It runs without a source checkout or a separately installed Python/Rust. Git, an authenticated GitHub CLI, and Claude Code for AI actions remain external requirements. The MCP host must also be able to find these commands through its PATH. A public release and Homebrew cask are not available yet.
+
+배포 파일을 만드는 사람은 macOS에서 Python 3.12 이상·Rust·Tauri CLI가 필요합니다. 저장소 루트에서 실행합니다. ARM과 Intel은 각각 해당 머신에서 빌드합니다. 교차 빌드와 universal 빌드는 아직 지원하지 않습니다.
+
+```sh
+python3 scripts/prepare-runtime.py --build --target aarch64-apple-darwin
+# Intel Mac: use --target x86_64-apple-darwin.
+# Local unsigned test build: add --no-sign.
+```
+
+위 빌드 명령은 Rust 의존성까지 빌드 머신의 개인 경로를 제거하도록 설정합니다. 배포 파일은 이 명령으로 만드세요. Tauri 빌드 전 단계에서 실행 환경을 준비합니다. 도구는 정해 둔 Python 배포 파일의 SHA-256을 확인하고, [고정 목록](requirements-runtime.lock)의 라이브러리와 해시를 확인해 설치합니다. `src-tauri/runtime/`은 자동으로 만드는 빌드 결과이며 Git에 넣지 않습니다. 지도·개인 설정은 포함하지 않습니다. Python 전체 배포본에서 구성요소별 라이선스 자료도 가져오고, 메타데이터가 참조하지만 원배포 파일에 빠진 zlib-ng 고지는 해당 배포본이 지정한 2.2.4 원문으로 보완합니다. 라이브러리 패키지에 포함된 라이선스 파일도 보존합니다.
+
+```sh
+WHERE_WERE_WE_RUNTIME=src-tauri/runtime python3 -m unittest discover -s tests -p test_packaging.py -v
+cargo test --manifest-path src-tauri/Cargo.toml
+```
+
+패키징 검사는 실행 환경을 공백이 있는 다른 폴더로 옮기고, 빈 홈 폴더와 제한된 PATH에서 연결 안내 생성·MCP 연결·프로젝트 조회를 확인합니다. 하위 Python 실행 인자 검사는 실제 함수의 프로세스 호출을 가짜로 바꿔 확인하며, Rust 검사에서는 포함된 Python을 직접 실행합니다. 실제 저장소 새로고침·AI 분석·사용자 에이전트 설정은 실행하지 않습니다. 코드 서명·공증과 실제 Homebrew 설치는 별도 배포 단계에서 확인해야 합니다.
+
+
+## 업데이트 / Updates
+
+상단 **버전·업데이트**에서 설치한 버전과 최신 정식 릴리즈, 한국어·영어 변경 내용을 봅니다. 앱을 열 때 하루에 최대 한 번 GitHub의 공개 릴리즈를 확인합니다. 자동 확인을 끄거나 **지금 확인**으로 직접 조회할 수 있습니다. 조회에 실패하면 이전 정보를 유지하고, 실패를 최신 버전이라는 뜻으로 표시하지 않습니다.
+
+Open **Version & updates** to see the installed version, latest stable release, and Korean/English release notes. The app checks public GitHub releases at most once per day when opened. You can turn automatic checks off or check manually. Failed checks keep earlier information and never imply that your app is up to date.
+
+업데이트 설치는 터미널에서 실행합니다. 앱은 명령만 복사합니다. 아래 명령은 공개 릴리즈와 Homebrew 설치 정의를 게시한 뒤 사용할 수 있습니다.
+
+```sh
+brew install --cask ganggangstone/tap/where-were-we
+brew update && brew upgrade --cask ganggangstone/tap/where-were-we
+```
+
+Installation and upgrades use Homebrew. The app only copies the upgrade command. These commands become usable after the release and cask are published. Maps in `~/.where-were-we/` are preserved when uninstalling the app.
+
+버전 조회는 GitHub의 공개 릴리즈 주소만 요청합니다. 요청에 프로젝트 지도·코드·GitHub 로그인 토큰은 넣지 않습니다. 릴리즈 노트는 원문을 일반 텍스트로 보여 줍니다.
+
+The version check requests only the public GitHub release endpoint, without project maps, source code, or GitHub login tokens. Notes are displayed as plain text.
+
+### 배포 준비 / Preparing a release
+
+다음 명령으로 앱을 빌드하고 ZIP·해시·설치 정의 미리보기를 준비합니다. ZIP은 `src-tauri/target/release-assets/`에 두며 도구가 GitHub나 tap에 게시하지 않습니다. 서명·공증과 다른 머신에서의 실행 확인은 배포 전에 별도로 해야 합니다.
+
+```sh
+python3 scripts/prepare-runtime.py --build --release-preview --target aarch64-apple-darwin
+```
+
+릴리즈 노트 정본은 아래 초안입니다. 같은 버전의 ZIP과 한영 노트를 GitHub 릴리즈로 공개한 뒤, 출력된 해시·설치 정의를 `ganggangstone/homebrew-tap`의 `Casks/where-were-we.rb`에 반영합니다. 설치 정의가 아직 비공개인 ZIP을 가리키지 않게 하는 순서입니다. tap 반영 전까지는 앱에서 새 버전이 보여도 Homebrew가 이전 버전을 유지할 수 있습니다. Intel 파일을 준비하면 실제 해시를 함께 넣어 두 아키텍처의 설치 정의를 만들 수 있습니다. 설치 정의 원본은 [Casks/where-were-we.rb](Casks/where-were-we.rb)에 있습니다. GitHub 릴리즈와 설치용 tap에는 아직 반영하지 않았습니다.
+
+The draft below is the source for release notes. Build and verify the app, publish the GitHub release with its ZIP and both languages, then update `Casks/where-were-we.rb` in `ganggangstone/homebrew-tap` with the actual digest. This keeps the cask from pointing at inaccessible draft assets. Homebrew may retain the previous version until the tap update reaches it. Only architectures with verified release files belong in the cask. The cask source is [Casks/where-were-we.rb](Casks/where-were-we.rb). No GitHub release or cask in the installation tap has been published yet.
+
+### 첫 공개 릴리즈 초안 / First release draft
+
+<!-- release-notes:start -->
+### 한국어
+
+- 서비스의 프로그램·화면·서버 요청·데이터와 연결된 PR·이슈를 지도에서 확인합니다.
+- 한국어 기본 화면과 영어 전환을 지원하며 선택한 언어를 저장합니다. 프로젝트 원문은 유지합니다.
+- macOS 앱에 Python과 MCP 실행 환경을 포함합니다. git·GitHub CLI와 AI 기능에 필요한 Claude Code는 별도로 필요합니다.
+- 앱에서 새 버전과 한영 릴리즈 노트를 확인하고, Homebrew 업데이트 명령을 복사할 수 있습니다.
+
+### English
+
+- Explore programs, screens, server requests, data, and linked pull requests and issues in a local map.
+- Start in Korean or switch to English; your language preference is saved and project content stays verbatim.
+- The macOS app includes Python and MCP. Git, GitHub CLI, and Claude Code for AI actions remain external requirements.
+- Check new versions and Korean/English release notes in the app, then copy the Homebrew upgrade command.
+<!-- release-notes:end -->
+
 ## 에이전트 연결
 
-앱 위쪽의 **에이전트 연결**을 누르고(또는 `python3 mapcore.py setup`) 나온 글을 복사해, 쓰는 에이전트(Claude Code, Codex 등)에 붙여 넣으세요.
+앱 위쪽의 **에이전트 연결**을 누르고(또는 `.venv/bin/python mapcore.py setup`) 나온 글을 복사해, 쓰는 에이전트(Claude Code, Codex 등)에 붙여 넣으세요.
 에이전트가 MCP 서버를 등록하고, 전역 지침에 "계획 전에 바뀐 것을 보고, 고치기 전에 영향을 본다"는 규칙을 넣고, 두 가지를 물어 내 방식에 맞춥니다.
 설정 파일을 바꾸기 전에 허락을 구하게 되어 있습니다.
 
