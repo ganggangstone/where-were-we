@@ -25,7 +25,7 @@ The app bundles Python, MCP dependencies, and collection scripts. The cask insta
 
 ### Create your first map
 
-There is no project creation form yet. Quit the app first if it is open. Use a local checkout with `origin/dev`, `origin/main`, and the [supported layout](#data-and-limits), including `frontend/src/App.tsx`. Run the bundled collector once, then choose the project in the app:
+There is no project creation form yet. Quit the app first if it is open. Use a local checkout with `origin/dev`, `origin/main`, and the [supported layout](#data-and-limits), including `frontend/src/App.tsx` and `backend/app/main.py`. Run the bundled collector once, then choose the project in the app:
 
 ```sh
 RUNTIME="/Applications/where-were-we.app/Contents/Resources/runtime"

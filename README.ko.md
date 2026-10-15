@@ -25,7 +25,7 @@ gh auth login
 
 ### 첫 지도 만들기
 
-아직 프로젝트 추가 화면은 없습니다. 앱이 열려 있다면 먼저 종료하세요. `origin/dev`·`origin/main`과 `frontend/src/App.tsx`를 포함한 [지원 구조](#데이터와-한계)의 저장소를 준비하고, 포함된 수집 도구를 한 번 실행한 뒤 앱에서 프로젝트를 고릅니다.
+아직 프로젝트 추가 화면은 없습니다. 앱이 열려 있다면 먼저 종료하세요. `origin/dev`·`origin/main`과 `frontend/src/App.tsx`·`backend/app/main.py`를 포함한 [지원 구조](#데이터와-한계)의 저장소를 준비하고, 포함된 수집 도구를 한 번 실행한 뒤 앱에서 프로젝트를 고릅니다.
 
 ```sh
 RUNTIME="/Applications/where-were-we.app/Contents/Resources/runtime"
