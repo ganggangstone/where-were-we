@@ -88,14 +88,14 @@ async fn suggest_groups(app: tauri::AppHandle, project: String, branch: String) 
 
 /// 에이전트 연결 프롬프트 (mapcore.py setup). 이 맥의 경로가 채워진다.
 #[tauri::command]
-async fn setup_prompt(app: tauri::AppHandle) -> Result<String, String> {
-    run_py(&app, "mapcore.py", &["setup"])
+async fn setup_prompt(app: tauri::AppHandle, lang: Option<String>) -> Result<String, String> {
+    run_py(&app, "mapcore.py", &["setup", if lang.as_deref() == Some("en") { "--lang=en" } else { "--lang=ko" }])
 }
 
 /// 테스트가 안 이어진 서버 기능 하나에 대해 에이전트가 테스트를 찾게 하는 글 (mapcore.py tests).
 #[tauri::command]
-async fn tests_prompt(app: tauri::AppHandle, project: String, route: String) -> Result<String, String> {
-    run_py(&app, "mapcore.py", &["tests", &project, &route])
+async fn tests_prompt(app: tauri::AppHandle, project: String, route: String, lang: Option<String>) -> Result<String, String> {
+    run_py(&app, "mapcore.py", &["tests", &project, &route, if lang.as_deref() == Some("en") { "--lang=en" } else { "--lang=ko" }])
 }
 
 /// jobs.py 를 돌려 서버 밖 프로그램 하나가 하는 일을 에이전트가 읽어 적게 한다 (AI 호출, 버튼을 눌렀을 때만).

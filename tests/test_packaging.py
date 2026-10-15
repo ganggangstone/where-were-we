@@ -29,6 +29,25 @@ spec.loader.exec_module(builder)
 
 
 class PromptPaths(unittest.TestCase):
+    def test_prompt_languages_keep_commands_and_project_text(self):
+        with patch.object(mapcore, 'projects', return_value=[]):
+            default = mapcore.setup_prompt()
+            english = mapcore.setup_prompt(lang='en')
+        self.assertIn('MCP 서버', default)
+        self.assertIn('Before changing configuration', english)
+        self.assertIn('claude mcp add --scope user where-were-we --', english)
+        self.assertIn('[mcp_servers.where-were-we]', english)
+        with patch.object(mapcore, 'tests_conf', return_value={'files':['test_*.py'], 'calls':['client.<method>("<path>")']}):
+            prompt = mapcore.tests_prompt('원문-project', ['backend/render.py::cancel'], lang='en')
+        self.assertIn('원문-project', prompt)
+        self.assertIn('backend/render.py::cancel', prompt)
+        self.assertIn('Do not conclude that tests do not exist', prompt)
+        self.assertIn('record_test', prompt)
+        with patch.object(mapcore, 'projects', return_value=['source-name']), patch.object(mapcore, '_read', return_value={'repo':'/demo/path with spaces'}), patch('subprocess.run', return_value=SimpleNamespace(returncode=0,stdout='https://example.invalid/demo.git\n')):
+            english = mapcore.setup_prompt(lang='en')
+        self.assertIn('any working folder cloned from https://example.invalid/demo.git', english)
+        self.assertIn('/demo/path with spaces', english)
+
     def test_nested_refresh_uses_isolated_nonwriting_python(self):
         calls = []
         process = SimpleNamespace(run=lambda args, **kwargs: (calls.append(args) or

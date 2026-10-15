@@ -264,10 +264,21 @@ def extractor_id(home):
     return hashlib.sha1(raw).hexdigest()[:10]
 
 
-def tests_prompt(project, routes=()):
+def tests_prompt(project, routes=(), lang="ko"):
     """테스트가 안 이어진 서버 기능에 붙는 안내. MCP impact 답과 앱의 "프롬프트 복사"가 이것 하나를 쓴다."""
     c = tests_conf(os.path.join(ROOT, project))
     lines = "\n".join(f"   - {r}" for r in routes) or "   - (impact 답에서 테스트가 0 인 서버 기능)"
+    if lang == "en":
+        lines = "\n".join(f"   - {r}" for r in routes) or "   - (server requests with zero linked tests in impact)"
+        return f"""## If test code is missing
+where-were-we({project}) could not link tests to these server requests. It only recognizes configured patterns; unlinked tests may still exist.
+{lines}
+Current rules: files {c['files']}, call patterns {c['calls']}
+
+1. Find tests in the repository that call these requests, including HTTP clients, direct imports, and shared helpers. Do not write to the target repository.
+2. If the pattern repeats, update set_test_rules. Include the existing rules too: omitted rules are removed. Available placeholders: <method>, <path>, <function>, <module> (the imported server module). Examples: 'client.<method>("<path>")', '<module>.<function>(', '<function>('. Then call refresh and check that the requests have linked tests.
+3. For one-off patterns or helper calls, use record_test with the server request, test file, line number, and exact text on that line. Only matching evidence is stored.
+4. If nothing is found, report that result. Do not conclude that tests do not exist."""
     return f"""## 테스트 코드가 안 보인다면?
 where-were-we({project})가 아래 서버 기능에 테스트를 잇지 못했다. 지도는 정해 둔 찾는 규칙으로만 테스트를 잇기 때문에, 테스트가 없다는 뜻이 아닐 수 있다.
 {lines}
@@ -287,7 +298,7 @@ assert call_regex("<module>.<function>(").search("await ProjectRouter.delete_pro
 
 
 # ---------- 에이전트 연결 프롬프트 (앱의 "에이전트 연결" 버튼과 README 가 이것 하나를 쓴다) ----------
-def setup_prompt():
+def setup_prompt(lang="ko"):
     here = os.path.dirname(os.path.abspath(__file__))
     py, server = sys.executable, os.path.join(here, "mcp_server.py")
     command = python_command(server)
@@ -297,8 +308,37 @@ def setup_prompt():
     for p in projects():
         m = _read(p, "dev") or {}
         if m.get("repo"):
-            url = os.popen(f"git -C '{m['repo']}' remote get-url origin 2>/dev/null").read().strip()
-            repos.append(f"   - {p}: " + (f"원격 {url} 을 받은 작업 폴더 어디서든 (이 맥에서는 예: {m['repo']})" if url else m["repo"]))
+            import subprocess
+            result = subprocess.run(["git", "-C", m["repo"], "remote", "get-url", "origin"], capture_output=True, text=True)
+            url = result.stdout.strip() if result.returncode == 0 else ""
+            if lang == "en":
+                location = f"any working folder cloned from {url} (on this Mac, for example: {m['repo']})" if url else m["repo"]
+            else:
+                location = f"원격 {url} 을 받은 작업 폴더 어디서든 (이 맥에서는 예: {m['repo']})" if url else m["repo"]
+            repos.append(f"   - {p}: {location}")
+    if lang == "en":
+        repo_lines = "\n".join(repos) or "   - (No maps yet; extract a project first.)"
+        return f"""Connect where-were-we (a code structure map) to this agent and adapt it to my workflow. Before changing configuration, show the proposed edits and ask my permission.
+
+1. Register the MCP server using the configuration for the agent you are running:
+   - Claude Code: claude mcp add --scope user where-were-we -- {shell_command}
+   - Codex: add to ~/.codex/config.toml:
+     [mcp_servers.where-were-we]
+     command = {toml_command}
+     args = {toml_args}
+   - Other agents: register the command `{py}` with arguments {toml_args} as a stdio MCP server.
+2. Call the projects tool to verify the connection and show the result. Explain if a new session is needed to discover the tools.
+3. Update the existing matching section in my global instructions (Claude Code: ~/.claude/CLAUDE.md; Codex: ~/.codex/AGENTS.md; otherwise the agent's global instructions). Add a section only if there is no matching one:
+
+   ## where-were-we
+   Use the where-were-we MCP tools when working in these repositories:
+{repo_lines}
+   - Before starting the day's work or making a plan, call changes. If the last refresh is over a day old, call refresh first.
+   - Before editing files, screens, server requests, or data stores, call impact to check affected areas and overlapping PRs, branches, and issues. Include the affected areas in the plan.
+   - Preserve qualifications such as candidate, inferred, and unverified; do not report them as confirmed facts.
+
+4. Ask whether changes should run at every session start or only before planning, and how much impact detail to include (screen count, screen/request lists, or overlapping work too). Apply my answers to the section.
+5. Show the files and lines you changed."""
     repo_lines = "\n".join(repos) or "   - (아직 지도가 없다. 앱에서 프로젝트를 먼저 뽑는다)"
     return f"""where-were-we(코드 구조 지도)를 너에게 연결하고 내 작업 방식에 맞게 설정해 줘. 아래를 순서대로 하고, 설정 파일을 바꾸기 전에는 바꿀 내용을 보여 주고 내 허락을 받아.
 
@@ -325,7 +365,15 @@ def setup_prompt():
 5. 마지막에 바꾼 파일과 바꾼 줄을 보여 준다."""
 
 
+if __name__ == "__main__" and "--lang=en" in sys.argv:
+    sys.argv.remove("--lang=en")
+    _prompt_lang = "en"
+else:
+    _prompt_lang = "ko"
+    if __name__ == "__main__" and "--lang=ko" in sys.argv:
+        sys.argv.remove("--lang=ko")
+
 if __name__ == "__main__" and sys.argv[1:] == ["setup"]:
-    print(setup_prompt())
+    print(setup_prompt(lang=_prompt_lang))
 elif __name__ == "__main__" and sys.argv[1:2] == ["tests"]:  # mapcore.py tests <프로젝트> [서버 기능 …]
-    print(tests_prompt(sys.argv[2], sys.argv[3:]))
+    print(tests_prompt(sys.argv[2], sys.argv[3:], lang=_prompt_lang))

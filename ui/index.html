@@ -775,7 +775,7 @@ function render() {
   if ($('copyS')) $('copyS').onclick = () => copy(copyText(m, s), $('copyS'));
   // 테스트가 안 이어진 서버 기능: 에이전트에게 테스트를 찾게 하는 글(mapcore.tests_prompt)을 복사한다
   document.querySelectorAll('[data-tp]').forEach(b => b.onclick = async () => {
-    try { await navigator.clipboard.writeText(await invoke('tests_prompt', { project: S.project, route: b.dataset.tp })); $('tpDone').textContent = tr(' 복사됨'); }
+    try { await navigator.clipboard.writeText(await invoke('tests_prompt', { project: S.project, route: b.dataset.tp, lang: S.lang })); $('tpDone').textContent = tr(' 복사됨'); }
     catch (err) { $('tpDone').textContent = tr(' 복사하지 못했다: ') + err; } });
   document.querySelectorAll('[data-copy]').forEach(b => b.onclick = () => copy(copyText(m, s, rows.find(x => x.key === b.dataset.copy)), b));
   if ($('mk')) $('mk').onclick = async () => { $('mk').disabled = true; $('mklog').textContent = tr('에이전트가 코드를 읽는 중… 1~2분'); try { await invokeAction('make_steps', { project:S.project, branch:S.branch, screen:s.path }); await loadProject(S.project, false); } catch (e) { $('mklog').textContent = tr('실패: ') + String(e).slice(0, 160); $('mk').disabled = false; } };
@@ -793,7 +793,7 @@ function renderAgentPrompt() {
   $('insp').innerHTML = ui`<h2>에이전트 연결</h2><p class="sub">아래 글을 복사해 쓰는 에이전트(Claude Code, Codex 등)에 붙여 넣으면, 에이전트가 MCP 서버를 등록하고 전역 지침에 사용 규칙을 넣는다. 설정 파일을 바꾸기 전에 허락을 구하게 되어 있다.</p><div class="ctl"><button class="btn primary" id="cpAgent">복사</button><span id="cpDone"></span></div><pre class="prompt mono">${esc(S.agentPrompt)}</pre>`;
   $('cpAgent').onclick = async () => { await navigator.clipboard.writeText(S.agentPrompt); $('cpDone').textContent = tr('복사됨'); };
 }
-$('agent').onclick = async () => { try { S.agentPrompt = await invoke('setup_prompt'); } catch (e) { S.agentPrompt = tr('프롬프트를 만들지 못했다: ') + e; } renderAgentPrompt(); };
+$('agent').onclick = async () => { try { S.agentPrompt = await invoke('setup_prompt', {lang: S.lang}); } catch (e) { S.agentPrompt = tr('프롬프트를 만들지 못했다: ') + e; } renderAgentPrompt(); };
 document.querySelectorAll('#branch button').forEach(b => b.onclick = () => { if (S.maps[b.dataset.b]) { S.agentPrompt = null; S.branch = b.dataset.b; S.open = null; render(); } });
 document.querySelectorAll('#view button').forEach(b => b.onclick = () => { S.agentPrompt = null; S.view = b.dataset.v; render(); });
 $('project').onchange = () => loadProject($('project').value);
