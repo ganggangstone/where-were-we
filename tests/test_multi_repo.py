@@ -65,6 +65,17 @@ class Projects(TemporaryProject):
         self.assertEqual((home/'dev.json').read_text(),text)
         self.assertEqual(project.read_bundle('legacy')['dev']['screens'][0]['repository'],'old')
 
+    def test_main_only_legacy_requires_explicit_adoption(self):
+        home=self.root/'legacy';home.mkdir()
+        original=json.dumps(sample('/demo/old'));(home/'main.json').write_text(original)
+        with self.assertRaisesRegex(ValueError,'legacy'):
+            project.configure('legacy',{'repositories':[{'id':'new','path':'/demo/new'}]})
+        self.assertFalse((home/'project.json').exists())
+        self.assertEqual((home/'main.json').read_text(),original)
+        project.configure('legacy',{'repositories':[{'id':'old','path':'/demo/old','legacy':True,
+                                                   'refs':{'dev':None,'main':'origin/main'}}]})
+        self.assertEqual(project.read_bundle('legacy')['main']['screens'][0]['repository'],'old')
+
 class Connections(TemporaryProject):
     def inputs(self):
         project.configure('studio', {'repositories':[
@@ -89,6 +100,32 @@ class Connections(TemporaryProject):
         m=mapcore.Map('studio')
         self.assertEqual(m.requests('/@web/settings'),[])
         self.assertEqual(m.m['connection_candidates'][0]['targets'][0]['repository'],'api')
+
+    def test_cross_repository_uncommitted_work_is_visible(self):
+        web,api=self.inputs()
+        folder={'path':'/demo/work','branch':'feature','uncommitted':['app/main.py'],'screens':[]}
+        project.publish('studio','api',{'dev':api,'status':{'worktrees':[folder]}},{})
+        for scope in ('','web'):
+            bundle=project.read_bundle('studio',scope)
+            m=mapcore.Map('studio',data=bundle['dev'],bundle=bundle)
+            work=m.work_of('/@web/settings')['folders']
+            self.assertEqual(len(work),1)
+            self.assertEqual(work[0]['repository'],'api')
+            self.assertEqual(work[0]['uncommitted'],['app/main.py'])
+        self.assertEqual(folder['screens'],[])
+
+    def test_cross_repository_pr_linked_issue_is_visible(self):
+        web,api=self.inputs()
+        status={'open_prs':[{'number':42,'title':'API','files':['app/main.py'],'screens':[],
+                            'issues':[{'number':5}],'refs':[]}],
+                'issues':[{'number':5,'title':'Linked','screens':[],'via':'pr','hits':['PR #42']},
+                          {'number':6,'title':'Unrelated','screens':[],'via':None,'hits':[]}]}
+        project.publish('studio','api',{'dev':api,'status':status},{})
+        for scope in ('','web'):
+            bundle=project.read_bundle('studio',scope)
+            m=mapcore.Map('studio',data=bundle['dev'],bundle=bundle)
+            self.assertEqual([i['number'] for i in m.work_of('/@web/settings')['issues']],[5])
+        self.assertEqual(status['issues'][0]['screens'],[])
 
     def test_previous_view_keeps_unchanged_dependency_repository(self):
         web,api=self.inputs()
@@ -174,6 +211,20 @@ class Collection(TemporaryProject):
     def run_cli(self,env,*args):
         import subprocess
         return subprocess.run([sys.executable,'-I','-B',str(Path(project.__file__)),*args],env=env,capture_output=True,text=True)
+
+    def test_custom_non_python_roots_can_be_collected_before_ai_analysis(self):
+        env=self.environment()
+        sources=json.loads(Path(env['FAKE_SOURCES']).read_text())
+        sources[str(self.root/'web')]={'pages/items.vue':'<template>Items</template>'}
+        sources[str(self.root/'api')]={'server/main.go':'package main'}
+        Path(env['FAKE_SOURCES']).write_text(json.dumps(sources))
+        conf={'repositories':[{'id':'web','path':str(self.root/'web'),'layout':{'frontend':'pages','backend':None}},
+                              {'id':'api','path':str(self.root/'api'),'layout':{'frontend':None,'backend':'server'}}]}
+        self.assertEqual(self.run_cli(env,'configure','studio',json.dumps(conf)).returncode,0)
+        result=self.run_cli(env,'refresh','studio')
+        self.assertNotIn('FAILED',result.stdout,result.stdout)
+        self.assertIn('web: refreshed',result.stdout)
+        self.assertIn('api: refreshed',result.stdout)
 
     def test_real_isolated_collection_split_sources_and_partial_failure(self):
         env=self.environment()
@@ -302,6 +353,36 @@ class MCP(TemporaryProject):
         self.server.set_test_rules(['spec_*.py'],['<function>('],'studio',repository='api')
         self.assertIn('spec_*.py',mapcore.tests_prompt('studio',lang='en',repository='api'))
         self.assertNotIn('spec_*.py',mapcore.tests_prompt('studio',lang='en',repository='web'))
+
+    def test_http_impact_includes_connected_work(self):
+        web,api=self.inputs()
+        project.publish('studio','api',{'dev':api,'status':{'open_prs':[
+            {'number':42,'title':'API change','author':'demo','files':['app/main.py'],'screens':[]}]}},{})
+        text=self.server.impact('GET /settings','studio',repository='api')
+        self.assertIn('PR #42',text)
+        self.assertIn('API change',text)
+
+    def test_backend_only_impact_includes_file_work(self):
+        project.configure('studio',{'repositories':[{'id':'api','path':'/demo/api'}]})
+        api=sample('/demo/api');api['screens']=[];api['file_screens']={};api['models']={'Settings':'settings'}
+        api['backend_routes']=[{'file':'app/main.py','line':3,'function':'read_settings',
+            'method':'GET','path':'/settings','mounted':True,'tables':['settings'],'tests':[]}]
+        project.publish('studio','api',{'dev':api,'status':{'open_prs':[
+            {'number':42,'title':'API change','author':'demo','files':['app/main.py'],'screens':[]}]}},{})
+        for target in ('GET /settings','app/main.py','settings'):
+            self.assertIn('PR #42',self.server.impact(target,'studio',repository='api'))
+
+    def test_mcp_reports_configuration_change_and_collection_times(self):
+        conf=project.configure('studio',{'repositories':[{'id':'web','path':'/demo/old'}]})
+        project.publish('studio','web',{'dev':sample('/demo/old')},
+                        {'fingerprint':project.fingerprint(conf['repositories'][0])})
+        state=project.states('studio')['web']
+        conf['repositories'][0]['path']='/demo/new';project.configure('studio',conf)
+        for text in (self.server.projects(),self.server.overview('studio'),
+                     self.server.impact('/settings','studio',repository='web')):
+            self.assertIn('configuration changed; refresh required',text)
+            self.assertIn(state['last_success'],text)
+            self.assertIn(state['last_attempt'],text)
 
     def test_mcp_main_only_repository(self):
         project.configure('studio',{'repositories':[{'id':'only','path':'/demo/only','refs':{'dev':None,'main':'origin/main'}}]})

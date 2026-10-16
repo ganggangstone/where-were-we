@@ -42,8 +42,8 @@ SRC = LAYOUT.get("frontend") or ("src" if "src/App.tsx" in ls() else "frontend/s
 BACKEND = LAYOUT.get("backend") or ("app" if "app/main.py" in ls() else "backend/app")
 APP = SRC + "/App.tsx"
 for area, root, required in (("frontend", SRC, APP), ("backend", BACKEND, BACKEND + "/main.py")):
-    if area in LAYOUT and LAYOUT[area] and required not in ls():
-        raise ValueError(f"Configured {area} root is missing its entry file: {required}")
+    if area in LAYOUT and LAYOUT[area] and not any(f.startswith(root.rstrip("/")+"/") for f in ls()):
+        raise ValueError(f"Configured {area} source root has no tracked files: {root}")
 
 def resolve(frm, spec):
     """상대 import 를 저장소 경로로. 없으면 None."""
@@ -159,9 +159,7 @@ def normalize(p, table=None):
     """프런트 경로 템플릿과 FastAPI 경로를 같은 꼴로. 변수 자리는 {}."""
     p = p.strip("`'\"")
     p = expand(p, table or {})
-    p = p.split("?")[0]
-    p = re.sub(r"\{[^}]*\}", "{}", p)
-    return p.rstrip("/") or "/"
+    return mapcore.normalize_http_path(p)
 
 
 def calls_in(src, lo=0, hi=None):
@@ -572,44 +570,7 @@ assert module_file("generations", {"backend/app/routers/old_generations.py"}) is
 
 
 def backend_tests(be_index, be, conf):
-    """테스트 규칙(mapcore.tests_conf)으로 라우트마다 테스트 파일을 모은다. 돌려주는 것: (hits, 대조에 실패한 records 수)"""
-    hits = defaultdict(set)
-    by_func = defaultdict(list)  # (서버 기능 파일, 함수 이름) → 라우트
-    for r in be:
-        if r.get("function"):
-            by_func[(r["file"], r["function"])].append(r)
-    router_files = {k[0] for k in by_func}
-    pats = [mapcore.call_regex(t) for t in conf["calls"]]
-    is_test = lambda f: f.endswith(".py") and any(fnmatch.fnmatch(f if "/" in g else os.path.basename(f), g) for g in conf["files"])
-    for f in ls():
-        if not is_test(f):
-            continue
-        src = show(f) or ""
-        imps = py_imports(src)
-        for pat in pats:
-            for m in pat.finditer(src):
-                g = m.groupdict()
-                if g.get("path"):
-                    rs = be_index.get((g["method"].upper(), normalize(g["path"])), [])
-                elif g.get("module"):  # 서버 기능 파일을 import 한 이름.함수(
-                    mod, name = imps.get(g["module"], (None, None))
-                    rf_ = mod is not None and module_file(f"{mod}.{name}" if mod else name, router_files)
-                    rs = by_func.get((rf_, g["function"]), []) if rf_ else []
-                else:  # 서버 기능 함수를 import 해서 바로 부름
-                    mod, name = imps.get(g["function"], (None, None))
-                    rf_ = mod and module_file(mod, router_files)
-                    rs = by_func.get((rf_, name), []) if rf_ else []
-                for r in rs:
-                    hits[(r["file"], r["line"])].add(f)
-    stale = 0
-    for rec in conf["records"]:  # 에이전트가 하나씩 넘긴 것. 이 커밋에서도 그 줄(±2)에 그 글자가 있어야 센다
-        r = next((r for r in be if f"{r['file']}::{r.get('function')}" == rec.get("route")), None)
-        lines = (show(rec.get("file", "")) or "").splitlines(); q = re.sub(r"\s+", "", rec.get("quote") or ""); ln = rec.get("line") or 0
-        if r and len(q) >= 6 and any(q in re.sub(r"\s+", "", l) for l in lines[max(0, ln - 3):ln + 2]):
-            hits[(r["file"], r["line"])].add(rec["file"])
-        else:
-            stale += 1
-    return hits, stale
+    return mapcore.backend_test_links(be,ls(),show,conf,py_imports,module_file,normalize)
 
 
 # ---------- 5. 조립 ----------

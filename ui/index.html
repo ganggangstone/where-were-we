@@ -60,6 +60,14 @@ const UI_EN = {
   '버전·업데이트': 'Version & updates', '새 버전 알림': 'New version available',
   '현재 버전': 'Installed version', '최신 공개 버전': 'Latest public version',
   '릴리즈 노트': 'Release notes', '변경 내용 보기': 'View changes', '닫기': 'Close',
+  '지금 업데이트': 'Update now', '업데이트 준비 중…': 'Preparing the update…',
+  'Homebrew에서 새 버전을 확인하는 중…': 'Checking the new version in Homebrew…',
+  '앱을 닫고 업데이트하는 중…': 'Closing the app and installing the update…',
+  '새 버전으로 다시 여는 중…': 'Reopening the updated app…',
+  '업데이트가 완료되었습니다.': 'Update completed.',
+  '업데이트하지 못했습니다.': 'The update could not be completed.',
+  '앱이 잠시 닫힌 뒤 자동으로 다시 열립니다.': 'The app will close briefly and reopen automatically.',
+  '직접 업데이트하기': 'Update manually',
   '지금 확인': 'Check now', '확인 중…': 'Checking…', '업데이트 명령 복사': 'Copy upgrade command',
   '앱을 열 때 하루에 한 번 GitHub 공개 릴리즈 확인': 'Check public GitHub releases once a day when opening the app',
   'GitHub에서 새 버전을 확인하지 못했어요. 연결 상태를 확인하고 다시 시도해 주세요.': 'Could not check GitHub for a new version. Check your connection and try again.',
@@ -186,6 +194,15 @@ const UI_EN = {
   ' 버튼': ' button', ' 외 ': ' and ', ' 외': ' and more', '분 전': ' minutes ago', '시간 전': ' hours ago', '일 전': ' days ago',
   '개 중': ' total', '개:': ':', '개': '', '곳': '', '줄': ' lines'
 };
+Object.assign(UI_EN, {
+ '분석 요청을 준비하는 중…':'Preparing analysis request…', '분석 요청':'Analysis request', '복사해 MCP가 연결된 에이전트에 전달하세요. 해당 에이전트가 자신의 모델로 코드를 읽고 결과를 저장합니다.':'Copy this request to your MCP-connected agent. It reads the code with its own model and records the result.',
+ '연결된 MCP 에이전트로 분석합니다. 해당 에이전트 계정의 사용량을 사용합니다.':'Analyze through your connected MCP agent using its own account.',
+ 'AI 상세 분석':'Analyze with AI', '사용자 Claude Code로 분석합니다. 해당 계정의 사용량을 사용합니다.':'Analyze with your Claude Code account and its usage allowance.',
+ 'AI 분석 · 원문 대조':'AI analysis · source text checked', 'AI 재분석 필요':'AI analysis required', 'AI가 상세 지도를 만드는 중…':'AI is analyzing the detailed map…',
+ '공유 데이터 설정':'Shared data settings', '공유 데이터 추가':'Add shared data',
+ '공유 데이터 ID':'Shared data ID', '같은 데이터를 사용하는 레포와 테이블만 연결하세요. 이름이 같다는 이유로 자동 연결하지 않습니다.':'Connect repositories and tables only when they use the same data. Matching names do not create automatic connections.',
+ '테이블':'Table', '연결 추가':'Add connection', '제거':'Remove', '레포 선택':'Choose repository'
+});
 const UI_PATTERN = new RegExp(Object.keys(UI_EN).sort((a, b) => b.length - a.length).map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'g');
 function tr(text) { return S.lang === 'en' ? String(text).replace(UI_PATTERN, match => UI_EN[match]) : String(text); }
 function ui(parts, ...values) { return parts.reduce((out, part, i) => out + tr(part) + (i < values.length ? values[i] : ''), ''); }
@@ -206,7 +223,7 @@ const RELEASE_PAGE = 'https://github.com/ganggangstone/where-were-we/releases';
 const RELEASE_CACHE = 'where-were-we.release-check';
 const RELEASE_AUTO = 'where-were-we.release-auto';
 const UPGRADE_COMMAND = 'brew update && brew upgrade --cask ganggangstone/tap/where-were-we';
-const U = { current:null, latest:null, checked:false, busy:false, failed:false, dismissed:null,
+const U = { current:null, latest:null, checked:false, busy:false, failed:false, dismissed:null, installing:false, job:null, timer:null,
   auto:(() => { try { return localStorage.getItem(RELEASE_AUTO) !== 'false'; } catch { return false; } })() };
 function validReleaseResult(result) {
   if (!result || result.current !== U.current) return false;
@@ -219,7 +236,8 @@ function renderUpdates() {
   $('updates').textContent = tr('버전·업데이트') + (U.latest?.newer ? ' ●' : '');
   const release = U.latest;
   $('release-banner').hidden = !release?.newer || U.dismissed === release.version;
-  $('release-banner').innerHTML = release?.newer ? ui`<span>${tr('새 버전 알림')}: <b>${esc(release.version)}</b></span><button class="btn" id="viewRelease">변경 내용 보기</button><button class="btn quiet" id="dismissRelease">닫기</button>` : '';
+  $('release-banner').innerHTML = release?.newer ? ui`<span>${tr('새 버전 알림')}: <b>${esc(release.version)}</b></span><button class="btn" id="startBannerUpdate" ${U.installing ? 'disabled' : ''}>지금 업데이트</button><button class="btn" id="viewRelease">변경 내용 보기</button><button class="btn quiet" id="dismissRelease">닫기</button>` : '';
+  if ($('startBannerUpdate')) $('startBannerUpdate').onclick = () => { $('release-dialog').showModal(); startUpdate(); };
   if ($('viewRelease')) $('viewRelease').onclick = () => $('release-dialog').showModal();
   if ($('dismissRelease')) $('dismissRelease').onclick = () => { U.dismissed = release.version; renderUpdates(); };
   const message = U.failed ? tr('GitHub에서 새 버전을 확인하지 못했어요. 연결 상태를 확인하고 다시 시도해 주세요.') :
@@ -231,7 +249,8 @@ function renderUpdates() {
     <p role="status">${esc(message)}${U.failed && release ? ui` ${tr('이전 확인에서 받은 정보입니다.')}` : ''}</p>
     <div class="ctl"><button class="btn" id="checkRelease" ${U.busy ? 'disabled' : ''}>${tr(U.busy ? '확인 중…' : '지금 확인')}</button></div>
     <p><label><input type="checkbox" id="autoRelease" ${U.auto ? 'checked' : ''}> ${tr('앱을 열 때 하루에 한 번 GitHub 공개 릴리즈 확인')}</label></p>
-    ${release?.newer ? ui`<div class="sect"><p>터미널에서 아래 명령을 실행해 업데이트하세요.</p><pre class="mono release-notes" id="upgradeCommand">${UPGRADE_COMMAND}</pre><button class="btn" id="copyUpgrade">업데이트 명령 복사</button><span id="upgradeCopied"></span></div>` : ''}
+    <p role="status" id="updateStatus">${esc(updateMessage())}</p>
+    ${release?.newer ? ui`<div class="sect"><button class="btn" id="installUpdate" ${U.installing ? 'disabled' : ''}>지금 업데이트</button><p>앱이 잠시 닫힌 뒤 자동으로 다시 열립니다.</p><details><summary>직접 업데이트하기</summary><pre class="mono release-notes" id="upgradeCommand">${UPGRADE_COMMAND}</pre><button class="btn" id="copyUpgrade">업데이트 명령 복사</button><span id="upgradeCopied"></span></details></div>` : ''}
     ${release ? ui`<div class="sect"><h3>릴리즈 노트</h3><p class="sub">변경 내용은 GitHub 릴리즈에 적힌 원문입니다.</p><pre class="release-notes">${esc(release.notes || tr('아직 변경 내용이 없습니다.'))}</pre><button class="btn" id="releasePage">릴리즈 페이지 열기</button></div>` : ''}`;
   $('closeRelease').onclick = () => $('release-dialog').close();
   $('checkRelease').onclick = () => checkUpdates(true);
@@ -240,11 +259,35 @@ function renderUpdates() {
     try { localStorage.setItem(RELEASE_AUTO, String(U.auto)); } catch { /* Session-only preference. */ }
     if (U.auto) checkUpdates(false);
   };
+  if ($('installUpdate')) $('installUpdate').onclick = startUpdate;
   if ($('copyUpgrade')) $('copyUpgrade').onclick = async () => {
     try { await navigator.clipboard.writeText(UPGRADE_COMMAND); $('upgradeCopied').textContent = tr('복사됨'); }
     catch { $('upgradeCopied').textContent = tr('복사하지 못했다: '); }
   };
   if ($('releasePage')) $('releasePage').onclick = () => invoke('open_url', { url: release.url });
+}
+function updateMessage() {
+  if (!U.job) return '';
+  const messages={starting:'업데이트 준비 중…',checking:'Homebrew에서 새 버전을 확인하는 중…',
+    ready:'앱을 닫고 업데이트하는 중…',installing:'앱을 닫고 업데이트하는 중…',
+    restarting:'새 버전으로 다시 여는 중…',completed:'업데이트가 완료되었습니다.',failed:'업데이트하지 못했습니다.'};
+  return tr(messages[U.job.stage] || '') + (U.job.error ? ' '+U.job.error : '');
+}
+async function pollUpdate() {
+  clearTimeout(U.timer);
+  try {
+    const state=await invoke('app_update_status');
+    if (state && typeof state.stage==='string' && typeof state.version==='string') U.job=state;
+    U.installing=!!U.job && ['starting','checking','ready','installing','restarting'].includes(U.job.stage);
+    renderUpdates();
+  } catch { /* The native helper keeps running if this view closes. */ }
+  if (U.installing) U.timer=setTimeout(pollUpdate,1000);
+}
+async function startUpdate() {
+  if (U.installing || !U.latest?.newer) return;
+  U.installing=true; U.job={stage:'starting',version:U.latest.version,error:null};renderUpdates();
+  try { await invoke('start_app_update',{version:U.job.version}); await pollUpdate(); }
+  catch (error) { U.installing=false;U.job={...U.job,stage:'failed',error:String(error)};renderUpdates(); }
 }
 async function checkUpdates(manual = false) {
   if (U.busy || (!manual && !U.auto)) return;
@@ -277,6 +320,7 @@ async function checkUpdates(manual = false) {
 }
 const pendingActions = new Set();
 const ACTION_UI = {
+  analysis_request: ['analyzeMap','status','분석 요청을 준비하는 중…'],
   make_system: ['remakeSys', 'status', '에이전트가 저장소를 읽는 중… 몇 분'],
   make_jobs: ['mkJobs', 'jobslog', '에이전트가 코드를 읽는 중… 몇 분'],
   make_steps: ['mk', 'mklog', '에이전트가 코드를 읽는 중… 1~2분'],
@@ -372,7 +416,7 @@ function groupsOf(m) {
   } else { const by = {}; for (const s of vis) (by['/' + (s.path.split('/')[1] || '')] ??= []).push(s); for (const [k, list] of Object.entries(by)) out.push({ name: k, description: '', list }); }
   return out;
 }
-const flowOf = (r) => (S.flows && S.flows.routes && S.flows.routes[r.file + '::' + r.function]) || null;
+const flowOf = (r) => r.source==='ai' ? r.flow || null : (S.flows && S.flows.routes && S.flows.routes[r.file + '::' + r.function]) || null;
 // 화면이 서버에 하는 요청 전부 (모바일 짝 포함, 헤더 부품 제외). 버튼 글자를 아는 요청은 그 글자로.
 function requests(m, path) {
   m._req ??= {}; if (m._req[path]) return m._req[path];
@@ -458,37 +502,67 @@ function renderRepositories() {
   const repos = S.projectInfo?.repositories || []; const bar = $('repository-bar');
   bar.hidden = !S.project; if (!S.project) return;
   const current = repos.filter(r => !S.repository || r.id === S.repository);
-  bar.innerHTML = `<select id="repository"><option value="">${tr('전체 레포')}</option>${repos.map(r => `<option value="${esc(r.id)}" ${r.id === S.repository ? 'selected' : ''}>${esc(r.name)}</option>`).join('')}</select><button class="btn quiet" id="manageRepositories">${tr('레포 관리')}</button><span class="s">${current.map(r => `${esc(r.name)}: ${r.error ? `<b>${tr('수집 실패')}</b> ${esc(r.error)}` : !r.collected ? tr('아직 수집하지 않음') : `${esc(r.commits?.[S.branch] || '—')} · ${tr('마지막 성공')} ${r.last_success ? esc(when(r.last_success)) : '—'}`}${r.config_changed ? ' · '+tr('설정 변경 후 다시 수집해야 합니다') : ''}`).join(' | ')}</span>`;
+  if (!repos.length && S.maps[S.branch]?.analysis) {const m=S.maps[S.branch];current.push({name:S.project,collected:true,commits:{[S.branch]:m.commit},last_success:m.analysis.generated_at,analysis:{[S.branch]:m.analysis}});}
+  bar.innerHTML = `<select id="repository"><option value="">${tr('전체 레포')}</option>${repos.map(r => `<option value="${esc(r.id)}" ${r.id === S.repository ? 'selected' : ''}>${esc(r.name)}</option>`).join('')}</select><button class="btn quiet" id="manageRepositories">${tr('레포 관리')}</button><button class="btn quiet" id="analyzeMap" title="${tr('연결된 MCP 에이전트로 분석합니다. 해당 에이전트 계정의 사용량을 사용합니다.')}">${tr('AI 상세 분석')}</button><span class="s">${current.map(r => `${esc(r.name)}: ${r.error ? `<b>${tr('수집 실패')}</b> ${esc(r.error)}` : !r.collected ? tr('아직 수집하지 않음') : `${esc(r.commits?.[S.branch] || '—')} · ${tr('마지막 성공')} ${r.last_success ? esc(when(r.last_success)) : '—'}`}${r.config_changed ? ' · '+tr('설정 변경 후 다시 수집해야 합니다') : ''}${r.analysis?.[S.branch] ? ' · '+tr(r.analysis[S.branch].stale ? 'AI 재분석 필요' : 'AI 분석 · 원문 대조') : ''}${r.analysis?.[S.branch]?.unknown?.length ? ' · '+r.analysis[S.branch].unknown.map(esc).join('; ') : ''}`).join(' | ')}</span>`;
   $('repository').onchange = () => loadProject(S.project, false, $('repository').value);
   $('manageRepositories').onclick = () => editProject(false);
+  $('analyzeMap').onclick=async()=>{
+    const scope={project:S.project,repository:S.repository,branch:S.branch,lang:S.lang}, token=S.loadToken;
+    const current=()=>token===S.loadToken && Object.keys(scope).every(key=>scope[key]===S[key]);
+    try { const request=JSON.parse(await invokeAction('analysis_request',scope));if(!current())return;S.agentPrompt=request.handoff;S.agentPurpose='analysis';renderAgentPrompt();$('status').textContent=''; }
+    catch(error) {if(current())$('status').textContent=String(error);}
+  };
+  if ($('analyzeMap')) $('analyzeMap').disabled=pendingActions.has('analysis_request');
 }
 function editProject(create) {
   const dialog = $('project-dialog');
   const known = !create && S.projectInfo?.repositories?.length ? S.projectInfo.repositories : [];
   const old = !create && !known.length ? (S.maps.dev || S.maps.main) : null;
   const repos = known.map(r => ({...r,path:r.configured_path || r.path}));
+  const shared=structuredClone(create ? [] : S.projectInfo?.shared_data || []);
   if (old?.repo) repos.push({id:'original', name:S.project, path:old.repo, refs:{dev:'origin/dev',main:'origin/main'},layout:{},api_targets:[],legacy:true});
   if (!repos.length) repos.push({id:'',name:'',path:'',refs:{dev:'origin/dev',main:'origin/main'},layout:{},api_targets:[]});
-  dialog.innerHTML = `<h2>${tr(create ? '프로젝트 만들기' : '레포 관리')}</h2><label>${tr('프로젝트 이름')} <input id="projectName" value="${esc(create ? '' : S.project)}" ${create ? '' : 'disabled'}></label><div id="repositoryRows"></div><p class="s">${tr('ref를 비우면 해당 역할을 사용하지 않습니다.')} ${tr('레포를 연결 해제해도 저장된 지도는 남습니다.')}</p><div class="ctl"><button class="btn quiet" id="addRepository">${tr('레포 추가')}</button><span class="spacer"></span><button class="btn quiet" id="cancelProject">${tr('닫기')}</button><button class="btn primary" id="saveProject">${tr('저장')}</button></div><p id="projectError" role="alert"></p>`;
+  dialog.innerHTML = `<h2>${tr(create ? '프로젝트 만들기' : '레포 관리')}</h2><label>${tr('프로젝트 이름')} <input id="projectName" value="${esc(create ? '' : S.project)}" ${create ? '' : 'disabled'}></label><div id="repositoryRows"></div><h3>${tr('공유 데이터 설정')}</h3><p class="s">${tr('같은 데이터를 사용하는 레포와 테이블만 연결하세요. 이름이 같다는 이유로 자동 연결하지 않습니다.')}</p><div id="sharedRows"></div><button class="btn quiet" id="addSharedData">${tr('공유 데이터 추가')}</button><p class="s">${tr('ref를 비우면 해당 역할을 사용하지 않습니다.')} ${tr('레포를 연결 해제해도 저장된 지도는 남습니다.')}</p><div class="ctl"><button class="btn quiet" id="addRepository">${tr('레포 추가')}</button><span class="spacer"></span><button class="btn quiet" id="cancelProject">${tr('닫기')}</button><button class="btn primary" id="saveProject">${tr('저장')}</button></div><p id="projectError" role="alert"></p>`;
   function rows() {
     $('repositoryRows').innerHTML = repos.map((r,i) => `<fieldset data-repository-row="${i}"><div class="repository-fields">${[['id','레포 ID',r.id],['name','레포 이름',r.name],['path','레포 폴더',r.path],['dev','개발 ref',r.refs.dev || ''],['main','운영 ref',r.refs.main || '']].map(([key,label,value]) => `<label>${tr(label)}<input data-field="${key}" value="${esc(value)}" ${key==='id' && known.some(k=>k.id===r.id) ? 'disabled' : ''}></label>`).join('')}</div><details><summary>${tr('API 대상 레포')} · ${tr('웹 소스 폴더')} · ${tr('API 소스 폴더')}</summary><div class="repository-fields">${[['targets','API 대상 레포',(r.api_targets || []).join(', ')],['frontend','웹 소스 폴더',r.layout.frontend || ''],['backend','API 소스 폴더',r.layout.backend || '']].map(([key,label,value]) => `<label>${tr(label)}<input data-field="${key}" value="${esc(value)}" placeholder="${key==='targets' ? 'api, worker' : tr('자동 감지')}"></label>`).join('')}</div><p class="s">${tr('사용자가 지정한 레포 연결')} · ${tr('주소가 같지만 대상 레포를 확인하지 못했습니다.')}</p></details><button class="btn quiet" data-remove="${i}">${tr('연결 해제')}</button></fieldset>`).join('');
-    document.querySelectorAll('[data-remove]').forEach(b=>b.onclick=()=>{collect();repos.splice(+b.dataset.remove,1);rows();});
+    document.querySelectorAll('[data-remove]').forEach(b=>b.onclick=()=>{collect();collectShared();repos.splice(+b.dataset.remove,1);rows();sharedRows();});
   }
   function collect() {
     document.querySelectorAll('[data-repository-row]').forEach(row=>{
       const r = repos[+row.dataset.repositoryRow], value = key => row.querySelector(`[data-field="${key}"]`).value.trim();
       r.id=value('id');r.name=value('name');r.path=value('path');r.refs={dev:value('dev') || null, main:value('main') || null};
-      r.layout={};for (const key of ['frontend','backend']) if (value(key)) r.layout[key]=value(key);
+      const previousLayout=r.layout;
+      r.layout={};for (const key of ['frontend','backend']) {
+        if (value(key)) r.layout[key]=value(key);
+        else if (previousLayout[key]===null) r.layout[key]=null;
+      }
       r.api_targets=value('targets').split(',').map(x=>x.trim()).filter(Boolean);
     });
   }
-  rows(); $('addRepository').onclick=()=>{collect();repos.push({id:'',name:'',path:'',refs:{dev:'origin/dev',main:'origin/main'},layout:{},api_targets:[]});rows();};
+  function collectShared() {
+    collect();
+    document.querySelectorAll('[data-shared-group]').forEach(row=>{
+      const g=shared[+row.dataset.sharedGroup];g.id=row.querySelector('[data-shared-id]').value.trim();
+      g.members=[...row.querySelectorAll('[data-shared-member]')].map(m=>({repository:m.querySelector('[data-member-repo]').value,table:m.querySelector('[data-member-table]').value.trim()}));
+    });
+  }
+  function sharedRows() {
+    $('sharedRows').innerHTML=shared.map((g,i)=>`<fieldset data-shared-group="${i}"><label>${tr('공유 데이터 ID')}<input data-shared-id="${i}" value="${esc(g.id)}" placeholder="workspace"></label>
+      ${g.members.map((m,j)=>`<div class="repository-fields" data-shared-member="${j}"><label>${tr('레포 선택')}<select data-member-repo><option value="">${tr('레포 선택')}</option>${!repos.some(r=>r.id===m.repository) && m.repository ? `<option selected value="${esc(m.repository)}">${esc(m.repository)}</option>` : ''}${repos.filter(r=>r.id).map(r=>`<option value="${esc(r.id)}" ${r.id===m.repository?'selected':''}>${esc(r.name || r.id)}</option>`).join('')}</select></label><label>${tr('테이블')}<input data-member-table value="${esc(m.table)}" list="shared-tables-${i}-${j}"></label><datalist id="shared-tables-${i}-${j}">${(known.find(r=>r.id===m.repository)?.tables || []).map(t=>`<option value="${esc(t)}"></option>`).join('')}</datalist><button class="btn quiet" data-remove-member="${i}:${j}">${tr('제거')}</button></div>`).join('')}
+      <button class="btn quiet" data-add-member="${i}">${tr('연결 추가')}</button><button class="btn quiet" data-remove-shared="${i}">${tr('제거')}</button></fieldset>`).join('');
+    document.querySelectorAll('[data-add-member]').forEach(b=>b.onclick=()=>{collectShared();shared[+b.dataset.addMember].members.push({repository:'',table:''});sharedRows();});
+    document.querySelectorAll('[data-remove-member]').forEach(b=>b.onclick=()=>{collectShared();const [i,j]=b.dataset.removeMember.split(':').map(Number);shared[i].members.splice(j,1);sharedRows();});
+    document.querySelectorAll('[data-remove-shared]').forEach(b=>b.onclick=()=>{collectShared();shared.splice(+b.dataset.removeShared,1);sharedRows();});
+    document.querySelectorAll('[data-member-repo]').forEach(el=>el.onchange=()=>{collectShared();sharedRows();});
+  }
+  sharedRows();$('addSharedData').onclick=()=>{collectShared();shared.push({id:'',members:[]});sharedRows();};
+  rows(); $('addRepository').onclick=()=>{collect();collectShared();repos.push({id:'',name:'',path:'',refs:{dev:'origin/dev',main:'origin/main'},layout:{},api_targets:[]});rows();sharedRows();};
   $('cancelProject').onclick=()=>dialog.close();
   $('saveProject').onclick=async()=>{
-    collect(); const name=$('projectName').value.trim(); $('saveProject').disabled=true;
+    collect();collectShared(); const name=$('projectName').value.trim(); $('saveProject').disabled=true;
     try {
       if (create && [...$('project').options].some(o=>!o.hasAttribute('data-empty') && o.value===name)) throw Error('A project with this name already exists');
-      await invoke('save_project',{project:name, configuration:JSON.stringify({repositories:repos,shared_data:create ? [] : S.projectInfo?.shared_data || []})});
+      await invoke('save_project',{project:name, configuration:JSON.stringify({repositories:repos,shared_data:shared})});
       const ps=await invoke('list_projects');$('project').innerHTML=ps.map(p=>`<option ${p===name?'selected':''}>${esc(p)}</option>`).join('');
       dialog.close();await loadProject(name,true,'');
     } catch(e) {$('projectError').textContent=String(e);$('saveProject').disabled=false;}
@@ -535,12 +609,12 @@ function codeLocation(m,file) {
   const r = m.repositories?.find(r=>file?.startsWith(r.id+'/'));
   return r ? r.path+'/'+file.slice(r.id.length+1) : m.repo+'/'+file;
 }
-const zed = (m, file, line) => ui`<a class="lnk mono" data-url="zed://file${codeLocation(m,file)}:${line}" title="Zed로 열기">${m.multi_repo ? esc(file.split('/')[0])+': ' : ''}${esc(file.split('/').pop())}:${line}</a>`;
+const zed = (m, file, line) => ui`<a class="lnk mono" data-url="${esc('zed://file'+codeLocation(m,file)+':'+line)}" title="Zed로 열기">${m.multi_repo ? esc(file.split('/')[0])+': ' : ''}${esc(file.split('/').pop())}:${line}</a>`;
 function copyText(m, s, row) {
   const L = [ui`화면: ${label(m, s.path)} — ${s.path} (${s.file})`];
   if (row) { L.push(ui`하는 일: ${reqLabel(row)}`, ui`요청: ${row.route.method} ${row.route.path}`, ui`화면 쪽 코드: ${row.fn.file}:${row.call.line}${row.fn.name !== '<inline>' ? ' ' + row.fn.name : ''}`, ui`서버 쪽 코드: ${row.route.file}:${row.route.line} ${row.route.function}`);
     if ((row.route.tables || []).length) L.push(ui`저장소: ${row.route.tables.join(', ')}`); if ((row.route.externals || []).length) L.push(ui`외부: ${row.route.externals.join(', ')}`);
-    const f = flowOf(row.route); if (f) L.push(tr('단계:'), ...f.steps.map((st, i) => `  ${i + 1}. [${st.lane}] ${st.text} (${row.route.file}:${st.line})`)); }
+    const f = flowOf(row.route); if (f) L.push(tr('단계:'), ...f.steps.map((st, i) => `  ${i + 1}. [${st.lane}] ${st.text} (${st.file || row.route.file}:${st.line})`)); }
   L.push(ui`기준: ${m.ref} ${m.commit}`); return L.join('\n');
 }
 function inspector(m) {
@@ -602,7 +676,7 @@ function detail(m, s, r) {
     const steps = [{ lane: '화면', text: r.btn ? ui`"${r.btn}" 을 누른다` : tr('화면이 요청을 보낸다'), start: true }, ...f.steps];
     h += ui`<div class="lanes"><span class="screen">화면</span><span class="server">서버</span><span class="store">저장소</span><span class="external">외부</span></div>` + steps.map((st, i) => {
       const cur = S.step === i; const off = S.step >= 0 && !cur;
-      return `<div class="step l${LANE[st.lane] ?? 1} ${cur ? 'cur' : ''} ${off ? 'off' : ''} ${st.uncertain ? 'unsure' : ''}" data-step="${i}"><span class="n">${i || '▶'}</span><div class="grow"><div class="tx">${esc(st.text)}${st.uncertain ? tr(' (코드만으로는 확신 못 함)') : ''}</div>${S.ev === i && !st.start ? `<div class="ev mono">${esc(st.quote)}<br>${zed(m, rt.file, st.line)}</div>` : ''}</div></div>`; }).join('') +
+      return `<div class="step l${LANE[st.lane] ?? 1} ${cur ? 'cur' : ''} ${off ? 'off' : ''} ${st.uncertain ? 'unsure' : ''}" data-step="${i}"><span class="n">${i || '▶'}</span><div class="grow"><div class="tx">${esc(st.text)}${st.uncertain ? tr(' (코드만으로는 확신 못 함)') : ''}</div>${S.ev === i && !st.start ? `<div class="ev mono">${esc(st.quote)}<br>${zed(m, st.file || rt.file, st.line)}</div>` : ''}</div></div>`; }).join('') +
       ui`<div class="ctl"><button class="btn quiet" id="prev">◀</button><button class="btn quiet" id="next">다음 ▶</button><span>${S.step >= 0 ? `${S.step}/${steps.length - 1}` : tr('한 단계씩 보기')}</span><span class="spacer"></span><span class="ai">AI가 쓴 문장</span><span>· 근거 줄 대조 통과</span></div>`;
   } else h += ui`<div class="empty">누르면 생기는 일의 순서는 아직 만들지 않았다. 아래 버튼으로 만든다.</div>`;
   h += ui`<details><summary>연결된 코드</summary><div class="kv mono">${esc(rt.method)} ${esc(rt.path)}</div><div class="kv">화면 쪽 ${zed(m, r.fn.file, r.call.line)} · 서버 쪽 ${zed(m, rt.file, rt.line)} <span class="mono">${esc(rt.function)}</span></div>
@@ -891,17 +965,20 @@ document.querySelectorAll('#language button').forEach(b => b.onclick = () => set
 renderHeader();
 // 에이전트 연결: 프롬프트를 복사해 자기 에이전트에 붙이면 에이전트가 등록과 전역 지침 추가를 한다
 function renderAgentPrompt() {
-  $('insp').innerHTML = ui`<h2>에이전트 연결</h2><p class="sub">아래 글을 복사해 쓰는 에이전트(Claude Code, Codex 등)에 붙여 넣으면, 에이전트가 MCP 서버를 등록하고 전역 지침에 사용 규칙을 넣는다. 설정 파일을 바꾸기 전에 허락을 구하게 되어 있다.</p><div class="ctl"><button class="btn primary" id="cpAgent">복사</button><span id="cpDone"></span></div><pre class="prompt mono">${esc(S.agentPrompt)}</pre>`;
+  const analysis=S.agentPurpose==='analysis';
+  const heading=analysis ? '분석 요청' : '에이전트 연결';
+  const description=analysis ? '복사해 MCP가 연결된 에이전트에 전달하세요. 해당 에이전트가 자신의 모델로 코드를 읽고 결과를 저장합니다.' : '아래 글을 복사해 쓰는 에이전트(Claude Code, Codex 등)에 붙여 넣으면, 에이전트가 MCP 서버를 등록하고 전역 지침에 사용 규칙을 넣는다. 설정 파일을 바꾸기 전에 허락을 구하게 되어 있다.';
+  $('insp').innerHTML = `<h2>${tr(heading)}</h2><p class="sub">${tr(description)}</p>` + ui`<div class="ctl"><button class="btn primary" id="cpAgent">복사</button><span id="cpDone"></span></div><pre class="prompt mono">${esc(S.agentPrompt)}</pre>`;
   $('cpAgent').onclick = async () => { await navigator.clipboard.writeText(S.agentPrompt); $('cpDone').textContent = tr('복사됨'); };
 }
-$('agent').onclick = async () => { try { S.agentPrompt = await invoke('setup_prompt', {lang: S.lang}); } catch (e) { S.agentPrompt = tr('프롬프트를 만들지 못했다: ') + e; } renderAgentPrompt(); };
+$('agent').onclick = async () => { S.agentPurpose='setup';try { S.agentPrompt = await invoke('setup_prompt', {lang: S.lang}); } catch (e) { S.agentPrompt = tr('프롬프트를 만들지 못했다: ') + e; } renderAgentPrompt(); };
 document.querySelectorAll('#branch button').forEach(b => b.onclick = () => { if (S.maps[b.dataset.b]) { S.agentPrompt = null; S.branch = b.dataset.b; S.open = null; render(); } });
 document.querySelectorAll('#view button').forEach(b => b.onclick = () => { S.agentPrompt = null; S.view = b.dataset.v; render(); });
 $('newProject').onclick = () => editProject(true);
 $('project').onchange = () => loadProject($('project').value);
 $('updates').onclick = () => { renderUpdates(); $('release-dialog').showModal(); };
 (async () => {
-  try { U.current = await invoke('app_version'); renderUpdates(); await checkUpdates(false); }
+  try { U.current = await invoke('app_version'); await pollUpdate(); renderUpdates(); await checkUpdates(false); }
   catch { U.failed = true; renderUpdates(); }
 })();
 (async () => {

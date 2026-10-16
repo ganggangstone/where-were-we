@@ -40,7 +40,23 @@ def scoped_map(name, repository=""):
     return mapcore.Map(name, data=data, bundle=bundle)
 
 def scope_notes(m):
-    return [f"- {r['id']}: {r.get('commits', {})}; " + (f"FAILED: {r['error']} (last successful data retained)" if r.get('error') else "not collected" if not r.get('collected') else "collected") for r in m.m.get("repositories", [])]
+    notes=[]
+    for r in m.m.get("repositories", []):
+        status=(f"FAILED: {r['error']} (last successful data retained)" if r.get('error')
+                else "not collected" if not r.get('collected') else "collected")
+        if r.get('config_changed'):status+="; configuration changed; refresh required"
+        for role,analysis in r.get('analysis',{}).items():
+            if analysis:
+                status+=f"; {role} AI-inferred, source text checked"
+                if analysis.get('stale'):status+='; AI analysis required after commit change'
+                if analysis.get('unknown'):status+='; unknown: '+'; '.join(analysis['unknown'])
+        notes.append(f"- {r['id']}: {r.get('commits', {})}; {status}; "
+                     f"last success: {r.get('last_success') or 'none'}; last attempt: {r.get('last_attempt') or 'none'}")
+    if not m.m.get('multi_repo') and m.m.get('analysis'):
+        analysis=m.m['analysis'];status='AI-inferred, source text checked'
+        if analysis.get('stale'):status+='; AI analysis required after commit change'
+        notes.append('- '+status+'; unknown: '+'; '.join(analysis.get('unknown',[])))
+    return notes
 
 
 def ago(iso):
@@ -124,7 +140,11 @@ def impact(target: str, project: str = "", repository: str = "") -> str:
     rows = [(x["path"], r) for x, _ in m.visible() for r in m.requests(x["path"])]
     untested_repositories = set()
     untested = []  # 이 답에 나온 서버 기능 중 테스트를 잇지 못한 것
+    affected_files=set()
     def route_lines(rs):
+        screens.update(p for p,_ in rs if p)
+        for _,row in rs:
+            affected_files.update([row["route"]["file"],*row["route"].get("services",[])])
         out = []
         for key in dict.fromkeys(r["key"] for _, r in rs):
             r = next(r for _, r in rs if r["key"] == key); rt = r["route"]
@@ -138,6 +158,7 @@ def impact(target: str, project: str = "", repository: str = "") -> str:
         return out
     screens = set()
     if "/" in t and "." in os.path.basename(t):  # 파일
+        affected_files.add(t)
         fs = m.m.get("file_screens", {}).get(t, [])
         screens |= set(fs)
         rs = [(p, r) for p, r in rows if r["route"]["file"] == t or t in (r["route"].get("services") or [])]
@@ -155,13 +176,17 @@ def impact(target: str, project: str = "", repository: str = "") -> str:
         L.append("읽는 화면: " + (", ".join(m.label(p) for p in u["r"]) or "없음"))
         progs = [n["name"] for n in m.nodes() if t in (n.get("tables") or [])]
         if progs: L.append("서버를 거치지 않고 직접 쓰는 프로그램: " + ", ".join(progs))
-        L += ["", "## 서버 기능"] + route_lines([(p, r) for p, r in rows if t in (r["route"].get("tables") or [])])
+        rs=[(p,r) for p,r in rows if t in (r['route'].get('tables') or [])]
+        present={r['key'] for _,r in rs}
+        rs += [(None,{'key':r['file']+'::'+str(r['function']),'name':m.req_name(r),'route':r,'btns':[]}) for r in m.m.get('backend_routes',[]) if t in r.get('tables',[]) and r['file']+'::'+str(r['function']) not in present]
+        L += ["", "## 서버 기능"] + route_lines(rs)
     elif t.split(" ")[0].upper() in ("GET", "POST", "PUT", "PATCH", "DELETE"):
         meth, path = t.split(" ", 1)
         rs = [(p, r) for p, r in rows if r["route"]["method"] == meth.upper() and r["route"]["path"] == path.strip() and (not repository or r["route"].get("repository")==repository)]
         if not rs:
             rs=[(None,{'key':r['file']+'::'+str(r['function']),'name':m.req_name(r),'route':r,'btns':[]}) for r in m.m.get('backend_routes',[]) if r['method']==meth.upper() and r['path']==path.strip() and (not repository or r.get('repository')==repository)]
         if not repository and len({r['route'].get('repository') for _,r in rs})>1:raise ValueError('Ambiguous request; specify repository')
+        screens.update(p for p,_ in rs if p)
         L.append(f"# 서버 기능 {t}"); L += route_lines(rs) or ["화면에서 부르는 곳이 없다."]
     elif (p := screen_lookup.find_screen(t)):
         screens.add(p); L.append(f"# 화면 {m.label(p)} ({p}) — 묶음 {m.group_of(p) or '없음'}")
@@ -176,6 +201,13 @@ def impact(target: str, project: str = "", repository: str = "") -> str:
     work = {k: [] for k in ("open", "branches", "folders", "issues", "merged")}
     for s in screens:
         for k, v in m.work_of(s).items(): work[k] += [x for x in v if x not in work[k]]
+    # Backend-only repositories have no screen on which to attach open work.
+    for key,source in [('open','open_prs'),('merged','merged_prs'),('branches','branches'),('folders','worktrees')]:
+        for item in m.status.get(source,[]):
+            if key=='branches' and (not item.get('ahead_of_dev') or item.get('stale') or item.get('has_open_pr')):continue
+            files=set(item.get('files',[]))
+            files.update((item['repository']+'/' if item.get('repository') else '')+f for f in item.get('uncommitted',[]))
+            if files & affected_files and item not in work[key]:work[key].append(item)
     if any(work.values()):
         L += ["", "## 지금 같은 곳의 작업"]
         L += [f"- 열린 PR #{x['number']} {x['title']} ({x.get('author')})" for x in work["open"]]
@@ -229,6 +261,24 @@ def record_test(route: str, file: str, line: int, quote: str, project: str = "",
     if rec not in c.setdefault("records", []): c["records"].append(rec)
     json.dump(c, open(pth, "w"), ensure_ascii=False, indent=1)
     return f"저장했다({len(c['records'])}건). refresh 를 부르면 지도에 반영된다."
+
+
+@app.tool(description="상세 지도 분석 요청과 JSON schema를 받는다. AI를 실행하지 않는다. 지금 연결된 MCP 에이전트가 자신의 모델로 analysis_source의 코드를 읽고 record_analysis로 결과를 제출한다. 멀티레포는 repository를 지정한다.")
+def analyze(project: str = "", repository: str = "", branch: str = "dev", lang: str = "ko") -> str:
+    import ai_extract
+    return json.dumps(ai_extract.request(need(project),branch,lang,repository),ensure_ascii=False)
+
+
+@app.tool(description="analyze가 반환한 고정 commit의 코드 조회. file을 비우면 파일 목록, 지정하면 줄 번호와 원문을 반환한다. start/limit으로 나눠 읽는다. AI CLI나 애플리케이션 코드는 실행하지 않는다.")
+def analysis_source(project: str, repository: str, commit: str, file: str = "", start: int = 1, limit: int = 200, branch: str = "dev") -> str:
+    import ai_extract
+    return json.dumps(ai_extract.source(need(project),repository,commit,file,start,limit,branch),ensure_ascii=False)
+
+
+@app.tool(description="연결된 에이전트가 만든 상세 지도 JSON을 저장. analyze의 record_arguments를 그대로 전달하고 result_json에 분석 JSON 문자열을 넣는다. 커밋/설정 변경 또는 근거 불일치 시 이전 지도를 보존한다. 특정 AI 제공자나 CLI가 필요하지 않다.")
+def record_analysis(project: str, repository: str, branch: str, lang: str, commit: str, configuration: str, result_json: str) -> str:
+    import ai_extract
+    return ai_extract.record(need(project),repository,branch,lang,commit,configuration,result_json)
 
 
 @app.tool(description="이름으로 찾기: 화면·버튼·서버 기능 이름·주소·PR/이슈 번호. impact 에 넣을 대상을 고를 때 쓴다.")

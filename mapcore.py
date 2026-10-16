@@ -6,7 +6,7 @@ check_same.js 가 같은 지도에서 두 쪽의 숫자(화면별 서버 요청 
 규칙: 리다이렉트는 빼고 /m/… 모바일 판은 같은 주소의 데스크톱 화면에 붙인다. 화면의 1/3 넘게 들어 있는 부품이 부르는 요청은
 그 화면의 요청에서 뺀다. 세 화면 넘게 똑같이 들어 있는 부품의 링크는 메뉴로 치고 흐름에서 뺀다.
 """
-import json, os, re, shlex, sys
+import fnmatch, json, os, re, shlex, sys
 from collections import defaultdict
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -146,6 +146,7 @@ class Map:
 
     def ai_name(self, r):
         key = r["file"] + "::" + str(r["function"])
+        if r.get("source")=="ai":return (r.get("flow") or {}).get("name")
         return (self.flows.get(key) or {}).get("name") or (self.groups.get("request_names") or {}).get(key)
 
     def req_name(self, r, btns=(), dup=False):
@@ -282,11 +283,61 @@ def call_regex(t):
     return re.compile(out)
 
 
+def normalize_http_path(value):
+    value=value.strip("`'\"").split('?')[0]
+    return re.sub(r"\$?\{[^}]*\}","{}",value).rstrip('/') or '/'
+
+
+def backend_test_links(be,files,read_source,conf,imports_reader=None,module_resolver=None,normalize_path=normalize_http_path):
+    """Apply one set of HTTP-pattern and verified-record rules to any source language."""
+    be_index=defaultdict(list)
+    for route in be:be_index[(route['method'],route['path'])].append(route)
+    hits = defaultdict(set)
+    by_func = defaultdict(list)  # (서버 기능 파일, 함수 이름) → 라우트
+    for r in be:
+        if r.get("function"):
+            by_func[(r["file"], r["function"])].append(r)
+    router_files = {k[0] for k in by_func}
+    pats = [call_regex(t) for t in conf["calls"]]
+    is_test = lambda f: any(fnmatch.fnmatch(f if "/" in g else os.path.basename(f), g) for g in conf["files"])
+    for f in files:
+        if not is_test(f):
+            continue
+        src = read_source(f) or ""
+        imps = imports_reader(src) if imports_reader else {}
+        for pat in pats:
+            for m in pat.finditer(src):
+                g = m.groupdict()
+                if g.get("path"):
+                    rs = be_index.get((g["method"].upper(), normalize_path(g["path"])), [])
+                elif g.get("module"):  # 서버 기능 파일을 import 한 이름.함수(
+                    mod, name = imps.get(g["module"], (None, None))
+                    rf_ = mod is not None and module_resolver(f"{mod}.{name}" if mod else name, router_files)
+                    rs = by_func.get((rf_, g["function"]), []) if rf_ else []
+                else:  # 서버 기능 함수를 import 해서 바로 부름
+                    mod, name = imps.get(g["function"], (None, None))
+                    rf_ = mod and module_resolver(mod, router_files)
+                    rs = by_func.get((rf_, name), []) if rf_ else []
+                for r in rs:
+                    hits[(r["file"], r["line"])].add(f)
+    stale = 0
+    for rec in conf["records"]:  # 에이전트가 하나씩 넘긴 것. 이 커밋에서도 그 줄(±2)에 그 글자가 있어야 센다
+        r = next((r for r in be if f"{r['file']}::{r.get('function')}" == rec.get("route")), None)
+        lines = (read_source(rec.get("file", "")) or "").splitlines(); q = re.sub(r"\s+", "", rec.get("quote") or ""); ln = rec.get("line") or 0
+        if r and len(q) >= 6 and any(q in re.sub(r"\s+", "", l) for l in lines[max(0, ln - 3):ln + 2]):
+            hits[(r["file"], r["line"])].add(rec["file"])
+        else:
+            stale += 1
+    return hits, stale
+
+
 def extractor_id(home):
     """뽑는 방법의 판. extract.py 와 테스트 규칙이 같으면 같다. 바뀌면 refresh 가 커밋이 그대로여도 다시 뽑는다."""
     import hashlib
     c = tests_conf(home)
-    raw = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "extract.py"), "rb").read() + open(__file__, "rb").read() + json.dumps(c, sort_keys=True, ensure_ascii=False).encode() + os.environ.get("WHERE_WERE_WE_LAYOUT", "").encode()
+    from pathlib import Path
+    base=Path(__file__).resolve().parent
+    raw = (base/'extract.py').read_bytes() + Path(__file__).read_bytes() + json.dumps(c,sort_keys=True,ensure_ascii=False).encode() + os.environ.get('WHERE_WERE_WE_LAYOUT','').encode()
     return hashlib.sha1(raw).hexdigest()[:10]
 
 

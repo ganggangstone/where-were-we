@@ -73,6 +73,12 @@ let browser;
     };
     window.__TAURI__ = { core: { invoke: async (command, args) => {
       if (command === 'app_version') return '0.1.0';
+      if (command === 'app_update_status') return window.__updateState || null;
+      if (command === 'start_app_update') {
+        window.__updateStarts=(window.__updateStarts || []).concat([args]);
+        if (window.__updateFailure) throw Error(window.__updateFailure);
+        window.__updateState={stage:'checking',version:args.version,error:null};return null;
+      }
       if (command === 'check_release') {
         window.__releaseChecks = (window.__releaseChecks || 0) + 1;
         if (window.__releaseFailure) throw Error('Offline fixture');
@@ -93,6 +99,7 @@ let browser;
         if (window.__holdRefresh) return new Promise(resolve=>{window.__finishRefresh=resolve;});
         return 'Demo only: no repository was accessed.';
       }
+      if (command === 'analysis_request') {window.__actionArgs=args;if(window.__holdAnalysis)return new Promise(resolve=>{window.__finishAnalysis=()=>resolve(JSON.stringify({handoff:'Old web analysis request'}));});return JSON.stringify({handoff:'Use MCP analyze, analysis_source and record_analysis with your connected agent.'});}
       if (command === 'make_steps' || command === 'suggest_groups' || command === 'make_jobs') {window.__actionArgs=args;return 'Demo only';}
       if (command === 'setup_prompt') return data.setup;
       if (command === 'tests_prompt') return args.lang === 'en' ? 'Fictional example: find and link revision API tests.' : '가상 예시: 수정 요청 API의 테스트를 찾아 연결해 주세요.';
@@ -152,12 +159,52 @@ let browser;
     assert.match(await page.evaluate(()=>window.__actionArgs.screen),/^@routes:/);
     await page.locator('#repository').selectOption('web');
     await page.waitForFunction(()=>document.querySelector('#repository').value==='web' && !document.querySelector('[data-scr="/@admin/renders/:id"]'));
+    assert.equal(await page.locator('#analyzeMap').count(),1);
+    await page.locator('#analyzeMap').click();
+    await page.waitForFunction(()=>window.__actionArgs?.repository==='web' && window.__actionArgs?.lang==='ko');
+    assert.match(await page.locator('#insp').innerText(),/record_analysis/);
+    await page.evaluate(()=>{window.__holdAnalysis=true;});
+    await page.locator('#analyzeMap').click();
+    await page.waitForFunction(()=>!!window.__finishAnalysis);
+    await page.locator('#repository').selectOption('admin');
+    await page.waitForFunction(()=>S.repository==='admin');
+    await page.evaluate(()=>{window.__finishAnalysis();window.__holdAnalysis=false;});
+    await page.waitForFunction(()=>!pendingActions.has('analysis_request'));
+    assert.equal(await page.evaluate(()=>S.agentPrompt),null);
+    assert.doesNotMatch(await page.locator('#insp').innerText(),/Old web analysis request/);
+    await page.locator('#repository').selectOption('web');
+    await page.waitForFunction(()=>S.repository==='web');
     await page.locator('#language [data-lang="en"]').click();
+    assert.equal(await page.locator('#analyzeMap').innerText(),'Analyze with AI');
     assert.equal(await page.locator('#manageRepositories').innerText(),'Manage repositories');
+    await page.evaluate(()=>{S.projectInfo.repositories[3].layout={frontend:null,backend:null};});
     await page.locator('#manageRepositories').click();
     assert.equal(await page.locator('[data-repository-row]').count(),4);
     assert.equal(await page.locator('[data-repository-row="0"] [data-field="id"]').isDisabled(),true);
-    await page.locator('#cancelProject').click();
+    assert.equal(await page.locator('#addSharedData').count(),1);
+    await page.locator('#addSharedData').click();
+    await page.locator('[data-shared-id="0"]').fill('workspace');
+    await page.locator('[data-add-member="0"]').click();
+    await page.locator('[data-add-member="0"]').click();
+    await page.locator('[data-shared-group="0"] [data-member-repo]').nth(0).selectOption('api');
+    await page.locator('[data-shared-group="0"] [data-member-table]').nth(0).fill('renders');
+    await page.locator('[data-shared-group="0"] [data-member-repo]').nth(1).selectOption('worker');
+    await page.locator('[data-shared-group="0"] [data-member-table]').nth(1).fill('renders');
+    await page.locator('#addRepository').click();
+    assert.equal(await page.locator('[data-shared-id="0"]').inputValue(),'workspace');
+    await page.locator('[data-repository-row="4"] [data-field="id"]').fill('extra');
+    await page.locator('[data-repository-row="4"] [data-field="path"]').fill('/demo/extra');
+    await page.locator('[data-add-member="0"]').click();
+    assert.equal(await page.locator('[data-shared-member="2"] [data-member-repo] option[value="extra"]').count(),1);
+    await page.locator('[data-remove-member="0:2"]').click();
+    assert.equal(await page.locator('[data-shared-group="0"] [data-member-table]').nth(1).inputValue(),'renders');
+    await page.locator('[data-remove="4"]').click();
+    await page.locator('#saveProject').click();
+    await page.waitForFunction(()=>window.__savedConfiguration);
+    assert.deepEqual(await page.evaluate(()=>window.__savedConfiguration.shared_data),[
+      {id:'workspace',members:[{repository:'api',table:'renders'},{repository:'worker',table:'renders'}]}]);
+    assert.deepEqual(await page.evaluate(()=>window.__savedConfiguration.repositories[3].layout),{frontend:null,backend:null});
+    await page.evaluate(()=>{window.__savedConfiguration=null;});
     // Hold A's refresh and B's read. Completing A must not cancel B's selection.
     await page.evaluate(()=>{window.__holdRefresh=true;window.__holdRead='admin';});
     await page.locator('#refresh').click();
@@ -198,6 +245,19 @@ let browser;
     assert.match(await page.locator('#release-dialog').innerText(), /Fictional change/);
     assert.equal(await page.locator('#release-dialog img').count(), 0, 'Notes are rendered as text');
     assert.equal(await page.locator('#upgradeCommand').textContent(), 'brew update && brew upgrade --cask ganggangstone/tap/where-were-we');
+    assert.equal(await page.locator('#installUpdate').count(), 1, 'One-click installation control');
+    await page.evaluate(() => { window.__updateFailure='Wait for collection or AI work to finish before updating'; });
+    await page.locator('#installUpdate').click();
+    await page.waitForFunction(() => document.querySelector('#updateStatus').textContent.includes('Wait for collection'));
+    assert.equal(await page.locator('#installUpdate').isEnabled(), true, 'Failed preflight can be retried');
+    await page.evaluate(() => { window.__updateFailure=null;window.__updateStarts=[]; });
+    await page.locator('#installUpdate').click();
+    await page.waitForFunction(() => window.__updateStarts?.length===1);
+    assert.equal(await page.locator('#installUpdate').isDisabled(), true, 'Duplicate installs blocked');
+    assert.equal(await page.evaluate(() => window.__updateStarts[0].version), '0.2.0');
+    await page.evaluate(() => { window.__updateState={stage:'failed',version:'0.2.0',error:'Homebrew does not have the requested stable version yet'}; });
+    await page.waitForFunction(() => document.querySelector('#updateStatus').textContent.includes('Homebrew does not have'));
+    assert.equal(await page.locator('#installUpdate').isEnabled(), true);
     const knownRelease = await page.evaluate(() => JSON.parse(localStorage.getItem('where-were-we.release-check')).result);
     await page.locator('#closeRelease').click();
     await page.reload();

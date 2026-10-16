@@ -104,6 +104,46 @@ class ArchiveChecks(unittest.TestCase):
             self.assertFalse((base / 'escaped').exists())
 
 
+class BundleSigning(unittest.TestCase):
+    def test_valid_signature_is_preserved(self):
+        with patch.object(builder.subprocess, 'run', return_value=SimpleNamespace(returncode=0)) as run:
+            builder.seal_app(Path('/temporary/example.app'))
+        self.assertEqual(run.call_count, 1)
+        self.assertIn('--verify', run.call_args.args[0])
+
+    def test_incomplete_signature_is_repaired_and_verified(self):
+        with patch.object(builder.subprocess, 'run', side_effect=[
+                SimpleNamespace(returncode=1), SimpleNamespace(returncode=0, stderr='Signature=adhoc'),
+                SimpleNamespace(returncode=0), SimpleNamespace(returncode=0)]) as run:
+            builder.seal_app(Path('/temporary/example.app'))
+        calls = [c.args[0] for c in run.call_args_list]
+        self.assertIn('--verify', calls[0])
+        self.assertEqual(calls[2], ['/usr/bin/codesign', '--force', '--deep', '--sign', '-', '/temporary/example.app'])
+        self.assertIn('--strict', calls[3])
+        self.assertTrue(run.call_args_list[3].kwargs['check'])
+
+    def test_invalid_identity_signature_is_not_downgraded(self):
+        with patch.object(builder.subprocess, 'run', side_effect=[SimpleNamespace(returncode=1),
+                SimpleNamespace(returncode=0, stderr='Authority=Developer ID Application: Example')]) as run:
+            with self.assertRaisesRegex(ValueError, 'identity signature'):
+                builder.seal_app(Path('/temporary/example.app'))
+        self.assertEqual(run.call_count, 2)
+
+    def test_final_verification_failure_is_not_ignored(self):
+        with patch.object(builder.subprocess, 'run', side_effect=[SimpleNamespace(returncode=1),
+                SimpleNamespace(returncode=0, stderr='Signature=adhoc'), SimpleNamespace(returncode=0),
+                subprocess.CalledProcessError(1, 'codesign')]):
+            with self.assertRaises(subprocess.CalledProcessError):
+                builder.seal_app(Path('/temporary/example.app'))
+
+    def test_repair_failure_stops_packaging(self):
+        with patch.object(builder.subprocess, 'run', side_effect=[SimpleNamespace(returncode=1), SimpleNamespace(returncode=0, stderr='Signature=adhoc'),
+                subprocess.CalledProcessError(1, 'codesign')]) as run:
+            with self.assertRaises(subprocess.CalledProcessError):
+                builder.seal_app(Path('/temporary/example.app'))
+        self.assertEqual(run.call_count, 3)
+
+
 class ReleaseArtifacts(unittest.TestCase):
     def test_cask_uses_only_available_architectures_and_fixed_hashes(self):
         arm = 'a' * 64
@@ -140,9 +180,10 @@ class ReleaseArtifacts(unittest.TestCase):
             (contents / 'Info.plist').write_bytes(plistlib.dumps(info))
             (root / 'src-tauri/tauri.conf.json').write_text('{"version":"0.1.0"}')
             (root / 'README.md').write_text('<!-- release-notes:start -->\n### 한국어\n- 가상\n### English\n- Fictional\n<!-- release-notes:end -->')
-            # ZIP creation is real; only architecture inspection of the fake binary is mocked.
-            with patch.object(builder, 'ROOT', root), patch.object(builder.subprocess, 'check_output', return_value='arm64\n'):
+            # ZIP creation is real; architecture inspection and signing of the fake binary are mocked.
+            with patch.object(builder, 'ROOT', root), patch.object(builder.subprocess, 'check_output', return_value='arm64\n'), patch.object(builder, 'seal_app') as seal:
                 preview = builder.release_preview('aarch64-apple-darwin')
+                seal.assert_called_once_with(app)
                 archive = Path(preview['archive'])
                 self.assertEqual(preview['sha256'], hashlib.sha256(archive.read_bytes()).hexdigest())
                 self.assertIn(preview['sha256'], preview['cask'])
@@ -215,6 +256,116 @@ anyio.run(main)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn('MCP handshake and projects passed', result.stdout)
             self.assertFalse(list(runtime.rglob('__pycache__')), 'Installed bundle must not be modified')
+
+
+@unittest.skipUnless(os.environ.get('WHERE_WERE_WE_UPDATE_APP'), 'Set WHERE_WERE_WE_UPDATE_APP for the native helper integration')
+class NativeUpdateHelper(unittest.TestCase):
+    def test_parent_exit_lock_app_replacement_and_native_restart(self):
+        self.run_native_update(False)
+
+    def test_killed_helper_keeps_recovery_outside_temporary_stage(self):
+        self.run_native_update(True)
+
+    def run_native_update(self, interrupted):
+        import fcntl
+        import signal
+        import time
+        source = Path(os.environ['WHERE_WERE_WE_UPDATE_APP']).resolve()
+        version = plistlib.loads((source / 'Contents/Info.plist').read_bytes())['CFBundleShortVersionString']
+        with tempfile.TemporaryDirectory(prefix='www native update test ') as temporary:
+            base = Path(temporary)
+            app = base / 'where-were-we.app'
+            shutil.copytree(source, app, symlinks=True)
+            home = base / 'empty home'
+            state_home = home / '.where-were-we'
+            state_home.mkdir(parents=True)
+            binary_dir = base / 'bin'
+            binary_dir.mkdir()
+            stage = Path(tempfile.mkdtemp(prefix='where-were-we-update-'))
+            helper = stage / 'updater'
+            helper.write_bytes((app / 'Contents/MacOS/where-were-we').read_bytes())
+            helper.chmod(0o755)
+            for phase, installed in [('before', '0.0.0'), ('after', version)]:
+                (binary_dir / (phase + '.json')).write_text(json.dumps({'casks':[{
+                    'full_token':'ganggangstone/tap/where-were-we', 'version':version, 'installed':installed,
+                    'artifacts':[{'app':['where-were-we.app'], 'target':str(app)}]}]}))
+            brew = binary_dir / 'brew'
+            # Only the synthetic Homebrew program removes the disposable test app.
+            # The native helper, app copy, locking, replacement and restart are real.
+            brew.write_text('''#!/bin/sh
+base=$(dirname "$0")
+echo "$*" >> "$base/calls"
+case "$1" in
+ update) exit 0 ;;
+ info) if test -f "$base/upgraded"; then cat "$base/after.json"; else cat "$base/before.json"; fi ;;
+ upgrade) /bin/rm -rf "$WWW_TEST_APP"
+          if test "$WWW_INTERRUPT" = 1; then
+            echo $$ > "$base/interrupted-pid"
+            while :; do sleep 1; done
+          fi
+          /usr/bin/ditto "$WWW_TEST_BACKUP" "$WWW_TEST_APP" || exit 9
+          touch "$base/upgraded" ;;
+ *) exit 8 ;;
+esac
+''')
+            brew.chmod(0o755)
+            parent = subprocess.Popen(['/bin/sleep', '90'])
+            job = dict(brew=str(brew), app=str(app), backup=str(state_home / 'recovery' / app.name),
+                       state=str(state_home / '.app-update.json'), log=str(state_home / '.app-update.log'),
+                       version=version, parent=parent.pid)
+            env = dict(builder.clean_environment(), HOME=str(home), WWW_TEST_APP=str(app), WWW_TEST_BACKUP=job['backup'], WWW_INTERRUPT='1' if interrupted else '0')
+            with (state_home / '.app-update.lock').open('w+') as lock:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                process = subprocess.Popen([str(helper), '--apply-update', json.dumps(job)], cwd=home, env=env,
+                                           stdin=lock, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            try:
+                deadline = time.monotonic() + 15
+                while time.monotonic() < deadline:
+                    if Path(job['state']).exists() and json.loads(Path(job['state']).read_text())['stage'] == 'ready': break
+                    self.assertIsNone(process.poll(), 'Native helper stopped before ready')
+                    time.sleep(.1)
+                else: self.fail('Native helper never reached ready')
+                self.assertFalse((binary_dir / 'upgraded').exists(), 'App must stay intact until the parent exits')
+                with (state_home / '.app-update.lock').open('r+') as other:
+                    with self.assertRaises(BlockingIOError): fcntl.flock(other, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                parent.terminate()
+                parent.wait()
+                if interrupted:
+                    deadline=time.monotonic()+15
+                    while not (binary_dir/'interrupted-pid').exists():
+                        self.assertIsNone(process.poll())
+                        if time.monotonic()>deadline:self.fail('Fake Homebrew did not reach replacement')
+                        time.sleep(.1)
+                    process.kill();process.communicate(timeout=5)
+                    os.killpg(int((binary_dir/'interrupted-pid').read_text()),signal.SIGKILL)
+                    self.assertFalse(app.exists())
+                    shutil.rmtree(stage)  # Reboot may clear the temporary helper.
+                    state=json.loads(Path(job['state']).read_text())
+                    self.assertEqual(state['stage'],'installing')
+                    self.assertEqual(state['backup'],job['backup'])
+                    self.assertIn('reinstall --cask ganggangstone/tap/where-were-we',state['recovery_command'])
+                    self.assertIn(job['backup'],Path(job['log']).read_text())
+                    shutil.copytree(Path(state['backup']),app,symlinks=True)
+                    self.assertEqual(plistlib.loads((app/'Contents/Info.plist').read_bytes())['CFBundleShortVersionString'],version)
+                    return
+                output, error = process.communicate(timeout=80)
+                self.assertEqual(process.returncode, 0, output + error)
+                self.assertEqual(json.loads(Path(job['state']).read_text())['stage'], 'completed')
+                self.assertFalse(stage.exists(), 'Successful staging is removed')
+                self.assertIn('upgrade --cask ganggangstone/tap/where-were-we', (binary_dir / 'calls').read_text())
+            finally:
+                if parent.poll() is None: parent.terminate(); parent.wait()
+                if process.poll() is None: process.kill(); process.wait()
+                if (binary_dir/'interrupted-pid').exists():
+                    try: os.killpg(int((binary_dir/'interrupted-pid').read_text()),signal.SIGKILL)
+                    except ProcessLookupError: pass
+                # Stop only the native test app created by this helper, including its curl child.
+                for line in subprocess.check_output(['ps', '-axo', 'pid=,command='], text=True).splitlines():
+                    pid, _, command = line.strip().partition(' ')
+                    if command.strip() == str(app / 'Contents/MacOS/where-were-we'):
+                        try: os.killpg(int(pid), signal.SIGTERM)
+                        except ProcessLookupError: pass
+                if stage.exists(): shutil.rmtree(stage)
 
 
 if __name__ == '__main__':

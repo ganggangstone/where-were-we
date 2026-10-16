@@ -19,7 +19,7 @@ brew install --cask ganggangstone/tap/where-were-we
 gh auth login
 ```
 
-Python is included. Homebrew installs git and GitHub CLI. [Claude Code](https://code.claude.com/docs/en/overview) must be installed separately for AI actions. The MCP host must be able to find git, gh, and (for AI actions) claude on its PATH.
+Python is included. Homebrew installs git and GitHub CLI. Detailed AI analysis works through any MCP agent that supports tool calls; it does not require Claude Code. The MCP server must be able to find git and gh on its PATH. Existing optional local CLI shortcuts for groups, architecture and background jobs use Claude Code.
 
 **This initial build is unsigned and not notarized.** macOS may block its first launch; see Apple's [instructions for opening an app from an unidentified developer](https://support.apple.com/guide/mac-help/open-a-mac-app-from-an-unknown-developer-mh40616/mac).
 
@@ -27,9 +27,9 @@ Python is included. Homebrew installs git and GitHub CLI. [Claude Code](https://
 
 Click **＋** to create a project and add a local repository folder. Add related repositories under **Manage repositories**. Use **All repositories** for the service view, or select one repository to narrow it down.
 
-Each repository can use its own development and production refs; leave a role empty when it does not exist. React Router frontends and FastAPI backends can live in separate repositories. The app detects `frontend/src` or `src`, and `backend/app` or `app`; set other source roots in repository settings. Other frameworks are not yet supported by detailed extraction.
+Each repository can use its own development and production refs; leave a role empty when it does not exist. React Router frontends and FastAPI backends can live in separate repositories. The app detects `frontend/src` or `src`, and `backend/app` or `app`; set other source roots in repository settings. For other languages and frameworks, refresh first, select a repository, then choose **Analyze with AI**. Copy the analysis request to your MCP-connected agent. That agent uses its own model to read the selected branch snapshot through MCP and submit a detailed map, including request steps. The app validates and stores the result; it does not launch another model or pay for AI access. Matching source text verifies evidence, not the correctness of AI interpretations. Normal refresh does not call AI; changed code is marked as requiring analysis, and the previous AI map stays available.
 
-Use **API destination repositories** to explicitly identify a frontend's API repository. Matching endpoints are labeled as user-configured connections. Unconfigured or ambiguous matches remain candidates. Equal table names stay separate unless explicitly assigned to shared data. Repository collection failures preserve the last successful map and appear beside the repository's commit and last success time.
+Use **API destination repositories** to explicitly identify a frontend's API repository. Matching endpoints are labeled as user-configured connections. Unconfigured or ambiguous matches remain candidates. Equal table names stay separate unless explicitly assigned to shared data. In **Manage repositories → Shared data settings**, add a shared data ID and connect the repository/table pairs. You can edit or remove connections there; collected table names are suggested. Repository collection failures preserve the last successful map and appear beside the repository's commit and last success time.
 
 Existing projects remain available. Open **Manage repositories** to keep the original repository and add others without moving or deleting the old map files.
 
@@ -102,7 +102,7 @@ Generate MCP registration instructions for the installed runtime. Ask the agent 
 
 ### Versions and updates
 
-View the installed version, stable releases, and bilingual notes; copy the Homebrew upgrade command.
+View the installed version, stable releases, and bilingual notes; install Homebrew updates with **Update now**.
 
 ![Versions and updates: fictional Lumen Studio](docs/images/en/updates.png)
 
@@ -144,14 +144,18 @@ To upgrade, run:
 brew update && brew upgrade --cask ganggangstone/tap/where-were-we
 ```
 
-Run the command yourself to install an update. Uninstalling the app preserves your maps.
+For Homebrew installations, click **Update now**. The app checks that the new version is available, closes, installs it through Homebrew, and reopens. Finish collection or AI work before updating. If installation or startup fails, the updater attempts to restore the previous app and shows the error; recovery files are retained if restoration fails. Maps remain in place.
+
+If an update is interrupted by shutdown or force quit, recovery details remain in `~/.where-were-we/.app-update.log` and `.app-update.json`. Open the log with `open -a TextEdit ~/.where-were-we/.app-update.log`. It records the retained app copy and its original destination: copy it back with Finder and choose Replace, or run the recorded Homebrew reinstall command.
+
+The command above is the manual fallback, including for older versions that only offer command copying. A ZIP installation is not managed by the update button. Uninstalling the app preserves your maps.
 
 ## Data and limits
 
 - Maps stay in `~/.where-were-we/`. They contain your project's structure; keep them out of public repositories.
 - The collector runs `git fetch` and reads local files, git history, GitHub activity, work folders, and available local Claude Code session metadata. It does not check out another branch or modify target repository files.
-- Explicitly requested AI actions run your installed `claude -p`. Their input can include source snippets and screen information; processing and transmission follow that client's provider and settings.
-- Detailed extraction currently supports React Router and axios, FastAPI, and SQLAlchemy. Source roots can be configured per repository; other frameworks require extractor changes.
+- Detailed analysis uses the connected MCP agent and its account. `analyze` returns the instructions and schema, `analysis_source` serves the pinned source, and `record_analysis` verifies and saves the result. Optional local CLI shortcuts use `claude -p`. Source processing follows the selected agent/provider settings.
+- Automatic code extraction supports React Router/axios, FastAPI, and SQLAlchemy. Explicit AI analysis accepts source code in other languages and frameworks, subject to what the model can establish; it does not guarantee complete coverage. AI provenance, source checks, unresolved areas and changed-commit warnings remain visible. Source roots are configurable per repository.
 - `dev` and `main` are code branch comparisons, not a check of what is actually deployed. Programs or runtime facts absent from git remain unverified until someone checks the running system.
 - Read/write grouping uses HTTP methods (GET versus other methods). Missing test or navigation links can reflect an unrecognized pattern. AI explanations and candidate matches still need checking; a matching code quote does not establish that an explanation is correct.
 
@@ -172,6 +176,7 @@ The [license](LICENSE) permits personal use, internal business use, and free red
 - 레포별 수집 상태를 표시하고, 실패·중단 시 마지막 성공 지도를 유지합니다.
 - 사용자가 지정한 API 연결과 미확인 후보를 구분합니다. 같은 경로·PR 번호·테이블 이름을 레포별로 구분합니다.
 - MCP 조회와 테스트 기록에도 레포 범위를 지정할 수 있습니다. 기존 단일 레포 지도는 보존합니다.
+- Homebrew 설치본에서 버튼으로 업데이트하고 앱을 다시 엽니다. 실패 시 이전 앱 복구를 시도합니다.
 
 ### English
 
@@ -180,6 +185,7 @@ The [license](LICENSE) permits personal use, internal business use, and free red
 - Show collection status per repository and retain the last successful snapshot after failure or interruption.
 - Distinguish user-configured API destinations from unverified candidates; keep equal paths, PR numbers, and table names separate.
 - Scope MCP queries and test writes by repository while preserving existing single-repository maps.
+- Install Homebrew updates from the app and reopen automatically, with recovery of the previous app on failure.
 <!-- release-notes:end -->
 
 </details>

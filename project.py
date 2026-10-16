@@ -102,7 +102,7 @@ def configure(name, data):
             if repo.get('legacy'):
                 old=read(home(name)/'dev.json') or read(home(name)/'main.json')
                 if not old or os.path.realpath(old.get('repo',''))!=repo['path']:raise ValueError('Legacy repository does not match the existing map')
-        if not existing and not any(r.get('legacy') for r in proposed['repositories']) and (home(name)/'dev.json').exists():
+        if not existing and not any(r.get('legacy') for r in proposed['repositories']) and any((home(name)/(role+'.json')).exists() for role in ('dev','main')):
             raise ValueError('Keep the existing repository as a legacy entry when adopting this project')
         atomic(home(name)/'project.json',proposed)
     return proposed
@@ -152,6 +152,8 @@ def qualify_map(source,repo,table_ids):
     for s in m['screens']:
         s.update(repository=rid,source_path=s['path'],source_file=s.get('file'))
         s['path']=screen(s['path']);s['file']=file(s.get('file'))
+        for ev in s.get('evidence') or []:
+            if isinstance(ev,dict):ev['file']=file(ev.get('file'))
         for ref in s.get('api_functions',[]):
             ref['file']=file(ref['file']);ref['via']=file(ref.get('via'))
         for a in s.get('actions',[]):
@@ -161,10 +163,16 @@ def qualify_map(source,repo,table_ids):
     for f in m['api_functions']:
         f.update(repository=rid,source_file=f['file']);f['file']=file(f['file'])
         for call in f.get('calls',[]):
+            if call.get('file'):call['file']=file(call['file'])
             for b in call.get('backend',[]):b['file']=file(b['file'])
     for r in m['backend_routes']:
         r.update(repository=rid,source_file=r['file']);r['file']=file(r['file'])
         r['services']=[file(x) for x in r.get('services',[])]
+        for ev in [*(r.get('evidence') or []),*(r.get('table_evidence') or [])]:
+            if isinstance(ev,dict):ev['file']=file(ev.get('file'))
+        if r.get('flow'):
+            r['flow']['file']=file(r['flow'].get('file'))
+            for step in r['flow'].get('steps',[]):step['file']=file(step.get('file'))
         r['tests']=[file(x) for x in r.get('tests',[])]
         r['source_tables']=r.get('tables',[])
         r['tables']=[table_ids.get((rid,t),rid+'::'+t) for t in r.get('tables',[])]
@@ -186,7 +194,9 @@ def _compose(name, conf, state, raws, repository=''):
         interrupted = st.get('in_progress') and not collection_running(name)
         if interrupted:st={**st,'error':'Previous collection was interrupted; last successful snapshot retained','in_progress':False}
         metadata.append({**repo,**st,'configured_path':repo['path'],'path':(raw.get('dev') or raw.get('main') or {}).get('repo',repo['path']),'collected':bool(raw.get('dev') or raw.get('main')),
+            'analysis':{role:(raw.get(role) or {}).get('analysis') for role in ('dev','main')},
             'config_changed':bool(st.get('fingerprint') and st['fingerprint']!=fingerprint(repo)),
+            'tables':sorted({v for role in ('dev','main') for v in ((raw.get(role) or {}).get('models') or {}).values()} | {t for role in ('dev','main') for route in (raw.get(role) or {}).get('backend_routes',[]) for t in route.get('tables',[])}),
             'commits':{role:(raw.get(role) or {}).get('commit') for role in ('dev','main')}})
     bundle={'project':{'name':name,'repositories':metadata,'selected':repository,'shared_data':conf.get('shared_data',[])},
         'status':{k:[] for k in STATUS_LISTS},'groups':{'names':{},'request_names':{},'groups':[]},
@@ -231,19 +241,32 @@ def _compose(name, conf, state, raws, repository=''):
         result['ref']=role;bundle[role]=result
     for repo in conf['repositories']:
         rid=repo['id'];raw=raws[rid];file=lambda x:qfile(rid,x);screen=lambda x:qscreen(rid,x)
+        related_issues={}
+        active_map=bundle['dev'] if bundle['dev']['available'] else bundle['main']
+        for pr in [*(raw.get('status') or {}).get('open_prs',[]),*(raw.get('status') or {}).get('merged_prs',[])]:
+            affected={p for f in pr.get('files',[]) for p in active_map['file_screens'].get(file(f),[])}
+            for number in {i['number'] for i in pr.get('issues',[])} | set(pr.get('refs',[])):
+                if number!=pr['number']:related_issues.setdefault(number,set()).update(affected)
         for k in STATUS_LISTS:
             for item in (raw.get('status') or {}).get(k,[]):
                 x=copy.deepcopy(item);x['repository']=rid
                 if 'title' in x:x['title']='['+repo['name']+'] '+x['title']
                 if 'files' in x:x['files']=[file(f) for f in x['files']]
                 # Recompute cross-repository file impact from the composed map.
-                x['screens']=sorted(set([screen(p) for p in x.get('screens',[])]+[p for f in x.get('files',[]) for p in (bundle['dev'] if bundle['dev']['available'] else bundle['main'])['file_screens'].get(f,[])]))
+                x['screens']=sorted(set([screen(p) for p in x.get('screens',[])]+[p for f in [*x.get('files',[]),*[file(f) for f in x.get('uncommitted',[])]] for p in (bundle['dev'] if bundle['dev']['available'] else bundle['main'])['file_screens'].get(f,[])]))
+                if k=='issues' and x.get('via')=='pr':
+                    x['screens']=sorted(set(x['screens']) | related_issues.get(x['number'],set()))
                 if rid in ids or any(p in {s['path'] for s in (bundle['dev'] if bundle['dev']['available'] else bundle['main'])['screens']} for p in x['screens']):bundle['status'][k].append(x)
         g=raw.get('groups') or {}
         bundle['groups']['names'].update({screen(k):v for k,v in g.get('names',{}).items()})
         bundle['groups']['request_names'].update({file(k):v for k,v in g.get('request_names',{}).items()})
         if rid in ids:bundle['groups']['groups'] += [{**g,'name':'['+repo['name']+'] '+g['name'],'screens':[screen(p) for p in g['screens']]} for g in (raw.get('groups') or {}).get('groups',[])]
-        for key,value in (raw.get('flows') or {}).get('routes',{}).items():bundle['flows']['routes'][file(key)]=copy.deepcopy(value)
+        for key,value in (raw.get('flows') or {}).get('routes',{}).items():
+            flow=copy.deepcopy(value)
+            if flow.get('file'):flow['file']=file(flow['file'])
+            for step in flow.get('steps',[]):
+                if step.get('file'):step['file']=file(step['file'])
+            bundle['flows']['routes'][file(key)]=flow
         sy=copy.deepcopy(raw.get('system') or {});prefix=rid+'::'
         def evidence(obj):
             if isinstance(obj,dict):
@@ -417,7 +440,7 @@ def main():
     else:
         if not args.args:raise ValueError('Choose an action')
         script=args.args[0]
-        if script not in ('group.py','steps.py','system.py','jobs.py'):raise ValueError('Unknown action')
+        if script not in ('group.py','steps.py','system.py','jobs.py','ai_extract.py'):raise ValueError('Unknown action')
         print(action(args.project,args.repository,script,args.args[1:]))
 if __name__=='__main__':
     try:main()

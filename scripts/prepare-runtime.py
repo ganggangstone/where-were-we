@@ -31,7 +31,7 @@ FULL_ARCHIVES = {
     'x86_64-apple-darwin': '2a36086baac5e4584b59d4638df04a1c348244b276829125f1aa038ab97a1ce6',
 }
 # Explicit allowlist: no project maps, private documents, venvs, or other repo files.
-BACKEND_FILES = ('mapcore.py', 'project.py', 'mcp_server.py', 'extract.py', 'refresh.py',
+BACKEND_FILES = ('mapcore.py', 'project.py', 'mcp_server.py', 'extract.py', 'ai_extract.py', 'refresh.py',
                  'collect.py', 'group.py', 'steps.py', 'system.py', 'jobs.py')
 
 
@@ -91,12 +91,31 @@ def release_environment():
     return env
 
 
+def seal_app(app):
+    """Seal local bundles, preserving any already valid distribution signature."""
+    verify = ['/usr/bin/codesign', '--verify', '--deep', '--strict', str(app)]
+    if subprocess.run(verify, capture_output=True, text=True).returncode == 0:
+        return
+    details = subprocess.run(['/usr/bin/codesign', '-d', '--verbose=4', str(app)],
+                             capture_output=True, text=True)
+    if details.returncode == 0:
+        if 'Signature=adhoc' not in details.stderr:
+            raise ValueError('Invalid identity signature: rebuild with the original signing identity')
+    elif 'code object is not signed at all' not in details.stderr:
+        raise ValueError('Cannot inspect the app signature: ' + details.stderr.strip())
+    # Linker-only ad-hoc signatures do not seal app resources and can stall launch.
+    # This local signature is not Developer ID signing or notarization.
+    subprocess.run(['/usr/bin/codesign', '--force', '--deep', '--sign', '-', str(app)], check=True)
+    subprocess.run(verify, check=True)
+
+
 def build_app(target, no_sign=False):
     command = ['cargo', 'tauri', 'build', '--target', target, '--bundles', 'app']
     if no_sign:
         command.append('--no-sign')
     # The Tauri beforeBuildCommand prepares the runtime; do not run it twice.
     subprocess.run(command, cwd=ROOT, env=release_environment(), check=True)
+    seal_app(ROOT / "src-tauri/target" / target / "release/bundle/macos/where-were-we.app")
 
 
 def cask_definition(version, hashes):
@@ -154,6 +173,7 @@ def release_preview(target):
     output = ROOT / 'src-tauri/target/release-assets'
     output.mkdir(parents=True, exist_ok=True)
     archive = output / f'where-were-we_{version}_{target}.zip'
+    seal_app(app)
     subprocess.run(['/usr/bin/ditto', '-c', '-k', '--keepParent', '--norsrc', str(app), str(archive)], check=True)
     checksum = digest(archive)
     return {'version': version, 'archive': str(archive), 'sha256': checksum,
@@ -230,7 +250,7 @@ if __name__ == '__main__':
                         default=os.environ.get('TAURI_ENV_TARGET_TRIPLE') or
                         {'arm64': 'aarch64-apple-darwin', 'x86_64': 'x86_64-apple-darwin'}.get(platform.machine()))
     parser.add_argument('--build', action='store_true', help='Build the .app with build paths removed (requires cargo-tauri)')
-    parser.add_argument('--no-sign', action='store_true', help='Skip signing for a local test build')
+    parser.add_argument('--no-sign', action='store_true', help='Skip identity signing; seal the local app with an ad-hoc signature')
     parser.add_argument('--release-preview', action='store_true', help='Package the built app and print cask/notes without publishing')
     args = parser.parse_args()
     if args.build:

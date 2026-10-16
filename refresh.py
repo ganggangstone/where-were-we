@@ -8,6 +8,7 @@
 """
 import json, os, subprocess, sys
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
 import mapcore
 
@@ -43,6 +44,16 @@ for b in ("dev", "main"):
     cur = json.load(open(path)) if os.path.exists(path) else {}
     have = cur.get("commit")
     now = git("rev-parse", "--short", ref)
+    if (cur.get('analysis') or {}).get('source')=='ai':
+        # A normal refresh must not spend the user's AI quota or erase an AI map.
+        cur['analysis']['observed_commit']=ref
+        cur['analysis']['stale']=have not in (now,ref)
+        import ai_extract
+        ai_extract.refresh_test_links(cur,mapcore.tests_conf(HOME))
+        import project as project_store
+        project_store.atomic(Path(path),cur)
+        log += f"{b}: AI map retained; " + ("AI analysis required\n" if cur['analysis']['stale'] else "current\n")
+        continue
     if have != now:
         log += run(os.path.join(HERE, "extract.py"), REPO, ref, path); moved[b] = (have, now)
     elif cur.get("extractor") != mapcore.extractor_id(HOME):  # 테스트 규칙 등 뽑는 방법만 바뀌었으면 같은 커밋을 다시 뽑는다
