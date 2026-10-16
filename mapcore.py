@@ -39,9 +39,11 @@ def _read(project, name):
 class Map:
     def __init__(self, project, branch="dev", data=None, bundle=None):
         self.project, self.branch = project, branch
-        if bundle is None and os.path.isfile(os.path.join(ROOT, project, "project.json")):
+        if bundle is None:
             import project as projects_module
-            bundle = projects_module.read_bundle(project)
+            bundle = projects_module.read_bundle(project,branch=branch)
+        if bundle.get('branch_details'):
+            bundle={**bundle,**bundle['branch_details'].get(branch,{})}
         read = (lambda p, key: bundle.get(key)) if bundle is not None else _read
         self.m = data if data is not None else read(project, branch) or {}
         self.groups = read(project, "groups") or {}
@@ -146,7 +148,7 @@ class Map:
 
     def ai_name(self, r):
         key = r["file"] + "::" + str(r["function"])
-        if r.get("source")=="ai":return (r.get("flow") or {}).get("name")
+        if r.get('flow'):return r['flow'].get('name')
         return (self.flows.get(key) or {}).get("name") or (self.groups.get("request_names") or {}).get(key)
 
     def req_name(self, r, btns=(), dup=False):

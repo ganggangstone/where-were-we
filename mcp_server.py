@@ -35,9 +35,10 @@ def need(project):
 
 def scoped_map(name, repository=""):
     bundle = project_store.read_bundle(name, repository)
+    branch='dev' if bundle.get('dev') else 'main'
     data = bundle.get("dev") or bundle.get("main") or {}
     if bundle['project']['repositories'] and not data:data={'repositories':bundle['project']['repositories'],'multi_repo':True}
-    return mapcore.Map(name, data=data, bundle=bundle)
+    return mapcore.Map(name, branch=branch, data=data, bundle=bundle)
 
 def scope_notes(m):
     notes=[]
@@ -279,6 +280,18 @@ def analysis_source(project: str, repository: str, commit: str, file: str = "", 
 def record_analysis(project: str, repository: str, branch: str, lang: str, commit: str, configuration: str, result_json: str) -> str:
     import ai_extract
     return ai_extract.record(need(project),repository,branch,lang,commit,configuration,result_json)
+
+
+@app.tool(description="묶음(groups), 전체 구조(system), 프로그램 작업(jobs), 요청 단계(steps)의 분석 안내·입력·schema를 받는다. AI를 실행하지 않는다. 연결된 에이전트가 analysis_source로 코드를 읽고 record_ai_task로 제출한다. jobs target은 node ID, steps target은 화면 주소 또는 @routes:[route keys]. 멀티레포는 repository 필수.")
+def request_ai_task(project: str, task: str, repository: str = "", branch: str = "dev", lang: str = "ko", target: str = "") -> str:
+    import ai_extract
+    return json.dumps(ai_extract.task_request(need(project),task,branch,lang,repository,target),ensure_ascii=False)
+
+
+@app.tool(description="request_ai_task의 record_arguments와 결과 JSON을 제출한다. 커밋·설정·입력 변경과 원문 근거를 검사하며 실패하면 기존 결과를 보존한다. 사람이 작성한 전체 구조는 덮지 않고 system.ai에 제안을 저장한다. AI 제공자·CLI에 의존하지 않는다.")
+def record_ai_task(project: str, repository: str, task: str, branch: str, lang: str, target: str, commit: str, configuration: str, snapshot: str, result_json: str) -> str:
+    import ai_extract
+    return ai_extract.task_record(need(project),repository,task,branch,lang,target,commit,configuration,snapshot,result_json)
 
 
 @app.tool(description="이름으로 찾기: 화면·버튼·서버 기능 이름·주소·PR/이슈 번호. impact 에 넣을 대상을 고를 때 쓴다.")

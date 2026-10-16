@@ -100,10 +100,11 @@ let browser;
         return 'Demo only: no repository was accessed.';
       }
       if (command === 'analysis_request') {window.__actionArgs=args;if(window.__holdAnalysis)return new Promise(resolve=>{window.__finishAnalysis=()=>resolve(JSON.stringify({handoff:'Old web analysis request'}));});return JSON.stringify({handoff:'Use MCP analyze, analysis_source and record_analysis with your connected agent.'});}
-      if (command === 'make_steps' || command === 'suggest_groups' || command === 'make_jobs') {window.__actionArgs=args;return 'Demo only';}
+      if (command === 'make_steps' || command === 'suggest_groups' || command === 'make_jobs') {window.__actionArgs=args;return JSON.stringify({handoff:'Use request_ai_task and record_ai_task for '+command});}
       if (command === 'setup_prompt') return data.setup;
       if (command === 'tests_prompt') return args.lang === 'en' ? 'Fictional example: find and link revision API tests.' : '가상 예시: 수정 요청 API의 테스트를 찾아 연결해 주세요.';
       if (command === 'make_system') {
+        window.__actionArgs=args;if(window.__autoSystem)return JSON.stringify({handoff:'Use request_ai_task and record_ai_task for system'});
         window.__pendingCalls = (window.__pendingCalls || 0) + 1;
         return new Promise(resolve => { window.__finishSystem = resolve; });
       }
@@ -157,8 +158,33 @@ let browser;
     await page.locator('#mk').click();
     await page.waitForFunction(()=>window.__actionArgs?.repository==='api');
     assert.match(await page.evaluate(()=>window.__actionArgs.screen),/^@routes:/);
+    await page.waitForFunction(()=>document.querySelector('#insp').textContent.includes('record_ai_task'));
+    assert.equal(await page.evaluate(()=>window.__actionArgs.lang),'ko');
+    await page.locator('#repository').selectOption('worker');
+    await page.waitForFunction(()=>S.repository==='worker');
+    await page.locator('[data-v="sys"]').click();
+    await page.evaluate(()=>{const n=S.system.nodes.find(n=>n.repository==='worker');n.kind='program';n.code=['worker/src'];render();});
+    await page.locator('.card[data-node="worker::repository"]').click();
+    await page.locator('#mkJobs').click();
+    await page.waitForFunction(()=>document.querySelector('#insp').textContent.includes('record_ai_task'));
+    assert.equal(await page.evaluate(()=>window.__actionArgs.repository),'worker');
+    assert.equal(await page.evaluate(()=>window.__actionArgs.node),'repository');
+    assert.equal(await page.evaluate(()=>window.__actionArgs.branch),'dev');
+    await page.evaluate(()=>{window.__autoSystem=true;});
+    await page.locator('#remakeSys').click();
+    await page.waitForFunction(()=>document.querySelector('#insp').textContent.includes('for system'));
+    assert.equal(await page.evaluate(()=>window.__actionArgs.repository),'worker');
+    await page.locator('[data-v="map"]').click();
     await page.locator('#repository').selectOption('web');
     await page.waitForFunction(()=>document.querySelector('#repository').value==='web' && !document.querySelector('[data-scr="/@admin/renders/:id"]'));
+    await page.locator('#regroup').click();
+    await page.waitForFunction(()=>document.querySelector('#insp').textContent.includes('for suggest_groups'));
+    assert.equal(await page.evaluate(()=>window.__actionArgs.repository),'web');
+    await page.evaluate(()=>{S.branchDetails.main.groups.names['/@web/renders/:id']='Main label';S.branchDetails.dev.groups.names['/@web/renders/:id']='Dev label';});
+    await page.locator('#branch [data-b="main"]').click();
+    assert.equal(await page.evaluate(()=>aiName('/@web/renders/:id')),'Main label');
+    await page.locator('#branch [data-b="dev"]').click();
+    assert.equal(await page.evaluate(()=>aiName('/@web/renders/:id')),'Dev label');
     assert.equal(await page.locator('#analyzeMap').count(),1);
     await page.locator('#analyzeMap').click();
     await page.waitForFunction(()=>window.__actionArgs?.repository==='web' && window.__actionArgs?.lang==='ko');
@@ -351,7 +377,7 @@ let browser;
     await page.locator('#language [data-lang="ko"]').click();
     assert.equal(await page.locator('#remakeSys').isDisabled(), true, 'Pending analysis stays disabled after language change');
     assert.equal(await page.evaluate(() => window.__pendingCalls), 1);
-    await page.evaluate(() => window.__finishSystem('Done'));
+    await page.evaluate(() => window.__finishSystem(JSON.stringify({handoff:'Use request_ai_task and record_ai_task for system'})));
     await page.waitForFunction(() => !document.querySelector('#remakeSys').disabled);
     await page.addInitScript(() => { window.__emptyProjects = true; });
     await page.reload();

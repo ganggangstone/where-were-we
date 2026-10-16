@@ -19,7 +19,7 @@ brew install --cask ganggangstone/tap/where-were-we
 gh auth login
 ```
 
-Python is included. Homebrew installs git and GitHub CLI. Detailed AI analysis works through any MCP agent that supports tool calls; it does not require Claude Code. The MCP server must be able to find git and gh on its PATH. Existing optional local CLI shortcuts for groups, architecture and background jobs use Claude Code.
+Python is included. Homebrew installs git and GitHub CLI. AI analysis, screen grouping, architecture, program jobs and request steps work through any MCP agent that supports tool calls; Claude Code is not required. The MCP server must be able to find git and gh on its PATH.
 
 **This initial build is unsigned and not notarized.** macOS may block its first launch; see Apple's [instructions for opening an app from an unidentified developer](https://support.apple.com/guide/mac-help/open-a-mac-app-from-an-unknown-developer-mh40616/mac).
 
@@ -154,7 +154,7 @@ The command above is the manual fallback, including for older versions that only
 
 - Maps stay in `~/.where-were-we/`. They contain your project's structure; keep them out of public repositories.
 - The collector runs `git fetch` and reads local files, git history, GitHub activity, work folders, and available local Claude Code session metadata. It does not check out another branch or modify target repository files.
-- Detailed analysis uses the connected MCP agent and its account. `analyze` returns the instructions and schema, `analysis_source` serves the pinned source, and `record_analysis` verifies and saves the result. Optional local CLI shortcuts use `claude -p`. Source processing follows the selected agent/provider settings.
+- Detailed analysis uses the connected MCP agent and its account. `analyze` returns the instructions and schema, `analysis_source` serves the pinned source, and `record_analysis` verifies and saves the result. Grouping, architecture, program jobs and request-step buttons prepare requests for the same connected agent through `request_ai_task` and `record_ai_task`. Copy the request to the agent, then refresh the app after it saves the result. Source processing follows the selected agent/provider settings.
 - Automatic code extraction supports React Router/axios, FastAPI, and SQLAlchemy. Explicit AI analysis accepts source code in other languages and frameworks, subject to what the model can establish; it does not guarantee complete coverage. AI provenance, source checks, unresolved areas and changed-commit warnings remain visible. Source roots are configurable per repository.
 - `dev` and `main` are code branch comparisons, not a check of what is actually deployed. Programs or runtime facts absent from git remain unverified until someone checks the running system.
 - Read/write grouping uses HTTP methods (GET versus other methods). Missing test or navigation links can reflect an unrecognized pattern. AI explanations and candidate matches still need checking; a matching code quote does not establish that an explanation is correct.

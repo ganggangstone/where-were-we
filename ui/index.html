@@ -127,7 +127,7 @@ const UI_EN = {
   '누르면 생기는 일 만들기 (': 'Generate request steps (', '개 남음)': ' remaining)', 'AI가 코드를 읽는다. 한 번에 12개': 'AI reads the code, up to 12 requests at a time',
   '입력 없음': 'No inputs', '이 저장소를 쓰는 곳 보기': 'Show callers using this data', '외부 서비스': 'External service', '저장·외부 없음': 'No data or external services',
   ' 안에는 이 요청이 거치는 파일의 다른 판이 있다: ': ' contains a different version of files used by this request: ', '개 사본)': ' copies)',
-  '이 요청 뒤에 ': 'After this request: ', '이 이어서 하는 일': ' — follow-up jobs', ' (같은 서비스 파일을 거쳐서 이어진 것으로 추정)': ' (inferred through a shared service file)',
+  '이 요청 뒤에 ': 'After this request: ', '이 이어서 하는 일': ' — follow-up jobs', ' (연결 관계는 추정)': ' (inferred connection)',
   '시작: ': 'Triggered by: ', '이 일을 하는 버튼 ': 'Buttons for this action: ',
   '도 서버를 거치지 않고 이 저장소를 직접 읽고 쓴다: ': ' also accesses this data directly: ',
   ' 을 누른다': ' is clicked', '화면이 요청을 보낸다': 'The screen sends a request',
@@ -140,17 +140,17 @@ const UI_EN = {
   '운영 머신에 접속해야 확인됨': 'Requires access to the running environment', '아직 읽지 않음': 'Not read yet',
   '이 저장소': 'This repository', '다른 저장소': 'Another repository', '사본을 끼워 씀': 'Uses a copied version', '코드 없음': 'No source available',
   '근거 줄이 바뀜': 'Code quote changed', '전체 구조가 아직 없습니다.': 'No system map yet.',
-  '에이전트가 저장소의 설명서·실행 설정·코드를 읽어 상자와 선을 적습니다. 몇 분 걸립니다.': 'An agent reads repository docs, configuration, and code to map components and links. This takes a few minutes.',
+  '연결된 에이전트가 저장소의 설명서·실행 설정·코드를 읽어 상자와 선을 적습니다.': 'Your connected agent reads repository docs, configuration, and code to map components and links.',
   '전체 구조 만들기': 'Generate system map', ' 덩어리 · 바깥 서비스 ': ' components · External services: ',
   '실선은 부르거나 읽고 쓰는 길, 점선은 코드나 설정을 같이 쓰는 사이': 'Solid lines: calls or data access. Dotted lines: shared code or configuration.',
-  '에이전트가 저장소를 다시 읽어 상자와 선을 새로 적는다. 몇 분 걸린다': 'Ask the agent to rebuild the map from the repository; takes a few minutes',
+  '연결된 에이전트에게 전체 구조 분석을 요청합니다': 'Prepare an architecture request for your connected agent',
   '다시 읽기': 'Read again', ' · 근거 대조 ': ' · Code reference: ', '안 함': 'Not checked', '지도와 기준 커밋이 다름': 'Reference commit differs',
   '쓰는 곳: ': 'Used by: ', '없음': 'None', '없다': 'None', '선 ': 'Links: ', '문서로만 확인': 'Documented only', '사본 비교로 계산': 'From copy comparison',
   '그림에 없지만 도는 것': 'Other running components',
   '따로 켜지는 프로그램 하나가 상자 하나다. 상자를 누르면 그 상자와 이어진 것만 남는다.': 'Each box represents a separately running program. Select a box to highlight its connections.',
   '아직 모르는 것 ': 'Unknowns: ', '아직 모르는 것': 'Unknowns', '화면 지도 보기': 'View screen map', '코드가 오는 곳': 'Source origin',
   '이어진 선 ': 'Connected links: ', '쓰는 바깥 서비스': 'External services used', '하는 일 읽기': 'Read jobs', '하는 일 ': 'Jobs: ',
-  ' · 이 일을 시작하게 하는 서버 기능 ': ' · Triggering endpoints: ', '에이전트가 이 프로그램의 코드를 읽는다. 몇 분 걸린다': 'An agent reads this program; takes a few minutes',
+  ' · 이 일을 시작하게 하는 서버 기능 ': ' · Triggering endpoints: ', '요청을 복사해 연결된 에이전트에 전달하세요': 'Copy the request to your connected agent',
   '이 프로그램의 코드를 건드린 PR ': 'PRs affecting this program: ', ' (열린 것과 최근 7일 병합)': ' (open or merged in 7 days)',
   '사본 ': 'Copies: ', '이 저장소 파일 ': 'Repository files: ', '개가 들어 있고 ': '; different: ', '개가 ': ' versus ', ' 브랜치의 판과 다르다': ' branch',
   '코드에서 직접 닿는 저장소 ': 'Data accessed directly: ', '근거': 'Evidence',
@@ -197,7 +197,7 @@ const UI_EN = {
 Object.assign(UI_EN, {
  '분석 요청을 준비하는 중…':'Preparing analysis request…', '분석 요청':'Analysis request', '복사해 MCP가 연결된 에이전트에 전달하세요. 해당 에이전트가 자신의 모델로 코드를 읽고 결과를 저장합니다.':'Copy this request to your MCP-connected agent. It reads the code with its own model and records the result.',
  '연결된 MCP 에이전트로 분석합니다. 해당 에이전트 계정의 사용량을 사용합니다.':'Analyze through your connected MCP agent using its own account.',
- 'AI 상세 분석':'Analyze with AI', '사용자 Claude Code로 분석합니다. 해당 계정의 사용량을 사용합니다.':'Analyze with your Claude Code account and its usage allowance.',
+ 'AI 상세 분석':'Analyze with AI',
  'AI 분석 · 원문 대조':'AI analysis · source text checked', 'AI 재분석 필요':'AI analysis required', 'AI가 상세 지도를 만드는 중…':'AI is analyzing the detailed map…',
  '공유 데이터 설정':'Shared data settings', '공유 데이터 추가':'Add shared data',
  '공유 데이터 ID':'Shared data ID', '같은 데이터를 사용하는 레포와 테이블만 연결하세요. 이름이 같다는 이유로 자동 연결하지 않습니다.':'Connect repositories and tables only when they use the same data. Matching names do not create automatic connections.',
@@ -321,10 +321,10 @@ async function checkUpdates(manual = false) {
 const pendingActions = new Set();
 const ACTION_UI = {
   analysis_request: ['analyzeMap','status','분석 요청을 준비하는 중…'],
-  make_system: ['remakeSys', 'status', '에이전트가 저장소를 읽는 중… 몇 분'],
-  make_jobs: ['mkJobs', 'jobslog', '에이전트가 코드를 읽는 중… 몇 분'],
-  make_steps: ['mk', 'mklog', '에이전트가 코드를 읽는 중… 1~2분'],
-  suggest_groups: ['regroup', 'status', '묶음과 이름을 제안받는 중…']
+  make_system: ['remakeSys', 'status', '분석 요청을 준비하는 중…'],
+  make_jobs: ['mkJobs', 'jobslog', '분석 요청을 준비하는 중…'],
+  make_steps: ['mk', 'mklog', '분석 요청을 준비하는 중…'],
+  suggest_groups: ['regroup', 'status', '분석 요청을 준비하는 중…']
 };
 function renderPendingActions() {
   for (const [command, [button, log, message]] of Object.entries(ACTION_UI)) {
@@ -352,8 +352,17 @@ async function invokeAction(command, args) {
   }
   if (pendingActions.has(command)) return;
   pendingActions.add(command); renderPendingActions();
-  try { let output=''; for (const call of calls) output+=await invoke(command,call); return output; }
+  try { const responses=[];for(const call of calls)responses.push(JSON.parse(await invoke(command,call)));return JSON.stringify({handoff:responses.map(r=>r.handoff).join('\n\n')}); }
   finally { pendingActions.delete(command); renderPendingActions(); }
+}
+async function requestAgentAction(command,extra={}) {
+  const scope={project:S.project,repository:S.repository,branch:S.branch,lang:S.lang}, token=S.loadToken;
+  const current=()=>token===S.loadToken && Object.keys(scope).every(key=>scope[key]===S[key]);
+  try {
+    const request=JSON.parse(await invokeAction(command,{...scope,...extra}));
+    if(!current())return;
+    S.agentPrompt=request.handoff;S.agentPurpose='analysis';renderAgentPrompt();$('status').textContent='';
+  } catch(error) {if(current())$('status').textContent=String(error);}
 }
 function setLanguage(lang) {
   S.lang = lang === 'en' ? 'en' : 'ko';
@@ -416,7 +425,7 @@ function groupsOf(m) {
   } else { const by = {}; for (const s of vis) (by['/' + (s.path.split('/')[1] || '')] ??= []).push(s); for (const [k, list] of Object.entries(by)) out.push({ name: k, description: '', list }); }
   return out;
 }
-const flowOf = (r) => r.source==='ai' ? r.flow || null : (S.flows && S.flows.routes && S.flows.routes[r.file + '::' + r.function]) || null;
+const flowOf = (r) => r.flow || (S.flows && S.flows.routes && S.flows.routes[r.file + '::' + r.function]) || null;
 // 화면이 서버에 하는 요청 전부 (모바일 짝 포함, 헤더 부품 제외). 버튼 글자를 아는 요청은 그 글자로.
 function requests(m, path) {
   m._req ??= {}; if (m._req[path]) return m._req[path];
@@ -475,7 +484,7 @@ async function loadProject(p, first = true, repository = S.project === p ? S.rep
     const bundle = JSON.parse(await invoke('read_project', {project:p, repository}));
     if (token !== S.loadToken) return;
     S.project = p; S.repository = repository; S.projectInfo = bundle.project;
-    S.maps = {main:bundle.main, dev:bundle.dev}; S.agentPrompt = null;
+    S.maps = {main:bundle.main, dev:bundle.dev}; S.agentPrompt = null;S.branchDetails=bundle.branch_details;
     for (const key of ['status','groups','flows','system','jobs','changes']) S[key] = bundle[key];
     S.prev = {dev:bundle['dev.prev'], main:bundle['main.prev']};
     if (!S.maps[S.branch] && (S.maps.dev || S.maps.main)) S.branch = S.maps.dev ? 'dev' : 'main';
@@ -506,12 +515,7 @@ function renderRepositories() {
   bar.innerHTML = `<select id="repository"><option value="">${tr('전체 레포')}</option>${repos.map(r => `<option value="${esc(r.id)}" ${r.id === S.repository ? 'selected' : ''}>${esc(r.name)}</option>`).join('')}</select><button class="btn quiet" id="manageRepositories">${tr('레포 관리')}</button><button class="btn quiet" id="analyzeMap" title="${tr('연결된 MCP 에이전트로 분석합니다. 해당 에이전트 계정의 사용량을 사용합니다.')}">${tr('AI 상세 분석')}</button><span class="s">${current.map(r => `${esc(r.name)}: ${r.error ? `<b>${tr('수집 실패')}</b> ${esc(r.error)}` : !r.collected ? tr('아직 수집하지 않음') : `${esc(r.commits?.[S.branch] || '—')} · ${tr('마지막 성공')} ${r.last_success ? esc(when(r.last_success)) : '—'}`}${r.config_changed ? ' · '+tr('설정 변경 후 다시 수집해야 합니다') : ''}${r.analysis?.[S.branch] ? ' · '+tr(r.analysis[S.branch].stale ? 'AI 재분석 필요' : 'AI 분석 · 원문 대조') : ''}${r.analysis?.[S.branch]?.unknown?.length ? ' · '+r.analysis[S.branch].unknown.map(esc).join('; ') : ''}`).join(' | ')}</span>`;
   $('repository').onchange = () => loadProject(S.project, false, $('repository').value);
   $('manageRepositories').onclick = () => editProject(false);
-  $('analyzeMap').onclick=async()=>{
-    const scope={project:S.project,repository:S.repository,branch:S.branch,lang:S.lang}, token=S.loadToken;
-    const current=()=>token===S.loadToken && Object.keys(scope).every(key=>scope[key]===S[key]);
-    try { const request=JSON.parse(await invokeAction('analysis_request',scope));if(!current())return;S.agentPrompt=request.handoff;S.agentPurpose='analysis';renderAgentPrompt();$('status').textContent=''; }
-    catch(error) {if(current())$('status').textContent=String(error);}
-  };
+  $('analyzeMap').onclick=()=>requestAgentAction('analysis_request');
   if ($('analyzeMap')) $('analyzeMap').disabled=pendingActions.has('analysis_request');
 }
 function editProject(create) {
@@ -668,7 +672,7 @@ function detail(m, s, r) {
   if (r.call?.connection_basis === 'configured') h += ui`<div class="empty">사용자가 지정한 레포 연결 · ${esc(rt.repository)}</div>`;
   const files = [rt.file, ...(rt.services || [])]; const other = copyDiffs().filter(d => files.includes(d.path));
   if (other.length) h += ui`<div class="empty">${esc(other[0].node.name)} 안에는 이 요청이 거치는 파일의 다른 판이 있다: ${[...new Set(other.map(d => d.path.split('/').pop()))].map(esc).join(', ')} (${new Set(other.map(d => d.branch)).size}개 사본)</div>`;
-  for (const { node, job, exact } of jobsOf(r.key)) h += ui`<div class="sect"><h4>이 요청 뒤에 ${esc(node.name)}이 이어서 하는 일${exact ? '' : tr(' (같은 서비스 파일을 거쳐서 이어진 것으로 추정)')}</h4><div class="tw"><b class="strong">${esc(job.name)}</b> ${esc(job.what)}</div><div class="s">시작: ${esc(job.starts_when)}</div>${job.steps.map((st, i) => `<div class="step l${st.lane === '저장소' ? 2 : st.lane === '외부' ? 3 : 1}"><span class="n">${i + 1}</span><div class="grow"><div class="tx">${esc(st.text)}</div><div class="s">${zed(m, st.file, st.line)}</div></div></div>`).join('')}</div>`;
+  for (const { node, job, exact } of jobsOf(r.key)) h += ui`<div class="sect"><h4>이 요청 뒤에 ${esc(node.name)}이 이어서 하는 일${exact ? '' : tr(' (연결 관계는 추정)')}</h4><div class="tw"><b class="strong">${esc(job.name)}</b> ${esc(job.what)}</div><div class="s">시작: ${esc(job.starts_when)}</div>${job.steps.map((st, i) => `<div class="step l${st.lane === '저장소' ? 2 : st.lane === '외부' ? 3 : 1}"><span class="n">${i + 1}</span><div class="grow"><div class="tx">${esc(st.text)}</div><div class="s">${zed(m, st.file, st.line)}</div></div></div>`).join('')}</div>`;
   if (r.btns.length > 1) h += ui`<div class="empty">이 일을 하는 버튼 ${r.btns.length}개: ${r.btns.map(esc).join(', ')}</div>`;
   const shared = (rt.tables || []).filter(t => progs(t).length); const users = (routeUse(m)[r.key] || []).length;
   if (shared.length) h += ui`<div class="empty">${esc([...new Set(shared.flatMap(t => progs(t).map(n => n.name)))].join(', '))}도 서버를 거치지 않고 이 저장소를 직접 읽고 쓴다: ${shared.map(esc).join(', ')}</div>`;
@@ -694,11 +698,11 @@ const evHtml = (m, evs) => (evs || []).map(e => e.repo ? `<div class="kv">${esc(
   `<div class="kv">${zed(m, e.file, e.line)}${e.ok === false ? tr(' <span class="pill warn">근거 줄이 바뀜</span>') : ''}</div>`).join('');
 const needHtml = (u) => `<div class="row"><span class="arrow">${u.needs === 'ops' ? '🔒' : '?'}</span><div class="grow"><div class="tw">${esc(u.text)}</div><div class="s">${tr(NEED[u.needs])}</div></div></div>`;
 function sysView(m) {
-  const y = S.system; if (!y) return ui`<div class="hint">전체 구조가 아직 없습니다.<br>에이전트가 저장소의 설명서·실행 설정·코드를 읽어 상자와 선을 적습니다. 몇 분 걸립니다.<br><br><button class="btn primary" id="remakeSys">전체 구조 만들기</button></div>`; const stale = y.checked && m.commit && !m.commit.startsWith(y.checked);
+  const y = S.system; if (!y) return ui`<div class="hint">전체 구조가 아직 없습니다.<br>연결된 에이전트가 저장소의 설명서·실행 설정·코드를 읽어 상자와 선을 적습니다.<br><br><button class="btn primary" id="remakeSys">전체 구조 만들기</button></div>`; const stale = y.checked && m.commit && !m.commit.startsWith(y.checked);
   const LINKS = sysLinks(y); const near = new Set(LINKS.filter(l => l.from === S.node || l.to === S.node).flatMap(l => [l.from, l.to]));
   let h = ui`<div class="legend"><span><b class="strong">${y.nodes.filter(n => n.kind !== 'user').length}</b> 덩어리 · 바깥 서비스 <b class="strong">${y.externals.length}</b></span>
     <span>실선은 부르거나 읽고 쓰는 길, 점선은 코드나 설정을 같이 쓰는 사이</span><span>🔒 ${tr(NEED.ops)}</span>
-    <span class="spacer"></span><button class="btn plain" id="remakeSys" title="에이전트가 저장소를 다시 읽어 상자와 선을 새로 적는다. 몇 분 걸린다">다시 읽기</button><span>${esc(y.written)} · 근거 대조 ${esc(y.checked || tr('안 함'))}${stale ? tr(' <span class="pill warn">지도와 기준 커밋이 다름</span>') : ''}</span></div>
+    <span class="spacer"></span><button class="btn plain" id="remakeSys" title="연결된 에이전트에게 전체 구조 분석을 요청합니다">다시 읽기</button><span>${esc(y.written)} · 근거 대조 ${esc(y.checked || tr('안 함'))}${stale ? tr(' <span class="pill warn">지도와 기준 커밋이 다름</span>') : ''}</span></div>
     <div class="sysrow"><div class="graph" id="sys">${WIRES}`;
   for (const n of y.nodes) {
     const o = ORIGIN[n.origin]; const lock = (n.unknown || []).some(u => u.needs === 'ops');
@@ -724,7 +728,7 @@ function sysInspector(m) {
   h += ui`<div class="sect"><h4>이어진 선 ${ls.length}</h4><div class="group">${ls.map(l => `<div class="row click" data-node="${esc(l.from === n.id ? l.to : l.from)}"><span class="wn inline">${l.i + 1}</span><div class="grow"><div class="tw"><b class="strong">${l.from === n.id ? '→ ' + esc(nm(l.to)) : '← ' + esc(nm(l.from))}</b> ${esc(l.label)}</div></div></div>`).join('') || tr('<div class="row"><div class="grow empty">없다</div></div>')}</div></div>`;
   if ((n.uses || []).length) h += ui`<div class="sect"><h4>쓰는 바깥 서비스</h4><div class="flowline">${n.uses.map(u => `<span class="pill">${esc(y.externals.find(x => x.id === u).name)}</span>`).join('')}</div></div>`;
   const jn = S.jobs && S.jobs.nodes[n.id];
-  if (n.code && n.id !== 'backend' && n.kind === 'program') h += ui`<div class="sect"><h4>하는 일 ${jn ? jn.jobs.length : ''}</h4>${jn ? `<div class="group">${jn.jobs.map(j => ui`<div class="row"><div class="grow"><div class="tw"><b class="strong">${esc(j.name)}</b> ${esc(j.what)}</div><div class="s">시작: ${esc(j.starts_when)}${j.routes.length ? ui` · 이 일을 시작하게 하는 서버 기능 ${j.routes.length}` : ''}</div></div></div>`).join('')}</div>` : ''}<div class="ctl"><button class="btn quiet" id="mkJobs" data-node="${esc(n.id)}">${jn ? tr('다시 읽기') : tr('하는 일 읽기')}</button><span id="jobslog">에이전트가 이 프로그램의 코드를 읽는다. 몇 분 걸린다</span></div></div>`;
+  if (n.code && n.id !== 'backend' && n.kind === 'program') h += ui`<div class="sect"><h4>하는 일 ${jn ? jn.jobs.length : ''}</h4>${jn ? `<div class="group">${jn.jobs.map(j => ui`<div class="row"><div class="grow"><div class="tw"><b class="strong">${esc(j.name)}</b> ${esc(j.what)}</div><div class="s">시작: ${esc(j.starts_when)}${j.routes.length ? ui` · 이 일을 시작하게 하는 서버 기능 ${j.routes.length}` : ''}</div></div></div>`).join('')}</div>` : ''}<div class="ctl"><button class="btn quiet" id="mkJobs" data-node="${esc(n.id)}">${jn ? tr('다시 읽기') : tr('하는 일 읽기')}</button><span id="jobslog">요청을 복사해 연결된 에이전트에 전달하세요</span></div></div>`;
   const prs = n.code ? [...((S.status || {}).open_prs || []).map(p => ({ ...p, o: 1 })), ...((S.status || {}).merged_prs || [])].filter(p => p.files.some(f => ownerOf(f) === n)) : [];
   if (prs.length) h += ui`<div class="sect"><h4>이 프로그램의 코드를 건드린 PR ${prs.length} (열린 것과 최근 7일 병합)</h4><div class="group">${prs.slice(0, 8).map(p => `<div class="row click" data-url="${esc(p.url)}"><div class="grow"><div class="t">#${p.number} ${esc(p.title)}</div><div class="s">${p.o ? tr('열린 PR') : tr('병합 ') + ago(p.merged_at)}</div></div><span class="chev">↗</span></div>`).join('')}${prs.length > 8 ? ui`<div class="row"><div class="grow empty">${prs.length - 8}개 더</div></div>` : ''}</div></div>`;
   if ((n.copies || []).length) h += ui`<div class="sect"><h4>사본 ${n.copies.length}</h4><div class="group">${n.copies.map(c => { const d = c.files.filter(f => !f.same); return ui`<div class="row"><div class="grow"><div class="tw mono">${esc(c.branch)}</div><div class="s">이 저장소 파일 ${c.files.length}개가 들어 있고 ${d.length}개가 ${c.against === 'origin/main' ? tr('운영') : tr('개발')} 브랜치의 판과 다르다</div>${d.map(f => `<div class="s mono">${esc(f.path)}</div>`).join('')}</div></div>`; }).join('')}</div></div>`;
@@ -911,6 +915,7 @@ function focusInspector(m) {
 
 // ---------- 묶어서 그리기 ----------
 function render() {
+  if(S.branchDetails?.[S.branch])for(const key of ['groups','flows','system','jobs'])S[key]=S.branchDetails[S.branch][key];
   renderHeader();
   const m = M();
   document.querySelectorAll('#branch button').forEach(b => { b.classList.toggle('on', b.dataset.b === S.branch); const bm = S.maps[b.dataset.b];
@@ -931,9 +936,9 @@ function render() {
   document.querySelectorAll('[data-f]').forEach(el => el.onclick = (e) => { e.stopPropagation(); setFocus(el.dataset.f); });
   if ($('unfocus')) $('unfocus').onclick = () => { S.focus = null; render(); };
   $('map').scrollTop = top; $('map').scrollLeft = left; $('insp').scrollTop = itop;
-  if ($('mkJobs')) $('mkJobs').onclick = async () => { const b = $('mkJobs'); b.disabled = true; $('jobslog').textContent = tr('에이전트가 코드를 읽는 중… 몇 분'); try { await invokeAction('make_jobs', { project: S.project, node: b.dataset.node }); await reloadCurrent(); } catch (e) { $('jobslog').textContent = tr('실패: ') + String(e).slice(0, 160); b.disabled = false; } };
-  if ($('remakeSys')) $('remakeSys').onclick = async () => { $('remakeSys').disabled = true; $('status').textContent = tr('에이전트가 저장소를 읽는 중… 몇 분'); try { await invokeAction('make_system', { project: S.project }); await reloadCurrent(); $('status').textContent = ''; } catch (e) { $('status').textContent = tr('실패: ') + String(e).slice(0, 160); $('remakeSys').disabled = false; } };
-  if (sys && S.system) { S._wires = sysLinks(S.system).map((l, i) => ({ ...l, n: i + 1, dim: !!S.node && l.from !== S.node && l.to !== S.node })); drawWires(); document.querySelectorAll('[data-node]').forEach(el => el.onclick = () => { S.node = S.node === el.dataset.node ? null : el.dataset.node; render(); });
+  if ($('mkJobs')) $('mkJobs').onclick=()=>requestAgentAction('make_jobs',{node:$('mkJobs').dataset.node});
+  if ($('remakeSys')) $('remakeSys').onclick=()=>requestAgentAction('make_system');
+  if (sys && S.system) { S._wires = sysLinks(S.system).map((l, i) => ({ ...l, n: i + 1, dim: !!S.node && l.from !== S.node && l.to !== S.node })); drawWires(); document.querySelectorAll('.card[data-node], .row[data-node]').forEach(el => el.onclick = () => { S.node = S.node === el.dataset.node ? null : el.dataset.node; render(); });
     if ($('toMap')) $('toMap').onclick = () => { S.view = 'map'; render(); } }
   const pick = (p) => { S.agentPrompt = null; if (view === 'focus') return setFocus('screen|' + p); S.sel = p; S.open = null; S.step = -1; S.ev = -1; render(); $('insp').scrollTop = 0; };
   document.querySelectorAll('[data-scr]').forEach(el => el.onclick = () => pick(el.dataset.scr));
@@ -953,8 +958,8 @@ function render() {
     try { await navigator.clipboard.writeText(await invoke('tests_prompt', { project: S.project, route: b.dataset.tp, lang: S.lang, repository: b.dataset.repository || S.repository })); $('tpDone').textContent = tr(' 복사됨'); }
     catch (err) { $('tpDone').textContent = tr(' 복사하지 못했다: ') + err; } });
   document.querySelectorAll('[data-copy]').forEach(b => b.onclick = () => copy(copyText(m, s, rows.find(x => x.key === b.dataset.copy)), b));
-  if ($('mk')) $('mk').onclick = async () => { $('mk').disabled = true; $('mklog').textContent = tr('에이전트가 코드를 읽는 중… 1~2분'); try { await invokeAction('make_steps', { project:S.project, branch:S.branch, screen:s.path }); await reloadCurrent(); } catch (e) { $('mklog').textContent = tr('실패: ') + String(e).slice(0, 160); $('mk').disabled = false; } };
-  if ($('regroup')) $('regroup').onclick = async () => { $('regroup').disabled = true; $('status').textContent = tr('묶음과 이름을 제안받는 중…'); try { await invokeAction('suggest_groups', { project:S.project, branch:S.branch }); await reloadCurrent(); $('status').textContent = ''; } catch (e) { $('status').textContent = tr('실패: ') + String(e).slice(0, 160); } };
+  if ($('mk')) $('mk').onclick=()=>requestAgentAction('make_steps',{screen:s.path});
+  if ($('regroup')) $('regroup').onclick=()=>requestAgentAction('suggest_groups');
   renderPendingActions();
   if (S.agentPrompt != null) renderAgentPrompt();
 }

@@ -167,6 +167,124 @@ class Analysis(unittest.TestCase):
             self.assertIn('1 screens',message)
         self.assertEqual(project.read_bundle('demo')['dev']['screens'][0]['source_path'],'/items')
 
+    def seed_tasks(self):
+        m,flows=self.normalize()
+        project.publish('demo','service',{'dev':m},{'fingerprint':project.fingerprint(self.conf['repositories'][0])})
+        return {'file':'server/items.go','line':2,'quote':'db.Table("items").Create(item)'}
+
+    def submit_task(self,task,data,target='',lang='en',branch='dev'):
+        import mcp_server
+        request=json.loads(mcp_server.request_ai_task('demo',task,'service',branch,lang,target))
+        self.assertEqual(request['commit'],self.commit)
+        self.assertIn('record_ai_task',request['handoff'])
+        self.assertEqual(request['record_arguments']['task'],task)
+        mcp_server.record_ai_task(**request['record_arguments'],result_json=json.dumps(data))
+        return request
+
+    def test_four_ai_tasks_use_connected_agent_and_existing_scoped_formats(self):
+        ev=self.seed_tasks()
+        request=self.submit_task('groups',{'groups':[{'name':'Items','description':'Manage items','screens':['/items']}],
+             'names':{'/items':'Items'},'request_names':{'server/items.go::SaveItem':'Save item'}})
+        self.assertEqual(request['input']['screens'][0]['path'],'/items')
+        self.submit_task('steps',{'routes':{'server/items.go::SaveItem':{'name':'Save item','steps':[{**ev,'lane':'저장소','text':'Store item'}]}}},'@routes:["server/items.go::SaveItem"]')
+        self.submit_task('system',{'nodes':[{'id':'worker','name':'Worker','kind':'program','code':['server'],'ev':[ev]}],
+             'links':[],'externals':[],'others':[],'unknown':[]})
+        self.submit_task('jobs',{'jobs':[{'name':'Store item','what':'Store item','starts_when':'Item arrives','trigger':ev,
+             'made_by':[{**ev,'routes':['server/items.go::SaveItem']}], 'steps':[{**ev,'lane':'저장소','text':'Store item'}]}]},'worker')
+        bundle=project.read_bundle('demo')
+        self.assertEqual(bundle['groups']['names']['/@service/items'],'Items')
+        self.assertEqual(bundle['dev']['backend_routes'][0]['flow']['steps'][0]['text'],'Store item')
+        self.assertEqual(bundle['system']['nodes'][0]['id'],'service::worker')
+        job=bundle['jobs']['nodes']['service::worker']['jobs'][0]
+        self.assertEqual(job['trigger']['file'],'service/server/items.go')
+        self.assertEqual(job['routes'],[{'key':'service/server/items.go::SaveItem','exact':False,'source':'ai'}])
+
+    def test_ai_tasks_reject_bad_evidence_stale_input_and_unknown_targets(self):
+        ev=self.seed_tasks()
+        request=ai_extract.task_request('demo','system','dev','en','service')
+        before=project.states('demo')['service']['generation']
+        with self.assertRaisesRegex(ValueError,'evidence'):
+            ai_extract.task_record(**request['record_arguments'],result_json=json.dumps({'nodes':[{'id':'bad','ev':[{**ev,'quote':'invented text'}]}]}))
+        self.assertEqual(project.states('demo')['service']['generation'],before)
+        with self.assertRaisesRegex(ValueError,'target'):ai_extract.task_request('demo','steps','dev','en','service','@routes:["other.go::SaveItem"]')
+        with self.assertRaisesRegex(ValueError,'node'):ai_extract.task_request('demo','jobs','dev','en','service','missing')
+        self.submit_task('groups',{'groups':[{'name':'First','screens':['/items']}],'names':{},'request_names':{}})
+        stale=ai_extract.task_request('demo','groups','dev','en','service')
+        self.submit_task('groups',{'groups':[{'name':'Second','screens':['/items']}],'names':{},'request_names':{}})
+        with self.assertRaisesRegex(ValueError,'changed'):
+            ai_extract.task_record(**stale['record_arguments'],result_json=json.dumps({'groups':[{'name':'Overwrite','screens':['/items']}]}))
+        (self.repo/'changed.txt').write_text('changed')
+        self.git('add','.');self.git('commit','-qm','Changed head')
+        with self.assertRaisesRegex(ValueError,'changed'):
+            ai_extract.task_record(**request['record_arguments'],result_json=json.dumps({'nodes':[{'id':'worker','ev':[ev]}]}))
+
+    def test_system_tasks_preserve_human_authored_system(self):
+        ev=self.seed_tasks()
+        folder=project.repository_folder('demo',self.conf['repositories'][0],project.states('demo'))
+        raw=project.raw_bundle(folder);raw['system']={'source':'human','nodes':[{'id':'manual','name':'Manual','ev':[]}]}
+        project.publish('demo','service',raw,{'fingerprint':project.fingerprint(self.conf['repositories'][0])})
+        self.submit_task('system',{'nodes':[{'id':'worker','name':'Worker','kind':'program','ev':[ev]}]})
+        folder=project.repository_folder('demo',self.conf['repositories'][0],project.states('demo'))
+        raw=project.raw_bundle(folder)
+        self.assertEqual(raw['system']['nodes'][0]['id'],'manual')
+        self.assertEqual(project.branch_bundle(raw,'dev')['system.ai']['nodes'][0]['id'],'worker')
+
+    def test_task_outputs_stay_separate_between_branch_roles(self):
+        ev=self.seed_tasks()
+        conf=project.config('demo');conf['repositories'][0]['refs']['main']='HEAD';project.configure('demo',conf)
+        m,_=self.normalize()
+        for route in m['backend_routes']:route.pop('source',None)
+        project.publish('demo','service',{'dev':m,'main':copy.deepcopy(m)},{'fingerprint':project.fingerprint(project.config('demo')['repositories'][0])})
+        for role in ('dev','main'):
+            self.submit_task('groups',{'groups':[{'name':role,'screens':['/items']}],'names':{'/items':role}},branch=role)
+            self.submit_task('steps',{'routes':{'server/items.go::SaveItem':{'name':role,'steps':[{**ev,'text':role}]}}},'/items',branch=role)
+            self.submit_task('system',{'nodes':[{'id':'worker','name':role,'code':['server'],'ev':[ev]}]},branch=role)
+            self.submit_task('jobs',{'jobs':[{'name':role,'trigger':ev,'steps':[],'made_by':[]}]},'worker',branch=role)
+        for role in ('dev','main'):
+            bundle=project.read_bundle('demo',branch=role);model=mapcore.Map('demo',role)
+            self.assertEqual(bundle['groups']['names']['/@service/items'],role)
+            self.assertEqual(bundle['system']['nodes'][0]['name'],'[service] '+role)
+            self.assertEqual(bundle['jobs']['nodes']['service::worker']['jobs'][0]['name'],role)
+            self.assertEqual(model.ai_name(model.m['backend_routes'][0]),role)
+            self.assertEqual(bundle['branch_details'][role]['groups']['names']['/@service/items'],role)
+
+    def test_system_task_outputs_remain_readable_by_mcp(self):
+        import mcp_server
+        ev=self.seed_tasks()
+        self.submit_task('system',{'nodes':[{'id':'worker','name':'Worker','code':['server'],'ev':[ev],
+             'unknown':['Unknown deployment'],'copies':'unsupported extra field'}], 'externals':[{'id':'cloud','ev':[ev]}],
+             'links':[],'unknown':['Unknown deployment']})
+        # Accepted provider output must be safe for the actual consumers.
+        output=mcp_server.overview('demo')
+        self.assertIn('Unknown deployment',output)
+        model=mapcore.Map('demo')
+        self.assertNotIn('copies',model.system['nodes'][0])
+        self.assertIsInstance(model.system['unknown'][0],dict)
+        self.assertIsInstance(model.system['nodes'][0]['unknown'][0],dict)
+        self.assertEqual(model.system['externals'][0]['name'],'cloud')
+
+    def test_four_compatibility_commands_prepare_requests_without_ai(self):
+        ev=self.seed_tasks()
+        self.submit_task('system',{'nodes':[{'id':'worker','name':'Worker','code':['server'],'ev':[ev]}]})
+        base=Path(__file__).resolve().parents[1]
+        env=dict(os.environ,WHERE_WERE_WE_ROOT=str(self.home),PATH='/usr/bin:/bin')
+        commands=[['group.py','demo','dev'],['steps.py','demo','dev','/items'],
+                  ['system.py','demo','--branch','dev'],['jobs.py','demo','worker','--branch','dev']]
+        before=project.states('demo')['service']['generation']
+        for script,*args in commands:
+            result=subprocess.run([sys.executable,'-I','-B',str(base/script),*args,'--repository','service','--lang','en'],env=env,capture_output=True,text=True)
+            self.assertEqual(result.returncode,0,result.stderr)
+            self.assertIn('record_ai_task',json.loads(result.stdout)['handoff'])
+        self.assertEqual(project.states('demo')['service']['generation'],before)
+
+    def test_main_only_task_names_are_available_to_mcp_queries(self):
+        import mcp_server
+        conf=project.config('demo');conf['repositories'][0]['refs']={'dev':None,'main':'HEAD'};project.configure('demo',conf)
+        m,_=self.normalize();m['screens'][0]['heading']=None
+        project.publish('demo','service',{'main':m},{'fingerprint':project.fingerprint(project.config('demo')['repositories'][0])})
+        self.submit_task('groups',{'groups':[{'name':'Main group','screens':['/items']}],'names':{'/items':'MAIN ONLY LABEL'}},branch='main')
+        self.assertIn('MAIN ONLY LABEL',mcp_server.find('MAIN ONLY LABEL','demo','service'))
+
     def test_standard_mcp_protocol_supports_agent_owned_analysis(self):
         import asyncio
         from mcp import ClientSession,StdioServerParameters
@@ -179,7 +297,7 @@ class Analysis(unittest.TestCase):
                 async with ClientSession(*streams) as session:
                     await session.initialize()
                     names={tool.name for tool in (await session.list_tools()).tools}
-                    self.assertTrue({'analyze','analysis_source','record_analysis'}<=names)
+                    self.assertTrue({'analyze','analysis_source','record_analysis','request_ai_task','record_ai_task'}<=names)
                     reply=await session.call_tool('analyze',{'project':'demo','repository':'service','branch':'dev','lang':'en'})
                     self.assertFalse(reply.is_error)
                     request=json.loads(reply.content[0].text)
@@ -188,6 +306,17 @@ class Analysis(unittest.TestCase):
                     self.assertIn('SaveItem',reply.content[0].text)
                     reply=await session.call_tool('record_analysis',{**request['record_arguments'],'result_json':json.dumps(self.data)})
                     self.assertFalse(reply.is_error,reply.content)
+                    ev={'file':'server/items.go','line':2,'quote':'db.Table("items").Create(item)'}
+                    tasks=[('groups','',{'groups':[{'name':'Items','screens':['/items']}]}),
+                           ('steps','/items',{'routes':{'server/items.go::SaveItem':{'name':'Save item','steps':[{**ev,'text':'Store item'}]}}}),
+                           ('system','',{'nodes':[{'id':'worker','name':'Worker','code':['server'],'ev':[ev]}]}),
+                           ('jobs','worker',{'jobs':[{'name':'Store item','trigger':ev,'made_by':[],'steps':[]}]})]
+                    for task,target,data in tasks:
+                        reply=await session.call_tool('request_ai_task',{'project':'demo','repository':'service','branch':'dev','lang':'en','task':task,'target':target})
+                        self.assertFalse(reply.is_error,reply.content)
+                        request=json.loads(reply.content[0].text)
+                        reply=await session.call_tool('record_ai_task',{**request['record_arguments'],'result_json':json.dumps(data)})
+                        self.assertFalse(reply.is_error,reply.content)
         asyncio.run(exercise())
         self.assertEqual(project.read_bundle('demo')['dev']['backend_routes'][0]['source'],'ai')
 

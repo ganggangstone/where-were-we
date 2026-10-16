@@ -21,8 +21,7 @@ METHODS={'GET','POST','PUT','PATCH','DELETE','HEAD','OPTIONS'}
 def git(repo,*args):
     return subprocess.run(['git','-C',repo,*args],capture_output=True,text=True,check=True).stdout
 
-def normalize(data,repo,commit,ref,layout=None):
-    if not isinstance(data,dict):raise ValueError('AI output must be an object')
+def evidence_reader(repo,commit):
     files=set(git(repo,'ls-tree','-r','--name-only',commit).splitlines());cache={};rejected=0
     def evidence(item):
         nonlocal rejected
@@ -36,6 +35,11 @@ def normalize(data,repo,commit,ref,layout=None):
         # Exact line and literal quote: successful text matching does not prove semantics.
         if line>len(lines) or quote not in lines[line-1]:rejected+=1;return None
         return {'file':file,'line':line,'quote':quote}
+    return evidence,cache,lambda:rejected
+
+def normalize(data,repo,commit,ref,layout=None):
+    if not isinstance(data,dict):raise ValueError('AI output must be an object')
+    evidence,cache,rejections=evidence_reader(repo,commit)
     def rows(obj,key):
         value=obj.get(key,[])
         if not isinstance(value,list) or len(value)>5000:raise ValueError('Invalid AI list: '+key)
@@ -120,7 +124,7 @@ def normalize(data,repo,commit,ref,layout=None):
     output.update(screens=screens,api_functions=functions,backend_routes=routes,file_screens=file_screens,
         backend_routes_without_screen=[r for r in routes if (r['file'],r['line']) not in used],unresolved_calls=unresolved,
         models={t:t for r in routes for t in r['tables']},coverage={'frontend':bool(screens),'backend':bool(routes)},
-        analysis={'source':'ai','version':VERSION,'commit':commit,'generated_at':project.now(),'stale':False,'rejected':rejected,
+        analysis={'source':'ai','version':VERSION,'commit':commit,'generated_at':project.now(),'stale':False,'rejected':rejections(),
                   'unknown':[v for v in rows(data,'unknown') if isinstance(v,str)],'evidence_check':'literal-source-match; semantics are AI-inferred'})
     return output,flows
 
@@ -282,10 +286,259 @@ def record(project,repository,branch,lang,commit,configuration,result_json):
                 if value is not None:store.atomic(store.home(project)/(key+'.json'),value)
         return message
 
+EV_SCHEMA={'file':'path/in/repository','line':1,'quote':'literal source text'}
+UNKNOWN_SCHEMA={'text':'Unverified fact','needs':'read'}
+TASK_SCHEMAS={
+    'groups':{'groups':[{'name':'Name','description':'Description','screens':['/path']}],
+              'names':{'/path':'Screen name'},'request_names':{'file::function':'Request name'}},
+    'system':{'nodes':[{'id':'program','name':'Program','kind':'program','what':'Purpose','origin':'repo',
+                        'origin_text':'Source location','code':['src'],'uses':[],'unknown':[UNKNOWN_SCHEMA],'ev':[EV_SCHEMA]}],
+              'links':[{'from':'program','to':'store','label':'Exchange','style':'','sure':'code','ev':[EV_SCHEMA]}],
+              'externals':[{'id':'cloud','name':'Cloud','what':'External service','ev':[EV_SCHEMA]}],
+              'others':[{'name':'Other program','what':'Purpose','ev':[EV_SCHEMA]}],'unknown':[UNKNOWN_SCHEMA]},
+    'jobs':{'jobs':[{'name':'Job','what':'Purpose','starts_when':'Trigger condition','trigger':EV_SCHEMA,
+                    'made_by':[{**EV_SCHEMA,'routes':['file::function']}],
+                    'steps':[{**EV_SCHEMA,'lane':'프로그램','text':'Step'}]}]},
+    'steps':{'routes':{'file::function':{'name':'Request name','steps':[{**EV_SCHEMA,'lane':'서버','text':'Step','uncertain':False}]}}}
+}
+
+def task_input(raw,task,branch,target):
+    raw=project.branch_bundle(raw,branch)
+    m=raw[branch]
+    routes={r['file']+'::'+r['function']:r for r in m['backend_routes'] if r.get('mounted') and r.get('function')}
+    if task=='groups':
+        screens=[s for s in m['screens'] if not s.get('redirect')]
+        paths={s['path'] for s in screens}
+        screens=[s for s in screens if not s['path'].startswith('/m/') or s['path'][2:] not in paths]
+        return {'screens':[{'path':s['path'],'title':s.get('heading'),'buttons':list(dict.fromkeys(
+                    a['label'] for a in s.get('actions',[]) if a.get('label') and not a.get('via')))[:10]} for s in screens],
+                'routes':[{k:r.get(k) for k in ('file','function','method','path','tables','externals')} for r in routes.values()]}
+    if task=='system':return {'previous':raw.get('system') or {},'routes':list(routes)}
+    if task=='jobs':
+        node=next((n for n in (raw.get('system') or {}).get('nodes',[]) if n.get('id')==target),None)
+        if not node or not node.get('code'):raise ValueError('Choose a node with repository code')
+        return {'node':node,'routes':list(routes.values())}
+    if not target:raise ValueError('Choose a screen or route target')
+    if target.startswith('@routes:'):
+        keys=json.loads(target[len('@routes:'):])
+        if not isinstance(keys,list) or not keys or any(not isinstance(k,str) or k not in routes for k in keys):
+            raise ValueError('Choose known route targets')
+    else:
+        screens=[s for s in m['screens'] if s['path'] in (target,'/m'+target)]
+        if not screens:raise ValueError('Choose a known screen target')
+        refs={(f['file'],f['name']) for s in screens for f in s.get('api_functions',[])}
+        hits={(b['file'],b['line']) for f in m['api_functions'] if (f['file'],f['name']) in refs
+              for c in f.get('calls',[]) for b in c.get('backend',[])}
+        keys=[key for key,r in routes.items() if (r['file'],r['line']) in hits]
+    if not keys:raise ValueError('No server route targets in this snapshot')
+    return {'routes':{key:routes[key] for key in keys}}
+
+def task_snapshot(raw,task,branch):
+    raw=project.branch_bundle(raw,branch)
+    keys={'groups':['groups'],'system':['system','system.ai'],'jobs':['system','jobs'],'steps':['flows']}[task]
+    return hashlib.sha256(json.dumps({k:raw.get(k) for k in [branch,*keys]},sort_keys=True,ensure_ascii=False).encode()).hexdigest()
+
+def task_context(name,task,branch,repository):
+    if task not in TASK_SCHEMAS:raise ValueError('Choose groups, system, jobs or steps')
+    repo,raw,rid,commit=context(name,repository,branch)
+    if rid and project.states(name).get(rid,{}).get('fingerprint')!=project.fingerprint(repo):
+        raise ValueError('Configuration changed; refresh first')
+    if git(repo['path'],'rev-parse',raw[branch]['commit']+'^{commit}').strip()!=commit:
+        raise ValueError('Map commit changed; refresh or analyze the map first')
+    return repo,raw,rid,commit
+
+def task_request(name,task,branch='dev',lang='ko',repository='',target=''):
+    if lang not in ('ko','en'):raise ValueError('Choose ko or en')
+    with project.locked(name):
+        repo,raw,rid,commit=task_context(name,task,branch,repository)
+        inputs=task_input(raw,task,branch,target)
+        args={'project':name,'repository':rid,'task':task,'branch':branch,'lang':lang,'target':target,
+              'commit':commit,'configuration':project.fingerprint(repo),'snapshot':task_snapshot(raw,task,branch)}
+        scope={k:args[k] for k in ('project','repository','task','branch','lang','target')}
+        rules={
+            'groups':'Group all supplied screens exactly once by user activity. Keep screen paths and route keys unchanged. Name mounted requests too. Use only supplied metadata, not source code.',
+            'system':'Describe separately running programs, users, stores and copied code, their connections and external services. Each node, link, external and other item needs ev evidence. Give repository-relative code directories for each program. Keep unknown operational facts in unknown. Do not invent nodes or connections.',
+            'jobs':'Describe jobs of the selected node. Trigger and step evidence must be within its code directories. made_by evidence identifies server code that creates the trigger; attach existing route keys only when the relation is supported. Unresolved producers stay unknown; never infer a relation from a shared table name alone.',
+            'steps':'Describe ordered request steps for the supplied route keys only. Each step needs its own file, exact line and quote. Include service calls and return values, mark uncertain interpretation. Keep route keys unchanged.'}[task]
+        prompt=(f'Produce {task} for commit {commit}. {rules}\nUse analysis_source with source_arguments for immutable source reads; never launch another AI CLI, execute application code or edit files. '
+                f'Use {"English" if lang=="en" else "Korean"} for names and explanations; keep identifiers unchanged. '
+                'Evidence must use tracked relative file paths, exact one-based lines and literal single-line quotes of at least 6 characters. Text matching does not establish semantic correctness. '
+                'Return a JSON object using schema. Preserve unknown facts explicitly.')
+        handoff=(f'where-were-we MCP의 request_ai_task를 {json.dumps(scope,ensure_ascii=False)} 인자로 호출하세요. '
+                 '반환된 input·prompt·schema를 기준으로 현재 에이전트의 모델로 작업하세요. 필요한 코드는 source_arguments를 넣어 analysis_source로 읽으세요. '
+                 '다른 AI CLI를 실행하지 마세요. 결과 JSON을 record_arguments와 함께 record_ai_task의 result_json으로 제출하세요. 저장 후 앱을 새로고침하세요.') if lang=='ko' else (
+                 f'Call where-were-we MCP request_ai_task with {json.dumps(scope)}. Use your current agent/model with the returned input, prompt and schema. '
+                 'Read pinned source with analysis_source and source_arguments as needed. Do not launch another AI CLI. '
+                 'Submit result_json to record_ai_task with record_arguments, then refresh the app.')
+        return {'commit':commit,'input':inputs,'prompt':prompt,'schema':TASK_SCHEMAS[task],'handoff':handoff,
+                'record_arguments':args,'source_arguments':{'project':name,'repository':rid,'branch':branch,'commit':commit}}
+
+def task_result(raw,task,branch,target,data,repo,commit,lang):
+    original=raw;raw=project.branch_bundle(raw,branch)
+    inputs=task_input(raw,task,branch,target)
+    evidence,cache,rejected=evidence_reader(repo,commit)
+    def rows(obj,key):
+        value=obj.get(key,[])
+        if not isinstance(value,list) or len(value)>5000 or any(not isinstance(v,dict) for v in value):raise ValueError('Invalid task list: '+key)
+        return value
+    def text(obj,key):return obj.get(key) if isinstance(obj.get(key),str) else ''
+    def verified(items):return [{**evidence_item,'ok':True} for item in items if (evidence_item:=evidence(item))]
+    def unknown(value):
+        if not isinstance(value,list):raise ValueError('Unknown facts must be a list')
+        result=[]
+        for item in value:
+            if isinstance(item,str):result.append({'text':item,'needs':'read'})
+            elif isinstance(item,dict) and text(item,'text'):
+                result.append({'text':item['text'],'needs':item.get('needs') if item.get('needs') in ('ops','read') else 'read'})
+            else:raise ValueError('Use text and needs for unknown facts')
+        return result
+    meta={'source':'ai','provider':'mcp-agent','commit':commit,'branch':branch,'language':lang}
+    updated=copy.deepcopy(raw)
+    if task=='groups':
+        known={s['path'] for s in inputs['screens']};seen=set();groups=[]
+        for g in rows(data,'groups'):
+            if not text(g,'name') or not isinstance(g.get('screens'),list):raise ValueError('Invalid group')
+            paths=[]
+            for path in g['screens']:
+                if not isinstance(path,str) or path not in known or path in seen:raise ValueError('Unknown or duplicate grouped screen')
+                seen.add(path);paths.append(path)
+            if paths:groups.append({'name':g['name'],'description':text(g,'description'),'screens':paths})
+        if known!=seen:raise ValueError('Group every known screen exactly once')
+        routes={r['file']+'::'+r['function'] for r in inputs['routes']}
+        def names(key,allowed):
+            value=data.get(key,{})
+            if not isinstance(value,dict):raise ValueError('Invalid names')
+            return {p:n.strip() for p,n in value.items() if p in allowed and isinstance(n,str) and n.strip()}
+        updated['groups']={**meta,'groups':groups,'names':names('names',known),'request_names':names('request_names',routes)}
+    elif task=='system':
+        def items(key):
+            fields={'nodes':('id','name','kind','what','origin','origin_text','code','uses','unknown'),
+                    'links':('from','to','label','style','sure'),'externals':('id','name','what'),
+                    'others':('name','what')}[key]
+            result=[]
+            for item in rows(data,key):
+                ev=verified(item.get('ev',[]))
+                if ev:result.append({**{k:item[k] for k in fields if k in item},'ev':ev})
+            return result
+        nodes=items('nodes');externals=items('externals');ids=[n.get('id') for n in nodes]
+        if not nodes:raise ValueError('No usable system evidence; previous system preserved')
+        if any(not isinstance(v,str) or not v for v in ids) or len(set(ids))!=len(ids):raise ValueError('Invalid or duplicate node identity')
+        extids=[x.get('id') for x in externals]
+        if any(not isinstance(v,str) or not v for v in extids) or len(set(extids))!=len(extids):raise ValueError('Invalid external identity')
+        for i,node in enumerate(nodes):
+            if not text(node,'name'):raise ValueError('Name each node')
+            node['kind']=node.get('kind') if node.get('kind') in ('user','program','store','copy') else 'program'
+            if not isinstance(node.get('uses',[]),list):raise ValueError('Uses must be external IDs')
+            node['uses']=[v for v in node.get('uses',[]) if v in extids]
+            code=node.get('code',[])
+            if not isinstance(code,list) or any(not isinstance(c,str) or c.startswith('/') or '..' in PurePosixPath(c).parts for c in code):raise ValueError('Use relative code directories')
+            node['code']=code;node['unknown']=unknown(node.get('unknown',[]));node['what']=text(node,'what')
+            node['origin']=node.get('origin') if node.get('origin') in ('repo','other','copy','none') else 'repo'
+            node['origin_text']=text(node,'origin_text')
+            node['col']=1 if node['kind']=='user' else 2;node['row']=i+1
+        links=[l for l in items('links') if l.get('from') in ids and l.get('to') in ids and l['from']!=l['to']]
+        for link in links:
+            link['label']=text(link,'label');link['style']='copy' if link.get('style')=='copy' else ''
+            link['sure']='doc' if link.get('sure')=='doc' else 'code'
+        for external in externals:external['name']=text(external,'name') or external['id'];external['what']=text(external,'what')
+        others=items('others')
+        for item in others:
+            if not text(item,'name'):raise ValueError('Name each other program')
+            item['what']=text(item,'what')
+        result={**meta,'written':'MCP agent · source text checked','checked':commit,'nodes':nodes,'links':links,
+                'externals':externals,'others':others,'unknown':unknown(data.get('unknown',[]))}
+        dest='system.ai' if raw.get('system') and raw['system'].get('source')!='ai' else 'system'
+        updated[dest]=result
+    elif task=='steps':
+        outputs=data.get('routes')
+        if not isinstance(outputs,dict) or not outputs or any(k not in inputs['routes'] for k in outputs):raise ValueError('Choose known route targets')
+        updated['flows']=updated.get('flows') or {'routes':{}};flows=updated['flows']['routes']
+        for key,got in outputs.items():
+            if not isinstance(got,dict):raise ValueError('Invalid route steps')
+            route=inputs['routes'][key];steps=[]
+            for step in rows(got,'steps'):
+                ev=evidence({**step,'file':step.get('file',route['file'])})
+                if ev and text(step,'text'):steps.append({**ev,'lane':step.get('lane') if step.get('lane') in ('서버','저장소','외부','화면') else '서버',
+                                                         'text':step['text'],'uncertain':bool(step.get('uncertain'))})
+            if not steps:raise ValueError('No usable step evidence; previous steps preserved')
+            flow={**meta,'name':text(got,'name'),'file':route['file'],'function':route['function'],'steps':steps,
+                  'hash':hashlib.sha1(git(repo,'show',commit+':'+route['file']).encode()).hexdigest()[:12]}
+            flows[key]=flow
+            for r in updated[branch]['backend_routes']:
+                if r['file']+'::'+str(r.get('function'))==key:r['flow']=flow
+    else:
+        code=inputs['node']['code'];jobs=[]
+        def within(ev):return any(c in ('','.','/') or ev['file']==c.rstrip('/') or ev['file'].startswith(c.rstrip('/')+'/') for c in code)
+        routes={r['file']+'::'+r['function']:r for r in inputs['routes']}
+        for job in rows(data,'jobs'):
+            trigger=evidence(job.get('trigger'))
+            if not trigger or not within(trigger):continue
+            made=[];links={};steps=[]
+            for item in rows(job,'made_by'):
+                ev=evidence(item)
+                if not ev:continue
+                made.append(ev)
+                for key in item.get('routes',[]):
+                    route=routes.get(key)
+                    if route and ev['file'] in [route['file'],*route.get('services',[])]:links[key]={'key':key,'exact':False,'source':'ai'}
+            for step in rows(job,'steps'):
+                ev=evidence(step)
+                if ev and within(ev) and text(step,'text'):steps.append({**ev,'lane':step.get('lane') if step.get('lane') in ('프로그램','저장소','외부') else '프로그램','text':step['text']})
+            jobs.append({'name':text(job,'name'),'what':text(job,'what'),'starts_when':text(job,'starts_when'),
+                         'trigger':trigger,'made_by':made,'steps':steps,'routes':list(links.values())})
+        if not jobs:raise ValueError('No usable job trigger evidence; previous jobs preserved')
+        updated['jobs']=updated.get('jobs') or {'nodes':{}}
+        updated['jobs']['nodes'][target]={**meta,'jobs':jobs}
+    # Task results travel with their exact branch map, rather than overwriting
+    # the shared legacy auxiliary files used by the other branch.
+    result=copy.deepcopy(original)
+    result[branch]=updated[branch]
+    outputs=result[branch].setdefault('task_outputs',{})
+    for key in project.DETAILS:
+        if updated.get(key)!=raw.get(key):outputs[key]=updated[key]
+    return result
+
+def task_record(project,repository,task,branch,lang,target,commit,configuration,snapshot,result_json):
+    import project as store
+    if lang not in ('ko','en'):raise ValueError('Choose ko or en')
+    if not isinstance(result_json,str) or len(result_json)>8_000_000:raise ValueError('Invalid task JSON')
+    data=json.loads(result_json)
+    if not isinstance(data,dict):raise ValueError('Task result must be an object')
+    with store.locked(project):
+        repo,raw,rid,head=task_context(project,task,branch,repository)
+        if configuration!=store.fingerprint(repo) or commit!=head or snapshot!=task_snapshot(raw,task,branch):
+            raise ValueError('Task source or stored input changed; request it again')
+        updated=task_result(raw,task,branch,target,data,repo['path'],commit,lang)
+        if rid:store._publish(project,rid,updated,{},collection=False)
+        else:
+            for key,value in updated.items():
+                if value!=raw.get(key):store.atomic(store.home(project)/(key+'.json'),value)
+        return 'Saved '+task+' from connected MCP agent'
+
+def task_cli(task):
+    """Compatibility commands prepare MCP requests; they never invoke AI."""
+    import argparse
+    parser=argparse.ArgumentParser(description='Prepare a connected-agent MCP task')
+    parser.add_argument('project')
+    if task in ('groups','steps'):parser.add_argument('branch',nargs='?',default='dev',choices=['dev','main'])
+    else:parser.add_argument('--branch',default=None,choices=['dev','main'])
+    if task in ('steps','jobs'):parser.add_argument('target')
+    parser.add_argument('--lang',default='ko',choices=['ko','en']);parser.add_argument('--repository',default='')
+    args=parser.parse_args()
+    branch=args.branch
+    if branch is None:
+        conf=project.config(args.project)
+        if conf:
+            repo=project.selected_repository(args.project,args.repository);branch='dev' if repo['refs'].get('dev') else 'main'
+        else:branch='dev' if project.raw_bundle(project.home(args.project)).get('dev') else 'main'
+    print(json.dumps(task_request(args.project,task,branch,args.lang,args.repository,getattr(args,'target','')),ensure_ascii=False))
+
 if __name__=='__main__':
     import argparse
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--request',action='store_true');parser.add_argument('--repository',default='')
+    parser.add_argument('--task',choices=list(TASK_SCHEMAS));parser.add_argument('--target',default='')
     parser.add_argument('project');parser.add_argument('branch',choices=['dev','main']);parser.add_argument('lang',nargs='?',default='ko',choices=['ko','en'])
     args=parser.parse_args()
-    print(json.dumps(request(args.project,args.branch,args.lang,args.repository),ensure_ascii=False) if args.request else analyze(args.project,args.branch,args.lang,args.repository))
+    if args.task:print(json.dumps(task_request(args.project,args.task,args.branch,args.lang,args.repository,args.target),ensure_ascii=False))
+    else:print(json.dumps(request(args.project,args.branch,args.lang,args.repository),ensure_ascii=False) if args.request else analyze(args.project,args.branch,args.lang,args.repository))

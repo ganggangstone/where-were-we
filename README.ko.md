@@ -19,7 +19,7 @@ brew install --cask ganggangstone/tap/where-were-we
 gh auth login
 ```
 
-Python은 앱에 포함되어 있습니다. Homebrew는 git과 GitHub CLI를 함께 설치합니다. 상세 AI 분석은 도구 호출을 지원하는 MCP 에이전트로 실행하며 Claude Code 설치가 필요하지 않습니다. MCP 서버의 PATH에서 git·gh를 찾을 수 있어야 합니다. 기존 묶음·전체 구조·서버 밖 작업을 만드는 선택형 로컬 CLI 기능은 Claude Code를 사용합니다.
+Python은 앱에 포함되어 있습니다. Homebrew는 git과 GitHub CLI를 함께 설치합니다. 상세 분석·화면 묶음·전체 구조·프로그램 작업·요청 단계는 도구 호출을 지원하는 MCP 에이전트로 만들며 Claude Code 설치가 필요하지 않습니다. MCP 서버의 PATH에서 git·gh를 찾을 수 있어야 합니다.
 
 **첫 배포 파일에는 코드 서명과 공증이 없습니다.** macOS가 처음 실행을 막을 수 있습니다. Apple의 [확인되지 않은 개발자의 앱 열기 안내](https://support.apple.com/ko-kr/guide/mac-help/mh40616/mac)를 참고하세요.
 
@@ -152,7 +152,7 @@ brew update && brew upgrade --cask ganggangstone/tap/where-were-we
 
 - 지도는 `~/.where-were-we/`에 둡니다. 프로젝트 구조가 들어 있으므로 공개 저장소에 넣지 마세요.
 - 수집 도구는 `git fetch`를 실행하고 로컬 파일·git 이력·GitHub 작업·작업 폴더·확인 가능한 로컬 Claude Code 세션 메타데이터를 읽습니다. 다른 브랜치로 이동하거나 대상 저장소의 파일을 수정하지 않습니다.
-- 상세 분석은 연결된 MCP 에이전트와 해당 계정을 사용합니다. `analyze`가 분석 안내와 schema를 제공하고, `analysis_source`로 고정 커밋을 읽으며, `record_analysis`가 결과를 검증·저장합니다. 선택형 로컬 CLI 기능은 `claude -p`를 사용합니다. 소스 처리·전송은 선택한 에이전트와 제공자 설정을 따릅니다.
+- 상세 분석은 연결된 MCP 에이전트와 해당 계정을 사용합니다. `analyze`가 분석 안내와 schema를 제공하고, `analysis_source`로 고정 커밋을 읽으며, `record_analysis`가 결과를 검증·저장합니다. 묶음·전체 구조·프로그램 작업·요청 단계 버튼도 같은 에이전트에 전달할 요청을 만듭니다(`request_ai_task`·`record_ai_task`). 요청을 복사해 에이전트에 전달하고, 저장이 끝나면 앱을 새로고침하세요. 소스 처리·전송은 선택한 에이전트와 제공자 설정을 따릅니다.
 - 자동 코드 추출은 React Router·axios, FastAPI, SQLAlchemy를 지원합니다. 다른 언어·프레임워크는 사용자가 AI 상세 분석을 실행할 수 있습니다. AI가 확인하는 범위에 따라 결과가 달라지며 전체 코드를 빠짐없이 분석한다고 보장하지 않습니다. AI 분석 표시, 원문 검사, 확인하지 못한 부분과 코드 변경 후 재분석 안내를 함께 보여 줍니다. 소스 폴더는 레포마다 지정할 수 있습니다.
 - `dev`와 `main`은 코드 브랜치 비교입니다. 실제 배포 상태를 확인하는 것은 아닙니다. git에 없는 프로그램과 실행 상태는 실제 환경을 확인하기 전까지 미확인으로 남습니다.
 - 읽기·변경은 GET과 나머지 HTTP 방식으로 구분합니다. 테스트나 이동 경로를 잇지 못한 것은 추출기가 그 모양을 인식하지 못해서일 수도 있습니다. AI 설명과 후보 연결은 확인이 필요하며, 코드 인용문이 일치해도 설명의 정확성이 보장되지는 않습니다.

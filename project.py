@@ -182,7 +182,15 @@ def qualify_map(source,repo,table_ids):
     m['file_screens']={file(k):[screen(p) for p in v] for k,v in m.get('file_screens',{}).items()}
     return m
 
-def _compose(name, conf, state, raws, repository=''):
+DETAILS=('groups','flows','system','system.ai','jobs')
+
+def branch_bundle(raw,branch):
+    """Select task results stored with a branch map; retain legacy shared files."""
+    outputs=(raw.get(branch) or {}).get('task_outputs',{})
+    return {**raw,**{key:outputs.get(key,raw.get(key)) for key in DETAILS}}
+
+def _compose(name, conf, state, raws, repository='', branch='dev'):
+    raws={rid:branch_bundle(raw,branch) for rid,raw in raws.items()}
     selected=[r for r in conf['repositories'] if not repository or r['id']==repository]
     if repository and not selected:raise ValueError('Unknown repository')
     ids={r['id'] for r in selected};allids={r['id'] for r in conf['repositories']}
@@ -339,14 +347,23 @@ def collection_running(name):
         except BlockingIOError:return True
         fcntl.flock(stream,fcntl.LOCK_UN);return False
 
-def read_bundle(name, repository=''):
+def read_bundle(name, repository='', branch='dev'):
     conf=config(name)
     if not conf:
         if repository:raise ValueError('This legacy project has no repository selector')
-        result=raw_bundle(home(name));result['project']={'name':name,'repositories':[],'selected':''};return result
+        raw=raw_bundle(home(name));result=branch_bundle(raw,branch)
+        result['project']={'name':name,'repositories':[],'selected':''}
+        result['branch_details']={role:{key:branch_bundle(raw,role).get(key) for key in DETAILS} for role in ('dev','main')}
+        return result
     state=states(name)
     raws={r['id']:raw_bundle(repository_folder(name,r,state)) for r in conf['repositories']}
-    return _compose(name,conf,state,raws,repository)
+    branch=branch if any(raw.get(branch) for raw in raws.values()) else 'main'
+    result=_compose(name,conf,state,raws,repository,branch)
+    result['branch_details']={}
+    for role in ('dev','main'):
+        detail=result if role==branch else _compose(name,conf,state,raws,repository,role)
+        result['branch_details'][role]={key:detail.get(key) for key in DETAILS}
+    return result
 
 def child_environment(root,repo):
     env=dict(os.environ,WHERE_WERE_WE_ROOT=str(root),WHERE_WERE_WE_REFS=json.dumps(repo['refs']),WHERE_WERE_WE_LAYOUT=json.dumps(repo['layout']))
