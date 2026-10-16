@@ -6,10 +6,12 @@
 코드는 넘기지 않는다. 넘기는 것은 화면 주소, <h1> 제목, 버튼 글자뿐이다.
 """
 import json, os, re, subprocess, sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import mapcore
 
 PROJECT = sys.argv[1]
 BRANCH = sys.argv[2] if len(sys.argv) > 2 else "dev"
-HOME = os.path.expanduser("~/.where-were-we/" + PROJECT)
+HOME = mapcore.project_home(PROJECT)
 m = json.load(open(os.path.join(HOME, f"{BRANCH}.json")))
 
 # 보여 주는 단위와 같게: 리다이렉트 제외, 모바일 판은 데스크톱 짝에 접음

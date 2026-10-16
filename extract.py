@@ -37,8 +37,13 @@ def commit():
 
 
 # ---------- 1. 화면: App.tsx 의 <Route path=... element={<X ...> ----------
-APP = "frontend/src/App.tsx"
-SRC = "frontend/src"
+LAYOUT = json.loads(os.environ.get("WHERE_WERE_WE_LAYOUT", "{}"))
+SRC = LAYOUT.get("frontend") or ("src" if "src/App.tsx" in ls() else "frontend/src")
+BACKEND = LAYOUT.get("backend") or ("app" if "app/main.py" in ls() else "backend/app")
+APP = SRC + "/App.tsx"
+for area, root, required in (("frontend", SRC, APP), ("backend", BACKEND, BACKEND + "/main.py")):
+    if area in LAYOUT and LAYOUT[area] and required not in ls():
+        raise ValueError(f"Configured {area} root is missing its entry file: {required}")
 
 def resolve(frm, spec):
     """상대 import 를 저장소 경로로. 없으면 None."""
@@ -79,7 +84,7 @@ def balanced(text, start, open_ch="{", close_ch="}"):
 
 
 def screens():
-    src = show(APP)
+    src = show(APP) or ""
     comp_file = {}
     for names, tgt in imports(APP):
         for n in re.findall(r"\w+(?:\s+as\s+\w+)?", names.strip("{} ")):
@@ -414,7 +419,7 @@ DECO_RE = re.compile(r"^@(\w+)\.(get|post|put|patch|delete)\(\s*(?:\n\s*)?([\"']
 ROUTER_RE = re.compile(r"^(\w+)\s*=\s*APIRouter\((.*?)\)", re.M | re.S)
 
 def backend_routes():
-    main = show("backend/app/main.py")
+    main = show(BACKEND + "/main.py") or ""
     alias_mod = {}
     for m in re.finditer(r"^from\s+[\w.]*routers\s+import\s+(.+)$", main, re.M):
         for item in m.group(1).split(","):
@@ -426,9 +431,9 @@ def backend_routes():
         pm = re.search(r"prefix\s*=\s*[\"']([^\"']*)[\"']", m.group(3))
         mounted[(alias_mod.get(m.group(1), m.group(1)), m.group(2))] = pm.group(1) if pm else ""
     rows = []
-    files = ["backend/app/main.py"] + sorted(x for x in ls() if x.startswith("backend/app/routers/") and x.endswith(".py"))
+    files = [BACKEND + "/main.py"] + sorted(x for x in ls() if x.startswith(BACKEND + "/routers/") and x.endswith(".py"))
     for f in files:
-        src = show(f)
+        src = show(f) or ""
         mod = os.path.basename(f)[:-3]
         prefixes = {}
         for rm in ROUTER_RE.finditer(src):
@@ -452,7 +457,7 @@ def models():
     """{클래스 이름: 테이블 이름}"""
     out = {}
     for f in ls():
-        if not (f.startswith("backend/app/models/") and f.endswith(".py")):
+        if not (f.startswith(BACKEND + "/models/") and f.endswith(".py")):
             continue
         src = show(f)
         for m in re.finditer(r"^class\s+(\w+)\((?:Base|\w*Base)\):(.*?)(?=^class\s|\Z)", src, re.M | re.S):
@@ -491,7 +496,7 @@ def func_body(src, name):
 
 def service_file(mod):
     """'services.pipeline_launch' → backend/app/services/pipeline_launch.py"""
-    cand = "backend/app/" + mod.replace(".", "/") + ".py"
+    cand = BACKEND + "/" + mod.replace(".", "/") + ".py"
     return cand if cand in ls() else None
 
 
@@ -609,9 +614,9 @@ def backend_tests(be_index, be, conf):
 
 # ---------- 5. 조립 ----------
 def main():
-    scr = screens()
-    fns = api_functions()
-    be = backend_routes()
+    scr = [] if "frontend" in LAYOUT and LAYOUT["frontend"] is None else screens()
+    fns = {} if "frontend" in LAYOUT and LAYOUT["frontend"] is None else api_functions()
+    be = [] if "backend" in LAYOUT and LAYOUT["backend"] is None else backend_routes()
     be_index = defaultdict(list)
     for r in be:
         be_index[(r["method"], r["path"])].append(r)
@@ -681,7 +686,8 @@ def main():
 
     orphans = [r for r in be if r["mounted"] and (r["file"], r["line"]) not in matched_be]
     out = {
-        "ref": REF, "commit": commit(), "repo": os.path.abspath(REPO), "models": model_table,
+        "ref": mapcore.configured_refs().get(os.path.basename(OUT or "")[:-5], REF), "commit": commit(), "repo": os.path.abspath(REPO), "models": model_table,
+        "coverage": {"frontend": APP in ls() and LAYOUT.get("frontend", True) is not None, "backend": BACKEND + "/main.py" in ls() and LAYOUT.get("backend", True) is not None},
         "extractor": mapcore.extractor_id(HOME),  # 뽑는 방법(코드와 테스트 규칙)이 바뀌면 지도 두 장을 그대로 비교할 수 없다
         "screens": scr, "api_functions": fn_rows, "backend_routes": be,
         "unresolved_calls": unresolved, "backend_routes_without_screen": orphans,

@@ -25,17 +25,15 @@ Python is included. Homebrew installs git and GitHub CLI. [Claude Code](https://
 
 ### Create your first map
 
-There is no project creation form yet. Quit the app first if it is open. Use a local checkout with `origin/dev`, `origin/main`, and the [supported layout](#data-and-limits), including `frontend/src/App.tsx` and `backend/app/main.py`. Run the bundled collector once, then choose the project in the app:
+Click **＋** to create a project and add a local repository folder. Add related repositories under **Manage repositories**. Use **All repositories** for the service view, or select one repository to narrow it down.
 
-```sh
-RUNTIME="/Applications/where-were-we.app/Contents/Resources/runtime"
-"$RUNTIME/python/bin/python3" -I -B "$RUNTIME/backend/refresh.py" my-project /path/to/repository
-open -a where-were-we
-```
+Each repository can use its own development and production refs; leave a role empty when it does not exist. React Router frontends and FastAPI backends can live in separate repositories. The app detects `frontend/src` or `src`, and `backend/app` or `app`; set other source roots in repository settings. Other frameworks are not yet supported by detailed extraction.
 
-Replace `my-project` and `/path/to/repository` with your own values. The path above assumes the app is in `/Applications`. The collector reads both remote branches and GitHub activity; the refresh button subsequently updates the selected project. GitHub authentication must permit reading that repository.
+Use **API destination repositories** to explicitly identify a frontend's API repository. Matching endpoints are labeled as user-configured connections. Unconfigured or ambiguous matches remain candidates. Equal table names stay separate unless explicitly assigned to shared data. Repository collection failures preserve the last successful map and appear beside the repository's commit and last success time.
 
-The app starts in Korean. Choose **English** in the toolbar; the preference is saved locally. Interface text and newly requested agent/test prompts follow the selected language. Names, code, and AI explanations from your project stay verbatim.
+Existing projects remain available. Open **Manage repositories** to keep the original repository and add others without moving or deleting the old map files.
+
+The app starts in Korean. Choose **English** in the toolbar; the preference is saved locally. Project names, code, and AI explanations stay verbatim.
 
 ## Explore the map
 
@@ -134,7 +132,7 @@ View the installed version, stable releases, and bilingual notes; copy the Homeb
 
 Click **Connect agent**, copy the instructions, and give them to Claude Code, Codex, or another MCP client. The agent asks permission before editing configuration.
 
-Ask your agent to check `changes` before planning and `impact` before editing. It can use the same map to find affected areas and overlapping work.
+Ask your agent to check `changes` before planning and `impact` before editing. It can use the same map to find affected areas and overlapping work. MCP tools accept a `repository` ID to narrow the scope; test-rule writes require a repository when the project has several.
 
 ## Updates
 
@@ -153,7 +151,7 @@ Run the command yourself to install an update. Uninstalling the app preserves yo
 - Maps stay in `~/.where-were-we/`. They contain your project's structure; keep them out of public repositories.
 - The collector runs `git fetch` and reads local files, git history, GitHub activity, work folders, and available local Claude Code session metadata. It does not check out another branch or modify target repository files.
 - Explicitly requested AI actions run your installed `claude -p`. Their input can include source snippets and screen information; processing and transmission follow that client's provider and settings.
-- Detailed extraction currently assumes React Router, axios in `frontend/src/api`, FastAPI in `backend/app/routers`, and SQLAlchemy in `backend/app/models`. Other layouts require extractor changes. General structure/PR information is separate from detailed screen extraction.
+- Detailed extraction currently supports React Router and axios, FastAPI, and SQLAlchemy. Source roots can be configured per repository; other frameworks require extractor changes.
 - `dev` and `main` are code branch comparisons, not a check of what is actually deployed. Programs or runtime facts absent from git remain unverified until someone checks the running system.
 - Read/write grouping uses HTTP methods (GET versus other methods). Missing test or navigation links can reflect an unrecognized pattern. AI explanations and candidate matches still need checking; a matching code quote does not establish that an explanation is correct.
 
@@ -164,22 +162,26 @@ Report bugs or suggest improvements in [Issues](https://github.com/ganggangstone
 The [license](LICENSE) permits personal use, internal business use, and free redistribution under its conditions. Paid products and external paid services are restricted. This is a custom source-available license; third-party components retain their own licenses.
 
 <details>
-<summary>v0.1.0 release notes</summary>
+<summary>v0.2.0 release notes (unreleased)</summary>
 
 <!-- release-notes:start -->
 ### 한국어
 
-- 서비스의 프로그램·화면·서버 요청·데이터와 연결된 PR·이슈를 지도에서 확인합니다.
-- 한국어 기본 화면과 영어 전환을 지원하며 선택한 언어를 저장합니다. 프로젝트 원문은 유지합니다.
-- macOS 앱에 Python과 MCP 실행 환경을 포함합니다. git·GitHub CLI와 AI 기능에 필요한 Claude Code는 별도로 필요합니다.
-- 앱에서 새 버전과 한영 릴리즈 노트를 확인하고, Homebrew 업데이트 명령을 복사할 수 있습니다.
+- 한 프로젝트에 여러 레포를 연결하고 전체 또는 레포별 지도를 봅니다.
+- 웹·API가 나뉜 레포와 서로 다른 브랜치·소스 폴더를 지원합니다.
+- 레포별 수집 상태를 표시하고, 실패·중단 시 마지막 성공 지도를 유지합니다.
+- 사용자가 지정한 API 연결과 미확인 후보를 구분합니다. 같은 경로·PR 번호·테이블 이름을 레포별로 구분합니다.
+- MCP 조회와 테스트 기록에도 레포 범위를 지정할 수 있습니다. 기존 단일 레포 지도는 보존합니다.
 
 ### English
 
-- Explore programs, screens, server requests, data, and linked pull requests and issues in a local map.
-- Start in Korean or switch to English; your language preference is saved and project content stays verbatim.
-- The macOS app includes Python and MCP. Git, GitHub CLI, and Claude Code for AI actions remain external requirements.
-- Check new versions and Korean/English release notes in the app, then copy the Homebrew upgrade command.
+- Connect multiple repositories to one project and switch between service-wide and repository views.
+- Collect split frontend/backend repositories with independent refs and source roots.
+- Show collection status per repository and retain the last successful snapshot after failure or interruption.
+- Distinguish user-configured API destinations from unverified candidates; keep equal paths, PR numbers, and table names separate.
+- Scope MCP queries and test writes by repository while preserving existing single-repository maps.
 <!-- release-notes:end -->
 
 </details>
+
+Implementation and configuration details: [multi-repository specification](docs/MULTI_REPO_SPEC.md).

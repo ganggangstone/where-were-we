@@ -118,3 +118,13 @@ details .kv { margin:var(--space-3) var(--space-0) var(--space-0); word-break:br
 .graph { position:relative; flex:none } .graph .card { position:absolute; width:var(--size-node); margin:var(--space-0); z-index:1 }
 .extcol { display:grid; grid-template-columns:repeat(auto-fill, minmax(var(--size-column), 1fr)); gap:var(--space-3); margin-top:var(--space-6) } .extcol .zone { grid-column:1 / -1 }
 .prompt { white-space:pre-wrap; word-break:break-all; background:var(--color-bg-group); border:var(--border-hairline); border-radius:var(--radius-card); padding:var(--space-4); margin-top:var(--space-4); user-select:text }
+
+/* Project and repository controls reuse the shared design tokens. */
+#repository-bar { display:flex; align-items:center; flex-wrap:wrap; gap:var(--space-3); padding:var(--space-3) var(--space-5); border-bottom:var(--border-hairline); background:var(--color-bg-content) }
+#repository-bar[hidden] { display:none }
+#repository-bar .s { overflow-wrap:anywhere }
+#project-dialog { width:calc(var(--size-inspector) + var(--size-column)); max-width:calc(100% - var(--space-8)); max-height:calc(100% - var(--space-8)); overflow:auto; padding:var(--space-6); border:var(--border-hairline); border-radius:var(--radius-card); color:var(--color-text); background:var(--color-bg-content); font:var(--font-body) }
+#project-dialog fieldset { margin:var(--space-4) var(--space-0); padding:var(--space-4); border:var(--border-hairline); border-radius:var(--radius-control) }
+.repository-fields { display:flex; flex-wrap:wrap; gap:var(--space-3); margin-bottom:var(--space-3) }
+#project-dialog label { display:flex; flex-direction:column; flex:1; gap:var(--space-2); font:var(--font-secondary) }
+#project-dialog input, #repository-bar select { padding:var(--space-2); font:var(--font-secondary); border:var(--border-hairline); border-radius:var(--radius-control); background:var(--color-bg-content); color:var(--color-text) }

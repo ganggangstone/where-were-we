@@ -8,8 +8,15 @@ check_same.js 가 같은 지도에서 두 쪽의 숫자(화면별 서버 요청 
 """
 import json, os, re, shlex, sys
 from collections import defaultdict
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-ROOT = os.path.expanduser("~/.where-were-we")
+ROOT = os.environ.get("WHERE_WERE_WE_ROOT") or os.path.expanduser("~/.where-were-we")
+
+def project_home(project):
+    return os.path.join(ROOT, project)
+
+def configured_refs():
+    return json.loads(os.environ.get("WHERE_WERE_WE_REFS", '{"dev":"origin/dev","main":"origin/main"}'))
 
 
 def python_command(script, *args):
@@ -22,19 +29,26 @@ def projects():
 
 
 def _read(project, name):
+    if os.path.isfile(os.path.join(ROOT, project, "project.json")):
+        import project as projects_module
+        return projects_module.read_bundle(project).get(name)
     p = os.path.join(ROOT, project, name + ".json")
     return json.load(open(p)) if os.path.exists(p) else None
 
 
 class Map:
-    def __init__(self, project, branch="dev", data=None):
+    def __init__(self, project, branch="dev", data=None, bundle=None):
         self.project, self.branch = project, branch
-        self.m = data or _read(project, branch) or {}
-        self.groups = _read(project, "groups") or {}
-        self.flows = (_read(project, "flows") or {}).get("routes", {})
-        self.system = _read(project, "system")
-        self.jobs = (_read(project, "jobs") or {}).get("nodes", {})
-        self.status = _read(project, "status") or {}
+        if bundle is None and os.path.isfile(os.path.join(ROOT, project, "project.json")):
+            import project as projects_module
+            bundle = projects_module.read_bundle(project)
+        read = (lambda p, key: bundle.get(key)) if bundle is not None else _read
+        self.m = data if data is not None else read(project, branch) or {}
+        self.groups = read(project, "groups") or {}
+        self.flows = (read(project, "flows") or {}).get("routes", {})
+        self.system = read(project, "system")
+        self.jobs = (read(project, "jobs") or {}).get("nodes", {})
+        self.status = read(project, "status") or {}
         s = self.m.get("screens", [])
         self.by_path = {x["path"]: x for x in s}
         self.fn = {(f["file"], f["name"]): f for f in self.m.get("api_functions", [])}
@@ -43,7 +57,9 @@ class Map:
         for sc in s:
             for v in {a.get("via") for a in sc["actions"]} | {a.get("via") for a in sc["api_functions"]}:
                 if v: cnt[v] += 1
-        self.common = {v for v, c in cnt.items() if c > len(s) / 3}
+        totals = defaultdict(int)
+        for screen in s: totals[screen.get("repository", "")] += 1
+        self.common = {v for v, c in cnt.items() if c > totals.get(v.split("/", 1)[0] if self.m.get("multi_repo") else "", len(s)) / 3}
         self._req = {}
 
     # ---------- 화면 ----------
@@ -68,6 +84,8 @@ class Map:
 
     def label(self, p):
         x = self.by_path.get(p); h = x and x.get("heading")
+        if x and x.get("repository"):
+            return (h or (self.groups.get("names") or {}).get(p) or x.get("source_path", p)) + " [" + x["repository"] + "]"
         if not h:
             return (self.groups.get("names") or {}).get(p) or p
         same = [y["path"] for y in self.m["screens"] if y.get("heading") == h and not y.get("redirect") and not y["path"].startswith("/m/")]
@@ -81,8 +99,13 @@ class Map:
     def find_screen(self, q):
         q = q.strip()
         if q in self.by_path: return self.fold(q)
+        source_hits = [x for x, _ in self.visible() if x.get("source_path") == q]
+        if len(source_hits) > 1: raise ValueError("Ambiguous screen; specify repository: " + ", ".join(x["repository"] for x in source_hits))
+        if source_hits: return source_hits[0]["path"]
         ql = q.lower()
         hits = [x for x, _ in self.visible() if ql in self.label(x["path"]).lower() or ql in x["path"].lower()]
+        if len(hits) > 1 and len({x.get("repository") for x in hits}) > 1:
+            raise ValueError("Ambiguous screen; specify repository: " + ", ".join(sorted({x["repository"] for x in hits})))
         return hits[0]["path"] if hits else None
 
     # ---------- 서버 요청 ----------
@@ -112,7 +135,7 @@ class Map:
                         seen.add((r["file"], r["line"]))
                         k = f["file"] + " " + c["method"] + " " + str(c["path"]) if f["name"] == "<inline>" else f["name"]
                         btns = tags.get(k, []) if r["method"] != "GET" else []
-                        rows.append({"key": r["file"] + "::" + str(r["function"]), "route": r, "btns": btns})
+                        rows.append({"key": r["file"] + "::" + str(r["function"]), "route": r, "btns": btns, "connection_basis": c.get("connection_basis")})
         cnt = defaultdict(int)
         for row in rows:
             if row["btns"]: cnt[row["btns"][0]] += 1
@@ -128,7 +151,8 @@ class Map:
     def req_name(self, r, btns=(), dup=False):
         if btns:
             return btns[0] + (f" 외 {len(btns) - 1}" if len(btns) > 1 else "") + (" · " + (self.ai_name(r) or str(r["function"])) if dup else "")
-        return self.ai_name(r) or str(r["function"])
+        name = self.ai_name(r) or str(r["function"])
+        return name + " [" + r["repository"] + "]" if r.get("repository") else name
 
     # ---------- 흐름 ----------
     def edges(self):
@@ -235,7 +259,9 @@ SLOTS = {"<method>": r"(?P<method>(?i:get|post|put|patch|delete))", "<path>": r"
 
 def tests_conf(home):
     p = os.path.join(home, "tests.json")
-    c = json.load(open(p)) if os.path.exists(p) else {}
+    if os.path.exists(p):
+        with open(p) as stream:c=json.load(stream)
+    else:c={}
     return {"files": c.get("files") or TESTS_DEFAULT["files"], "calls": c.get("calls") or TESTS_DEFAULT["calls"], "records": c.get("records", [])}
 
 
@@ -260,20 +286,29 @@ def extractor_id(home):
     """뽑는 방법의 판. extract.py 와 테스트 규칙이 같으면 같다. 바뀌면 refresh 가 커밋이 그대로여도 다시 뽑는다."""
     import hashlib
     c = tests_conf(home)
-    raw = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "extract.py"), "rb").read() + json.dumps(c, sort_keys=True, ensure_ascii=False).encode()
+    raw = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "extract.py"), "rb").read() + open(__file__, "rb").read() + json.dumps(c, sort_keys=True, ensure_ascii=False).encode() + os.environ.get("WHERE_WERE_WE_LAYOUT", "").encode()
     return hashlib.sha1(raw).hexdigest()[:10]
 
 
-def tests_prompt(project, routes=(), lang="ko"):
+def tests_prompt(project, routes=(), lang="ko", repository=""):
     """테스트가 안 이어진 서버 기능에 붙는 안내. MCP impact 답과 앱의 "프롬프트 복사"가 이것 하나를 쓴다."""
-    c = tests_conf(os.path.join(ROOT, project))
+    rules_home = os.path.join(ROOT, project)
+    tool_scope = ""
+    if os.path.isfile(os.path.join(rules_home, "project.json")):
+        import project as projects_module
+        repo = projects_module.selected_repository(project, repository)
+        rules_home = projects_module.repository_folder(project, repo, projects_module.states(project))
+        if not rules_home: raise ValueError("Refresh this repository first")
+        tool_scope = f"Tool arguments: project={project!r}, repository={repo['id']!r}. Preserve both arguments when recording tests or updating rules.\n"
+        project = project + " / " + repo["id"]
+    c = tests_conf(rules_home)
     lines = "\n".join(f"   - {r}" for r in routes) or "   - (impact 답에서 테스트가 0 인 서버 기능)"
     if lang == "en":
         lines = "\n".join(f"   - {r}" for r in routes) or "   - (server requests with zero linked tests in impact)"
         return f"""## If test code is missing
 where-were-we({project}) could not link tests to these server requests. It only recognizes configured patterns; unlinked tests may still exist.
 {lines}
-Current rules: files {c['files']}, call patterns {c['calls']}
+{tool_scope}Current rules: files {c['files']}, call patterns {c['calls']}
 
 1. Find tests in the repository that call these requests, including HTTP clients, direct imports, and shared helpers. Do not write to the target repository.
 2. If the pattern repeats, update set_test_rules. Include the existing rules too: omitted rules are removed. Available placeholders: <method>, <path>, <function>, <module> (the imported server module). Examples: 'client.<method>("<path>")', '<module>.<function>(', '<function>('. Then call refresh and check that the requests have linked tests.
@@ -282,7 +317,7 @@ Current rules: files {c['files']}, call patterns {c['calls']}
     return f"""## 테스트 코드가 안 보인다면?
 where-were-we({project})가 아래 서버 기능에 테스트를 잇지 못했다. 지도는 정해 둔 찾는 규칙으로만 테스트를 잇기 때문에, 테스트가 없다는 뜻이 아닐 수 있다.
 {lines}
-지금 규칙: 테스트 파일 {c['files']}, 부르는 모양 {c['calls']}
+{tool_scope}지금 규칙: 테스트 파일 {c['files']}, 부르는 모양 {c['calls']}
 
 1. 저장소에서 이 서버 기능을 부르는 테스트를 찾는다. 주소로 요청하는 것, 서버 함수를 import 해서 직접 부르는 것, 공용 도우미를 거치는 것 등 이 저장소가 실제로 쓰는 모양을 본다. 대상 저장소에는 아무것도 쓰지 않는다.
 2. 찾은 모양이 다른 테스트에서도 되풀이되면 set_test_rules 로 규칙을 고친다. 지금 규칙도 같이 넘긴다(빠진 것은 지워진다).
@@ -305,8 +340,13 @@ def setup_prompt(lang="ko"):
     shell_command = shlex.join(command)
     toml_command, toml_args = json.dumps(py, ensure_ascii=False), json.dumps(command[1:], ensure_ascii=False)
     repos = []
+    targets = []
     for p in projects():
-        m = _read(p, "dev") or {}
+        m = _read(p, "dev") or _read(p, "main") or {}
+        if m.get("repositories"):
+            targets.extend((p + " / " + repo["id"], {"repo": repo.get("configured_path", repo["path"])}) for repo in m["repositories"])
+        else: targets.append((p,m))
+    for p,m in targets:
         if m.get("repo"):
             import subprocess
             result = subprocess.run(["git", "-C", m["repo"], "remote", "get-url", "origin"], capture_output=True, text=True)
@@ -365,6 +405,12 @@ def setup_prompt(lang="ko"):
 5. 마지막에 바꾼 파일과 바꾼 줄을 보여 준다."""
 
 
+_prompt_repository = ""
+if __name__ == "__main__":
+    for argument in sys.argv[:]:
+        if argument.startswith("--repository="):
+            _prompt_repository = argument.partition("=")[2];sys.argv.remove(argument)
+
 if __name__ == "__main__" and "--lang=en" in sys.argv:
     sys.argv.remove("--lang=en")
     _prompt_lang = "en"
@@ -376,4 +422,4 @@ else:
 if __name__ == "__main__" and sys.argv[1:] == ["setup"]:
     print(setup_prompt(lang=_prompt_lang))
 elif __name__ == "__main__" and sys.argv[1:2] == ["tests"]:  # mapcore.py tests <프로젝트> [서버 기능 …]
-    print(tests_prompt(sys.argv[2], sys.argv[3:], lang=_prompt_lang))
+    print(tests_prompt(sys.argv[2], sys.argv[3:], lang=_prompt_lang, repository=_prompt_repository))

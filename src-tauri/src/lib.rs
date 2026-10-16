@@ -74,16 +74,41 @@ fn run_py(app: &tauri::AppHandle, script: &str, args: &[&str]) -> Result<String,
     else { Err(String::from_utf8_lossy(&out.stderr).to_string()) }
 }
 
+/// One composed read model for the UI and MCP, including repository status.
+#[tauri::command]
+async fn read_project(app: tauri::AppHandle, project: String, repository: Option<String>) -> Result<String, String> {
+    run_py(&app, "project.py", &["read", &project, "--repository", repository.as_deref().unwrap_or("")])
+}
+
+#[tauri::command]
+async fn save_project(app: tauri::AppHandle, project: String, configuration: String) -> Result<String, String> {
+    run_py(&app, "project.py", &["configure", &project, &configuration])
+}
+
+fn scoped_action(app: &tauri::AppHandle, project: &str, repository: Option<&str>, script: &str, args: &[&str]) -> Result<String, String> {
+    if root().join(project).join("project.json").is_file() {
+        let mut command = vec!["action", project, script];
+        command.extend_from_slice(args);
+        command.extend_from_slice(&["--repository", repository.unwrap_or("")]);
+        run_py(app, "project.py", &command)
+    } else {
+        let mut command = vec![project]; command.extend_from_slice(args);
+        run_py(app, script, &command)
+    }
+}
+
 /// 새로고침: refresh.py 가 fetch, 바뀐 브랜치의 지도 다시 뽑기, 수집, 달라진 것 기록을 한다. 로그를 돌려준다.
 #[tauri::command]
-async fn refresh(app: tauri::AppHandle, project: String, repo: String, since: String) -> Result<String, String> {
-    run_py(&app, "refresh.py", &[&project, &repo, &since])
+async fn refresh(app: tauri::AppHandle, project: String, repo: String, since: String, repository: Option<String>) -> Result<String, String> {
+    if root().join(&project).join("project.json").is_file() {
+        run_py(&app, "project.py", &["refresh", &project, "--repository", repository.as_deref().unwrap_or("")])
+    } else { run_py(&app, "refresh.py", &[&project, &repo, &since]) }
 }
 
 /// group.py 를 돌려 묶음을 다시 제안받는다 (AI 호출, 버튼을 눌렀을 때만).
 #[tauri::command]
-async fn suggest_groups(app: tauri::AppHandle, project: String, branch: String) -> Result<String, String> {
-    run_py(&app, "group.py", &[&project, &branch])
+async fn suggest_groups(app: tauri::AppHandle, project: String, branch: String, repository: Option<String>) -> Result<String, String> {
+    scoped_action(&app, &project, repository.as_deref(), "group.py", &[&branch])
 }
 
 /// 에이전트 연결 프롬프트 (mapcore.py setup). 이 맥의 경로가 채워진다.
@@ -94,26 +119,27 @@ async fn setup_prompt(app: tauri::AppHandle, lang: Option<String>) -> Result<Str
 
 /// 테스트가 안 이어진 서버 기능 하나에 대해 에이전트가 테스트를 찾게 하는 글 (mapcore.py tests).
 #[tauri::command]
-async fn tests_prompt(app: tauri::AppHandle, project: String, route: String, lang: Option<String>) -> Result<String, String> {
-    run_py(&app, "mapcore.py", &["tests", &project, &route, if lang.as_deref() == Some("en") { "--lang=en" } else { "--lang=ko" }])
+async fn tests_prompt(app: tauri::AppHandle, project: String, route: String, lang: Option<String>, repository: Option<String>) -> Result<String, String> {
+    let scope = format!("--repository={}", repository.as_deref().unwrap_or(""));
+    run_py(&app, "mapcore.py", &["tests", &project, &route, &scope, if lang.as_deref() == Some("en") { "--lang=en" } else { "--lang=ko" }])
 }
 
 /// jobs.py 를 돌려 서버 밖 프로그램 하나가 하는 일을 에이전트가 읽어 적게 한다 (AI 호출, 버튼을 눌렀을 때만).
 #[tauri::command]
-async fn make_jobs(app: tauri::AppHandle, project: String, node: String) -> Result<String, String> {
-    run_py(&app, "jobs.py", &[&project, &node])
+async fn make_jobs(app: tauri::AppHandle, project: String, node: String, repository: Option<String>) -> Result<String, String> {
+    scoped_action(&app, &project, repository.as_deref(), "jobs.py", &[&node])
 }
 
 /// system.py 를 돌려 전체 구조를 에이전트가 저장소를 읽어 다시 적게 한다 (AI 호출, 버튼을 눌렀을 때만).
 #[tauri::command]
-async fn make_system(app: tauri::AppHandle, project: String) -> Result<String, String> {
-    run_py(&app, "system.py", &[&project])
+async fn make_system(app: tauri::AppHandle, project: String, repository: Option<String>) -> Result<String, String> {
+    scoped_action(&app, &project, repository.as_deref(), "system.py", &[])
 }
 
 /// steps.py 를 돌려 화면 하나의 "누르면 생기는 일" 단계를 만든다 (AI 호출, 버튼을 눌렀을 때만).
 #[tauri::command]
-async fn make_steps(app: tauri::AppHandle, project: String, branch: String, screen: String) -> Result<String, String> {
-    run_py(&app, "steps.py", &[&project, &branch, &screen])
+async fn make_steps(app: tauri::AppHandle, project: String, branch: String, screen: String, repository: Option<String>) -> Result<String, String> {
+    scoped_action(&app, &project, repository.as_deref(), "steps.py", &[&branch, &screen])
 }
 
 /// zed://file/... 같은 주소를 macOS `open` 으로 연다.
@@ -188,7 +214,7 @@ async fn check_release(app: tauri::AppHandle) -> Result<ReleaseStatus, String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![list_projects, read_map, open_url, refresh, suggest_groups, make_steps, make_system, make_jobs, setup_prompt, tests_prompt, app_version, check_release])
+        .invoke_handler(tauri::generate_handler![list_projects, read_map, read_project, save_project, open_url, refresh, suggest_groups, make_steps, make_system, make_jobs, setup_prompt, tests_prompt, app_version, check_release])
         .run(tauri::generate_context!())
         .expect("error while building tauri application");
 }

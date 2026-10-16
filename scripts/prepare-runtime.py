@@ -31,7 +31,7 @@ FULL_ARCHIVES = {
     'x86_64-apple-darwin': '2a36086baac5e4584b59d4638df04a1c348244b276829125f1aa038ab97a1ce6',
 }
 # Explicit allowlist: no project maps, private documents, venvs, or other repo files.
-BACKEND_FILES = ('mapcore.py', 'mcp_server.py', 'extract.py', 'refresh.py',
+BACKEND_FILES = ('mapcore.py', 'project.py', 'mcp_server.py', 'extract.py', 'refresh.py',
                  'collect.py', 'group.py', 'steps.py', 'system.py', 'jobs.py')
 
 

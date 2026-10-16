@@ -12,6 +12,10 @@ HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
 import mapcore
 
 PROJECT = sys.argv[1]
+if os.path.exists(os.path.join(mapcore.ROOT, PROJECT, "project.json")):
+    import project
+    print(project.refresh_project(PROJECT, since=sys.argv[3] if len(sys.argv) > 3 else "7"))
+    sys.exit(0)
 HOME = os.path.join(mapcore.ROOT, PROJECT)
 REPO = sys.argv[2] if len(sys.argv) > 2 else json.load(open(os.path.join(HOME, "dev.json")))["repo"]
 SINCE = sys.argv[3] if len(sys.argv) > 3 else "7"
@@ -24,18 +28,25 @@ def run(*a):
     return p.stdout
 
 
-git = lambda *a: subprocess.run(["git", "-C", REPO, *a], capture_output=True, text=True).stdout.strip()
+def git(*args):
+    result = subprocess.run(["git", "-C", REPO, *args], capture_output=True, text=True)
+    if result.returncode:sys.exit(result.stderr.strip() or "Git command failed")
+    return result.stdout.strip()
 git("fetch", "-q", "origin")
+PINNED = {role: git("rev-parse", "--verify", ref + "^{commit}") for role,ref in mapcore.configured_refs().items() if ref}
+os.environ["WHERE_WERE_WE_COMMITS"] = json.dumps(PINNED)
 log, moved = "", {}
 for b in ("dev", "main"):
+    ref = PINNED.get(b)
+    if not ref: continue
     path = os.path.join(HOME, b + ".json")
     cur = json.load(open(path)) if os.path.exists(path) else {}
     have = cur.get("commit")
-    now = git("rev-parse", "--short", f"origin/{b}")
+    now = git("rev-parse", "--short", ref)
     if have != now:
-        log += run(os.path.join(HERE, "extract.py"), REPO, f"origin/{b}", path); moved[b] = (have, now)
+        log += run(os.path.join(HERE, "extract.py"), REPO, ref, path); moved[b] = (have, now)
     elif cur.get("extractor") != mapcore.extractor_id(HOME):  # 테스트 규칙 등 뽑는 방법만 바뀌었으면 같은 커밋을 다시 뽑는다
-        log += run(os.path.join(HERE, "extract.py"), REPO, f"origin/{b}", path)
+        log += run(os.path.join(HERE, "extract.py"), REPO, ref, path)
     else:
         log += f"origin/{b} ({now}) 그대로\n"
 log += run(os.path.join(HERE, "collect.py"), REPO, PROJECT, SINCE)
@@ -53,7 +64,7 @@ for b, (old, new) in moved.items():
             run(os.path.join(HERE, "extract.py"), REPO, pm["commit"], prev)
         d = mapcore.diff(mapcore.Map(PROJECT, b, json.load(open(prev))), mapcore.Map(PROJECT, b))
         entry["branches"][b] = {"from": old, "to": new, **d}
-m = mapcore.Map(PROJECT, "dev")
+m = mapcore.Map(PROJECT, "dev" if os.path.exists(os.path.join(HOME,"dev.json")) else "main")
 def place(p):  # 화면에 안 걸리는 PR 의 자리
     fs = p["files"]
     if p.get("common_files"): return ["여러 화면에 똑같이 들어 있는 부품"]

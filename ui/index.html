@@ -11,6 +11,7 @@
 <body>
 <header>
   <select id="project"></select>
+  <button id="newProject" class="btn">＋</button>
   <div class="seg" id="view"><button data-v="changes">바뀐 것</button><button data-v="sys">전체 구조</button><button data-v="feat">기능</button><button data-v="map">화면 지도</button><button data-v="focus">이어진 것</button></div>
   <div class="seg" id="branch"><button data-b="main">운영</button><button data-b="dev">개발</button></div>
   <button id="refresh" class="btn" title="저장소를 다시 읽는다">↻ 새로고침</button>
@@ -21,6 +22,8 @@
   <button id="updates" class="btn">버전·업데이트</button>
   <input type="search" id="q" placeholder="화면·버튼·하는 일·PR·이슈 번호 찾기">
 </header>
+<div id="repository-bar" hidden></div>
+<dialog id="project-dialog"></dialog>
 <div id="release-banner" role="status" hidden></div>
 <dialog id="release-dialog" aria-labelledby="releaseTitle"></dialog>
 <main>
@@ -31,13 +34,29 @@
 const invoke = window.__TAURI__.core.invoke;
 const LANGUAGE_KEY = 'where-were-we.language';
 function readLanguage() { try { return localStorage.getItem(LANGUAGE_KEY) === 'en' ? 'en' : 'ko'; } catch { return 'ko'; } }
-const S = { lang:readLanguage(), agentPrompt:null, project:null, branch:'dev', maps:{}, status:null, groups:null, flows:null, sel:null, open:null, step:-1, ev:-1, q:'', view:'changes', chi:0, system:null, node:null, focus:null, feat:null };
+const S = { lang:readLanguage(), agentPrompt:null, project:null, repository:'', projectInfo:null, loadToken:0, desiredProject:null, desiredRepository:'', branch:'dev', maps:{}, status:null, groups:null, flows:null, sel:null, open:null, step:-1, ev:-1, q:'', view:'changes', chi:0, system:null, node:null, focus:null, feat:null };
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const M = () => S.maps[S.branch];
 
 // Only interface literals go through this dictionary. Interpolated project data stays verbatim.
 const UI_EN = {
+  '전체 레포': 'All repositories', '레포 관리': 'Manage repositories', '프로젝트 만들기': 'Create project',
+  '프로젝트 이름': 'Project name', '레포 이름': 'Repository name', '레포 ID': 'Repository ID',
+  '레포 폴더': 'Repository folder', '개발 ref': 'Development ref', '운영 ref': 'Production ref',
+  '레포 추가': 'Add repository', '연결 해제': 'Unregister', '저장': 'Save',
+  '선택한 레포가 없습니다. 레포를 골라 실행하세요.': 'Choose a repository before running this action.',
+  '아직 수집하지 않음': 'Not collected yet', '마지막 성공': 'Last success', '수집 실패': 'Collection failed',
+  '설정 변경 후 다시 수집해야 합니다': 'Refresh required after configuration changes',
+  'API 대상 레포': 'API destination repositories', '자동 감지': 'Auto-detect',
+  '웹 소스 폴더': 'Frontend source folder', 'API 소스 폴더': 'Backend source folder',
+  'ref를 비우면 해당 역할을 사용하지 않습니다.': 'Leave a ref empty to disable that role.',
+  '레포를 연결 해제해도 저장된 지도는 남습니다.': 'Unregistering a repository preserves its stored maps.',
+  '사용자가 지정한 레포 연결': 'User-configured repository connection',
+  '레포 사이 연결 후보': 'Cross-repository connection candidates',
+  '주소가 같지만 대상 레포를 확인하지 못했습니다.': 'Matching endpoint; destination repository is unverified.',
+  '전체 보기는 프로젝트의 레포를 함께 표시합니다.': 'All repositories are shown together.',
+
   '버전·업데이트': 'Version & updates', '새 버전 알림': 'New version available',
   '현재 버전': 'Installed version', '최신 공개 버전': 'Latest public version',
   '릴리즈 노트': 'Release notes', '변경 내용 보기': 'View changes', '닫기': 'Close',
@@ -181,6 +200,7 @@ function renderHeader() {
   const emptyProject = $('project').querySelector('[data-empty]');
   if (emptyProject) emptyProject.textContent = tr('(없음)');
   renderUpdates();
+  renderRepositories();
 }
 const RELEASE_PAGE = 'https://github.com/ganggangstone/where-were-we/releases';
 const RELEASE_CACHE = 'where-were-we.release-check';
@@ -269,8 +289,26 @@ function renderPendingActions() {
   }
 }
 async function invokeAction(command, args) {
-  pendingActions.add(command);
-  try { return await invoke(command, args); }
+  let calls = [args];
+  if (S.projectInfo?.repositories?.length) {
+    if (command === 'make_steps') {
+      const by = new Map();
+      for (const row of requests(M(),args.screen)) {
+        const rid=row.route.repository; if (!by.has(rid)) by.set(rid,[]);
+        by.get(rid).push(row.route.file.slice(rid.length+1)+'::'+row.route.function);
+      }
+      calls=[...by].map(([repository, keys])=>({...args,repository,screen:'@routes:'+JSON.stringify(keys)}));
+      if (!calls.length) throw Error(tr('선택한 레포가 없습니다. 레포를 골라 실행하세요.'));
+    } else {
+      const rid=args.node?.split('::')[0] || S.repository || (S.projectInfo.repositories.length===1 ? S.projectInfo.repositories[0].id : '');
+      if (!rid) throw Error(tr('선택한 레포가 없습니다. 레포를 골라 실행하세요.'));
+      calls=[{...args,repository:rid}];
+      if (args.node) calls[0].node=args.node.slice(rid.length+2);
+    }
+  }
+  if (pendingActions.has(command)) return;
+  pendingActions.add(command); renderPendingActions();
+  try { let output=''; for (const call of calls) output+=await invoke(command,call); return output; }
   finally { pendingActions.delete(command); renderPendingActions(); }
 }
 function setLanguage(lang) {
@@ -296,8 +334,9 @@ function visibleScreens(m) {
 const fold = (m, p) => { if (!p || !p.startsWith('/m/')) return p; const t = p.replace(/^\/m/, ''); return m.screens.some(x => x.path === t && !x.redirect) ? t : p; };
 // 화면 이름: 제목(코드 원문) → AI가 붙인 이름(점선) → 주소
 const aiName = (p) => (S.groups && S.groups.names && S.groups.names[p]) || null;
-function label(m, p) { const t = m.screens.find(x => x.path === p); const h = t && t.heading; if (!h) return aiName(p) || p;
+function label(m, p) { const t = m.screens.find(x => x.path === p); const h = t && t.heading; if (t?.repository) return (h || aiName(p) || t.source_path) + ' ['+t.repository+']'; if (!h) return aiName(p) || p;
   // 같은 제목을 쓰는 화면이 여럿이면 주소가 가장 짧은 것만 제목 그대로, 나머지는 주소를 붙인다.
+  if (t?.repository) return (h || aiName(p) || t.source_path) + ' ['+t.repository+']';
   const same = (m._heads ??= m.screens.reduce((o, x) => { if (x.heading && !x.redirect && !x.path.startsWith('/m/')) (o[x.heading] ??= []).push(x.path); return o; }, {}))[h] || [];
   return same.length > 1 && p !== same.slice().sort((a, b) => a.length - b.length)[0] ? h + ' · ' + p : h; }
 const isAi = (m, p) => { const t = m.screens.find(x => x.path === p); return !(t && t.heading) && !!aiName(p); };
@@ -306,7 +345,7 @@ const nameHtml = (m, p) => `<span class="${isAi(m, p) ? 'ai' : ''}">${esc(label(
 function commonVia(m) {
   if (m._cv) return m._cv; const c = {};
   for (const sc of m.screens) { const vs = new Set([...sc.actions.map(a => a.via), ...sc.api_functions.map(a => a.via)].filter(Boolean)); for (const v of vs) c[v] = (c[v] || 0) + 1; }
-  return m._cv = new Set(Object.keys(c).filter(v => c[v] > m.screens.length / 3));
+  return m._cv = new Set(Object.keys(c).filter(v => c[v] > m.screens.filter(sc => !m.multi_repo || sc.repository === v.split('/')[0]).length / 3));
 }
 // 화면 사이 이동 (모바일 접음). common=true 는 메뉴·탭으로 가는 길.
 function edges(m) {
@@ -358,9 +397,9 @@ function requests(m, path) {
   return m._req[path] = rows;
 }
 const reqName = (r) => (S.groups && S.groups.request_names && S.groups.request_names[r.file + '::' + r.function]) || null;
-const reqLabel = (r) => (r.btn && r.btn + (r.btns.length > 1 ? ui` 외 ${r.btns.length - 1}` : '') + (r.dup ? ' · ' + (flowOf(r.route)?.name || reqName(r.route) || r.route.function) : '')) || flowOf(r.route)?.name || reqName(r.route) || r.route.function;
+const reqLabel = (r) => { const value = (r.btn && r.btn + (r.btns.length > 1 ? ui` 외 ${r.btns.length - 1}` : '') + (r.dup ? ' · ' + (flowOf(r.route)?.name || reqName(r.route) || r.route.function) : '')) || flowOf(r.route)?.name || reqName(r.route) || r.route.function; return value + (r.route?.repository ? ' ['+r.route.repository+']' : ''); };
 const reqIsAi = (r) => !r.btn && !!(flowOf(r.route)?.name || reqName(r.route));
-const inMain = (r) => S.maps.main ? S.maps.main.backend_routes.some(x => x.method === r.method && x.path === r.path && x.mounted) : null;
+const inMain = (r) => S.maps.main ? S.maps.main.backend_routes.some(x => x.method === r.method && x.path === r.path && x.mounted && x.repository === r.repository) : null;
 const openWork = (row) => (S.status ? S.status.open_prs : []).filter(p => p.files.includes(row.route.file) || p.files.includes(row.fn.file));
 // 운영·개발 사이에 이 화면이 다른가 (서버 요청 집합 기준)
 function diffOf(path) {
@@ -386,20 +425,77 @@ function vanished(m) { const p = S.prev && S.prev[S.branch]; if (!p || p.commit 
   return p._gone = { from: p.commit.slice(0, 8), to: m.commit.slice(0, 8), screens, reqs }; }
 
 // ---------- 불러오기 ----------
-async function loadProject(p, first = true) {
-  S.project = p; S.maps = {}; S.agentPrompt = null;
-  const read = async (n) => { try { return JSON.parse(await invoke('read_map', { project:p, branch:n })); } catch (e) { return null; } };
-  S.maps.main = await read('main'); S.maps.dev = await read('dev'); S.status = await read('status'); S.groups = await read('groups'); S.flows = await read('flows'); S.system = await read('system'); S.jobs = await read('jobs'); S.changes = await read('changes'); S.prev = { dev: await read('dev.prev'), main: await read('main.prev') };
-  if (!S.maps[S.branch]) S.branch = S.maps.dev ? 'dev' : 'main';
-  render(); if (first) doRefresh();
+async function loadProject(p, first = true, repository = S.project === p ? S.repository : '') {
+  const token = ++S.loadToken; S.desiredProject=p; S.desiredRepository=repository;
+  try {
+    const bundle = JSON.parse(await invoke('read_project', {project:p, repository}));
+    if (token !== S.loadToken) return;
+    S.project = p; S.repository = repository; S.projectInfo = bundle.project;
+    S.maps = {main:bundle.main, dev:bundle.dev}; S.agentPrompt = null;
+    for (const key of ['status','groups','flows','system','jobs','changes']) S[key] = bundle[key];
+    S.prev = {dev:bundle['dev.prev'], main:bundle['main.prev']};
+    if (!S.maps[S.branch] && (S.maps.dev || S.maps.main)) S.branch = S.maps.dev ? 'dev' : 'main';
+    if (!(M()?.screens || []).some(x => x.path === S.sel)) { S.sel = null; S.open = null; S.focus = null; }
+    S.node = null; S.feat = null; S.chi = 0;
+    $('status').textContent = ''; render(); if (first) await doRefresh();
+  } catch (e) { if (token === S.loadToken) $('status').textContent = tr('실패: ') + String(e); }
+}
+async function reloadCurrent() {
+  if (S.desiredProject === S.project && S.desiredRepository === S.repository) await loadProject(S.project,false,S.repository);
 }
 async function doRefresh() {
-  const m = S.maps.dev || S.maps.main; if (!m || !m.repo) { $('status').textContent = tr('지도가 없습니다. extract.py 를 먼저 돌리세요.'); return; }
+  const m = S.maps.dev || S.maps.main;
+  if (!m?.repo && !S.projectInfo?.repositories?.length) { $('status').textContent = tr('지도가 없습니다. extract.py 를 먼저 돌리세요.'); return; }
+  const project = S.project, repository = S.repository;
   $('refresh').disabled = true; $('status').textContent = tr('저장소를 읽는 중…');
-  try { await invoke('refresh', { project:S.project, repo:m.repo, since:'7' }); await loadProject(S.project, false); $('status').textContent = ''; }
-  catch (e) { $('status').textContent = tr('실패: ') + String(e).slice(0, 160); }
-  $('refresh').disabled = false;
+  try {
+    await invoke('refresh', { project, repository, repo:m?.repo || '', since:'7' });
+    if (S.desiredProject === project && S.desiredRepository === repository) await loadProject(project, false, repository);
+  } catch (e) { if (S.desiredProject === project && S.desiredRepository === repository) $('status').textContent = tr('실패: ') + String(e).slice(0,160); }
+  finally { $('refresh').disabled = false; }
 }
+function renderRepositories() {
+  const repos = S.projectInfo?.repositories || []; const bar = $('repository-bar');
+  bar.hidden = !S.project; if (!S.project) return;
+  const current = repos.filter(r => !S.repository || r.id === S.repository);
+  bar.innerHTML = `<select id="repository"><option value="">${tr('전체 레포')}</option>${repos.map(r => `<option value="${esc(r.id)}" ${r.id === S.repository ? 'selected' : ''}>${esc(r.name)}</option>`).join('')}</select><button class="btn quiet" id="manageRepositories">${tr('레포 관리')}</button><span class="s">${current.map(r => `${esc(r.name)}: ${r.error ? `<b>${tr('수집 실패')}</b> ${esc(r.error)}` : !r.collected ? tr('아직 수집하지 않음') : `${esc(r.commits?.[S.branch] || '—')} · ${tr('마지막 성공')} ${r.last_success ? esc(when(r.last_success)) : '—'}`}${r.config_changed ? ' · '+tr('설정 변경 후 다시 수집해야 합니다') : ''}`).join(' | ')}</span>`;
+  $('repository').onchange = () => loadProject(S.project, false, $('repository').value);
+  $('manageRepositories').onclick = () => editProject(false);
+}
+function editProject(create) {
+  const dialog = $('project-dialog');
+  const known = !create && S.projectInfo?.repositories?.length ? S.projectInfo.repositories : [];
+  const old = !create && !known.length ? (S.maps.dev || S.maps.main) : null;
+  const repos = known.map(r => ({...r,path:r.configured_path || r.path}));
+  if (old?.repo) repos.push({id:'original', name:S.project, path:old.repo, refs:{dev:'origin/dev',main:'origin/main'},layout:{},api_targets:[],legacy:true});
+  if (!repos.length) repos.push({id:'',name:'',path:'',refs:{dev:'origin/dev',main:'origin/main'},layout:{},api_targets:[]});
+  dialog.innerHTML = `<h2>${tr(create ? '프로젝트 만들기' : '레포 관리')}</h2><label>${tr('프로젝트 이름')} <input id="projectName" value="${esc(create ? '' : S.project)}" ${create ? '' : 'disabled'}></label><div id="repositoryRows"></div><p class="s">${tr('ref를 비우면 해당 역할을 사용하지 않습니다.')} ${tr('레포를 연결 해제해도 저장된 지도는 남습니다.')}</p><div class="ctl"><button class="btn quiet" id="addRepository">${tr('레포 추가')}</button><span class="spacer"></span><button class="btn quiet" id="cancelProject">${tr('닫기')}</button><button class="btn primary" id="saveProject">${tr('저장')}</button></div><p id="projectError" role="alert"></p>`;
+  function rows() {
+    $('repositoryRows').innerHTML = repos.map((r,i) => `<fieldset data-repository-row="${i}"><div class="repository-fields">${[['id','레포 ID',r.id],['name','레포 이름',r.name],['path','레포 폴더',r.path],['dev','개발 ref',r.refs.dev || ''],['main','운영 ref',r.refs.main || '']].map(([key,label,value]) => `<label>${tr(label)}<input data-field="${key}" value="${esc(value)}" ${key==='id' && known.some(k=>k.id===r.id) ? 'disabled' : ''}></label>`).join('')}</div><details><summary>${tr('API 대상 레포')} · ${tr('웹 소스 폴더')} · ${tr('API 소스 폴더')}</summary><div class="repository-fields">${[['targets','API 대상 레포',(r.api_targets || []).join(', ')],['frontend','웹 소스 폴더',r.layout.frontend || ''],['backend','API 소스 폴더',r.layout.backend || '']].map(([key,label,value]) => `<label>${tr(label)}<input data-field="${key}" value="${esc(value)}" placeholder="${key==='targets' ? 'api, worker' : tr('자동 감지')}"></label>`).join('')}</div><p class="s">${tr('사용자가 지정한 레포 연결')} · ${tr('주소가 같지만 대상 레포를 확인하지 못했습니다.')}</p></details><button class="btn quiet" data-remove="${i}">${tr('연결 해제')}</button></fieldset>`).join('');
+    document.querySelectorAll('[data-remove]').forEach(b=>b.onclick=()=>{collect();repos.splice(+b.dataset.remove,1);rows();});
+  }
+  function collect() {
+    document.querySelectorAll('[data-repository-row]').forEach(row=>{
+      const r = repos[+row.dataset.repositoryRow], value = key => row.querySelector(`[data-field="${key}"]`).value.trim();
+      r.id=value('id');r.name=value('name');r.path=value('path');r.refs={dev:value('dev') || null, main:value('main') || null};
+      r.layout={};for (const key of ['frontend','backend']) if (value(key)) r.layout[key]=value(key);
+      r.api_targets=value('targets').split(',').map(x=>x.trim()).filter(Boolean);
+    });
+  }
+  rows(); $('addRepository').onclick=()=>{collect();repos.push({id:'',name:'',path:'',refs:{dev:'origin/dev',main:'origin/main'},layout:{},api_targets:[]});rows();};
+  $('cancelProject').onclick=()=>dialog.close();
+  $('saveProject').onclick=async()=>{
+    collect(); const name=$('projectName').value.trim(); $('saveProject').disabled=true;
+    try {
+      if (create && [...$('project').options].some(o=>!o.hasAttribute('data-empty') && o.value===name)) throw Error('A project with this name already exists');
+      await invoke('save_project',{project:name, configuration:JSON.stringify({repositories:repos,shared_data:create ? [] : S.projectInfo?.shared_data || []})});
+      const ps=await invoke('list_projects');$('project').innerHTML=ps.map(p=>`<option ${p===name?'selected':''}>${esc(p)}</option>`).join('');
+      dialog.close();await loadProject(name,true,'');
+    } catch(e) {$('projectError').textContent=String(e);$('saveProject').disabled=false;}
+  };
+  dialog.showModal();
+}
+
 
 // ---------- 그리기: 스토리 맵 ----------
 function storyMap(m) {
@@ -414,7 +510,7 @@ function storyMap(m) {
     h += `<div class="col"><h3><span class="${g.ai ? 'ai' : ''}">${esc(g.name)}</span></h3><p>${esc(g.description || '')}</p>`;
     for (const s of g.list) {
       const rs = requests(m, s.path); const tested = rs.filter(r => (r.route.tests || []).length).length; const pct = rs.length ? Math.round(tested / rs.length * 100) : 0;
-      const d = diffOf(s.path); const open = new Set(rs.flatMap(r => openWork(r).map(p => p.number))).size;
+      const d = diffOf(s.path); const open = new Set(rs.flatMap(r => openWork(r).map(p => (p.repository || '')+'#'+p.number))).size;
       const noWay = !hasInbound(m, s.path) && s.path !== '/' && s.path !== '/login';
       const hay = q ? [label(m, s.path), s.path, ...rs.map(reqLabel), ...s.actions.map(a => a.label), ...Object.values(workOf(s.path)).flat().map(x => (x.number ? '#' + x.number + ' ' : '') + (x.title || x.name || ''))].join(' ').toLowerCase() : '';
       const cls = [s.path === S.sel ? 'sel' : '', inSet.has(s.path) ? 'in' : '', outSet.has(s.path) ? 'out' : '', q && !hay.includes(q) ? 'dim' : ''].join(' ');
@@ -435,7 +531,11 @@ function storyMap(m) {
 }
 
 // ---------- 그리기: 인스펙터 ----------
-const zed = (m, file, line) => ui`<a class="lnk mono" data-url="zed://file${m.repo}/${file}:${line}" title="Zed로 열기">${esc(file.split('/').pop())}:${line}</a>`;
+function codeLocation(m,file) {
+  const r = m.repositories?.find(r=>file?.startsWith(r.id+'/'));
+  return r ? r.path+'/'+file.slice(r.id.length+1) : m.repo+'/'+file;
+}
+const zed = (m, file, line) => ui`<a class="lnk mono" data-url="zed://file${codeLocation(m,file)}:${line}" title="Zed로 열기">${m.multi_repo ? esc(file.split('/')[0])+': ' : ''}${esc(file.split('/').pop())}:${line}</a>`;
 function copyText(m, s, row) {
   const L = [ui`화면: ${label(m, s.path)} — ${s.path} (${s.file})`];
   if (row) { L.push(ui`하는 일: ${reqLabel(row)}`, ui`요청: ${row.route.method} ${row.route.path}`, ui`화면 쪽 코드: ${row.fn.file}:${row.call.line}${row.fn.name !== '<inline>' ? ' ' + row.fn.name : ''}`, ui`서버 쪽 코드: ${row.route.file}:${row.route.line} ${row.route.function}`);
@@ -447,7 +547,7 @@ function inspector(m) {
   if (!S.sel) return ui`<div class="hint">화면 카드를 누르면<br>그 화면으로 오가는 길, 서버에 하는 일,<br>누르면 생기는 일의 순서, 검증 상태가 여기 나옵니다.</div>`;
   if (S.sel === '!orphans') return ui`<h2>아무 화면도 안 부르는 서버 기능</h2><p class="sub">서버에는 있는데 화면의 어느 요청과도 짝이 없다. 만들다 만 것이거나 다른 프로그램이 쓰는 것일 수 있다.</p><div class="sect"><div class="group">` +
     m.backend_routes_without_screen.map(r => `<div class="row"><div class="grow"><div class="t"><span class="${flowOf(r)?.name || reqName(r) ? 'ai' : ''}">${esc(flowOf(r)?.name || reqName(r) || r.function)}</span></div><div class="s mono">${esc(r.method)} ${esc(r.path)}</div></div>${zed(m, r.file, r.line)}</div>`).join('') + `</div></div>`;
-  if (S.sel === '!unres') return ui`<h2>받는 곳을 못 찾은 요청</h2><p class="sub">화면이 보내는 요청인데 주소가 코드에서 조립돼 어느 서버 기능으로 가는지 정해지지 않는다.</p><div class="sect"><div class="group">` +
+  if (S.sel === '!unres') return (m.connection_candidates?.length ? ui`<h4>레포 사이 연결 후보</h4><p class="sub">주소가 같지만 대상 레포를 확인하지 못했습니다.</p><div class="group">${m.connection_candidates.map(c=>`<div class="row"><div class="grow">${esc(c.repository)} → ${esc(c.targets.map(t=>t.repository).join(', '))}<div class="s mono">${esc(c.method)} ${esc(c.path)}</div></div></div>`).join('')}</div>` : '') + ui`<h2>받는 곳을 못 찾은 요청</h2><p class="sub">화면이 보내는 요청인데 주소가 코드에서 조립돼 어느 서버 기능으로 가는지 정해지지 않는다.</p><div class="sect"><div class="group">` +
     m.unresolved_calls.map(u => `<div class="row"><div class="grow"><div class="t mono">${esc(u.method)} ${esc(u.path ?? u.raw)}</div><div class="s mono">${esc(u.api_function.split('/').pop())}:${u.line}</div></div></div>`).join('') + `</div></div>`;
   const gh = (n, title, url, extra) => `<div class="row click" data-url="${esc(url)}"><div class="grow"><div class="t">#${n} ${esc(title)}</div>${extra ? `<div class="s">${extra}</div>` : ''}</div><span class="chev">↗</span></div>`;
   if (S.sel === '!issues') { const un = (S.status.issues || []).filter(i => !i.screens.length);
@@ -461,7 +561,7 @@ function inspector(m) {
   const rs = requests(m, s.path).slice().sort((a, b) => (!!b.btn - !!a.btn) || reqLabel(a).localeCompare(reqLabel(b)));
   const tested = rs.filter(r => (r.route.tests || []).length).length; const made = rs.filter(r => flowOf(r.route)).length;
   const way = (e, other, arrow) => `<div class="row click" data-scr="${esc(other)}"><span class="arrow">${arrow}</span><div class="grow"><div class="t">${nameHtml(m, other)}</div><div class="s">${e.common ? tr('메뉴에서') : esc(e.label || tr('아이콘 버튼'))}${e.cond ? tr(' · 조건에 따라') : ''}</div></div></div>`;
-  let h = ui`<div class="head"><div class="grow"><h2>${nameHtml(m, s.path)}</h2><p class="sub mono">${esc(s.path)}</p></div>${S.view === 'focus' ? '' : ui`<button class="btn quiet" data-f="screen|${esc(s.path)}">이어진 것 보기</button>`}<button class="btn" id="copyS">복사</button></div>`;
+  let h = ui`<div class="head"><div class="grow"><h2>${nameHtml(m, s.path)}</h2><p class="sub mono">${esc(s.source_path || s.path)}${s.repository ? ' · '+esc(s.repository) : ''}</p></div>${S.view === 'focus' ? '' : ui`<button class="btn quiet" data-f="screen|${esc(s.path)}">이어진 것 보기</button>`}<button class="btn" id="copyS">복사</button></div>`;
   h += ui`<div class="sect"><h4>여기로 오는 길 ${ins.length} · 여기서 가는 길 ${outs.length}</h4><div class="group">` +
     (insAll.length || outsAll.length || unk ? ins.map(e => way(e, e.from, '←')).join('') + outs.map(e => way(e, e.to, '→')).join('') +
       (menuIn || menuOut ? ui`<div class="row"><span class="arrow">≡</span><div class="grow"><div class="t">메뉴와 탭</div><div class="s">${menuIn ? tr('메뉴에서 여기로 올 수 있다') : tr('메뉴에는 이 화면이 없다')}${menuOut ? ui` · 메뉴로 ${menuOut}곳에 갈 수 있다` : ''}</div></div></div>` : '') + (unk ? ui`<div class="row"><span class="arrow">?</span><div class="grow"><div class="t">어디로 가는지 코드만으로 못 정한 이동 ${unk}개</div></div></div>` : '')
@@ -491,6 +591,7 @@ function detail(m, s, r) {
   const f = flowOf(r.route); const rt = r.route; const ins = (rt.inputs || []).map(i => i.split(':')[0]);
   let h = `<div class="detail"><div class="flowline">${ins.length ? ins.map(i => `<span class="pill">${esc(i)}</span>`).join('') : tr('<span class="pill">입력 없음</span>')}<span class="arrow">→</span><span class="pill ai">${esc(reqLabel(r))}</span><span class="arrow">→</span>` +
     ((rt.tables || []).map(t => ui`<span class="pill ok click" data-f="table|${esc(t)}" title="이 저장소를 쓰는 곳 보기">${esc(t)}</span>`).join('') + (rt.externals || []).map(t => ui`<span class="pill warn" title="외부 서비스">${esc(t)}</span>`).join('') || tr('<span class="pill">저장·외부 없음</span>')) + `</div>`;
+  if (r.call?.connection_basis === 'configured') h += ui`<div class="empty">사용자가 지정한 레포 연결 · ${esc(rt.repository)}</div>`;
   const files = [rt.file, ...(rt.services || [])]; const other = copyDiffs().filter(d => files.includes(d.path));
   if (other.length) h += ui`<div class="empty">${esc(other[0].node.name)} 안에는 이 요청이 거치는 파일의 다른 판이 있다: ${[...new Set(other.map(d => d.path.split('/').pop()))].map(esc).join(', ')} (${new Set(other.map(d => d.branch)).size}개 사본)</div>`;
   for (const { node, job, exact } of jobsOf(r.key)) h += ui`<div class="sect"><h4>이 요청 뒤에 ${esc(node.name)}이 이어서 하는 일${exact ? '' : tr(' (같은 서비스 파일을 거쳐서 이어진 것으로 추정)')}</h4><div class="tw"><b class="strong">${esc(job.name)}</b> ${esc(job.what)}</div><div class="s">시작: ${esc(job.starts_when)}</div>${job.steps.map((st, i) => `<div class="step l${st.lane === '저장소' ? 2 : st.lane === '외부' ? 3 : 1}"><span class="n">${i + 1}</span><div class="grow"><div class="tx">${esc(st.text)}</div><div class="s">${zed(m, st.file, st.line)}</div></div></div>`).join('')}</div>`;
@@ -505,7 +606,7 @@ function detail(m, s, r) {
       ui`<div class="ctl"><button class="btn quiet" id="prev">◀</button><button class="btn quiet" id="next">다음 ▶</button><span>${S.step >= 0 ? `${S.step}/${steps.length - 1}` : tr('한 단계씩 보기')}</span><span class="spacer"></span><span class="ai">AI가 쓴 문장</span><span>· 근거 줄 대조 통과</span></div>`;
   } else h += ui`<div class="empty">누르면 생기는 일의 순서는 아직 만들지 않았다. 아래 버튼으로 만든다.</div>`;
   h += ui`<details><summary>연결된 코드</summary><div class="kv mono">${esc(rt.method)} ${esc(rt.path)}</div><div class="kv">화면 쪽 ${zed(m, r.fn.file, r.call.line)} · 서버 쪽 ${zed(m, rt.file, rt.line)} <span class="mono">${esc(rt.function)}</span></div>
-    <div class="kv">${(rt.tests || []).length ? ui`자동 테스트 ${rt.tests.length}개: <span class="mono">${rt.tests.map(t => esc(t.split('/').pop())).join(', ')}</span>` : ui`<b>테스트 코드가 안 보인다면?</b> 지도는 정해 둔 규칙으로만 테스트를 잇는다. 에이전트에게 찾게 하는 글을 복사해 붙여 넣으면, 에이전트가 테스트를 찾아 규칙을 고치거나 하나씩 남긴다. <button class="btn quiet" data-tp="${esc(rt.method + ' ' + rt.path + ' (' + rt.file + '::' + rt.function + ')')}">프롬프트 복사</button><span id="tpDone"></span>`}</div></details>
+    <div class="kv">${(rt.tests || []).length ? ui`자동 테스트 ${rt.tests.length}개: <span class="mono">${rt.tests.map(t => esc(t.split('/').pop())).join(', ')}</span>` : ui`<b>테스트 코드가 안 보인다면?</b> 지도는 정해 둔 규칙으로만 테스트를 잇는다. 에이전트에게 찾게 하는 글을 복사해 붙여 넣으면, 에이전트가 테스트를 찾아 규칙을 고치거나 하나씩 남긴다. <button class="btn quiet" data-repository="${esc(rt.repository || '')}" data-tp="${esc(rt.method + ' ' + rt.path + ' (' + rt.file + '::' + rt.function + ')')}">프롬프트 복사</button><span id="tpDone"></span>`}</div></details>
     <div class="ctl"><button class="btn quiet" data-copy="${esc(r.key)}">이 일 복사</button>${S.focus && S.focus.t === 'route' ? '' : ui`<button class="btn plain" data-f="route|${esc(r.key)}">이 서버 기능을 쓰는 화면 ${users}곳</button>`}<span id="copied"></span></div></div>`;
   return h;
 }
@@ -593,8 +694,8 @@ function changesView(m) {
   const c = S.changes; if (!c || !c.entries.length) return ui`<div class="hint">아직 기록이 없습니다.<br>↻ 새로고침을 누르면 지난 새로고침 뒤에 달라진 것이 여기에 쌓입니다.</div>`;
   const e = c.entries[Math.min(S.chi, c.entries.length - 1)]; const b = e.branches[S.branch];
   let h = ui`<div class="legend"><span>새로고침할 때마다 지난 새로고침 뒤에 달라진 것을 한 건씩 남긴다. 마지막 새로고침 ${when(c.last_refresh)}</span></div>
-    <div class="flowline">${c.entries.slice(0, 12).map((x, i) => `<span class="pill ${i === S.chi ? 'strong' : ''} click" data-chi="${i}">${when(x.at)}</span>`).join('')}</div>
-    <h2>${when(e.since)} 이후</h2><p class="sub">들어온 PR ${e.prs.length}${b ? ui` · ${S.branch === 'dev' ? tr('개발') : tr('운영')} 브랜치 <span class="mono">${esc(b.from)} → ${esc(b.to)}</span>` : ui` · ${S.branch === 'dev' ? tr('개발') : tr('운영')} 브랜치 코드는 이 사이에 그대로`}</p>`;
+    <div class="flowline">${c.entries.slice(0, 12).map((x, i) => `<span class="pill ${i === S.chi ? 'strong' : ''} click" data-chi="${i}">${x.repository ? esc(x.repository)+' · ' : ''}${when(x.at)}</span>`).join('')}</div>
+    <h2>${e.repository ? esc(e.repository)+' · ' : ''}${when(e.since)} 이후</h2><p class="sub">들어온 PR ${e.prs.length}${b ? ui` · ${S.branch === 'dev' ? tr('개발') : tr('운영')} 브랜치 <span class="mono">${esc(b.from)} → ${esc(b.to)}</span>` : ui` · ${S.branch === 'dev' ? tr('개발') : tr('운영')} 브랜치 코드는 이 사이에 그대로`}</p>`;
   const go = (p, name) => `<span class="pill click" data-goscr="${esc(p)}">${esc(name || label(m, p))}</span>`;
   const sect = (title, items, row) => items && items.length ? `<div class="sect"><h4>${title} ${items.length}</h4><div class="group">${items.map(row).join('')}</div></div>` : '';
   if (b) { h += ui`<div class="sect"><h4>구조가 달라진 것</h4></div>`;
@@ -756,8 +857,8 @@ function render() {
   document.querySelectorAll('[data-f]').forEach(el => el.onclick = (e) => { e.stopPropagation(); setFocus(el.dataset.f); });
   if ($('unfocus')) $('unfocus').onclick = () => { S.focus = null; render(); };
   $('map').scrollTop = top; $('map').scrollLeft = left; $('insp').scrollTop = itop;
-  if ($('mkJobs')) $('mkJobs').onclick = async () => { const b = $('mkJobs'); b.disabled = true; $('jobslog').textContent = tr('에이전트가 코드를 읽는 중… 몇 분'); try { await invokeAction('make_jobs', { project: S.project, node: b.dataset.node }); await loadProject(S.project, false); } catch (e) { $('jobslog').textContent = tr('실패: ') + String(e).slice(0, 160); b.disabled = false; } };
-  if ($('remakeSys')) $('remakeSys').onclick = async () => { $('remakeSys').disabled = true; $('status').textContent = tr('에이전트가 저장소를 읽는 중… 몇 분'); try { await invokeAction('make_system', { project: S.project }); await loadProject(S.project, false); $('status').textContent = ''; } catch (e) { $('status').textContent = tr('실패: ') + String(e).slice(0, 160); $('remakeSys').disabled = false; } };
+  if ($('mkJobs')) $('mkJobs').onclick = async () => { const b = $('mkJobs'); b.disabled = true; $('jobslog').textContent = tr('에이전트가 코드를 읽는 중… 몇 분'); try { await invokeAction('make_jobs', { project: S.project, node: b.dataset.node }); await reloadCurrent(); } catch (e) { $('jobslog').textContent = tr('실패: ') + String(e).slice(0, 160); b.disabled = false; } };
+  if ($('remakeSys')) $('remakeSys').onclick = async () => { $('remakeSys').disabled = true; $('status').textContent = tr('에이전트가 저장소를 읽는 중… 몇 분'); try { await invokeAction('make_system', { project: S.project }); await reloadCurrent(); $('status').textContent = ''; } catch (e) { $('status').textContent = tr('실패: ') + String(e).slice(0, 160); $('remakeSys').disabled = false; } };
   if (sys && S.system) { S._wires = sysLinks(S.system).map((l, i) => ({ ...l, n: i + 1, dim: !!S.node && l.from !== S.node && l.to !== S.node })); drawWires(); document.querySelectorAll('[data-node]').forEach(el => el.onclick = () => { S.node = S.node === el.dataset.node ? null : el.dataset.node; render(); });
     if ($('toMap')) $('toMap').onclick = () => { S.view = 'map'; render(); } }
   const pick = (p) => { S.agentPrompt = null; if (view === 'focus') return setFocus('screen|' + p); S.sel = p; S.open = null; S.step = -1; S.ev = -1; render(); $('insp').scrollTop = 0; };
@@ -775,11 +876,11 @@ function render() {
   if ($('copyS')) $('copyS').onclick = () => copy(copyText(m, s), $('copyS'));
   // 테스트가 안 이어진 서버 기능: 에이전트에게 테스트를 찾게 하는 글(mapcore.tests_prompt)을 복사한다
   document.querySelectorAll('[data-tp]').forEach(b => b.onclick = async () => {
-    try { await navigator.clipboard.writeText(await invoke('tests_prompt', { project: S.project, route: b.dataset.tp, lang: S.lang })); $('tpDone').textContent = tr(' 복사됨'); }
+    try { await navigator.clipboard.writeText(await invoke('tests_prompt', { project: S.project, route: b.dataset.tp, lang: S.lang, repository: b.dataset.repository || S.repository })); $('tpDone').textContent = tr(' 복사됨'); }
     catch (err) { $('tpDone').textContent = tr(' 복사하지 못했다: ') + err; } });
   document.querySelectorAll('[data-copy]').forEach(b => b.onclick = () => copy(copyText(m, s, rows.find(x => x.key === b.dataset.copy)), b));
-  if ($('mk')) $('mk').onclick = async () => { $('mk').disabled = true; $('mklog').textContent = tr('에이전트가 코드를 읽는 중… 1~2분'); try { await invokeAction('make_steps', { project:S.project, branch:S.branch, screen:s.path }); await loadProject(S.project, false); } catch (e) { $('mklog').textContent = tr('실패: ') + String(e).slice(0, 160); $('mk').disabled = false; } };
-  if ($('regroup')) $('regroup').onclick = async () => { $('regroup').disabled = true; $('status').textContent = tr('묶음과 이름을 제안받는 중…'); try { await invokeAction('suggest_groups', { project:S.project, branch:S.branch }); await loadProject(S.project, false); $('status').textContent = ''; } catch (e) { $('status').textContent = tr('실패: ') + String(e).slice(0, 160); } };
+  if ($('mk')) $('mk').onclick = async () => { $('mk').disabled = true; $('mklog').textContent = tr('에이전트가 코드를 읽는 중… 1~2분'); try { await invokeAction('make_steps', { project:S.project, branch:S.branch, screen:s.path }); await reloadCurrent(); } catch (e) { $('mklog').textContent = tr('실패: ') + String(e).slice(0, 160); $('mk').disabled = false; } };
+  if ($('regroup')) $('regroup').onclick = async () => { $('regroup').disabled = true; $('status').textContent = tr('묶음과 이름을 제안받는 중…'); try { await invokeAction('suggest_groups', { project:S.project, branch:S.branch }); await reloadCurrent(); $('status').textContent = ''; } catch (e) { $('status').textContent = tr('실패: ') + String(e).slice(0, 160); } };
   renderPendingActions();
   if (S.agentPrompt != null) renderAgentPrompt();
 }
@@ -796,6 +897,7 @@ function renderAgentPrompt() {
 $('agent').onclick = async () => { try { S.agentPrompt = await invoke('setup_prompt', {lang: S.lang}); } catch (e) { S.agentPrompt = tr('프롬프트를 만들지 못했다: ') + e; } renderAgentPrompt(); };
 document.querySelectorAll('#branch button').forEach(b => b.onclick = () => { if (S.maps[b.dataset.b]) { S.agentPrompt = null; S.branch = b.dataset.b; S.open = null; render(); } });
 document.querySelectorAll('#view button').forEach(b => b.onclick = () => { S.agentPrompt = null; S.view = b.dataset.v; render(); });
+$('newProject').onclick = () => editProject(true);
 $('project').onchange = () => loadProject($('project').value);
 $('updates').onclick = () => { renderUpdates(); $('release-dialog').showModal(); };
 (async () => {

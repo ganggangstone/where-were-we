@@ -6,10 +6,12 @@
 에이전트가 쓴 단계마다 줄 번호와 원문 토막을 요구하고, 그 줄(±2)에 그 토막이 실제로 있는지 대조한다. 없으면 그 단계는 싣지 않는다.
 """
 import hashlib, json, os, re, subprocess, sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import mapcore
 
 PROJECT, BRANCH, SCREEN = sys.argv[1], sys.argv[2], sys.argv[3]
 LIMIT = int(sys.argv[4]) if len(sys.argv) > 4 else 12
-HOME = os.path.expanduser("~/.where-were-we/" + PROJECT)
+HOME = mapcore.project_home(PROJECT)
 m = json.load(open(os.path.join(HOME, f"{BRANCH}.json")))
 REPO, COMMIT = m["repo"], m["commit"]
 FLOWS = os.path.join(HOME, "flows.json")
@@ -59,6 +61,11 @@ for p in parts:
                 r = route_index.get((b["file"], b["line"]))
                 if r and r["function"]:
                     targets[r["file"] + "::" + r["function"]] = r
+
+if SCREEN.startswith('@routes:'):
+    keys=json.loads(SCREEN[len('@routes:'):])
+    targets={r['file']+'::'+r['function']:r for r in m['backend_routes'] if r.get('function') and r['file']+'::'+r['function'] in keys}
+    if len(targets)!=len(set(keys)):raise ValueError('Some requested routes are not in this repository snapshot')
 
 todo = []
 for key, r in sorted(targets.items()):

@@ -58,7 +58,8 @@ class PromptPaths(unittest.TestCase):
             function = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == name)
             function.decorator_list = []
             scope = dict(subprocess=process, sys=sys, mapcore=mapcore, os=os, HERE='/bundled backend',
-                         need=lambda project: project, changes=lambda project: '')
+                         need=lambda project: project, changes=lambda project: '',
+                         project_store=SimpleNamespace(config=lambda project: None))
             exec(compile(ast.Module(body=[function], type_ignores=[]), filename, 'exec'), scope)
             if name == 'run': scope[name]('/bundled backend/extract.py', 'fake')
             else: scope[name]('fake')

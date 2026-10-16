@@ -9,6 +9,7 @@ import json, os, subprocess, sys
 from datetime import datetime
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
 import mapcore
+import project as project_store
 from mcp.server import MCPServer
 
 INSTRUCTIONS = """이 서버는 대상 서비스의 구조 지도(화면, 서버 기능, 저장소, 서버 밖 프로그램, 열린 작업)를 알려 준다. 지도는 git 에서 계산하고, AI 가 적은 부분은 근거 줄을 대조한 것만 담는다.
@@ -32,6 +33,16 @@ def need(project):
     return p
 
 
+def scoped_map(name, repository=""):
+    bundle = project_store.read_bundle(name, repository)
+    data = bundle.get("dev") or bundle.get("main") or {}
+    if bundle['project']['repositories'] and not data:data={'repositories':bundle['project']['repositories'],'multi_repo':True}
+    return mapcore.Map(name, data=data, bundle=bundle)
+
+def scope_notes(m):
+    return [f"- {r['id']}: {r.get('commits', {})}; " + (f"FAILED: {r['error']} (last successful data retained)" if r.get('error') else "not collected" if not r.get('collected') else "collected") for r in m.m.get("repositories", [])]
+
+
 def ago(iso):
     try: d = datetime.now(datetime.fromisoformat(iso).tzinfo) - datetime.fromisoformat(iso.replace("Z", "+00:00"))
     except Exception: return ""
@@ -43,15 +54,19 @@ def ago(iso):
 def projects() -> str:
     out = []
     for p in mapcore.projects():
-        m = mapcore.Map(p); ch = mapcore._read(p, "changes") or {}
+        m = scoped_map(p); ch = project_store.read_bundle(p).get("changes") or {}
+        if m.m.get("multi_repo"):
+            out.append(f"- {p}: repositories " + ", ".join(r["id"] for r in m.m.get("repositories", [])))
+            out += scope_notes(m)
+            continue
         out.append(f"- {p}: 개발 {m.m.get('commit', '?')[:8]}, 마지막 새로고침 {ago(ch['last_refresh']) if ch.get('last_refresh') else '기록 없음'}, 저장소 {m.m.get('repo', '?')}")
     return "\n".join(out) or "지도가 없다."
 
 
 @app.tool(description="서비스 전체: 따로 켜지는 프로그램과 그 사이의 선, 바깥 서비스, 기능 묶음, 확인 못 한 것.")
-def overview(project: str = "") -> str:
-    m = mapcore.Map(need(project)); y = m.system or {}
-    L = [f"# {m.project} (개발 브랜치 {m.m.get('commit', '?')[:8]})", "", "## 프로그램"]
+def overview(project: str = "", repository: str = "") -> str:
+    m = scoped_map(need(project), repository); y = m.system or {}
+    L = [f"# {m.project} (개발 브랜치 {m.m.get('commit', '?')[:8]})", *scope_notes(m), "", "## 프로그램"]
     for n in y.get("nodes", []):
         L.append(f"- {n['name']} [{n['kind']}{', ' + n['origin'] if n.get('origin') else ''}]: {n.get('what', '')}" + (f" (코드: {', '.join(n['code'])})" if n.get("code") else ""))
     nm = {n["id"]: n["name"] for n in y.get("nodes", [])}
@@ -64,12 +79,15 @@ def overview(project: str = "") -> str:
 
 
 @app.tool(description="지난 새로고침 뒤에 달라진 것. back=0 이 가장 최근, 1 이 그 전. 들어온 PR 과 그것이 닿는 기능 묶음·화면, 화면·서버 요청·화면 사이 길의 변화.")
-def changes(project: str = "", back: int = 0) -> str:
-    p = need(project); ch = mapcore._read(p, "changes") or {}
+def changes(project: str = "", back: int = 0, repository: str = "") -> str:
+    p = need(project)
+    if project_store.config(p) and not repository:
+        return "\n\n".join("# Repository " + r["id"] + "\n" + changes(p, back, repository=r["id"]) for r in project_store.config(p)["repositories"])
+    ch = project_store.read_bundle(p, repository).get("changes") or {}
     es = ch.get("entries", [])
-    if not es: return "기록이 없다. refresh 를 부르면 생긴다."
+    if not es: return "기록이 없다. refresh 를 부르면 생긴다.\n" + "\n".join(scope_notes(scoped_map(p, repository)))
     e = es[min(back, len(es) - 1)]
-    L = [f"# {e['since'][:16]} → {e['at'][:16]} (마지막 새로고침 {ago(ch['last_refresh'])})"]
+    L = [f"# {e.get('repository', '')} {e['since'][:16]} → {e['at'][:16]} (마지막 새로고침 {ago(ch['last_refresh'])})"]
     for b, d in e["branches"].items():
         L += ["", f"## {b} 브랜치 {d['from']} → {d['to']}"]
         for k, t in (("screens_added", "새 화면"), ("screens_removed", "사라진 화면")):
@@ -91,16 +109,29 @@ def changes(project: str = "", back: int = 0) -> str:
 
 
 @app.tool(description="고치기 전에 영향 보기. target 에 파일 경로(frontend/…, backend/…, scripts/…), 화면 주소나 이름, 저장소(테이블) 이름, 서버 주소(예: POST /projects/{}/start) 중 하나를 넣는다.")
-def impact(target: str, project: str = "") -> str:
-    m = mapcore.Map(need(project)); t = target.strip(); L = []
+def impact(target: str, project: str = "", repository: str = "") -> str:
+    project_name = need(project); m = scoped_map(project_name, repository); screen_lookup=m; t = target.strip(); L = []
+    if repository and project_store.config(project_name):
+        m = scoped_map(project_name)
+        if "/" in t and "." in os.path.basename(t) and not t.startswith(repository+"/"):t=repository+"/"+t
+        elif repository+"::"+t in set(m.m.get('models',{}).values()) | set(m.table_use()):t=repository+"::"+t
+        elif any(member['repository']==repository and member['table']==t for store in project_store.config(project_name).get('shared_data',[]) for member in store['members']):
+            t=next('shared::'+store['id'] for store in project_store.config(project_name)['shared_data'] if any(member['repository']==repository and member['table']==t for member in store['members']))
+        elif t.startswith('/') and t not in screen_lookup.by_path:
+            qualified=project_store.qscreen(repository,t)
+            if qualified in m.by_path:t=qualified
+            else:return "No matching screen in repository " + repository
     rows = [(x["path"], r) for x, _ in m.visible() for r in m.requests(x["path"])]
+    untested_repositories = set()
     untested = []  # 이 답에 나온 서버 기능 중 테스트를 잇지 못한 것
     def route_lines(rs):
         out = []
         for key in dict.fromkeys(r["key"] for _, r in rs):
             r = next(r for _, r in rs if r["key"] == key); rt = r["route"]
-            scr = sorted({m.label(p) for p, x in rs if x["key"] == key})
-            if not rt.get("tests"): untested.append(f"{rt['method']} {rt['path']} ({rt['file']}::{rt['function']})")
+            scr = sorted({m.label(p) if p else "(no mapped screen)" for p, x in rs if x["key"] == key})
+            if not rt.get("tests"):
+                untested.append(f"{rt['method']} {rt['path']} ({rt['file']}::{rt['function']})")
+                if rt.get("repository"):untested_repositories.add(rt["repository"])
             out.append(f"- {r['name']} `{rt['method']} {rt['path']}` ({rt['file']}:{rt['line']}) 화면 {', '.join(scr)}; 저장소 {', '.join(rt.get('tables') or []) or '없음'}; 바깥 {', '.join(rt.get('externals') or []) or '없음'}; 테스트 " + (str(len(rt['tests'])) if rt.get('tests') else '안 보임(아래 안내)'))
             for name, j, exact in m.jobs_of(key):
                 out.append(f"  - 이 요청 뒤에 {name}에서 이어서 하는 일: {j['name']} — 시작 조건: {j['starts_when']}" + ("" if exact else " (추정)"))
@@ -110,14 +141,16 @@ def impact(target: str, project: str = "") -> str:
         fs = m.m.get("file_screens", {}).get(t, [])
         screens |= set(fs)
         rs = [(p, r) for p, r in rows if r["route"]["file"] == t or t in (r["route"].get("services") or [])]
+        present={r['key'] for _,r in rs}
+        rs += [(None,{'key':r['file']+'::'+str(r.get('function')),'name':m.req_name(r),'route':r,'btns':[]}) for r in m.m.get('backend_routes',[]) if (r['file']==t or t in r.get('services',[])) and r['file']+'::'+str(r.get('function')) not in present]
         o = m.owner_of(t)
         L.append(f"# 파일 {t}" + (f" — {o['name']}의 코드" if o else ""))
         if fs: L.append(f"닿는 화면 {len(fs)}: " + ", ".join(m.label(p) for p in fs[:20]) + (" …" if len(fs) > 20 else ""))
         if rs: L += ["", "## 이 파일을 거치는 서버 기능"] + route_lines(rs)
         cd = [(b, n["name"]) for f, b, n in m.copy_diffs() if f == t]
         if cd: L.append(f"\n주의: {cd[0][1]} 안에 이 파일의 다른 판이 있다 (사본 {', '.join(b for b, _ in cd)}). 고치면 두 판이 갈라진다.")
-    elif (tu := m.table_use()) and t in tu:
-        u = tu[t]; L.append(f"# 저장소 {t}")
+    elif t in (set(m.table_use()) | set(m.m.get("models",{}).values())):
+        tu=m.table_use(); u = tu.get(t, {"w":{},"r":{}}); L.append(f"# 저장소 {t}")
         L.append("바꾸는 화면: " + (", ".join(m.label(p) for p in u["w"]) or "없음"))
         L.append("읽는 화면: " + (", ".join(m.label(p) for p in u["r"]) or "없음"))
         progs = [n["name"] for n in m.nodes() if t in (n.get("tables") or [])]
@@ -125,15 +158,20 @@ def impact(target: str, project: str = "") -> str:
         L += ["", "## 서버 기능"] + route_lines([(p, r) for p, r in rows if t in (r["route"].get("tables") or [])])
     elif t.split(" ")[0].upper() in ("GET", "POST", "PUT", "PATCH", "DELETE"):
         meth, path = t.split(" ", 1)
-        rs = [(p, r) for p, r in rows if r["route"]["method"] == meth.upper() and r["route"]["path"] == path.strip()]
+        rs = [(p, r) for p, r in rows if r["route"]["method"] == meth.upper() and r["route"]["path"] == path.strip() and (not repository or r["route"].get("repository")==repository)]
+        if not rs:
+            rs=[(None,{'key':r['file']+'::'+str(r['function']),'name':m.req_name(r),'route':r,'btns':[]}) for r in m.m.get('backend_routes',[]) if r['method']==meth.upper() and r['path']==path.strip() and (not repository or r.get('repository')==repository)]
+        if not repository and len({r['route'].get('repository') for _,r in rs})>1:raise ValueError('Ambiguous request; specify repository')
         L.append(f"# 서버 기능 {t}"); L += route_lines(rs) or ["화면에서 부르는 곳이 없다."]
-    elif (p := m.find_screen(t)):
+    elif (p := screen_lookup.find_screen(t)):
         screens.add(p); L.append(f"# 화면 {m.label(p)} ({p}) — 묶음 {m.group_of(p) or '없음'}")
         es = [e for e in m.edges() if not e["menu"]]
         L.append("오는 화면: " + (", ".join(f"{m.label(e['from'])}({e['label'] or '아이콘'})" for e in es if e["to"] == p) or "없음"))
         L.append("가는 화면: " + (", ".join(f"{m.label(e['to'])}({e['label'] or '아이콘'})" for e in es if e["from"] == p) or "없음"))
         L += ["", "## 서버 기능"] + route_lines([(p, r) for r in m.requests(p)])
     else:
+        candidates = [c for c in m.m.get("connection_candidates", []) if t in (c.get("path"), c.get("method", "") + " " + c.get("path", ""))]
+        if candidates: return "Unverified cross-repository candidates (not confirmed calls):\n" + json.dumps(candidates, ensure_ascii=False)
         return f"'{t}' 를 지도에서 찾지 못했다. find 로 먼저 찾는다."
     work = {k: [] for k in ("open", "branches", "folders", "issues", "merged")}
     for s in screens:
@@ -145,24 +183,40 @@ def impact(target: str, project: str = "") -> str:
         L += [f"- 이 맥 작업 폴더 {x['path']} ({x['branch']}, 커밋 안 한 변경 {len(x['uncommitted'])})" for x in work["folders"]]
         L += [f"- 이슈 #{x['number']} {x['title']}" + (" (후보)" if x["via"] == "text" else "") for x in work["issues"]]
         L += [f"- 최근 병합 #{x['number']} {x['title']}" for x in work["merged"][:8]]
+    if m.m.get("multi_repo"):
+        L += ["", "## Repository freshness", *scope_notes(m)]
+        if any(r.get("connection_basis") == "configured" for _, r in rows): L.append("Cross-repository destinations are user-configured, not code-proven.")
+        candidates = m.m.get("connection_candidates", [])
+        if candidates: L += ["", "Unverified cross-repository candidates: " + json.dumps(candidates,ensure_ascii=False)]
     if untested:
-        L += ["", mapcore.tests_prompt(m.project, list(dict.fromkeys(untested))[:15])]
+        if project_store.config(project_name):
+            for rid in sorted(untested_repositories):
+                if rid:L += ["",mapcore.tests_prompt(m.project, [t for t in dict.fromkeys(untested) if '('+rid+'/' in t][:15],repository=rid)]
+        else:L += ["", mapcore.tests_prompt(m.project, list(dict.fromkeys(untested))[:15])]
     return "\n".join(L)
 
 
 @app.tool(description="테스트 찾는 규칙 고치기. files 는 테스트 파일 이름 모양(예: test_*.py), calls 는 테스트가 서버 기능을 부르는 모양(자리 <method> <path> <function> <module>). 지금 규칙을 모두 다시 넘긴다. 저장한 뒤 refresh 로 결과를 본다.")
-def set_test_rules(files: list[str], calls: list[str], project: str = "") -> str:
+def set_test_rules(files: list[str], calls: list[str], project: str = "", repository: str = "") -> str:
     p = need(project); home = os.path.join(mapcore.ROOT, p)
     for t in calls: mapcore.call_regex(t)  # 틀린 모양이면 여기서 ValueError 로 돌려보낸다
     if not files or not calls: raise ValueError("files 와 calls 가 비어 있으면 안 된다")
+    if project_store.config(p):
+        def update(raw, repo):
+            value = raw.get("tests") or {}; value.update(files=files, calls=calls); raw["tests"] = value
+        project_store.mutate_tests(p, repository, update)
+        return "Saved test rules for the selected repository; refresh to apply."
     path = os.path.join(home, "tests.json"); c = json.load(open(path)) if os.path.exists(path) else {}
     c.update(files=files, calls=calls); json.dump(c, open(path, "w"), ensure_ascii=False, indent=1)
     return f"저장했다. 테스트 파일 {files}, 부르는 모양 {calls}. refresh 를 부르면 이 규칙으로 다시 뽑는다."
 
 
 @app.tool(description="규칙으로 안 잡히는 테스트 하나를 지도에 남기기. route 는 서버 기능(예: DELETE /generations/{}), file 은 테스트 파일, line 은 그 테스트에서 서버 기능을 부르는 줄 번호, quote 는 그 줄의 글자를 그대로(6자 이상). 그 줄에 그 글자가 없으면 저장하지 않는다.")
-def record_test(route: str, file: str, line: int, quote: str, project: str = "") -> str:
-    p = need(project); m = mapcore.Map(p); home = os.path.join(mapcore.ROOT, p)
+def record_test(route: str, file: str, line: int, quote: str, project: str = "", repository: str = "") -> str:
+    p = need(project)
+    if project_store.config(p):
+        return project_store.record_test(p, repository, route, file, line, quote)
+    m = mapcore.Map(p); home = os.path.join(mapcore.ROOT, p)
     meth, _, path = route.strip().partition(" ")
     rs = [r for r in m.m.get("backend_routes", []) if r["method"] == meth.upper() and r["path"] == path.strip() and r.get("function")]
     if len(rs) != 1: return f"'{route}' 에 맞는 서버 기능이 {len(rs)}개다. find 로 주소를 확인한다."
@@ -178,13 +232,19 @@ def record_test(route: str, file: str, line: int, quote: str, project: str = "")
 
 
 @app.tool(description="이름으로 찾기: 화면·버튼·서버 기능 이름·주소·PR/이슈 번호. impact 에 넣을 대상을 고를 때 쓴다.")
-def find(query: str, project: str = "") -> str:
-    m = mapcore.Map(need(project)); q = query.lower().lstrip("#"); out = []
+def find(query: str, project: str = "", repository: str = "") -> str:
+    m = scoped_map(need(project), repository); q = query.lower().lstrip("#"); out = []
     for x, _ in m.visible():
         p = x["path"]
         if q in m.label(p).lower() or q in p.lower(): out.append(f"화면 {m.label(p)} ({p})")
         for r in m.requests(p):
             if q in r["name"].lower() or q in r["route"]["path"].lower(): out.append(f"서버 기능 {r['name']} `{r['route']['method']} {r['route']['path']}` — 화면 {m.label(p)}")
+    linked={r['key'] for x,_ in m.visible() for r in m.requests(x['path'])}
+    for route in m.m.get('backend_routes',[]):
+        if repository and route.get('repository')!=repository:continue
+        if route['file']+'::'+str(route.get('function')) in linked:continue
+        if q in str(route.get('function','')).lower() or q in route['path'].lower() or q in route.get('source_file',route['file']).lower():
+            out.append(f"서버 기능 {m.req_name(route)} `{route['method']} {route['path']}` — {route['file']}")
     st = m.status
     for pr in st.get("open_prs", []) + st.get("merged_prs", []):
         if q == str(pr["number"]) or q in pr["title"].lower(): out.append(f"PR #{pr['number']} {pr['title']} — 화면 {len(pr['screens'])}곳")
@@ -197,8 +257,10 @@ def find(query: str, project: str = "") -> str:
 
 
 @app.tool(description="새로고침: git fetch 뒤 바뀐 브랜치의 지도를 다시 뽑고 PR·이슈·세션을 모아 달라진 것을 기록한다. 1~2분 걸린다. 지도 파일만 쓰고 대상 저장소에는 쓰지 않는다.")
-def refresh(project: str = "") -> str:
+def refresh(project: str = "", repository: str = "") -> str:
     p = need(project)
+    if project_store.config(p):
+        return project_store.refresh_project(p, repository) + "\n\n" + changes(p, repository=repository)
     r = subprocess.run(mapcore.python_command(os.path.join(HERE, "refresh.py"), p), capture_output=True, text=True, timeout=900)
     return (r.stdout[-1500:] if r.returncode == 0 else "실패: " + r.stderr[-800:]) + "\n\n" + changes(p)
 

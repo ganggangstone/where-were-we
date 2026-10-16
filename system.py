@@ -9,14 +9,16 @@
 근거가 하나도 통과하지 못한 상자·선은 싣지 않는다.
 """
 import json, os, re, subprocess, sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import mapcore
 
 args = [a for a in sys.argv[1:] if not a.startswith("--")]
 FORCE = "--force" in sys.argv
 PROJECT = args[0]
-HOME = os.path.expanduser("~/.where-were-we/" + PROJECT)
-_map = os.path.join(HOME, "dev.json")
+HOME = mapcore.project_home(PROJECT)
+_map = os.path.join(HOME, "dev.json" if mapcore.configured_refs().get("dev") else "main.json")
 REPO = args[1] if len(args) > 1 else json.load(open(_map))["repo"]
-REF = args[2] if len(args) > 2 else "origin/dev"
+REF = args[2] if len(args) > 2 else json.load(open(_map))["commit"]
 
 
 def git(*a):

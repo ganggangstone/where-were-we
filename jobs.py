@@ -8,16 +8,19 @@
 시작 근거가 통과하지 못한 일은 싣지 않는다. 서버 쪽 근거는 그 줄이 든 서버 기능(같은 파일이면 그 함수, 서비스 파일이면 그 파일을 쓰는 서버 기능)에 잇는다.
 """
 import json, os, re, subprocess, sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import mapcore
 
 args = [a for a in sys.argv[1:] if not a.startswith("--")]
 PROJECT, NODE = args[0], args[1]
-REF = args[2] if len(args) > 2 else "origin/dev"
+REF = args[2] if len(args) > 2 else (mapcore.configured_refs().get("dev") or mapcore.configured_refs().get("main"))
 LINK_ONLY = "--link-only" in sys.argv  # 에이전트를 다시 부르지 않고 서버 기능과의 연결만 다시 계산한다
-HOME = os.path.expanduser("~/.where-were-we/" + PROJECT)
-m = json.load(open(os.path.join(HOME, "dev.json")))
+HOME = mapcore.project_home(PROJECT)
+m = json.load(open(os.path.join(HOME, "dev.json" if mapcore.configured_refs().get("dev") else "main.json")))
 system = json.load(open(os.path.join(HOME, "system.json")))
 node = next(n for n in system["nodes"] if n["id"] == NODE)
 REPO = m["repo"]
+if len(args) <= 2: REF = m["commit"]
 CODE = node.get("code") or sys.exit(f"{node['name']}: 코드 폴더(code)가 적혀 있지 않다")
 
 
