@@ -102,7 +102,7 @@ const status = {
   merged_prs: [merged], branches: [{name:'demo/retry-render', screens:['/renders/:id'], ahead_of_dev:2,
     stale:false, has_open_pr:false, author:'demo-agent', age_days:1}],
   worktrees: [{path:'/demo/workspaces/retry-render', branch:'demo/retry-render', screens:['/renders/:id'],
-    uncommitted:['backend/app/routers/renders.py'], session_count:0, sessions:[]}],
+    uncommitted:['backend/app/routers/renders.py']}],
   issues: [{ number: 18, title: '취소 후 크레딧 반환 확인', url: 'https://example.invalid/lumen-studio/issues/18',
     screens: ['/renders/:id'], via: 'pr', hits: ['#42'] }]
 };

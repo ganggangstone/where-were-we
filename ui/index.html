@@ -118,8 +118,6 @@ const UI_EN = {
   '이 화면과 이어진 작업 ': 'Linked work: ', ' · 최근 7일 병합 ': ' · Merged in 7 days: ', '열린 PR': 'Open PR',
   'PR 없는 브랜치 · 개발보다 ': 'Branch without a PR · Ahead of development: ', '커밋 앞섬 · ': ' commits · ',
   '이 맥의 작업 폴더 · ': 'Local worktree · ', ' · 커밋 안 한 변경 ': ' · Uncommitted changes: ',
-  ' · Claude Code 세션 ': ' · Claude Code sessions: ', '개, 마지막 ': ' · Last: ', ' · 이 맥에서 찾은 세션 없음': ' · No local sessions found',
-  '마지막 세션을 이어서 여는 명령을 복사한다': 'Copy a command to resume the latest session', '세션 명령 복사': 'Copy resume command',
   '열린 이슈': 'Open issue', '이어짐: ': 'Linked via: ', '후보': 'Candidate', ': 이슈 글에 ': ': issue mentions ', ' 가 나온다': '',
   '병합 ': 'Merged ', '병합 · ': 'Merged · ', '개 더': ' more',
   '이 화면이 서버에 하는 일 ': 'Requests: ', '자동 테스트 있음': 'Tests linked', '자동 테스트 ': 'Tests: ',
@@ -463,7 +461,7 @@ function diffOf(path) {
   if (ka.size !== kb.size) return 'diff'; for (const k of ka) if (!kb.has(k)) return 'diff'; return null;
 }
 
-// 이 화면과 이어진 작업: 열린 PR, 앞선 브랜치, 이 맥의 작업 폴더(와 그 폴더의 세션), 이슈, 최근 병합
+// 이 화면과 이어진 작업: 열린 PR, 앞선 브랜치, 이 맥의 작업 폴더, 이슈, 최근 병합
 const ago = (iso) => { const h = (Date.now() - new Date(iso)) / 36e5;
   const [n, unit] = h < 1 ? [Math.max(1, Math.round(h * 60)), 'minute'] : h < 48 ? [Math.round(h), 'hour'] : [Math.round(h / 24), 'day'];
   return new Intl.RelativeTimeFormat(S.lang).format(-n, unit); };
@@ -648,7 +646,7 @@ function inspector(m) {
   if (nWork || w.merged.length) { h += ui`<div class="sect"><h4>이 화면과 이어진 작업 ${nWork}${w.merged.length ? ui` · 최근 7일 병합 ${w.merged.length}` : ''}</h4><div class="group">`;
     h += w.open.map(p => gh(p.number, p.title, p.url, ui`열린 PR · ${esc(p.author || '')} · ${ago(p.updated_at)}`)).join('');
     h += w.branches.map(b => ui`<div class="row"><div class="grow"><div class="t mono">${esc(b.name)}</div><div class="s">PR 없는 브랜치 · 개발보다 ${b.ahead_of_dev}커밋 앞섬 · ${esc(b.author || '')} · ${b.age_days}일 전</div></div></div>`).join('');
-    h += w.folders.map(f => ui`<div class="row"><div class="grow"><div class="t mono">${esc(f.path.split('/').pop())}</div><div class="s">이 맥의 작업 폴더 · ${esc(f.branch)} · 커밋 안 한 변경 ${f.uncommitted.length}${f.session_count ? ui` · Claude Code 세션 ${f.session_count}개, 마지막 ${ago(f.sessions[0].last)}` : tr(' · 이 맥에서 찾은 세션 없음')}</div></div>${f.sessions && f.sessions.length ? ui`<button class="btn quiet" data-copytext="${esc(`cd ${f.path} && claude --resume ${f.sessions[0].id}`)}" title="마지막 세션을 이어서 여는 명령을 복사한다">세션 명령 복사</button>` : ''}</div>`).join('');
+    h += w.folders.map(f => ui`<div class="row"><div class="grow"><div class="t mono">${esc(f.path.split('/').pop())}</div><div class="s">이 맥의 작업 폴더 · ${esc(f.branch)} · 커밋 안 한 변경 ${f.uncommitted.length}</div></div></div>`).join('');
     h += w.issues.map(i => gh(i.number, i.title, i.url, ui`열린 이슈 · ${i.via === 'pr' ? tr('이어짐: ') + esc(i.hits.join(', ')) : tr('<span class="ai">후보</span>: 이슈 글에 ') + esc(i.hits.join(', ')) + tr(' 가 나온다')}`)).join('');
     h += w.merged.slice(0, 5).map(p => gh(p.number, p.title, p.url, ui`병합 · ${ago(p.merged_at)}`)).join('') + (w.merged.length > 5 ? ui`<div class="row"><div class="grow empty">병합 ${w.merged.length - 5}개 더</div></div>` : '');
     h += `</div></div>`; }
@@ -945,7 +943,6 @@ function render() {
   document.querySelectorAll('[data-req]').forEach(el => el.onclick = () => { S.open = S.open === el.dataset.req ? null : el.dataset.req; S.step = -1; S.ev = -1; render(); });
   document.querySelectorAll('[data-step]').forEach(el => el.onclick = () => { const i = +el.dataset.step; S.ev = S.ev === i ? -1 : i; render(); });
   document.querySelectorAll('.row[data-url]').forEach(el => el.onclick = () => invoke('open_url', { url: el.dataset.url }));
-  document.querySelectorAll('[data-copytext]').forEach(b => b.onclick = (e) => { e.stopPropagation(); navigator.clipboard.writeText(b.dataset.copytext); b.textContent = tr('복사됨'); });
   document.querySelectorAll('a[data-url]').forEach(a => a.onclick = (e) => { e.stopPropagation(); invoke('open_url', { url: a.dataset.url }); });
   const s = m.screens.find(x => x.path === S.sel); const rows = s ? requests(m, s.path) : [];
   const stepCount = () => { const r = rows.find(x => x.key === S.open); const f = r && flowOf(r.route); return f ? f.steps.length : 0; };

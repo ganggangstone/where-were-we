@@ -186,14 +186,6 @@ if os.path.exists(sys_path):
     json.dump(system, open(sys_path, "w"), ensure_ascii=False, indent=1)
     print(f"AI가 적은 것(전체 구조·하는 일)의 근거 {n}줄 대조, 달라진 것 {miss}")
 
-# --- 세션: 이 맥의 작업 폴더마다 그 폴더에서 돈 Claude Code 세션. 대화 내용은 읽지 않고 파일 이름(세션 번호)과 마지막으로 바뀐 시각만 ---
-for w in worktrees:
-    d = os.path.expanduser("~/.claude/projects/" + re.sub(r"[^A-Za-z0-9]", "-", w["path"]))
-    ss = [{"tool": "Claude Code", "id": f[:-6], "last": datetime.fromtimestamp(os.path.getmtime(os.path.join(d, f)), timezone.utc).isoformat()}
-          for f in (os.listdir(d) if os.path.isdir(d) else []) if f.endswith(".jsonl")]
-    ss.sort(key=lambda x: x["last"], reverse=True)
-    w["session_count"], w["sessions"] = len(ss), ss[:5]
-
 # --- 이슈(R7): 열린 이슈를 화면에 잇는다. PR 이 그 이슈 번호를 적었으면 확정, 이슈 글에 화면 주소·서버 주소·파일 이름이 나오면 후보 ---
 dev_map = json.load(open(os.path.join(HOME, "dev.json" if REFS.get("dev") else "main.json"))) if os.path.exists(os.path.join(HOME, "dev.json" if REFS.get("dev") else "main.json")) else {"screens": [], "api_functions": [], "backend_routes": []}
 fn_ix = {(f["file"], f["name"]): f for f in dev_map["api_functions"]}

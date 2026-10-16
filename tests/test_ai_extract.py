@@ -63,20 +63,19 @@ class Analysis(unittest.TestCase):
         data['backend_routes'][0]['quote']='invented declaration'
         data['screens'][0]['file']='not-in-the-commit.vue'
         with self.assertRaisesRegex(ValueError,'evidence'):self.normalize(data)
-    def test_ai_action_is_explicit_cached_and_does_not_modify_the_checkout(self):
-        calls=[]
-        def fake(command,**kwargs):
-            calls.append((command,kwargs))
-            return subprocess.CompletedProcess(command,0,json.dumps(self.data),'')
-        before=self.git('status','--porcelain')
-        ai_extract.analyze('demo','dev','en',runner=fake)
-        m=project.read_bundle('demo')['dev']
-        self.assertEqual(m['screens'][0]['source_path'],'/items')
-        self.assertEqual(len(calls),1)
-        self.assertIn('--allowedTools',calls[0][0]);self.assertEqual(Path(calls[0][1]['cwd']).resolve(),self.repo.resolve())
-        self.assertIn(self.commit,calls[0][1]['input'])
-        ai_extract.analyze('demo','dev','en',runner=fake)
-        self.assertEqual(len(calls),1)
+    def record_map(self,data=None):
+        request=ai_extract.request('demo','dev','en','service')
+        return ai_extract.record(**request['record_arguments'],result_json=json.dumps(self.data if data is None else data))
+
+    def test_map_requests_never_invoke_ai_or_modify_the_checkout(self):
+        before=self.git('status','--porcelain');generation=project.states('demo')['service']['generation']
+        for _ in range(2):
+            request=ai_extract.request('demo','dev','en','service')
+            self.assertEqual(request['commit'],self.commit)
+            self.assertIn('record_analysis',request['handoff'])
+        self.assertEqual(project.states('demo')['service']['generation'],generation)
+        self.record_map()
+        self.assertEqual(project.read_bundle('demo')['dev']['screens'][0]['source_path'],'/items')
         self.assertEqual(self.git('status','--porcelain'),before)
     def test_normal_refresh_retains_ai_map_and_marks_changed_commit(self):
         import runpy
@@ -107,13 +106,15 @@ class Analysis(unittest.TestCase):
         for repo in conf['repositories']:
             m=project.empty_map();m.update(repo=repo['path'],commit=self.commit,ref='HEAD')
             project.publish('split',repo['id'],{'dev':m},{'fingerprint':project.fingerprint(repo)})
-        binary=self.repo.parent/'bin';binary.mkdir()
-        output=self.repo.parent/'ai-output.json';output.write_text(json.dumps(self.data))
-        cli=binary/'claude';cli.write_text('#!'+sys.executable+'\nimport os,sys\nfrom pathlib import Path\nassert "Analyze the tracked source" in sys.stdin.read()\nprint(Path(os.environ["FAKE_AI_JSON"]).read_text())\n');cli.chmod(0o755)
-        env=dict(os.environ,WHERE_WERE_WE_ROOT=str(self.home),PATH=str(binary)+os.pathsep+os.environ['PATH'],FAKE_AI_JSON=str(output))
+        env=dict(os.environ,WHERE_WERE_WE_ROOT=str(self.home),PATH='/usr/bin:/bin')
         for rid in ('web','api'):
+            before=project.states('split')[rid]['generation']
             result=subprocess.run([sys.executable,'-I','-B',str(Path(os.environ['WHERE_WERE_WE_RUNTIME'])/'backend/project.py') if os.environ.get('WHERE_WERE_WE_RUNTIME') else project.__file__,'action','split','ai_extract.py','dev','en','--repository',rid],env=env,capture_output=True,text=True)
             self.assertEqual(result.returncode,0,result.stderr)
+            request=json.loads(result.stdout)
+            self.assertEqual(request['record_arguments']['project'],'split')
+            self.assertEqual(project.states('split')[rid]['generation'],before)
+            ai_extract.record(**request['record_arguments'],result_json=json.dumps(self.data))
         m=mapcore.Map('split');request=m.requests('/@web/items')[0]
         self.assertEqual(request['route']['repository'],'api')
         self.assertEqual(request['connection_basis'],'configured')
@@ -126,8 +127,7 @@ class Analysis(unittest.TestCase):
     def test_rules_and_recorded_tests_link_without_another_ai_call(self):
         test=self.repo/'tests/items_test.go';test.parent.mkdir();test.write_text('package tests\nclient.post("/items")\n')
         self.git('add','.');self.git('commit','-qm','Synthetic test')
-        def fake(command,**kwargs):return subprocess.CompletedProcess(command,0,json.dumps(self.data),'')
-        ai_extract.analyze('demo','dev','en',runner=fake)
+        self.record_map()
         def rules(raw,repo):raw['tests']={'files':['*_test.go'],'calls':['client.<method>("<path>")']}
         project.mutate_tests('demo','service',rules)
         folder=project.repository_folder('demo',self.conf['repositories'][0],project.states('demo'))
@@ -275,6 +275,11 @@ class Analysis(unittest.TestCase):
             result=subprocess.run([sys.executable,'-I','-B',str(base/script),*args,'--repository','service','--lang','en'],env=env,capture_output=True,text=True)
             self.assertEqual(result.returncode,0,result.stderr)
             self.assertIn('record_ai_task',json.loads(result.stdout)['handoff'])
+            result=subprocess.run([sys.executable,'-I','-B',str(base/'project.py'),'action','demo',script,*args[1:],'--repository','service','--lang','en'],env=env,capture_output=True,text=True)
+            self.assertEqual(result.returncode,0,result.stderr)
+            request=json.loads(result.stdout)
+            self.assertEqual(request['record_arguments']['project'],'demo')
+            self.assertEqual(request['record_arguments']['lang'],'en')
         self.assertEqual(project.states('demo')['service']['generation'],before)
 
     def test_main_only_task_names_are_available_to_mcp_queries(self):
@@ -336,8 +341,8 @@ class Analysis(unittest.TestCase):
 
     def test_bad_ai_output_preserves_selected_generation(self):
         before=project.states('demo')['service']['generation']
-        def bad(command,**kwargs):return subprocess.CompletedProcess(command,0,'not JSON','')
-        with self.assertRaises(ValueError):ai_extract.analyze('demo','dev','en',runner=bad)
+        request=ai_extract.request('demo','dev','en','service')
+        with self.assertRaises(ValueError):ai_extract.record(**request['record_arguments'],result_json='not JSON')
         self.assertEqual(project.states('demo')['service']['generation'],before)
 
 if __name__=='__main__':unittest.main()

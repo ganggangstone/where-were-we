@@ -42,6 +42,20 @@ class Projects(TemporaryProject):
         self.assertEqual(len(scoped['dev']['screens']), 1)
         self.assertEqual(len(scoped['status']['open_prs']), 1)
 
+    def test_legacy_session_fields_are_not_returned_or_migrated_into_project_views(self):
+        folder=self.root/'legacy';folder.mkdir()
+        (folder/'dev.json').write_text(json.dumps(sample('/demo/old')))
+        old=json.dumps({'worktrees':[{'path':'/demo/feature','branch':'feature','uncommitted':['src/Settings.tsx'],
+             'screens':['/settings'],'session_count':1,'sessions':[{'id':'old-session','last':'2026-10-01'}]}]})
+        (folder/'status.json').write_text(old)
+        for adopted in (False,True):
+            if adopted:project.configure('legacy',{'repositories':[{'id':'old','path':'/demo/old','legacy':True}]})
+            work=project.read_bundle('legacy')['status']['worktrees'][0]
+            self.assertNotIn('sessions',work);self.assertNotIn('session_count',work)
+            self.assertEqual(work['branch'],'feature')
+            self.assertEqual(work['uncommitted'],['src/Settings.tsx'])
+        self.assertEqual((folder/'status.json').read_text(),old)
+
     def test_config_rejects_path_traversal_and_duplicate_ids(self):
         for repositories in ([{'id':'../escape','path':'/demo/a'}],
             [{'id':'web','path':'/demo/a'},{'id':'web','path':'/demo/b'}],
@@ -212,6 +226,30 @@ class Collection(TemporaryProject):
         import subprocess
         return subprocess.run([sys.executable,'-I','-B',str(Path(project.__file__)),*args],env=env,capture_output=True,text=True)
 
+    def test_collection_keeps_git_worktrees_without_accessing_agent_sessions(self):
+        import contextlib,io,runpy,subprocess
+        folder=self.root/'collection';folder.mkdir()
+        repo=self.root/'code';repo.mkdir()
+        (folder/'dev.json').write_text(json.dumps(sample(str(repo))))
+        def command(argv,**kwargs):
+            if argv[0]=='gh':output='[]'
+            elif 'worktree' in argv:output=f'worktree {repo}\nbranch refs/heads/feature\n\n'
+            elif 'status' in argv:output=' M src/Settings.tsx\n'
+            elif 'ls-tree' in argv:output='src/Settings.tsx\n'
+            else:output=''
+            return subprocess.CompletedProcess(argv,0,output,'')
+        original=os.path.expanduser
+        def no_session_access(path):
+            if '/.claude' in str(path) or '/.codex' in str(path):raise AssertionError('Agent session discovery is outside product scope')
+            return original(path)
+        with patch.object(sys,'argv',['collect.py',str(repo),'collection']),patch.dict(os.environ,{'WHERE_WERE_WE_REFS':json.dumps({'dev':'origin/dev','main':None})}),patch('subprocess.run',side_effect=command),patch('os.path.expanduser',side_effect=no_session_access),contextlib.redirect_stdout(io.StringIO()):
+            runpy.run_path(str(Path(project.__file__).parent/'collect.py'),run_name='__main__')
+        work=json.loads((folder/'status.json').read_text())['worktrees']
+        self.assertEqual(len(work),1)
+        self.assertEqual(work[0]['branch'],'feature')
+        self.assertEqual(work[0]['uncommitted'],['src/Settings.tsx'])
+        self.assertNotIn('sessions',work[0]);self.assertNotIn('session_count',work[0])
+
     def test_custom_non_python_roots_can_be_collected_before_ai_analysis(self):
         env=self.environment()
         sources=json.loads(Path(env['FAKE_SOURCES']).read_text())
@@ -318,8 +356,7 @@ class Recovery(TemporaryProject):
         def checked(*args):
             self.assertTrue(project.collection_running('studio'))
             return select(*args)
-        with patch.object(project,'selected_repository',side_effect=checked), patch.object(project,'_transaction',return_value='done'):
-            self.assertEqual(project.action('studio','m','system.py'),'done')
+        with patch.object(project,'selected_repository',side_effect=checked):
             project.mutate_tests('studio','m',lambda raw,r:None)
 
     def test_removed_repository_snapshots_remain_on_disk(self):

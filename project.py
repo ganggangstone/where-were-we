@@ -138,7 +138,13 @@ def repository_folder(name,repo,state):
         return home(name)/'repositories'/repo['id']/'snapshots'/generation
     return home(name) if repo.get('legacy') else None
 
-def raw_bundle(folder):return {key:read(folder/(key+'.json')) for key in NAMES} if folder else {key:None for key in NAMES}
+def raw_bundle(folder):
+    bundle={key:read(folder/(key+'.json')) for key in NAMES} if folder else {key:None for key in NAMES}
+    # Session tracking is outside scope; omit legacy fields at the shared read
+    # boundary without rewriting the user's existing snapshot files.
+    for worktree in (bundle.get('status') or {}).get('worktrees',[]):
+        worktree.pop('sessions',None);worktree.pop('session_count',None)
+    return bundle
 def empty_map():return {'repo':'','commit':'','screens':[],'api_functions':[],'backend_routes':[],'backend_routes_without_screen':[],'unresolved_calls':[],'models':{},'file_screens':{}}
 def qfile(rid,value):return rid+'/'+value if value else value
 def qscreen(rid,value):
@@ -418,7 +424,14 @@ def action(name,rid,script,args=()):
         repo=selected_repository(name,rid)
         if not repo:raise ValueError('Use the legacy command for this project')
         if states(name).get(repo['id'],{}).get('fingerprint')!=fingerprint(repo):raise ValueError('Refresh this repository after configuration changes before running AI actions')
-        return _transaction(name,repo,[script,*args])
+    import ai_extract
+    arguments=[name,*args,'--repository',repo['id']]
+    if script=='ai_extract.py':result=ai_extract.analysis_cli(arguments)
+    else:
+        task={'group.py':'groups','system.py':'system','jobs.py':'jobs','steps.py':'steps'}.get(script)
+        if not task:raise ValueError('Unknown action')
+        result=ai_extract.task_cli(task,arguments,emit=False)
+    return json.dumps(result,ensure_ascii=False)
 
 def mutate_tests(name,rid,callback):
     with locked(name):
@@ -450,7 +463,9 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('command',choices=['read','configure','refresh','action']);parser.add_argument('project')
     parser.add_argument('--repository',default='');parser.add_argument('args',nargs='*')
-    args=parser.parse_args()
+    args,remaining=parser.parse_known_args()
+    if remaining and args.command!='action':parser.error('unrecognized arguments: '+' '.join(remaining))
+    if args.command=='action':args.args.extend(remaining)
     if args.command=='read':print(json.dumps(read_bundle(args.project,args.repository),ensure_ascii=False))
     elif args.command=='configure':print(json.dumps(configure(args.project,json.loads(args.args[0]) if args.args else json.load(sys.stdin)),ensure_ascii=False))
     elif args.command=='refresh':print(refresh_project(args.project,args.repository))

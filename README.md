@@ -153,7 +153,7 @@ The command above is the manual fallback, including for older versions that only
 ## Data and limits
 
 - Maps stay in `~/.where-were-we/`. They contain your project's structure; keep them out of public repositories.
-- The collector runs `git fetch` and reads local files, git history, GitHub activity, work folders, and available local Claude Code session metadata. It does not check out another branch or modify target repository files.
+- The collector runs `git fetch` and reads local files, git history, GitHub activity and work folders. It does not check out another branch or modify target repository files.
 - Detailed analysis uses the connected MCP agent and its account. `analyze` returns the instructions and schema, `analysis_source` serves the pinned source, and `record_analysis` verifies and saves the result. Grouping, architecture, program jobs and request-step buttons prepare requests for the same connected agent through `request_ai_task` and `record_ai_task`. Copy the request to the agent, then refresh the app after it saves the result. Source processing follows the selected agent/provider settings.
 - Automatic code extraction supports React Router/axios, FastAPI, and SQLAlchemy. Explicit AI analysis accepts source code in other languages and frameworks, subject to what the model can establish; it does not guarantee complete coverage. AI provenance, source checks, unresolved areas and changed-commit warnings remain visible. Source roots are configurable per repository.
 - `dev` and `main` are code branch comparisons, not a check of what is actually deployed. Programs or runtime facts absent from git remain unverified until someone checks the running system.
@@ -166,7 +166,7 @@ Report bugs or suggest improvements in [Issues](https://github.com/ganggangstone
 The [license](LICENSE) permits personal use, internal business use, and free redistribution under its conditions. Paid products and external paid services are restricted. This is a custom source-available license; third-party components retain their own licenses.
 
 <details>
-<summary>v0.2.0 release notes (unreleased)</summary>
+<summary>v0.2.0 release notes</summary>
 
 <!-- release-notes:start -->
 ### 한국어
@@ -176,6 +176,9 @@ The [license](LICENSE) permits personal use, internal business use, and free red
 - 레포별 수집 상태를 표시하고, 실패·중단 시 마지막 성공 지도를 유지합니다.
 - 사용자가 지정한 API 연결과 미확인 후보를 구분합니다. 같은 경로·PR 번호·테이블 이름을 레포별로 구분합니다.
 - MCP 조회와 테스트 기록에도 레포 범위를 지정할 수 있습니다. 기존 단일 레포 지도는 보존합니다.
+- 설정 화면에서 여러 레포가 함께 쓰는 데이터 연결을 관리합니다.
+- 상세 분석·화면 묶음·전체 구조·프로그램 작업·요청 단계를 연결된 MCP 에이전트로 만듭니다. 특정 AI CLI 설치가 필요하지 않습니다.
+- 에이전트 세션 수집과 세션 재개 기능을 제거했습니다.
 - Homebrew 설치본에서 버튼으로 업데이트하고 앱을 다시 엽니다. 실패 시 이전 앱 복구를 시도합니다.
 
 ### English
@@ -185,6 +188,9 @@ The [license](LICENSE) permits personal use, internal business use, and free red
 - Show collection status per repository and retain the last successful snapshot after failure or interruption.
 - Distinguish user-configured API destinations from unverified candidates; keep equal paths, PR numbers, and table names separate.
 - Scope MCP queries and test writes by repository while preserving existing single-repository maps.
+- Manage shared data mappings across repositories in settings.
+- Use your connected MCP agent for detailed maps, grouping, architecture, program jobs and request steps, without a provider-specific AI CLI.
+- Remove agent session collection and session-resume controls.
 - Install Homebrew updates from the app and reopen automatically, with recovery of the previous app on failure.
 <!-- release-notes:end -->
 

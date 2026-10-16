@@ -319,7 +319,7 @@ def find(query: str, project: str = "", repository: str = "") -> str:
     return "\n".join(out[:40]) + (f"\n… {len(out) - 40}개 더" if len(out) > 40 else "") if out else "없다."
 
 
-@app.tool(description="새로고침: git fetch 뒤 바뀐 브랜치의 지도를 다시 뽑고 PR·이슈·세션을 모아 달라진 것을 기록한다. 1~2분 걸린다. 지도 파일만 쓰고 대상 저장소에는 쓰지 않는다.")
+@app.tool(description="새로고침: git fetch 뒤 바뀐 브랜치의 지도를 다시 뽑고 PR·이슈·작업 폴더를 모아 달라진 것을 기록한다. 1~2분 걸린다. 지도 파일만 쓰고 대상 저장소에는 쓰지 않는다.")
 def refresh(project: str = "", repository: str = "") -> str:
     p = need(project)
     if project_store.config(p):

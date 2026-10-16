@@ -430,7 +430,7 @@ def setup_prompt(lang="ko"):
    - Before editing files, screens, server requests, or data stores, call impact to check affected areas and overlapping PRs, branches, and issues. Include the affected areas in the plan.
    - Preserve qualifications such as candidate, inferred, and unverified; do not report them as confirmed facts.
 
-4. Ask whether changes should run at every session start or only before planning, and how much impact detail to include (screen count, screen/request lists, or overlapping work too). Apply my answers to the section.
+4. Ask how much impact detail to include (screen count, screen/request lists, or overlapping work too). Apply my answer to the section.
 5. Show the files and lines you changed."""
     repo_lines = "\n".join(repos) or "   - (아직 지도가 없다. 앱에서 프로젝트를 먼저 뽑는다)"
     return f"""where-were-we(코드 구조 지도)를 너에게 연결하고 내 작업 방식에 맞게 설정해 줘. 아래를 순서대로 하고, 설정 파일을 바꾸기 전에는 바꿀 내용을 보여 주고 내 허락을 받아.
@@ -452,9 +452,7 @@ def setup_prompt(lang="ko"):
    - 파일·화면·서버 기능·저장소를 고치기 전에 impact 로 닿는 곳과 같은 곳에서 진행 중인 PR·브랜치·이슈를 보고, 계획에 영향받는 곳을 적는다.
    - 답에 "후보", "추정", "확인 못 한 것"이 붙은 내용은 사실로 옮기지 않는다.
 
-4. 나에게 두 가지를 물어 3번 단락에 반영한다.
-   - changes 를 세션을 시작할 때마다 볼지, 계획을 세울 때만 볼지.
-   - impact 결과를 계획에 얼마나 자세히 적을지(닿는 화면 수만 / 화면·서버 기능 목록까지 / 진행 중인 작업까지).
+4. impact 결과를 계획에 얼마나 자세히 적을지 묻고 3번 단락에 반영한다(닿는 화면 수만 / 화면·서버 기능 목록까지 / 진행 중인 작업까지).
 5. 마지막에 바꾼 파일과 바꾼 줄을 보여 준다."""
 
 

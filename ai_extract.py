@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Explicit, language-independent AI maps with commit-bound source evidence.
 
-Accepts results from any connected MCP agent; Claude Code CLI is an optional adapter. Normal refresh never invokes an AI provider.
+Accepts results from any connected MCP agent. CLI commands only prepare requests; normal refresh never invokes an AI provider.
 """
 import copy
 import hashlib
@@ -149,21 +149,6 @@ SCHEMA={
                     'services':[],'externals':[],'steps':[{'file':'server/main.go','line':8,'quote':'literal source','lane':'저장소',
                     'text':'Store item','uncertain':False}]}], 'unknown':['Anything not established from code']}
 
-def analyze_raw(raw,repo,refs,branch,lang,runner,layout=None):
-    if branch not in ('dev','main') or not refs.get(branch):raise ValueError('Choose an available branch role')
-    commit=git(repo,'rev-parse','--verify',refs[branch]+'^{commit}').strip()
-    layout=layout or {}
-    current=raw.get(branch) or {}
-    old=current.get('analysis') or {}
-    if old.get('source')=='ai' and old.get('version')==VERSION and current.get('commit')==commit and old.get('language')==lang:
-        return None,'AI map is already current; no AI was called.'
-    prompt=analysis_prompt(commit,lang,layout)
-    command=['claude','-p','--output-format','text','--model','sonnet','--allowedTools',
-             'Bash(git ls-tree:*)','Bash(git show:*)','Bash(git grep:*)']
-    result=runner(command,input=prompt,cwd=repo,capture_output=True,text=True,timeout=1200)
-    if result.returncode:raise ValueError('AI analysis failed: '+result.stderr[-800:])
-    return apply_result(raw,repo,refs,branch,lang,result.stdout,commit,layout)
-
 def analysis_prompt(commit,lang,layout):
     return f'''Analyze the tracked source at commit {commit} of this repository, regardless of programming language or framework.
 Read only this immutable commit using git ls-tree -r --name-only {commit}, git show {commit}:<path>, and git grep -n <pattern> {commit}.
@@ -199,28 +184,6 @@ def apply_result(raw,repo,refs,branch,lang,response,commit,layout):
         route['flow']=flows['routes'].get(route['file']+'::'+route['function'])
     updated[branch]=m
     return updated,f"AI map: {len(m['screens'])} screens, {len(m['backend_routes'])} requests; {m['analysis']['rejected']} rejected evidence items."
-
-def analyze(name,branch='dev',lang='ko',repository='',runner=None):
-    runner=runner or subprocess.run
-    if lang not in ('ko','en'):raise ValueError('Choose ko or en')
-    conf=project.config(name)
-    if conf:
-        with project.locked(name):
-            repo=project.selected_repository(name,repository)
-            state=project.states(name)
-            if state.get(repo['id'],{}).get('fingerprint')!=project.fingerprint(repo):raise ValueError('Refresh this repository first')
-            raw=project.raw_bundle(project.repository_folder(name,repo,state))
-            updated,message=analyze_raw(raw,repo['path'],repo['refs'],branch,lang,runner,repo['layout'])
-            if updated:project._publish(name,repo['id'],updated,{},collection=False)
-            return message
-    folder=project.home(name);raw=project.raw_bundle(folder)
-    current=raw.get(branch)
-    if not current:raise ValueError('Refresh this repository first')
-    updated,message=analyze_raw(raw,current['repo'],mapcore.configured_refs(),branch,lang,runner,json.loads(os.environ.get('WHERE_WERE_WE_LAYOUT','{}')))
-    if updated:
-        for key,value in updated.items():
-            if value is not None:project.atomic(folder/(key+'.json'),value)
-    return message
 
 def context(name,repository,branch):
     if branch not in ('dev','main'):raise ValueError('Choose dev or main')
@@ -515,7 +478,7 @@ def task_record(project,repository,task,branch,lang,target,commit,configuration,
                 if value!=raw.get(key):store.atomic(store.home(project)/(key+'.json'),value)
         return 'Saved '+task+' from connected MCP agent'
 
-def task_cli(task):
+def task_cli(task,argv=None,emit=True):
     """Compatibility commands prepare MCP requests; they never invoke AI."""
     import argparse
     parser=argparse.ArgumentParser(description='Prepare a connected-agent MCP task')
@@ -524,21 +487,26 @@ def task_cli(task):
     else:parser.add_argument('--branch',default=None,choices=['dev','main'])
     if task in ('steps','jobs'):parser.add_argument('target')
     parser.add_argument('--lang',default='ko',choices=['ko','en']);parser.add_argument('--repository',default='')
-    args=parser.parse_args()
+    args=parser.parse_args(argv)
     branch=args.branch
     if branch is None:
         conf=project.config(args.project)
         if conf:
             repo=project.selected_repository(args.project,args.repository);branch='dev' if repo['refs'].get('dev') else 'main'
         else:branch='dev' if project.raw_bundle(project.home(args.project)).get('dev') else 'main'
-    print(json.dumps(task_request(args.project,task,branch,args.lang,args.repository,getattr(args,'target','')),ensure_ascii=False))
+    result=task_request(args.project,task,branch,args.lang,args.repository,getattr(args,'target',''))
+    if emit:print(json.dumps(result,ensure_ascii=False))
+    return result
 
-if __name__=='__main__':
+def analysis_cli(argv=None):
     import argparse
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--request',action='store_true');parser.add_argument('--repository',default='')
     parser.add_argument('--task',choices=list(TASK_SCHEMAS));parser.add_argument('--target',default='')
     parser.add_argument('project');parser.add_argument('branch',choices=['dev','main']);parser.add_argument('lang',nargs='?',default='ko',choices=['ko','en'])
-    args=parser.parse_args()
-    if args.task:print(json.dumps(task_request(args.project,args.task,args.branch,args.lang,args.repository,args.target),ensure_ascii=False))
-    else:print(json.dumps(request(args.project,args.branch,args.lang,args.repository),ensure_ascii=False) if args.request else analyze(args.project,args.branch,args.lang,args.repository))
+    args=parser.parse_args(argv)
+    if args.task:return task_request(args.project,args.task,args.branch,args.lang,args.repository,args.target)
+    return request(args.project,args.branch,args.lang,args.repository)
+
+if __name__=='__main__':
+    print(json.dumps(analysis_cli(),ensure_ascii=False))
