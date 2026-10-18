@@ -130,3 +130,6 @@ details .kv { margin:var(--space-3) var(--space-0) var(--space-0); word-break:br
 #project-dialog .repository-option { flex-direction:row; align-items:center; margin:var(--space-2) 0 }
 #project-dialog legend { font:var(--font-secondary); color:var(--color-text) }
 #project-dialog input, #repository-bar select { padding:var(--space-2); font:var(--font-secondary); border:var(--border-hairline); border-radius:var(--radius-control); background:var(--color-bg-content); color:var(--color-text) }
+
+/* Keep agent selections visible with the existing focus color. */
+.agent-highlight { outline: var(--outline-selected); outline-offset: var(--space-1); }

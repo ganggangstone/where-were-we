@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""where-were-we 를 에이전트에 잇는 MCP 서버 (stdio). 지도 파일을 읽어 짧은 글로 답한다. 저장소에는 아무것도 쓰지 않는다.
+"""where-were-we 를 에이전트에 잇는 MCP 서버 (stdio). 저장된 지도 조회와 실행 앱의 명령·상태 회신을 제공한다. 대상 저장소의 작업 파일은 바꾸지 않는다.
 
 에이전트 설정 예:
   Claude Code:  claude mcp add --scope user where-were-we -- <이 저장소>/.venv/bin/python <이 저장소>/mcp_server.py
@@ -16,9 +16,36 @@ INSTRUCTIONS = """이 서버는 대상 서비스의 구조 지도(화면, 서버
 - 하루 작업이나 계획을 시작할 때 changes 로 지난 새로고침 뒤에 구조가 어떻게 달라졌는지 본다. 오래됐으면 refresh 를 먼저 부른다.
 - 무엇을 고치기 전에 impact 에 파일 경로·화면 주소·저장소 이름·서버 주소를 넣어, 닿는 화면·서버 기능·저장소·서버 밖 프로그램·지금 같은 곳에서 작업 중인 PR·브랜치·이슈를 확인하고 계획에 반영한다.
 - 서비스 전체가 낯설면 overview 를 먼저 본다.
+- 앱에서 보여 달라는 요청은 app_targets로 대상을 찾고 app_control로 표시한다. 현재 선택은 app_state로 읽는다. 명령 상태가 completed인 경우만 적용 완료로 말하고 queued/running/interrupted는 그대로 알린다. 분석 준비는 실행 완료가 아니다.
 답에 "후보", "추정", "확인 못 한 것"이 붙은 것은 사실로 옮기지 않고 그대로 전한다."""
 
 app = MCPServer("where-were-we", instructions=INSTRUCTIONS)
+
+
+@app.tool(description="실행 중인 앱의 실제 프로젝트·브랜치·보기·선택·대화상자를 읽습니다. 저장 지도 조회와 다릅니다. Read the live app selection.")
+def app_state() -> str:
+    import app_control
+    return json.dumps(app_control.command('state'),ensure_ascii=False)
+
+@app.tool(description="앱에서 대상을 찾고 안정적인 ID와 지도 revision을 받습니다. 같은 이름 후보를 구분한 뒤 app_control select에 그대로 넘깁니다. Find stable live targets.")
+def app_targets(query: str = "", project: str = "", repository: str = "", branch: str = "") -> str:
+    import app_control
+    args={'query':query}
+    if project:args.update(project=project,repository=repository)
+    if branch:args['branch']=branch
+    return json.dumps(app_control.command('targets',args),ensure_ascii=False)
+
+@app.tool(description="앱 전체 제어. action=catalog로 명령/입력을 확인하세요. select는 app_targets의 target/revision·프로젝트·레포·브랜치를 사용합니다. queued/running은 완료가 아닙니다. 같은 command_id는 재실행하지 않으며 app_command_result로 결과를 확인합니다. open은 앱 실행·앞으로 가져오기. 분석 요청 준비는 분석 실행이 아닙니다. Control the running app, with applied-state acknowledgement.")
+def app_control(action: str, arguments_json: str = "{}", command_id: str = "") -> str:
+    import app_control as control
+    if action=='catalog':return json.dumps(control.ACTIONS,ensure_ascii=False)
+    if action=='open':return json.dumps(control.open_app(),ensure_ascii=False)
+    return json.dumps(control.command(action,json.loads(arguments_json),command_id),ensure_ascii=False)
+
+@app.tool(description="명령 식별자로 실제 적용 결과 확인. 새로고침·저장·업데이트를 다시 실행하지 않습니다. Query a command without replaying it.")
+def app_command_result(command_id: str) -> str:
+    import app_control
+    return json.dumps(app_control.outcome(command_id),ensure_ascii=False)
 
 
 def pick(project):

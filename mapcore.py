@@ -472,6 +472,7 @@ def setup_prompt(lang="ko"):
 {repo_lines}
    - Before starting the day's work or making a plan, call changes. If the last refresh is over a day old, call refresh first.
    - Before editing files, screens, server requests, or data stores, call impact to check affected areas and overlapping PRs, branches, and issues. Include the affected areas in the plan.
+   - To show a discussed feature in the running app, use app_targets to obtain its target ID and revision, then app_control select with the explicit project/repository/branch. Read app_state for the current selection. Only completed responses confirm application; use app_command_result for queued/running commands.
    - Preserve qualifications such as candidate, inferred, and unverified; do not report them as confirmed facts.
 
 4. Ask how much impact detail to include (screen count, screen/request lists, or overlapping work too). Apply my answer to the section.
@@ -494,6 +495,7 @@ def setup_prompt(lang="ko"):
 {repo_lines}
    - 하루 일을 시작하거나 계획을 세우기 전에 changes 를 부른다. 마지막 새로고침이 하루보다 오래됐으면 refresh 를 먼저 부른다.
    - 파일·화면·서버 기능·저장소를 고치기 전에 impact 로 닿는 곳과 같은 곳에서 진행 중인 PR·브랜치·이슈를 보고, 계획에 영향받는 곳을 적는다.
+   - 대화 중인 기능을 실행 앱에 표시하려면 app_targets로 대상 ID와 revision을 얻고, 프로젝트·레포·브랜치를 명시해 app_control select로 선택한다. 현재 선택은 app_state로 읽는다. completed만 적용 완료이며 queued/running은 app_command_result로 확인한다.
    - 답에 "후보", "추정", "확인 못 한 것"이 붙은 내용은 사실로 옮기지 않는다.
 
 4. impact 결과를 계획에 얼마나 자세히 적을지 묻고 3번 단락에 반영한다(닿는 화면 수만 / 화면·서버 기능 목록까지 / 진행 중인 작업까지).

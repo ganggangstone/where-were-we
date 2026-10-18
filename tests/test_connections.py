@@ -100,7 +100,7 @@ class Connections(unittest.TestCase):
         chrome=Path('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome')
         if not chrome.exists():self.skipTest('Chrome is needed for the registration UI check')
         source=(Path(project.__file__).parent/'ui/index.html').read_text()
-        script=source.split('<script>',1)[1].rsplit('</script>',1)[0].split("$('q').oninput",1)[0]
+        script=source.split('<script>',1)[1].split('</script>',1)[0].split("$('q').oninput",1)[0]
         bootstrap=r'''
 const calls=[],saved=[],loads=[];let deny=true,refreshFail=false;
 window.__TAURI__={core:{invoke:async(command,args)=>{

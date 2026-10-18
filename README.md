@@ -37,6 +37,8 @@ For github.com code, the app remembers the GitHub account at connection time (or
 
 Existing projects remain available. Open **Manage code** to keep the original repository and add others without moving or deleting the old map files.
 
+With the app open and MCP connected, ask your agent: “Show me the upload retry feature in where-were-we.” It can find matching targets, open the right project and code version, select and highlight a target, and read back the selection you make in the app. Ask it to clarify when names match more than one target. Navigation and result checks do not refresh change history. The agent can also use the app's configuration, comparison settings, analysis requests and update actions. Preparing an analysis request does not run a model; result submission uses the existing analysis MCP tools. Both the app and MCP server need this version. If a command is still queued or running, its command ID lets the agent check completion without repeating it. After an interruption, inspect the app state before retrying.
+
 The app starts in Korean. Choose **English** in the toolbar; the preference is saved locally. Project names, code, and AI explanations stay verbatim.
 
 ## Explore the map

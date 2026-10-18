@@ -206,7 +206,7 @@ class Briefing(unittest.TestCase):
         briefing.record(**ko_request['record_arguments'],result_json=json.dumps(self.response(ko_request)))
         korean=project.read_bundle('demo')
         source=(Path(project.__file__).parent/'ui/index.html').read_text()
-        script=source.split('<script>',1)[1].rsplit('</script>',1)[0].split("$('q').oninput",1)[0]
+        script=source.split('<script>',1)[1].split('</script>',1)[0].split("$('q').oninput",1)[0]
         script+=source[source.index('function renderAgentPrompt() {'):source.index("$('agent').onclick")]
         fixtures=json.dumps({'request':request,'before':before,'after':after,'korean':korean}).replace('</','<\\/')
         bootstrap='const fixtures='+fixtures+r''';

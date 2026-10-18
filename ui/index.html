@@ -348,6 +348,7 @@ Object.assign(UI_EN, {"GitHub 저장소 주소를 입력해 주세요.":"Enter a
 Object.assign(UI_EN, {"같은 GitHub 저장소가 이미 연결되어 있습니다.":"This GitHub repository is already connected."});
 Object.assign(UI_EN, {"아직 코드가 없는 GitHub 저장소입니다.":"This GitHub repository does not have code yet."});
 Object.assign(UI_EN, {"앱의 코드 보관 위치가 바뀌었습니다. 연결 정보를 확인해 주세요.":"The app code storage location changed. Check the connection."});
+Object.assign(UI_EN,{"서버가 요청을 받는다":"The server receives the request"});
 const UI_PATTERN = new RegExp(Object.keys(UI_EN).sort((a, b) => b.length - a.length).map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'g');
 function tr(text) { return S.lang === 'en' ? String(text).replace(UI_PATTERN, match => UI_EN[match]) : String(text); }
 function ui(parts, ...values) { return parts.reduce((out, part, i) => out + tr(part) + (i < values.length ? values[i] : ''), ''); }
@@ -378,6 +379,10 @@ function validReleaseResult(result) {
     typeof r.notes === 'string' && typeof r.url === 'string' &&
     /^https:\/\/github\.com\/ganggangstone\/where-were-we\/releases\/tag\/v?\d+\.\d+\.\d+(?:\+[\w.-]+)?$/.test(r.url));
 }
+function setUpdateChecks(value) {
+  U.auto=value;try{localStorage.setItem(RELEASE_AUTO,String(U.auto));}catch{/* Session preference remains available. */}
+  if(U.auto)checkUpdates(false);
+}
 function renderUpdates() {
   $('updates').textContent = tr('버전·업데이트') + (U.latest?.newer ? ' ●' : '');
   const release = U.latest;
@@ -401,9 +406,7 @@ function renderUpdates() {
   $('closeRelease').onclick = () => $('release-dialog').close();
   $('checkRelease').onclick = () => checkUpdates(true);
   $('autoRelease').onchange = (e) => {
-    U.auto = e.target.checked;
-    try { localStorage.setItem(RELEASE_AUTO, String(U.auto)); } catch { /* Session-only preference. */ }
-    if (U.auto) checkUpdates(false);
+    setUpdateChecks(e.target.checked);
   };
   if ($('installUpdate')) $('installUpdate').onclick = startUpdate;
   if ($('copyUpgrade')) $('copyUpgrade').onclick = async () => {
@@ -515,7 +518,7 @@ async function requestAgentAction(command,extra={}) {
   try {
     const request=JSON.parse(await invokeAction(command,{...scope,...extra}));
     if(!current())return;
-    S.agentPrompt=request.handoff;S.agentPurpose='analysis';S.analysisRequest={scope,command,requirements:request.requirements,copied:false,state:'prepared'};renderAgentPrompt();$('status').textContent='';
+    S.agentPrompt=request.handoff;S.agentPurpose='analysis';S.analysisRequest={scope,command,requirements:request.requirements,copied:false,state:'prepared'};renderAgentPrompt();$('status').textContent='';return request;
   } catch(error) {if(current())$('status').textContent=analysisRequestError(error);}
 }
 function savedAnalysisState(info,request) {
@@ -532,6 +535,13 @@ function savedAnalysisState(info,request) {
   if(values.some(v=>['saved','proposal'].includes(v)))return values.some(v=>v.startsWith('proposal'))?'proposal_partial':'partial';
   if(values.includes('proposal_previous'))return 'proposal_previous';
   return values.includes('previous')?'previous':'missing';
+}
+async function reloadAnalysisOnly() {
+  const scope={project:S.project,repository:S.repository},token=S.loadToken;
+  const bundle=JSON.parse(await invoke('read_project',scope));
+  if(token!==S.loadToken || S.project!==scope.project || S.repository!==scope.repository)throw Error('Selection changed while reading results');
+  S.briefings=bundle.briefings;S.projectInfo=bundle.project;S.maps={dev:bundle.dev,main:bundle.main};S.branchDetails=bundle.branch_details;
+  for(const key of ['groups','flows','system','jobs'])S[key]=bundle[key];render();
 }
 async function checkAnalysisResults() {
   const request=S.analysisRequest,token=S.loadToken;
@@ -684,15 +694,22 @@ async function loadProject(p, first = true, repository = S.project === p ? S.rep
 async function reloadCurrent() {
   if (S.desiredProject === S.project && S.desiredRepository === S.repository) await loadProject(S.project,false,S.repository);
 }
+async function refreshConnectedCode(project,repository) {
+  const m=S.maps.dev || S.maps.main;
+  const output=await invoke('refresh',{project,repository,repo:m?.repo || '',since:'7'});
+  if(S.project===project && S.repository===repository)await loadProject(project,false,repository);
+  if(String(output).includes('FAILED'))throw Error(output);
+  return output;
+}
 async function doRefresh() {
   const m = S.maps.dev || S.maps.main;
   if (!m?.repo && !S.projectInfo?.repositories?.length) { $('status').textContent = tr('지도가 없습니다. extract.py 를 먼저 돌리세요.'); return; }
   const project = S.project, repository = S.repository;
   $('refresh').disabled = true; $('status').textContent = tr('저장소를 읽는 중…');
   try {
-    await invoke('refresh', { project, repository, repo:m?.repo || '', since:'7' });
+    await refreshConnectedCode(project,repository);
     S.githubFailure=null;
-    if (S.desiredProject === project && S.desiredRepository === repository) await loadProject(project, false, repository);
+
   } catch (e) { if (S.desiredProject === project && S.desiredRepository === repository) {S.githubFailure={project,error:String(e)};renderRepositories();$('status').textContent=tr('실패: ')+githubErrorText(e);} }
   finally { $('refresh').disabled = false; }
 }
@@ -774,6 +791,18 @@ function registrationError(error) {
   };
   for(const [code,text] of Object.entries(messages)) if(message.includes(code))return tr(text);
   return tr('연결을 저장하지 못했습니다: ')+message;
+}
+async function saveConnections(project,configuration,known=[],progress=()=>{}) {
+  const response=await invoke('save_project',{project,configuration:JSON.stringify(configuration)});
+  const saved=response?JSON.parse(response):configuration;
+  const pending=saved.repositories.filter(r=>r.url && !known.find(k=>k.id===r.id && k.url===r.url && k.collected));
+  const collection=[];
+  for(const repo of pending){
+    progress(repo);
+    try{const log=await invoke('refresh',{project,repository:repo.id,repo:'',since:'7'});collection.push({repository:repo.id,ok:!String(log).includes('FAILED'),log});}
+    catch(error){collection.push({repository:repo.id,ok:false,error:githubErrorText(error)});}
+  }
+  return {saved:true,configuration:saved,collection};
 }
 function editProject(create) {
   const dialog = $('project-dialog');
@@ -868,22 +897,15 @@ function editProject(create) {
   $('cancelProject').onclick=()=>dialog.close();
   $('saveProject').onclick=async()=>{
     collect();collectShared(); const name=$('projectName').value.trim(); $('saveProject').disabled=true;
-    const pending=repos.filter(r=>r.url && !known.find(k=>k.id===r.id && k.url===r.url && k.collected));
     const priorDisabled=new Map([...dialog.querySelectorAll('fieldset,input,button')].map(el=>[el,el.disabled]));
     const setBusy=value=>{for(const [el,disabled] of priorDisabled)el.disabled=value || disabled;$('saveProject').disabled=value;};
     setBusy(true);$('projectError').textContent=tr('접근 권한 확인 · GitHub 코드 내려받는 중…');
     try {
       if (create && [...$('project').options].some(o=>!o.hasAttribute('data-empty') && o.value===name)) throw Error('A project with this name already exists');
-      await invoke('save_project',{project:name, configuration:JSON.stringify({repositories:repos,shared_data:shared})});
-      const logs=[];let collectionFailed=false;
-      for(const repo of pending){
-        $('projectError').textContent=repo.name+' · '+tr('첫 지도 가져오는 중…');
-        try {logs.push(await invoke('refresh',{project:name,repository:repo.id,repo:'',since:'7'}));}
-        catch(error){collectionFailed=true;logs.push(githubErrorText(error));}
-      }
+      const saved=await saveConnections(name,{repositories:repos,shared_data:shared},known,repo=>{$('projectError').textContent=repo.name+' · '+tr('첫 지도 가져오는 중…');});
       const ps=await invoke('list_projects');$('project').innerHTML=ps.map(p=>`<option ${p===name?'selected':''}>${esc(p)}</option>`).join('');
       dialog.close();await loadProject(name,false,'');
-      if(collectionFailed || logs.some(log=>String(log).includes('FAILED') || String(log).includes('GITHUB_ACCESS'))) $('status').textContent=tr('연결은 저장되었습니다. 가져오지 못한 코드는 새로고침으로 다시 시도하세요.');
+      if(saved.collection.some(item=>!item.ok)) $('status').textContent=tr('연결은 저장되었습니다. 가져오지 못한 코드는 새로고침으로 다시 시도하세요.');
     } catch(e) {
       $('projectError').textContent=String(e).includes('GITHUB_ACCESS')?githubErrorText(e):registrationError(e);
       setBusy(false);
@@ -1005,7 +1027,7 @@ function detail(m, s, r) {
   const shared = (rt.tables || []).filter(t => progs(t).length); const users = (routeUse(m)[r.key] || []).length;
   if (shared.length) h += ui`<div class="empty">${esc([...new Set(shared.flatMap(t => progs(t).map(n => n.name)))].join(', '))}도 서버를 거치지 않고 이 저장소를 직접 읽고 쓴다: ${shared.map(esc).join(', ')}</div>`;
   if (f && f.steps.length) {
-    const steps = [{ lane: '화면', text: r.btn ? ui`"${r.btn}" 을 누른다` : tr('화면이 요청을 보낸다'), start: true }, ...f.steps];
+    const steps = [{ lane: '화면', text: s.path ? (r.btn ? ui`"${r.btn}" 을 누른다` : tr('화면이 요청을 보낸다')) : tr('서버가 요청을 받는다'), start: true }, ...f.steps];
     h += ui`<div class="lanes"><span class="screen">화면</span><span class="server">서버</span><span class="store">저장소</span><span class="external">외부</span></div>` + steps.map((st, i) => {
       const cur = S.step === i; const off = S.step >= 0 && !cur;
       return `<div class="step l${LANE[st.lane] ?? 1} ${cur ? 'cur' : ''} ${off ? 'off' : ''} ${st.uncertain ? 'unsure' : ''}" data-step="${i}"><span class="n">${i || '▶'}</span><div class="grow"><div class="tx">${esc(st.text)}${st.uncertain ? tr(' (코드만으로는 확신 못 함)') : ''}</div>${S.ev === i && !st.start ? `<div class="ev mono">${esc(st.quote)}<br>${zed(m, st.file || rt.file, st.line)}</div>` : ''}</div></div>`; }).join('') +
@@ -1224,8 +1246,14 @@ function sysLinks(y) { const out = [...y.links]; const by = {};
   return out; }
 const jobsOf = (key) => S.jobs ? Object.entries(S.jobs.nodes).flatMap(([id, v]) => v.jobs.filter(j => j.routes.some(r => r.key === key)).map(j => ({ node: (S.system ? S.system.nodes : []).find(n => n.id === id) || { name: id }, job: j, exact: j.routes.find(r => r.key === key).exact }))) : [];
 const progs = (table) => (S.system ? S.system.nodes : []).filter(n => (n.tables || []).includes(table));
+function selectScreen(path,relations=false) {
+  S.agentPrompt=null;S.controlTarget=null;
+  if(relations)return setFocus('screen|'+path);
+  S.sel=path;S.open=null;S.step=-1;S.ev=-1;S.view='map';render();$('insp').scrollTop=0;
+}
+function selectProgram(id,toggle=true) {S.controlTarget=null;S.view='sys';S.node=toggle && S.node===id?null:id;render();}
 function setFocus(f) { S.agentPrompt = null; const i = f.indexOf('|'); const t = f.slice(0, i), id = f.slice(i + 1); S.focus = { t, id }; S.view = 'focus'; S.step = -1; S.ev = -1;
-  if (t === 'screen') { S.sel = id; S.open = null; } if (t === 'route') { const u = routeUse(M())[id]; if (u) { S.sel = u[0].s.path; S.open = id; } }
+  if (t === 'screen') { S.sel = id; S.open = null; } if (t === 'route') { const u = routeUse(M())[id]; S.sel=u?.[0]?.s.path || null;S.open=id; }
   render(); $('map').scrollTop = 0; $('insp').scrollTop = 0; }
 function focusData(m) {
   const { t, id } = S.focus; const scr = (p, sub) => ({ f: 'screen|' + p, name: label(m, p), ai: isAi(m, p), sub });
@@ -1236,7 +1264,7 @@ function focusData(m) {
   if (t === 'table') { const u = tableUse(m)[id] || { w: new Map(), r: new Map() }; const row = (word) => ([p, rs]) => scr(p, `${word} ${rs.length}: ${reqLabel(rs[0])}${rs.length > 1 ? tr(' 외') : ''}`);
     return { kind: tr('저장소'), name: id, sub: '', lt: tr('이 저장소를 바꾸는 쪽'), rt: tr('이 저장소를 읽는 화면'), left: [...progs(id).map(n => ({ name: n.name, sub: tr('서버를 거치지 않고 직접 읽고 쓴다') })), ...[...u.w].map(row(tr('바꾸는 요청')))], right: [...u.r].map(row(tr('읽는 요청'))),
       note: tr('읽기와 바꾸기는 요청 방식으로만 갈랐다. 읽는 요청이 안에서 값을 바꾸는 경우는 가려내지 못한다.') }; }
-  const u = routeUse(m)[id] || []; const r = u[0] && u[0].r; if (!r) return null;
+  const u = routeUse(m)[id] || []; const original=(m.backend_routes || []).find(r=>r.file+'::'+r.function===id); const r = u[0]?.r || (original?{route:original,key:id,name:original.function}:null); if (!r) return null;
   return { kind: tr('서버 기능'), name: reqLabel(r), ai: reqIsAi(r), sub: r.route.method + ' ' + r.route.path, lt: tr('이 서버 기능을 부르는 화면'), rt: tr('닿는 저장소와 바깥 서비스'), left: u.map(x => scr(x.s.path, x.r.btn ? ui`"${x.r.btn}" 버튼` : tr('버튼 글자를 못 찾음'))),
     right: [...(r.route.tables || []).map(tb => ({ f: 'table|' + tb, name: tb, sub: tr('저장소') })), ...(r.route.externals || []).map(e => ({ name: e, sub: tr('바깥 서비스') }))], note: '' };
 }
@@ -1253,7 +1281,7 @@ function focusView(m) {
 function focusInspector(m) {
   if (!S.focus) return ui`<div class="hint">저장소를 고르면<br>그 저장소를 바꾸는 쪽과 읽는 쪽이 나옵니다.</div>`;
   const { t, id } = S.focus; if (t === 'screen') return inspector(m);
-  if (t === 'route') { const u = (routeUse(m)[id] || [])[0]; return u ? ui`<h2><span class="${reqIsAi(u.r) ? 'ai' : ''}">${esc(reqLabel(u.r))}</span></h2><p class="sub">서버 기능</p><div class="sect"><div class="group">${detail(m, u.s, u.r)}</div></div>` : ''; }
+  if (t === 'route') { const u = (routeUse(m)[id] || [])[0]; return u ? ui`<h2><span class="${reqIsAi(u.r) ? 'ai' : ''}">${esc(reqLabel(u.r))}</span></h2><p class="sub">서버 기능</p><div class="sect"><div class="group">${detail(m, u.s, u.r)}</div></div>` : (()=>{const route=(m.backend_routes || []).find(r=>r.file+'::'+r.function===id);return route?`<h2>${esc(route.method)} ${esc(route.path)}</h2><p>${esc(route.function)}</p>`+detail(m,{path:''},{key:id,route,name:route.function,btns:[],fn:{file:route.file},call:{line:route.line}}):'';})(); }
   const u = tableUse(m)[id] || { w: new Map(), r: new Map() }; const list = (mp) => [...mp].flatMap(([p, rs]) => rs.map(r => ui`<div class="row click" data-f="route|${esc(r.key)}"><span title="자동 테스트"><i class="dot ${(r.route.tests || []).length ? 'ok' : ''}"></i></span><div class="grow"><div class="t"><span class="${reqIsAi(r) ? 'ai' : ''}">${esc(reqLabel(r))}</span></div><div class="s">${esc(label(m, p))}</div></div></div>`)).join('') || tr('<div class="row"><div class="grow empty">없다</div></div>');
   const n = (mp) => [...mp.values()].reduce((a, b) => a + b.length, 0);
   return ui`<h2 class="mono">${esc(id)}</h2><p class="sub">저장소${progs(id).map(x => ' · ' + esc(x.name) + tr('도 직접 읽고 쓴다')).join('')}</p>
@@ -1285,9 +1313,9 @@ function render() {
   $('map').scrollTop = top; $('map').scrollLeft = left; $('insp').scrollTop = itop;
   if ($('remakeSys')) $('remakeSys').onclick=()=>requestAgentAction('make_system');
   if($('requestBriefing'))$('requestBriefing').onclick=()=>requestAgentAction('briefing_request');
-  if (sys && S.system) { S._wires = sysLinks(S.system).map((l, i) => ({ ...l, n: i + 1, dim: !!S.node && l.from !== S.node && l.to !== S.node })); drawWires(); document.querySelectorAll('.card[data-node], .row[data-node]').forEach(el => el.onclick = () => { S.node = S.node === el.dataset.node ? null : el.dataset.node; render(); });
+  if (sys && S.system) { S._wires = sysLinks(S.system).map((l, i) => ({ ...l, n: i + 1, dim: !!S.node && l.from !== S.node && l.to !== S.node })); drawWires(); document.querySelectorAll('.card[data-node], .row[data-node]').forEach(el => el.onclick = () => { selectProgram(el.dataset.node); });
     if ($('toMap')) $('toMap').onclick = () => { S.view = 'map'; render(); } }
-  const pick = (p) => { S.agentPrompt = null; if (view === 'focus') return setFocus('screen|' + p); S.sel = p; S.open = null; S.step = -1; S.ev = -1; render(); $('insp').scrollTop = 0; };
+  const pick=p=>selectScreen(p,view==='focus');
   document.querySelectorAll('[data-scr]').forEach(el => el.onclick = () => pick(el.dataset.scr));
   document.querySelectorAll('[data-req]').forEach(el => el.onclick = () => { S.open = S.open === el.dataset.req ? null : el.dataset.req; S.step = -1; S.ev = -1; render(); });
   document.querySelectorAll('[data-step]').forEach(el => el.onclick = () => { const i = +el.dataset.step; S.ev = S.ev === i ? -1 : i; render(); });
@@ -1308,8 +1336,13 @@ function render() {
   if ($('regroup')) $('regroup').onclick=()=>requestAgentAction('suggest_groups');
   renderPendingActions();
   if (S.agentPrompt != null) renderAgentPrompt();
+  if(typeof controlDecoration==='function')controlDecoration();
 }
 
+async function persistSettings(value) {
+  if(!value || typeof value!=='object')throw Error('Settings object required');
+  S.settings=JSON.parse(await invoke('save_settings',{json:JSON.stringify(value)}));return S.settings;
+}
 $('q').oninput = () => { S.q = $('q').value; render(); };
 $('refresh').onclick = doRefresh;
 function renderSettings() {
@@ -1330,7 +1363,7 @@ function renderSettings() {
     const value={open_refresh:$('openRefresh').checked,since:dialog.querySelector('input[name=since]:checked').value,since_time:$('sinceTime').value};
     if(value.since==='time' && !value.since_time){$('settingsError').textContent=tr('시각을 정해 주세요.');return;}
     $('saveSt').disabled=true;
-    try { S.settings=JSON.parse(await invoke('save_settings',{json:JSON.stringify(value)}));dialog.close(); }
+    try { await persistSettings(value);dialog.close(); }
     catch(error){$('settingsError').textContent=tr('설정을 저장하지 못했습니다: ')+String(error);}
     finally {if($('saveSt'))$('saveSt').disabled=false;}
   };
@@ -1370,8 +1403,10 @@ $('updates').onclick = () => { renderUpdates(); $('release-dialog').showModal();
   catch(error) { $('status').textContent=tr('설정을 읽지 못했습니다: ')+String(error); }
   const ps = await invoke('list_projects');
   $('project').innerHTML = ps.map(p => `<option>${esc(p)}</option>`).join('') || tr('<option data-empty>(없음)</option>');
-  if (ps.length) loadProject(ps[0]);
+  if (ps.length) await loadProject(ps[0]);
+  window.appControlReady=true;
 })();
 </script>
+<script src="control.js"></script>
 </body>
 </html>
