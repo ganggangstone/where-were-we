@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
 import mapcore
+import project as project_store
 
 PROJECT = sys.argv[1]
 if os.path.exists(os.path.join(mapcore.ROOT, PROJECT, "project.json")):
@@ -18,9 +19,14 @@ if os.path.exists(os.path.join(mapcore.ROOT, PROJECT, "project.json")):
     print(project.refresh_project(PROJECT, since=sys.argv[3] if len(sys.argv) > 3 else "7"))
     sys.exit(0)
 HOME = os.path.join(mapcore.ROOT, PROJECT)
-REPO = sys.argv[2] if len(sys.argv) > 2 else json.load(open(os.path.join(HOME, "dev.json")))["repo"]
+REPO = sys.argv[2] if len(sys.argv) > 2 else (project_store.read(Path(HOME)/'dev.json') or project_store.read(Path(HOME)/'main.json'))['repo']
 SINCE = sys.argv[3] if len(sys.argv) > 3 else "7"
 NOW = datetime.now(timezone.utc)
+
+if not os.environ.get('WHERE_WERE_WE_COLLECTION_STAGE') and project_store.github_origin(REPO):
+    try:print(project_store.refresh_legacy(PROJECT,REPO,SINCE))
+    except ValueError as error:sys.exit(str(error))
+    sys.exit(0)
 
 
 def run(*a):
@@ -31,7 +37,11 @@ def run(*a):
 
 def git(*args):
     result = subprocess.run(["git", "-C", REPO, *args], capture_output=True, text=True)
-    if result.returncode:sys.exit(result.stderr.strip() or "Git command failed")
+    if result.returncode:
+        if args and args[0]=='fetch' and os.environ.get('WHERE_WERE_WE_GITHUB'):
+            import project
+            sys.exit(str(project.github_error(json.loads(os.environ['WHERE_WERE_WE_GITHUB']),'fetch')))
+        sys.exit(result.stderr.strip() or "Git command failed")
     return result.stdout.strip()
 git("fetch", "-q", "origin")
 PINNED = {role: git("rev-parse", "--verify", ref + "^{commit}") for role,ref in mapcore.configured_refs().items() if ref}

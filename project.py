@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 import uuid
+from urllib.parse import urlsplit
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 NAMES = ('dev', 'main', 'dev.prev', 'main.prev', 'status', 'changes', 'groups', 'flows', 'system', 'system.ai', 'jobs', 'tests')
@@ -55,6 +56,134 @@ def config(name):
 def fingerprint(repo):
     return hashlib.sha256(json.dumps({k:repo.get(k) for k in ('path','refs','layout')},sort_keys=True).encode()).hexdigest()
 
+def github_origin(path):
+    result=subprocess.run(['git','-C',path,'remote','get-url','origin'],capture_output=True,text=True)
+    if result.returncode:return None
+    remote=result.stdout.strip()
+    match=re.fullmatch(r'(?:[^@/]+@)?([^:/]+):([^\s]+)',remote) if '://' not in remote else None
+    parsed=urlsplit(remote if '://' in remote else '')
+    host,slug=(match.group(1),match.group(2)) if match else (parsed.hostname,parsed.path.lstrip('/'))
+    if not host or not re.fullmatch(r'[a-zA-Z0-9.-]+',host) or not slug or len(slug.removesuffix('.git').split('/'))!=2:return None
+    # Non-GitHub remotes retain their own Git authentication.
+    if host!='github.com':return None
+    return {'host':host,'repository':slug.removesuffix('.git'),'https':parsed.scheme=='https'}
+
+def github_error(identity,kind):
+    return ValueError('GITHUB_ACCESS|'+identity.get('host','github.com')+'|'+identity.get('account','')+'|'+kind)
+
+def github_run(args,env,identity,kind):
+    try:result=subprocess.run(['gh',*args],env=env,capture_output=True,text=True,timeout=30)
+    except (OSError,subprocess.TimeoutExpired):raise github_error(identity,kind) from None
+    if result.returncode:raise github_error(identity,kind)
+    return result.stdout.strip()
+
+def github_environment(repo,check_access=True):
+    """Credentials live only in the collection child, never argv/config/logs."""
+    env=dict(os.environ)
+    for key in ('GH_REPO','GH_HOST','GH_DEBUG','DEBUG','GIT_TRACE','GIT_TRACE_CURL','GIT_CURL_VERBOSE','WHERE_WERE_WE_GITHUB'):
+        env.pop(key,None)
+    origin=github_origin(repo['path']) if repo.get('path') else None
+    identity=repo.get('github') or {}
+    if not origin:return env
+    if identity and identity['host']!=origin['host']:raise github_error(identity,'remote_changed')
+    identity=identity or {'host':origin['host']}
+    host=identity['host'];env['GH_HOST']=host;env['GH_PROMPT_DISABLED']='1';env['GIT_TERMINAL_PROMPT']='0'
+    account=identity.get('account')
+    if account:
+        # Ignore credentials inherited from an unrelated terminal/agent task.
+        stored=dict(env)
+        for key in ('GH_TOKEN','GITHUB_TOKEN','GH_ENTERPRISE_TOKEN','GITHUB_ENTERPRISE_TOKEN'):stored.pop(key,None)
+        token=github_run(['auth','token','--hostname',host,'--user',account],stored,identity,'login')
+        env=stored;env['GH_TOKEN']=token
+    actual=github_run(['api','user','--hostname',host,'--jq','.login'],env,identity,'login')
+    if not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9-]{0,38}',actual) or account and actual.lower()!=account.lower():raise github_error(identity,'login')
+    identity={'host':host,'account':actual}
+    if check_access:
+        github_run(['repo','view',host+'/'+origin['repository'],'--json','nameWithOwner'],env,identity,'repository')
+    # A command-scoped helper replaces any active-account credential helper.
+    # SSH remotes continue to use the user's existing SSH keys.
+    if origin['https']:
+        count=int(env.get('GIT_CONFIG_COUNT','0'))
+        for value in ('','!gh auth git-credential'):
+            env['GIT_CONFIG_KEY_'+str(count)]='credential.https://'+host+'.helper'
+            env['GIT_CONFIG_VALUE_'+str(count)]=value;count+=1
+        env['GIT_CONFIG_COUNT']=str(count)
+    env['WHERE_WERE_WE_GITHUB']=json.dumps(identity)
+    return env
+
+def capture_github(repo):
+    if repo.get('github'):return repo
+    try:
+        env=github_environment(repo,check_access=False)
+        if env.get('WHERE_WERE_WE_GITHUB'):repo['github']=json.loads(env['WHERE_WERE_WE_GITHUB'])
+    except ValueError:pass  # Offline registration is valid; first refresh retries.
+    return repo
+
+def github_repository(name,rid):
+    conf=config(name)
+    if conf:
+        repo=next((r for r in conf['repositories'] if r['id']==rid),None)
+        if not repo:raise ValueError('Unknown repository')
+        return repo
+    raw=read(home(name)/'dev.json') or read(home(name)/'main.json')
+    if not raw:raise ValueError('Refresh or connect code first')
+    repo={'id':'','path':raw['repo'],'refs':{},'layout':{}}
+    remembered=states(name).get('@github',{})
+    if remembered.get('path')==repo['path']:repo['github']=remembered.get('github')
+    return repo
+
+def remember_github(name,repo):
+    capture_github(repo)
+    if not repo.get('github'):return
+    conf=config(name)
+    if conf:
+        for item in conf['repositories']:
+            if item['id']==repo['id']:item['github']=repo['github']
+        atomic(home(name)/'project.json',conf)
+    else:
+        state=states(name);state['@github']={'path':repo['path'],'github':repo['github']}
+        atomic(home(name)/'repository-state.json',state)
+
+def refresh_legacy(name,path,since):
+    import mapcore
+    with locked(name):
+        repo=github_repository(name,'')
+        if os.path.realpath(repo['path'])!=os.path.realpath(path):raise ValueError('Repository path does not match this project')
+        remember_github(name,repo)
+        env=github_environment(repo)
+        with tempfile.TemporaryDirectory(prefix='.collect-',dir=home(name)) as temp:
+            stage=Path(temp)/name;stage.mkdir()
+            for key in NAMES:
+                source=home(name)/(key+'.json')
+                if source.exists():shutil.copyfile(source,stage/source.name)
+            env.update(WHERE_WERE_WE_ROOT=temp,WHERE_WERE_WE_COLLECTION_STAGE='1',WHERE_WERE_WE_SETTINGS=mapcore.settings_path())
+            result=subprocess.run(mapcore.python_command(Path(__file__).with_name('refresh.py'),name,path,since),env=env,capture_output=True,text=True,timeout=1800)
+            if result.returncode:raise ValueError((result.stderr or result.stdout)[-1600:] or 'Collection failed')
+            for key in NAMES:
+                target=stage/(key+'.json')
+                if target.exists():atomic(home(name)/target.name,read(target))
+        return result.stdout
+
+def github_accounts(name,rid):
+    repo=github_repository(name,rid);origin=github_origin(repo['path'])
+    if not origin:raise ValueError('This code does not use a github.com origin')
+    env=dict(os.environ)
+    for key in ('GH_TOKEN','GITHUB_TOKEN','GH_DEBUG','DEBUG'):env.pop(key,None)
+    identity=repo.get('github') or {'host':origin['host']}
+    value=github_run(['auth','status','--hostname',origin['host'],'--json','hosts','--jq','[.hosts[][] | .login] | unique'],env,identity,'login')
+    accounts=json.loads(value)
+    return {'accounts':[a for a in accounts if isinstance(a,str) and re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9-]{0,38}',a)],'selected':identity.get('account','')}
+
+def set_github_account(name,rid,account):
+    if not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9-]{0,38}',account):raise ValueError('Choose a GitHub account')
+    with locked(name):
+        repo=github_repository(name,rid);origin=github_origin(repo['path'])
+        if not origin:raise ValueError('This code does not use a github.com origin')
+        repo['github']={'host':origin['host'],'account':account}
+        github_environment(repo)  # Check identity and access before saving.
+        remember_github(name,repo)
+    return 'GitHub account saved'
+
 def validate(data):
     if not isinstance(data,dict) or not isinstance(data.get('repositories'),list) or not data['repositories']:
         raise ValueError('Add at least one repository')
@@ -76,6 +205,10 @@ def validate(data):
         for v in layout.values():
             if v is not None and (not isinstance(v,str) or not v or v.startswith('/') or '..' in v.split('/') or '\\' in v):raise ValueError('Source roots must be repository-relative paths')
         entry={'id':rid,'name':str(item.get('name') or rid),'path':path,'refs':refs,'layout':layout,'api_targets':item.get('api_targets',[])}
+        if item.get('github'):
+            identity=item['github']
+            if not isinstance(identity,dict) or identity.get('host')!='github.com' or not isinstance(identity.get('account'),str) or not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9-]{0,38}',identity['account']):raise ValueError('Choose a GitHub account')
+            entry['github']={'host':identity['host'],'account':identity['account']}
         if item.get('legacy'):entry['legacy']=True
         result['repositories'].append(entry);ids.add(rid);paths.add(path)
     for item in result['repositories']:
@@ -97,6 +230,12 @@ def configure(name, data):
     proposed=validate(data)
     with locked(name):
         existing=read(home(name)/'project.json')
+        for repo in proposed['repositories']:
+            previous=next((r for r in (existing or {}).get('repositories',[]) if r['id']==repo['id'] and r['path']==repo['path']),{})
+            if previous.get('github') and not repo.get('github'):repo['github']=previous['github']
+            legacy=states(name).get('@github',{})
+            if repo.get('legacy') and legacy.get('path')==repo['path'] and not repo.get('github'):repo['github']=legacy.get('github')
+            capture_github(repo)
         # IDs remain stable. A legacy association must describe the actual old map.
         for repo in proposed['repositories']:
             if repo.get('legacy'):
@@ -391,7 +530,7 @@ def read_bundle(name, repository='', branch='dev'):
 
 def child_environment(root,repo):
     import mapcore
-    env=dict(os.environ,WHERE_WERE_WE_ROOT=str(root),WHERE_WERE_WE_REFS=json.dumps(repo['refs']),WHERE_WERE_WE_LAYOUT=json.dumps(repo['layout']),WHERE_WERE_WE_SETTINGS=mapcore.settings_path())
+    env=dict(github_environment(repo),WHERE_WERE_WE_ROOT=str(root),WHERE_WERE_WE_REFS=json.dumps(repo['refs']),WHERE_WERE_WE_LAYOUT=json.dumps(repo['layout']),WHERE_WERE_WE_SETTINGS=mapcore.settings_path(),WHERE_WERE_WE_COLLECTION_STAGE='1')
     return env
 
 def _transaction(name,repo,command, reset=False):
@@ -423,6 +562,7 @@ def refresh_project(name, repository='', since='7'):
             old=states(name).get(repo['id'],{})
             state=states(name);state[repo['id']]={**old,'last_attempt':now(),'in_progress':True};atomic(home(name)/'repository-state.json',state)
             try:
+                remember_github(name,repo)
                 _transaction(name,repo,['refresh.py',repo['path'],since],reset=old.get('fingerprint')!=fingerprint(repo))
                 messages.append(repo['id']+': refreshed')
             except Exception as error:
@@ -480,7 +620,7 @@ def record_test(name,rid,route,file,line,quote):
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command',choices=['read','configure','refresh','action']);parser.add_argument('project')
+    parser.add_argument('command',choices=['read','configure','refresh','action','github-accounts','github-account']);parser.add_argument('project')
     parser.add_argument('--repository',default='');parser.add_argument('args',nargs='*')
     args,remaining=parser.parse_known_args()
     if remaining and args.command!='action':parser.error('unrecognized arguments: '+' '.join(remaining))
@@ -488,6 +628,8 @@ def main():
     if args.command=='read':print(json.dumps(read_bundle(args.project,args.repository),ensure_ascii=False))
     elif args.command=='configure':print(json.dumps(configure(args.project,json.loads(args.args[0]) if args.args else json.load(sys.stdin)),ensure_ascii=False))
     elif args.command=='refresh':print(refresh_project(args.project,args.repository))
+    elif args.command=='github-accounts':print(json.dumps(github_accounts(args.project,args.repository)))
+    elif args.command=='github-account':print(set_github_account(args.project,args.repository,args.args[0]))
     else:
         if not args.args:raise ValueError('Choose an action')
         script=args.args[0]

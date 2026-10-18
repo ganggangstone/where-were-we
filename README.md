@@ -31,6 +31,8 @@ New connections analyze committed code on the folder’s currently selected bran
 
 Under **Specify server connections and code locations**, select the receiving server by its display name. Matching endpoints are labeled as user-configured connections. Unconfigured or ambiguous matches remain candidates. Equal table names stay separate unless explicitly assigned to shared data. Under **Manage code → When code folders share the same data**, connect the code folders and table names that use the same database tables. Shared-data identifiers are generated automatically. You can edit or remove connections there; collected table names are suggested. Repository collection failures preserve the last successful map and appear beside the repository's commit and last success time.
 
+For github.com code, the app remembers the GitHub account at connection time (or the first refresh for existing projects). Changing the active account in another task does not change this connection. If collection fails, **Change GitHub account** lets you choose a saved login and retry. Tokens stay in GitHub CLI; only the account name is saved. HTTPS fetch uses that account; SSH fetch uses your configured SSH keys.
+
 Existing projects remain available. Open **Manage code** to keep the original repository and add others without moving or deleting the old map files.
 
 The app starts in Korean. Choose **English** in the toolbar; the preference is saved locally. Project names, code, and AI explanations stay verbatim.

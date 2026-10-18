@@ -26,6 +26,75 @@ class TemporaryProject(unittest.TestCase):
         self.patch = patch.object(mapcore, 'ROOT', str(self.root))
         self.patch.start(); self.addCleanup(self.patch.stop)
 
+class GitHubAccounts(TemporaryProject):
+    def fake_run(self,args,**kwargs):
+        import subprocess
+        self.calls.append((args,kwargs))
+        env=kwargs.get('env',{})
+        if args[0]=='git':out='https://github.com/example/private.git'
+        elif args[1:3]==['auth','token']:
+            out='test-token-'+args[-1]
+        elif args[1:3]==['api','user']:
+            out='alice' if env.get('GH_TOKEN')=='test-token-alice' else 'bob'
+        elif args[1:3]==['repo','view']:
+            return subprocess.CompletedProcess(args,1 if self.denied else 0,'{}','sensitive upstream details')
+        else:raise AssertionError(args)
+        return subprocess.CompletedProcess(args,0,out+'\n','')
+
+    def setUp(self):
+        super().setUp();self.calls=[];self.denied=False
+        self.runner=patch('subprocess.run',side_effect=self.fake_run)
+        self.runner.start();self.addCleanup(self.runner.stop)
+
+    def test_connect_remembers_account_without_storing_token_or_switching_global_account(self):
+        value=project.configure('demo',{'repositories':[{'id':'web','path':'/demo/web'}]})
+        self.assertEqual(value['repositories'][0]['github']['account'],'bob')
+        self.assertNotIn('test-token', (self.root/'demo/project.json').read_text())
+        project.configure('demo',value)
+        self.assertFalse(any('switch' in args for args,_ in self.calls))
+
+    def test_collection_uses_remembered_account_for_api_and_https_git_only_in_child(self):
+        repo={'path':'/demo/web','refs':{},'layout':{},'github':{'host':'github.com','account':'alice'}}
+        with patch.dict(os.environ,{'GH_TOKEN':'other-token','GH_REPO':'other/wrong','GH_DEBUG':'api'}):
+            env=project.child_environment(self.root,repo)
+            self.assertEqual(os.environ['GH_TOKEN'],'other-token')
+        self.assertEqual(env['GH_TOKEN'],'test-token-alice')
+        self.assertNotIn('GH_REPO',env);self.assertNotIn('GH_DEBUG',env)
+        pairs={env['GIT_CONFIG_KEY_'+str(i)]:env['GIT_CONFIG_VALUE_'+str(i)] for i in range(int(env['GIT_CONFIG_COUNT']))}
+        self.assertEqual(pairs['credential.https://github.com.helper'],'!gh auth git-credential')
+        self.assertFalse(any('test-token-alice' in str(args) for args,_ in self.calls))
+
+    def test_wrong_identity_is_rejected_without_exposing_token(self):
+        repo={'path':'/demo/web','refs':{},'layout':{},'github':{'host':'github.com','account':'charlie'}}
+        with self.assertRaisesRegex(ValueError,'GITHUB_ACCESS.*charlie') as error:
+            project.child_environment(self.root,repo)
+        self.assertNotIn('test-token',str(error.exception))
+
+    def test_account_repair_checks_access_before_saving_and_preserves_map(self):
+        project.configure('demo',{'repositories':[{'id':'web','path':'/demo/web'}]})
+        repo=project.config('demo')['repositories'][0]
+        project.publish('demo','web',{'dev':sample('/demo/web')},{'fingerprint':project.fingerprint(repo)})
+        generation=project.states('demo')['web']['generation']
+        self.denied=True
+        with self.assertRaisesRegex(ValueError,'GITHUB_ACCESS'):
+            project.set_github_account('demo','web','alice')
+        self.assertEqual(project.config('demo')['repositories'][0]['github']['account'],'bob')
+        self.denied=False
+        project.set_github_account('demo','web','alice')
+        self.assertEqual(project.config('demo')['repositories'][0]['github']['account'],'alice')
+        self.assertEqual(project.states('demo')['web']['generation'],generation)
+
+    def test_legacy_refresh_context_remembers_account_for_same_folder(self):
+        folder=self.root/'legacy';folder.mkdir()
+        project.atomic(folder/'dev.json',sample('/demo/web'))
+        repo=project.github_repository('legacy','')
+        project.remember_github('legacy',repo)
+        remembered=project.github_repository('legacy','')
+        self.assertEqual(remembered['github']['account'],'bob')
+        project.set_github_account('legacy','','alice')
+        adopted=project.configure('legacy',{'repositories':[{'id':'web','path':'/demo/web','legacy':True}]})
+        self.assertEqual(adopted['repositories'][0]['github']['account'],'alice')
+
 class RefreshSettings(TemporaryProject):
     def test_program_details_show_saved_jobs_and_empty_state_without_request_button(self):
         import shutil,subprocess
@@ -204,10 +273,12 @@ class Registration(TemporaryProject):
         source=(Path(project.__file__).parent/'ui/index.html').read_text()
         script=source.split('<script>',1)[1].rsplit('</script>',1)[0].split("$('q').oninput",1)[0]
         bootstrap=r'''
-const saved=[];
+const saved=[],accountChanges=[];let accountFailure=false;
 window.__TAURI__={core:{invoke:async(command,args)=>{
   if(command==='save_project'){saved.push(JSON.parse(args.configuration));return '';}
   if(command==='list_projects')return ['demo'];
+  if(command==='github_accounts')return JSON.stringify({accounts:['alice','bob'],selected:'bob'});
+  if(command==='use_github_account'){accountChanges.push(args);if(accountFailure)throw Error('GITHUB_ACCESS|github.com|bob|repository');return '';}
   throw Error('Unexpected command: '+command);
 }}};
 '''
@@ -275,6 +346,23 @@ window.__TAURI__={core:{invoke:async(command,args)=>{
   assert(!commonVia({screens:[screen('/one','src/One.tsx','src/Child.tsx')]}).has('src/Child.tsx'),'A component used on one screen is not shared');
   assert(!commonVia({screens:[screen('/one','src/One.tsx','src/One.tsx')]}).has('src/One.tsx'),'Direct screen requests must stay visible');
   assert(commonVia({screens:[screen('/one','src/One.tsx','src/Header.tsx'),screen('/two','src/Two.tsx','src/Header.tsx')]}).has('src/Header.tsx'),'Shared headers still count as shared');
+  S.project='demo';S.repository='';S.projectInfo={repositories:[{id:'web',name:'Web',collected:true,commits:{dev:'abc'},error:'GITHUB_ACCESS|github.com|bob|repository'}]};
+  S.lang='en';renderRepositories();
+  assert(document.querySelector('[data-github-repair]'),'Offer account repair only on authentication-related failure');
+  assert($('repository-bar').textContent.includes('@bob') && !$('repository-bar').textContent.includes('GITHUB_ACCESS'),'Use readable account-aware errors');
+  await editGitHubAccount('web');
+  assert($('githubAccount').value==='bob','Preselect the remembered account');
+  assert(!/[가-힣]/.test($('project-dialog').innerText),'Account repair is translated');
+  accountFailure=true;await $('saveGithub').onclick();
+  assert($('project-dialog').open && $('githubError').textContent.includes('@bob'),'Preserve the dialog on access failure');
+  accountFailure=false;$('githubAccount').value='alice';let retried=0;doRefresh=async()=>{retried++;};
+  await $('saveGithub').onclick();
+  assert(accountChanges.at(-1).repository==='web' && accountChanges.at(-1).account==='alice' && retried===1,'Save only the chosen code account and retry collection');
+  S.projectInfo.repositories[0].error=null;renderRepositories();
+  assert(!document.querySelector('[data-github-repair]'),'Normal collection should not add an account selector');
+  S.lang='ko';await editGitHubAccount('');
+  assert($('project-dialog').innerText.includes('다른 작업의 로그인 계정은 바꾸지 않습니다.'),'Legacy repair should use the same plain guidance');
+  $('project-dialog').close();
   document.body.dataset.registrationTest='passed';
   const output=document.createElement('pre');output.id='registration-result';output.textContent=JSON.stringify(saved);document.body.append(output);
 })().catch(error=>{document.body.dataset.registrationTest='failed';const output=document.createElement('pre');output.textContent=error.stack;document.body.append(output);});
@@ -517,10 +605,21 @@ args=sys.argv[1:];repo=os.getcwd()
 if '-C' in args:
  i=args.index('-C');repo=args[i+1];args=args[:i]+args[i+2:]
 if Path(sys.argv[0]).name=='gh':
+ if os.environ.get('FAKE_GITHUB'):
+  active=Path(os.environ['FAKE_ACTIVE']).read_text().strip()
+  account=os.environ.get('GH_TOKEN','test-token-'+active).removeprefix('test-token-')
+  if args[:2]==['auth','token']:print('test-token-'+args[-1]);sys.exit()
+  if args[:2]==['auth','git-credential']:
+   sys.stdin.read();print('username='+account+'\npassword='+os.environ.get('GH_TOKEN','')+'\n');sys.exit()
+  if args[:2]==['api','user']:print(account);sys.exit()
+  if args[:2]==['auth','status']:print(json.dumps(['alice','bob']));sys.exit()
+  if account!='alice' or os.environ.get('FAKE_GH_DENY'):print('access failed',file=sys.stderr);sys.exit(1)
+  if args[:2]==['repo','view']:print('{}');sys.exit()
  if os.environ.get('FAKE_GH_FAIL'):print('GitHub denied',file=sys.stderr);sys.exit(1)
  print('[]');sys.exit()
 sources=json.load(open(os.environ['FAKE_SOURCES']));files={os.path.realpath(k):v for k,v in sources.items()}.get(os.path.realpath(repo),{})
 if args[0]=='fetch':
+ if os.environ.get('FAKE_GITHUB') and os.environ.get('GH_TOKEN')!='test-token-alice':print('wrong Git credential',file=sys.stderr);sys.exit(1)
  if Path(repo).name=='broken':print('fetch denied',file=sys.stderr);sys.exit(1)
 elif args[0]=='ls-tree':print('\n'.join(files))
 elif args[0]=='show':
@@ -529,10 +628,70 @@ elif args[0]=='show':
  print(files[file],end='')
 elif args[0]=='rev-parse':print(hashlib.sha1(json.dumps(files,sort_keys=True).encode()).hexdigest()[:8] if '--short' in args or '--short=8' in args else hashlib.sha1(json.dumps(files,sort_keys=True).encode()).hexdigest())
 elif args[0]=='rev-list':print('0')
-elif args[0]=='remote':print('https://example.invalid/studio.git')
+elif args[0]=='remote':print('https://github.com/example/studio.git' if os.environ.get('FAKE_GITHUB') else 'https://example.invalid/studio.git')
 '''
 
 class Collection(TemporaryProject):
+    def test_real_git_credential_protocol_uses_child_account(self):
+        import shutil,subprocess
+        gh=shutil.which('gh')
+        if not gh:self.skipTest('GitHub CLI is required for the local credential protocol check')
+        env=self.environment();active=self.root/'active-account';active.write_text('bob')
+        env.update(FAKE_GITHUB='1',FAKE_ACTIVE=str(active))
+        repo={'path':str(self.root/'web'),'refs':{},'layout':{},'github':{'host':'github.com','account':'alice'}}
+        with patch.dict(os.environ,env):child=project.child_environment(self.root/'maps',repo)
+        child.update(GIT_CONFIG_NOSYSTEM='1',GIT_CONFIG_GLOBAL=os.devnull)
+        # Only the preflight uses fake gh. Real git and real gh exchange the fake
+        # token through the local credential protocol without a network request.
+        child['PATH']=str(Path(gh).parent)+os.pathsep+child['PATH']
+        child['GH_CONFIG_DIR']=str(self.root/'empty-gh-config')
+        result=subprocess.run(['/usr/bin/git','credential','fill'],input='protocol=https\nhost=github.com\n\n',env=child,capture_output=True,text=True)
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertIn('username=x-access-token',result.stdout);self.assertIn('password=test-token-alice',result.stdout)
+        self.assertEqual(active.read_text(),'bob')
+
+    def test_account_switch_and_access_failure_use_real_isolated_collection(self):
+        env=self.environment();active=self.root/'active-account';active.write_text('alice')
+        env.update(FAKE_GITHUB='1',FAKE_ACTIVE=str(active))
+        configured=self.run_cli(env,'configure','studio',json.dumps({'repositories':[{'id':'web','path':str(self.root/'web')}]}))
+        self.assertEqual(configured.returncode,0,configured.stderr)
+        self.assertEqual(json.loads(configured.stdout)['repositories'][0]['github']['account'],'alice')
+        active.write_text('bob')
+        success=self.run_cli(env,'refresh','studio')
+        self.assertEqual(success.returncode,0,success.stderr);self.assertNotIn('FAILED',success.stdout)
+        before=json.loads(self.run_cli(env,'read','studio').stdout)['project']['repositories'][0]
+        self.assertTrue(before['collected'])
+        denied=self.run_cli(dict(env,FAKE_GH_DENY='1'),'refresh','studio')
+        self.assertIn('GITHUB_ACCESS|github.com|alice|repository',denied.stdout)
+        after=json.loads(self.run_cli(env,'read','studio').stdout)['project']['repositories'][0]
+        self.assertEqual(before['generation'],after['generation'])
+        self.assertNotIn('test-token',json.dumps(after))
+        self.assertEqual(active.read_text(),'bob')
+        self.assertEqual(json.loads(self.run_cli(env,'github-accounts','studio','--repository','web').stdout)['accounts'],['alice','bob'])
+
+    def test_legacy_account_switch_and_failure_preserve_successful_files(self):
+        import subprocess
+        env=self.environment();active=self.root/'active-account';active.write_text('alice')
+        env.update(FAKE_GITHUB='1',FAKE_ACTIVE=str(active))
+        folder=Path(env['WHERE_WERE_WE_ROOT'])/'legacy';folder.mkdir(parents=True)
+        (folder/'dev.json').write_text(json.dumps(sample(str(self.root/'web'))))
+        def refresh(extra=None):
+            return subprocess.run([sys.executable,'-I','-B',str(Path(project.__file__).with_name('refresh.py')),'legacy',str(self.root/'web')],env={**env,**(extra or {})},capture_output=True,text=True)
+        first=refresh();self.assertEqual(first.returncode,0,first.stderr)
+        active.write_text('bob')
+        second=refresh();self.assertEqual(second.returncode,0,second.stderr)
+        previous={n:(folder/n).read_bytes() for n in ('dev.json','main.json','status.json','changes.json')}
+        denied=refresh({'FAKE_GH_DENY':'1'})
+        self.assertNotEqual(denied.returncode,0);self.assertIn('GITHUB_ACCESS|github.com|alice|repository',denied.stderr)
+        self.assertEqual(previous,{n:(folder/n).read_bytes() for n in previous})
+        sources=Path(env['FAKE_SOURCES']);changed=json.loads(sources.read_text())
+        changed[str(self.root/'web')]['src/Settings.tsx']+='\n// changed after successful collection\n'
+        sources.write_text(json.dumps(changed))
+        late_failure=refresh({'FAKE_GH_FAIL':'1'})
+        self.assertNotEqual(late_failure.returncode,0);self.assertIn('GITHUB_ACCESS',late_failure.stderr)
+        self.assertEqual(previous,{n:(folder/n).read_bytes() for n in previous})
+        self.assertEqual(active.read_text(),'bob')
+
     def environment(self):
         import stat
         sources={}

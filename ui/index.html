@@ -43,6 +43,15 @@ const M = () => S.maps[S.branch];
 
 // Only interface literals go through this dictionary. Interpolated project data stays verbatim.
 const UI_EN = {
+  'GitHub 계정 바꾸기':'Change GitHub account', '이 코드에 사용할 계정':'Account for this code',
+  '다른 작업의 로그인 계정은 바꾸지 않습니다.':'This does not change the active account used by other work.',
+  '계정 확인 중…':'Checking accounts…', '저장하고 다시 수집':'Save and retry collection',
+  '로그인된 계정이 없습니다. 터미널에서 gh auth login으로 로그인한 뒤 다시 열어 주세요.':'No saved accounts. Run gh auth login in a terminal, then reopen this dialog.',
+  '로그인 상태와 인터넷 연결을 확인해 주세요.':'Check the login status and internet connection.',
+  '이 계정으로 코드를 읽을 수 없습니다. 접근 권한이나 코드 주소를 확인해 주세요.':'This account could not read the repository. Check access permissions and the repository address.',
+  '코드 파일을 가져오지 못했습니다. Git 연결과 SSH 키를 확인해 주세요.':'Could not fetch code. Check the Git connection and SSH keys.',
+  '연결된 코드 주소가 바뀌었습니다. 코드 연결을 확인해 주세요.':'The repository address changed. Check the code connection.',
+
   '모든 코드': 'All code', '코드 연결': 'Manage code', '프로젝트 만들기': 'Create project',
   '프로젝트 이름': 'Project name', '레포 이름': 'Repository name', '레포 ID': 'Repository ID',
   '레포 폴더': 'Repository folder', '개발 ref': 'Development ref', '운영 ref': 'Production ref',
@@ -567,9 +576,37 @@ async function doRefresh() {
   $('refresh').disabled = true; $('status').textContent = tr('저장소를 읽는 중…');
   try {
     await invoke('refresh', { project, repository, repo:m?.repo || '', since:'7' });
+    S.githubFailure=null;
     if (S.desiredProject === project && S.desiredRepository === repository) await loadProject(project, false, repository);
-  } catch (e) { if (S.desiredProject === project && S.desiredRepository === repository) $('status').textContent = tr('실패: ') + String(e).slice(0,160); }
+  } catch (e) { if (S.desiredProject === project && S.desiredRepository === repository) {S.githubFailure={project,error:String(e)};renderRepositories();$('status').textContent=tr('실패: ')+githubErrorText(e);} }
   finally { $('refresh').disabled = false; }
+}
+function githubErrorText(error) {
+  const hit=String(error).match(/GITHUB_ACCESS\|([a-zA-Z0-9.-]+)\|([a-zA-Z0-9-]*)\|([a-z_]+)/);
+  if(!hit)return String(error).slice(0,200);
+  const messages={login:'로그인 상태와 인터넷 연결을 확인해 주세요.',repository:'이 계정으로 코드를 읽을 수 없습니다. 접근 권한이나 코드 주소를 확인해 주세요.',fetch:'코드 파일을 가져오지 못했습니다. Git 연결과 SSH 키를 확인해 주세요.',remote_changed:'연결된 코드 주소가 바뀌었습니다. 코드 연결을 확인해 주세요.'};
+  return hit[1]+(hit[2]?' / @'+hit[2]:'')+' · '+tr(messages[hit[3]] || messages.login);
+}
+async function editGitHubAccount(repository) {
+  const project=S.project,dialog=$('project-dialog');
+  dialog.innerHTML=`<h2>${tr('이 코드에 사용할 계정')}</h2><p>${tr('다른 작업의 로그인 계정은 바꾸지 않습니다.')}</p><div id="githubChoices">${tr('계정 확인 중…')}</div><p id="githubError" role="alert"></p><div class="ctl"><button class="btn quiet" id="closeGithub">${tr('닫기')}</button><button class="btn primary" id="saveGithub" disabled>${tr('저장하고 다시 수집')}</button></div>`;
+  $('closeGithub').onclick=()=>dialog.close();dialog.showModal();
+  const choices=$('githubChoices'),errorBox=$('githubError'),save=$('saveGithub'),viewRepository=S.repository;
+  const isCurrent=()=>dialog.open && choices.isConnected && S.project===project && S.repository===viewRepository;
+  try {
+    const value=JSON.parse(await invoke('github_accounts',{project,repository}));
+    if(!isCurrent())return;
+    const accounts=value.accounts || [];
+    choices.innerHTML=accounts.length?`<select id="githubAccount">${accounts.map(a=>`<option value="${esc(a)}" ${a===value.selected?'selected':''}>${esc(a)}</option>`).join('')}</select>`:tr('로그인된 계정이 없습니다. 터미널에서 gh auth login으로 로그인한 뒤 다시 열어 주세요.');
+    save.disabled=!accounts.length;
+    save.onclick=async()=>{
+      save.disabled=true;
+      try {
+        await invoke('use_github_account',{project,repository,account:$('githubAccount').value});
+        if(!isCurrent())return;dialog.close();await doRefresh();
+      } catch(error){if(isCurrent()){errorBox.textContent=githubErrorText(error);save.disabled=false;}}
+    };
+  } catch(error){if(isCurrent())errorBox.textContent=githubErrorText(error);}
 }
 function analysisScopeText(scope) {
   const labels={disabled:'분석 대상에서 제외',basic:'기본 수집으로 일부 확인',ai:'에이전트 분석으로 확인',
@@ -580,10 +617,11 @@ function renderRepositories() {
   const repos = S.projectInfo?.repositories || []; const bar = $('repository-bar');
   bar.hidden = !S.project; if (!S.project) return;
   const current = repos.filter(r => !S.repository || r.id === S.repository);
-  if (!repos.length && S.maps[S.branch]) {const m=S.maps[S.branch];current.push({name:S.project,collected:true,commits:{[S.branch]:m.commit},last_success:m.analysis?.generated_at || S.changes?.last_refresh,analysis:{[S.branch]:m.analysis},analysis_scope:S.projectInfo?.analysis_scope});}
-  bar.innerHTML = `<select id="repository"><option value="">${tr('모든 코드')}</option>${repos.map(r => `<option value="${esc(r.id)}" ${r.id === S.repository ? 'selected' : ''}>${esc(r.name)}</option>`).join('')}</select><button class="btn quiet" id="manageRepositories">${tr('코드 연결')}</button><button class="btn quiet" id="analyzeMap" title="${tr('연결된 MCP 에이전트로 분석합니다. 해당 에이전트 계정의 사용량을 사용합니다.')}">${tr('코드 분석 요청')}</button><span class="s">${current.map(r => `${esc(r.name)}: ${r.error ? `<b>${tr('수집 실패')}</b> ${esc(r.error)}` : !r.collected ? tr('아직 수집하지 않음') : `${esc(r.commits?.[S.branch] || '—')} · ${tr('마지막 성공')} ${r.last_success ? esc(when(r.last_success)) : '—'}`}${r.config_changed ? ' · '+tr('설정 변경 후 다시 수집해야 합니다') : ''}${r.analysis_scope?.[S.branch] ? ' · '+esc(analysisScopeText(r.analysis_scope[S.branch])) : ''}${r.analysis?.[S.branch] ? ' · '+tr(r.analysis[S.branch].stale ? 'AI 재분석 필요' : 'AI 분석 · 원문 대조') : ''}${r.analysis?.[S.branch]?.unknown?.length ? ' · '+r.analysis[S.branch].unknown.map(esc).join('; ') : ''}`).join(' | ')}</span>`;
+  if (!repos.length && S.maps[S.branch]) {const m=S.maps[S.branch];current.push({name:S.project,collected:true,commits:{[S.branch]:m.commit},last_success:m.analysis?.generated_at || S.changes?.last_refresh,analysis:{[S.branch]:m.analysis},analysis_scope:S.projectInfo?.analysis_scope,error:S.githubFailure?.project===S.project?S.githubFailure.error:null});}
+  bar.innerHTML = `<select id="repository"><option value="">${tr('모든 코드')}</option>${repos.map(r => `<option value="${esc(r.id)}" ${r.id === S.repository ? 'selected' : ''}>${esc(r.name)}</option>`).join('')}</select><button class="btn quiet" id="manageRepositories">${tr('코드 연결')}</button><button class="btn quiet" id="analyzeMap" title="${tr('연결된 MCP 에이전트로 분석합니다. 해당 에이전트 계정의 사용량을 사용합니다.')}">${tr('코드 분석 요청')}</button><span class="s">${current.map(r => `${esc(r.name)}: ${r.error ? `<b>${tr('수집 실패')}</b> ${esc(githubErrorText(r.error))}${String(r.error).includes('GITHUB_ACCESS|') ? ` <button class="btn quiet" data-github-repair="${esc(r.id || '')}">${tr('GitHub 계정 바꾸기')}</button>` : ''}` : !r.collected ? tr('아직 수집하지 않음') : `${esc(r.commits?.[S.branch] || '—')} · ${tr('마지막 성공')} ${r.last_success ? esc(when(r.last_success)) : '—'}`}${r.config_changed ? ' · '+tr('설정 변경 후 다시 수집해야 합니다') : ''}${r.analysis_scope?.[S.branch] ? ' · '+esc(analysisScopeText(r.analysis_scope[S.branch])) : ''}${r.analysis?.[S.branch] ? ' · '+tr(r.analysis[S.branch].stale ? 'AI 재분석 필요' : 'AI 분석 · 원문 대조') : ''}${r.analysis?.[S.branch]?.unknown?.length ? ' · '+r.analysis[S.branch].unknown.map(esc).join('; ') : ''}`).join(' | ')}</span>`;
   $('repository').onchange = () => loadProject(S.project, false, $('repository').value);
   $('manageRepositories').onclick = () => editProject(false);
+  bar.querySelectorAll('[data-github-repair]').forEach(button=>button.onclick=()=>editGitHubAccount(button.dataset.githubRepair));
   $('analyzeMap').onclick=()=>requestAgentAction('analysis_request');
   if ($('analyzeMap')) $('analyzeMap').disabled=pendingActions.has('analysis_request');
 }

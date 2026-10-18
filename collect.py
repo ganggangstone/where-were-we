@@ -33,7 +33,14 @@ def git(*args, cwd=REPO):
 
 
 def gh(*args):
-    out = sh("gh", *args, "--json", "number,title,headRefName,baseRefName,url,author,createdAt,updatedAt,mergedAt,files,closingIssuesReferences,body")
+    command=["gh",*args,"--json","number,title,headRefName,baseRefName,url,author,createdAt,updatedAt,mergedAt,files,closingIssuesReferences,body"]
+    result=subprocess.run(command,cwd=REPO,capture_output=True,text=True)
+    if result.returncode:
+        if os.environ.get('WHERE_WERE_WE_GITHUB'):
+            import project
+            sys.exit(str(project.github_error(json.loads(os.environ['WHERE_WERE_WE_GITHUB']),'repository')))
+        sys.exit(result.stderr.strip() or 'GitHub collection failed')
+    out=result.stdout
     return json.loads(out or "[]")
 
 
