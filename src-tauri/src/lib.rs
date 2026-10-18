@@ -186,6 +186,11 @@ async fn analysis_request(app: tauri::AppHandle, project: String, branch: String
     run_py(&app,"ai_extract.py",&[&project,&branch,&lang,"--request","--repository",repository.as_deref().unwrap_or("")])
 }
 
+#[tauri::command]
+async fn briefing_request(app: tauri::AppHandle, project: String, branch: String, lang: String, repository: Option<String>) -> Result<String, String> {
+    run_py(&app,"briefing.py",&["request",&project,"--branch",&branch,"--lang",&lang,"--repository",repository.as_deref().unwrap_or("")])
+}
+
 /// zed://file/... 같은 주소를 macOS `open` 으로 연다.
 #[tauri::command]
 fn open_url(url: String) -> Result<(), String> {
@@ -599,7 +604,7 @@ async fn check_release(app: tauri::AppHandle) -> Result<ReleaseStatus, String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app = tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![list_projects, read_map, read_project, save_project, github_accounts, use_github_account, read_settings, save_settings, open_url, refresh, suggest_groups, make_steps, make_system, make_jobs, analysis_request, setup_prompt, tests_prompt, app_version, check_release, app_update_status, start_app_update])
+        .invoke_handler(tauri::generate_handler![list_projects, read_map, read_project, save_project, github_accounts, use_github_account, read_settings, save_settings, open_url, refresh, suggest_groups, make_steps, make_system, make_jobs, analysis_request, briefing_request, setup_prompt, tests_prompt, app_version, check_release, app_update_status, start_app_update])
         .build(tauri::generate_context!()).expect("error while building tauri application");
     app.run(|app, event| {
         if matches!(event, tauri::RunEvent::Ready) {

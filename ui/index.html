@@ -43,6 +43,43 @@ const M = () => S.maps[S.branch];
 
 // Only interface literals go through this dictionary. Interpolated project data stays verbatim.
 const UI_EN = {
+  "변경 설명":"Change explanations",
+  "이 목록은 지도에서 PR이 닿는 위치를 보여 줍니다.":"This list shows where PRs affect the map.",
+  "PR은 저장소의 모든 대상 브랜치를 포함하며, 구조 근거는 선택한 코드 버전만 다룹니다.":"PRs include all base branches of each repository; structural evidence covers only the selected map version.",
+  "비교 기준이 바뀌었습니다. 새로고침으로 적용한 뒤 요청하세요.":"The comparison settings changed. Refresh to apply them before requesting explanations.",
+  "변경 설명 요청":"Request change explanations",
+  "코드 버전이 바뀌었습니다. 새로고침한 뒤 설명을 요청하세요.":"The code version changed. Refresh before requesting change explanations.",
+  "변경 설명은 아직 만들지 않았습니다.":"Change explanations have not been created yet.",
+  "근거를 보존하려면 먼저 새로고침하세요.":"Refresh first to preserve the supporting evidence.",
+  "수집된 근거에서 변경을 찾지 못했습니다.":"No changes were found in the collected evidence.",
+  "이전 구간의 설명입니다. 현재 근거로 다시 요청하세요.":"These explanations cover an earlier input. Request an update using the current evidence.",
+  "AI가 근거를 읽고 해석한 설명입니다. 인용 일치는 해석의 정확성을 보장하지 않습니다.":"These are AI interpretations of the cited evidence. Matching a quote does not establish interpretation accuracy.",
+  "해결한 문제":"Problem",
+  "바꾼 이유":"Reason for the change",
+  "바뀌기 전":"Before",
+  "바뀐 뒤":"After",
+  "해결한 방법":"Resolution",
+  "데이터에 미치는 영향":"Data impact",
+  "중단·복구":"Interruption and recovery",
+  "확인된 남은 문제":"Remaining issues",
+  "용어 풀이":"Terms",
+  "연결된 이슈":"Linked issues",
+  "확인 못 한 것":"Not established",
+  "근거 보기":"View evidence",
+  "PR 병합 · 배포·실제 동작은 미확인":"PRs merged \u00b7 Deployment and runtime behavior not verified",
+  "PR 근거 없음 · 배포·실제 동작은 미확인":"No PR evidence \u00b7 Deployment and runtime behavior not verified",
+  "문제 카드":"Problem cards",
+  "고유 PR":"Distinct PRs",
+  "코드 연결별 비교 구간":"Comparison window for each code connection",
+  "일부 코드를 수집하지 못해 마지막 성공 자료를 사용합니다.":"Collection failed for some code; its last successful evidence is retained.",
+  "수집 중인 코드가 있습니다.":"Some code is being collected.",
+  "설정이 바뀌어 다시 수집해야 합니다.":"Configuration changed; collect again.",
+  "이 코드의 설명 근거가 아직 없습니다.":"Briefing evidence has not been collected for this code.",
+  "수집 상한에 도달해 빠진 자료가 있을 수 있습니다.":"A collection limit was reached; additional evidence may be missing.",
+  "PR 본문이 없어 설명 근거가 부족합니다.":"A PR body is missing, limiting the supporting evidence.",
+  "연결된 이슈를 읽지 못했습니다.":"A linked issue could not be read.",
+  "같은 문제의 PR은 묶고, 다른 문제를 푼 PR은 나눠 설명합니다.":"PRs solving the same problem are grouped; distinct problems are explained separately.",
+
   "1. 요청 복사":"1. Copy the request",
   "2. 에이전트에 전달":"2. Send it to your agent",
   "복사한 요청을 MCP가 연결된 에이전트 채팅에 붙여 넣으세요.":"Paste the copied request into your MCP-connected agent chat.",
@@ -202,7 +239,6 @@ const UI_EN = {
   'AI가 적은 것 중 근거 줄이 바뀐 것': 'AI references affected by code changes', '전체 구조 근거 ': 'System references: ', '서버 밖 프로그램이 하는 일 근거 ': 'Worker job references: ',
   '코드가 바뀌어 그 줄에 그 글자가 없다. 다시 읽기 전에는 그 상자·선을 믿지 않는다': 'The referenced code changed. Read again before relying on these components and links.',
   '전체 구조에서 그 상자를 골라 다시 읽는다': 'Select the component in System and read it again', '지도에 자리가 없는 PR': 'PRs without a map location',
-  '묶음이 여럿에 걸치는 PR 은 묶음마다 나온다. 무엇이 왜 바뀌었는지는 아침 브리핑이 쓴다. 여기서는 지도의 어디에 닿는지를 본다.': 'A PR appears under every group it affects. This view shows where it belongs in the map.',
   '곳 더': ' more', '이슈 #': 'Issue #', ' · 파일 ': ' · Files: ', ' 화면이 달라짐': ' Screen changes', ' 서버 코드의 흐름': ' Server behavior',
   'DB·배포·설정·서버 밖 프로그램': 'Database, deployment, configuration, and workers', '새 화면 · 사라진 화면': 'Added / removed screens',
   '새 요청 · 사라진 요청': 'Added / removed requests', '새 길 · 끊긴 길': 'Added / removed links', '화면 이름을 누르면 화면 지도에서 그 화면이 열린다.': 'Select a screen name to open it in the screen map.',
@@ -422,6 +458,7 @@ async function checkUpdates(manual = false) {
 const pendingActions = new Set();
 const ACTION_UI = {
   analysis_request: ['analyzeMap','status','분석 요청을 준비하는 중…'],
+  briefing_request: ['requestBriefing','status','분석 요청을 준비하는 중…'],
   make_system: ['remakeSys', 'status', '분석 요청을 준비하는 중…'],
   make_steps: ['mk', 'mklog', '분석 요청을 준비하는 중…'],
   suggest_groups: ['regroup', 'status', '분석 요청을 준비하는 중…']
@@ -434,7 +471,7 @@ function renderPendingActions() {
 }
 async function invokeAction(command, args) {
   let calls = [args];
-  if (S.projectInfo?.repositories?.length) {
+  if (S.projectInfo?.repositories?.length && command!=='briefing_request') {
     if (command === 'make_steps') {
       const by = new Map();
       for (const row of requests(M(),args.screen)) {
@@ -455,6 +492,14 @@ async function invokeAction(command, args) {
   try { const responses=[];for(const call of calls){const result=JSON.parse(await invoke(command,call));responses.push({...result,repository:result.record_arguments?.repository || call.repository || ''});}return JSON.stringify({handoff:responses.map(r=>r.handoff).join('\n\n'),requirements:responses.flatMap(r=>(r.result_before || []).map(item=>({...item,repository:r.repository,commit:r.commit})))}); }
   finally { pendingActions.delete(command); renderPendingActions(); }
 }
+function analysisRequestError(error) {
+  const messages={
+    'Collect this project again to preserve briefing evidence':'근거를 보존하려면 먼저 새로고침하세요.',
+    'Collect again using the current configuration and comparison settings first':'비교 기준이 바뀌었습니다. 새로고침으로 적용한 뒤 요청하세요.',
+    'Code version changed; collect again before requesting a briefing':'코드 버전이 바뀌었습니다. 새로고침한 뒤 설명을 요청하세요.'};
+  const text=String(error),message=Object.keys(messages).find(key=>text.includes(key));
+  return message?tr(messages[message]):text;
+}
 async function requestAgentAction(command,extra={}) {
   const scope={project:S.project,repository:S.repository,branch:S.branch,lang:S.lang}, token=S.loadToken;
   const current=()=>token===S.loadToken && Object.keys(scope).every(key=>scope[key]===S[key]);
@@ -462,7 +507,7 @@ async function requestAgentAction(command,extra={}) {
     const request=JSON.parse(await invokeAction(command,{...scope,...extra}));
     if(!current())return;
     S.agentPrompt=request.handoff;S.agentPurpose='analysis';S.analysisRequest={scope,command,requirements:request.requirements,copied:false,state:'prepared'};renderAgentPrompt();$('status').textContent='';
-  } catch(error) {if(current())$('status').textContent=String(error);}
+  } catch(error) {if(current())$('status').textContent=analysisRequestError(error);}
 }
 function savedAnalysisState(info,request) {
   const values=(request.requirements || []).map(item=>{
@@ -487,8 +532,11 @@ async function checkAnalysisResults() {
   try {
     const bundle=JSON.parse(await invoke('read_project',{project:request.scope.project,repository:request.scope.repository}));
     if(!current())return;
-    request.state=savedAnalysisState(bundle.project,request);request.error=null;
-    S.projectInfo=bundle.project;S.maps={dev:bundle.dev,main:bundle.main};S.branchDetails=bundle.branch_details;
+    if(request.command==='briefing_request'){
+      const actual=bundle.briefings?.[request.scope.branch]?.[request.scope.lang];
+      request.state=actual?.state==='saved'?(actual.result.version!==request.requirements?.[0]?.before?.version?'saved':'previous'):actual?.state==='stale'?'stale':'missing';
+    }else request.state=savedAnalysisState(bundle.project,request);request.error=null;
+    S.briefings=bundle.briefings;S.projectInfo=bundle.project;S.maps={dev:bundle.dev,main:bundle.main};S.branchDetails=bundle.branch_details;
     for(const key of ['groups','flows','system','jobs'])S[key]=bundle[key];
     // Reading analysis must preserve change history, its selected entry and settings.
     render();renderAgentPrompt();
@@ -614,7 +662,7 @@ async function loadProject(p, first = true, repository = S.project === p ? S.rep
   try {
     const bundle = JSON.parse(await invoke('read_project', {project:p, repository}));
     if (token !== S.loadToken) return;
-    S.project = p; S.repository = repository; S.projectInfo = bundle.project;
+    S.project = p; S.repository = repository; S.projectInfo = bundle.project;S.briefings=bundle.briefings;
     S.maps = {main:bundle.main, dev:bundle.dev}; S.agentPrompt = null;S.branchDetails=bundle.branch_details;
     for (const key of ['status','groups','flows','system','jobs','changes']) S[key] = bundle[key];
     S.prev = {dev:bundle['dev.prev'], main:bundle['main.prev']};
@@ -1004,13 +1052,29 @@ const when = (iso) => { const d = new Date(iso); return S.lang === 'en'
 const KIND = { 기능: '', 구조: 'ok', 시스템: 'warn' };
 // 같은 요청이 여러 화면에 생기면 한 줄로 모으고 화면을 알약으로 붙인다
 const byReq = (list) => { const o = new Map(); for (const x of list || []) { const k = x.what + '|' + x.name; if (!o.has(k)) o.set(k, { name: x.name, what: x.what, screens: [] }); o.get(k).screens.push([x.screen, x.screen_name]); } return [...o.values()]; };
+function briefingPanel() {
+  const view=S.briefings?.[S.branch]?.[S.lang];
+  const labels={saved:'AI가 근거를 읽고 해석한 설명입니다. 인용 일치는 해석의 정확성을 보장하지 않습니다.',stale:'이전 구간의 설명입니다. 현재 근거로 다시 요청하세요.',needs_collection:'근거를 보존하려면 먼저 새로고침하세요.',no_changes:'수집된 근거에서 변경을 찾지 못했습니다.',not_analyzed:'변경 설명은 아직 만들지 않았습니다.'};
+  const warnings={collection_failed:'일부 코드를 수집하지 못해 마지막 성공 자료를 사용합니다.',collection_running:'수집 중인 코드가 있습니다.',configuration_changed:'설정이 바뀌어 다시 수집해야 합니다.',needs_collection:'이 코드의 설명 근거가 아직 없습니다.',collection_limited:'수집 상한에 도달해 빠진 자료가 있을 수 있습니다.',missing_body:'PR 본문이 없어 설명 근거가 부족합니다.',comparison_changed:'비교 기준이 바뀌었습니다. 새로고침으로 적용한 뒤 요청하세요.',issue_unavailable:'연결된 이슈를 읽지 못했습니다.'};
+  const result=view?.result;
+  let h=`<section class="sect"><div class="ctl"><h2>${tr('변경 설명')}</h2><span class="spacer"></span><button class="btn quiet" id="requestBriefing" title="${tr('에이전트에 전달할 요청을 준비합니다. 앱에서 바로 분석하지 않습니다.')}" ${!view || ['needs_collection','no_changes'].includes(view.state)?'disabled':''}>${tr('변경 설명 요청')}</button></div><p class="sub">${tr(labels[view?.state] || labels.needs_collection)}</p><p class="s">${tr('PR은 저장소의 모든 대상 브랜치를 포함하며, 구조 근거는 선택한 코드 버전만 다룹니다.')}</p><p class="s">${tr('같은 문제의 PR은 묶고, 다른 문제를 푼 PR은 나눠 설명합니다.')}</p>`;
+  for(const warning of view?.warnings || [])h+=`<p class="s">${esc(warning.repository)} · ${tr(warnings[warning.code] || warning.code)}</p>`;
+  if(!result)return h+'</section>';
+  h+=`<p class="s">${tr('문제 카드')} ${result.cards.length} · ${tr('고유 PR')} ${result.pr_count} · ${esc(result.language)}</p><details><summary>${tr('코드 연결별 비교 구간')}</summary>${result.input.repositories.map(r=>`<p class="s">${esc(r.id)} · ${r.since?when(r.since):'—'} → ${r.at?when(r.at):'—'} · ${esc(r.refs?.[result.branch] || '—')} · ${esc(r.commits?.from?.slice(0,8) || '—')} → ${esc(r.commits?.to?.slice(0,8) || '—')}</p>`).join('')}</details>`;
+  const claim=(title,value,translate=true)=>`<div class="row"><div class="grow"><h4>${esc(translate?tr(title):title)}</h4><p>${value.unknown?`<span class="pill warn">${tr('확인 못 한 것')}</span> `:''}${esc(value.text)}</p>${value.evidence?.length?`<details><summary>${tr('근거 보기')} ${value.evidence.length}</summary>${value.evidence.map(ev=>`<blockquote><p>${esc(ev.quote)}</p><span class="s">${esc(ev.source)}</span>${ev.url?` <button class="btn quiet" data-url="${esc(ev.url)}">↗</button>`:''}</blockquote>`).join('')}</details>`:''}</div></div>`;
+  for(const card of result.cards)h+=`<article class="group"><div class="row"><div class="grow"><h3>${esc(card.title)}</h3><p class="s">${tr(card.merge==='merged'?'PR 병합 · 배포·실제 동작은 미확인':'PR 근거 없음 · 배포·실제 동작은 미확인')}</p><div class="flowline">${card.prs.map(pr=>`<button class="pill click" data-url="${esc(pr.url)}">${esc(pr.repository)} #${pr.number} ↗</button><span class="s">${esc(pr.branch || '')} → ${esc(pr.base || '')}</span>`).join('')}</div><div class="flowline">${card.prs.flatMap(pr=>(pr.issues || []).filter(issue=>/^https:\/\/github\.com\/[^/]+\/[^/]+\/issues\/[0-9]+$/.test(issue.url || '')).map(issue=>`<button class="pill click" data-url="${esc(issue.url)}">${tr('연결된 이슈')} ${esc(pr.repository)} #${issue.number} ↗</button>`)).join('')}</div></div></div>`+
+    [['problem','해결한 문제'],['why','바꾼 이유'],['before','바뀌기 전'],['after','바뀐 뒤'],['resolution','해결한 방법'],['impact','데이터에 미치는 영향'],['recovery','중단·복구'],['remaining','확인된 남은 문제']].map(([key,title])=>claim(title,card[key])).join('')+
+    (card.terms.length?`<div class="row"><h4>${tr('용어 풀이')}</h4></div>`+card.terms.map(term=>claim(term.term,term.explanation,false)).join(''):'')+'</article>';
+  if(result.unknown.length)h+=`<h4>${tr('확인 못 한 것')}</h4><ul>${result.unknown.map(text=>`<li>${esc(text)}</li>`).join('')}</ul>`;
+  return h+'</section>';
+}
 function changesView(m) {
-  const c = S.changes;
+  const c = S.changes,brief=briefingPanel();
   const results=c?.last_results || (c?.last_result ? [c.last_result] : []);
   const latest=results.map(result=>`<div class="sect"><p class="sub">${result.repository ? esc(result.repository)+' · ' : ''}${when(result.at)} · ${when(result.since)} ${tr('이후')}${result.changed ? '' : ' · '+tr('선택한 기준 이후 달라진 것 없음')}</p>${result.scope==='basic' ? `<p class="s">${tr('기본 수집으로 비교한 변경 내역입니다. AI 분석이 필요한 부분은 지도 보완 요청으로 확인하세요.')}</p>` : ''}</div>`).join('');
-  if (!c || !c.entries.length) return latest || ui`<div class="hint">아직 기록이 없습니다.<br>↻ 새로고침을 누르면 설정에서 고른 기준 시각 뒤에 달라진 것이 여기에 쌓입니다.</div>`;
+  if (!c || !c.entries.length) return brief+(latest || ui`<div class="hint">아직 기록이 없습니다.<br>↻ 새로고침을 누르면 설정에서 고른 기준 시각 뒤에 달라진 것이 여기에 쌓입니다.</div>`);
   const e = c.entries[Math.min(S.chi, c.entries.length - 1)]; const b = e.branches[S.branch];
-  let h = latest + ui`<div class="legend"><span>설정에서 고른 기준으로 변경 내역을 기록합니다. 마지막 새로고침 ${when(c.last_refresh)}</span></div>
+  let h = brief+latest + ui`<div class="legend"><span>설정에서 고른 기준으로 변경 내역을 기록합니다. 마지막 새로고침 ${when(c.last_refresh)}</span></div>
     <div class="flowline">${c.entries.slice(0, 12).map((x, i) => `<span class="pill ${i === S.chi ? 'strong' : ''} click" data-chi="${i}">${x.repository ? esc(x.repository)+' · ' : ''}${when(x.at)}</span>`).join('')}</div>
     <h2>${e.repository ? esc(e.repository)+' · ' : ''}${when(e.since)} 이후</h2><p class="sub">들어온 PR ${e.prs.length}${b ? ui` · ${S.branch === 'dev' ? tr('개발') : tr('운영')} 브랜치 <span class="mono">${esc(b.from)} → ${esc(b.to)}</span>` : ui` · ${S.branch === 'dev' ? tr('개발') : tr('운영')} 브랜치 코드는 이 사이에 그대로`}</p>`;
   const go = (p, name) => `<span class="pill click" data-goscr="${esc(p)}">${esc(name || label(m, p))}</span>`;
@@ -1029,7 +1093,7 @@ function changesView(m) {
     h += ui`<div class="sect"><h4>AI가 적은 것 중 근거 줄이 바뀐 것</h4><div class="group">${st.system ? ui`<div class="row"><div class="grow"><div class="t">전체 구조 근거 ${st.system}줄</div><div class="s">코드가 바뀌어 그 줄에 그 글자가 없다. 다시 읽기 전에는 그 상자·선을 믿지 않는다</div></div><button class="btn quiet" id="remakeSys">전체 구조 분석 요청</button></div>` : ''}${st.jobs ? ui`<div class="row"><div class="grow"><div class="t">서버 밖 프로그램이 하는 일 근거 ${st.jobs}줄</div><div class="s">전체 구조에서 그 상자를 골라 다시 읽는다</div></div></div>` : ''}</div></div>`;
   // PR: 기능 묶음별로, 묶음에 안 걸리면 서버 밖 프로그램별로, 그것도 아니면 "지도에 자리가 없는 PR"
   const by = new Map(); for (const p of e.prs) { const keys = p.groups.length ? p.groups : p.programs.length ? p.programs : ['지도에 자리가 없는 PR']; for (const k of keys) { if (!by.has(k)) by.set(k, []); by.get(k).push(p); } }
-  h += ui`<div class="sect"><h4>들어온 PR ${e.prs.length}</h4><p class="empty">묶음이 여럿에 걸치는 PR 은 묶음마다 나온다. 무엇이 왜 바뀌었는지는 아침 브리핑이 쓴다. 여기서는 지도의 어디에 닿는지를 본다.</p></div>`;
+  h += ui`<div class="sect"><h4>들어온 PR ${e.prs.length}</h4><p class="empty">이 목록은 지도에서 PR이 닿는 위치를 보여 줍니다.</p></div>`;
   for (const [k, ps] of [...by].sort((a, b) => (a[0] === '지도에 자리가 없는 PR') - (b[0] === '지도에 자리가 없는 PR') || b[1].length - a[1].length))
     h += `<div class="sect"><h4>${esc(k === '지도에 자리가 없는 PR' ? tr(k) : k)} ${ps.length}</h4><div class="group">${ps.map(p => ui`<div class="row"><div class="grow"><div class="tw click" data-url="${esc(p.url)}">#${p.number} ${esc(p.title)} ↗</div>
       <div class="flowline">${p.kinds.map(x => `<span class="pill ${KIND[x]}">${tr(x)}</span>`).join('')}${p.base !== 'dev' ? `<span class="pill strong">${esc(p.base)}</span>` : ''}${p.screens.slice(0, 6).map(x => go(x)).join('')}${p.screens.length > 6 ? ui`<span class="s">화면 ${p.screens.length - 6}곳 더</span>` : ''}${p.issues.map(n => ui`<span class="pill">이슈 #${n}</span>`).join('')}<span class="s">${esc(p.author || '')} · ${when(p.merged_at)} · 파일 ${p.files}</span></div></div></div>`).join('')}</div></div>`;
@@ -1176,6 +1240,7 @@ function render() {
   if ($('unfocus')) $('unfocus').onclick = () => { S.focus = null; render(); };
   $('map').scrollTop = top; $('map').scrollLeft = left; $('insp').scrollTop = itop;
   if ($('remakeSys')) $('remakeSys').onclick=()=>requestAgentAction('make_system');
+  if($('requestBriefing'))$('requestBriefing').onclick=()=>requestAgentAction('briefing_request');
   if (sys && S.system) { S._wires = sysLinks(S.system).map((l, i) => ({ ...l, n: i + 1, dim: !!S.node && l.from !== S.node && l.to !== S.node })); drawWires(); document.querySelectorAll('.card[data-node], .row[data-node]').forEach(el => el.onclick = () => { S.node = S.node === el.dataset.node ? null : el.dataset.node; render(); });
     if ($('toMap')) $('toMap').onclick = () => { S.view = 'map'; render(); } }
   const pick = (p) => { S.agentPrompt = null; if (view === 'focus') return setFocus('screen|' + p); S.sel = p; S.open = null; S.step = -1; S.ev = -1; render(); $('insp').scrollTop = 0; };
@@ -1183,7 +1248,7 @@ function render() {
   document.querySelectorAll('[data-req]').forEach(el => el.onclick = () => { S.open = S.open === el.dataset.req ? null : el.dataset.req; S.step = -1; S.ev = -1; render(); });
   document.querySelectorAll('[data-step]').forEach(el => el.onclick = () => { const i = +el.dataset.step; S.ev = S.ev === i ? -1 : i; render(); });
   document.querySelectorAll('.row[data-url]').forEach(el => el.onclick = () => invoke('open_url', { url: el.dataset.url }));
-  document.querySelectorAll('a[data-url]').forEach(a => a.onclick = (e) => { e.stopPropagation(); invoke('open_url', { url: a.dataset.url }); });
+  document.querySelectorAll('a[data-url], button[data-url]').forEach(a => a.onclick = (e) => { e.stopPropagation(); invoke('open_url', { url: a.dataset.url }); });
   const s = m.screens.find(x => x.path === S.sel); const rows = s ? requests(m, s.path) : [];
   const stepCount = () => { const r = rows.find(x => x.key === S.open); const f = r && flowOf(r.route); return f ? f.steps.length : 0; };
   if ($('next')) $('next').onclick = () => { S.step = S.step >= stepCount() ? -1 : S.step + 1; S.ev = -1; render(); };
@@ -1244,7 +1309,7 @@ function renderAgentPrompt() {
     try {await navigator.clipboard.writeText(prompt);if(S.agentPrompt!==prompt)return;if(analysis && copyRequest===S.analysisRequest)copyRequest.copied=true;$('cpDone').textContent=tr(analysis?'복사했습니다. MCP가 연결된 에이전트 채팅에 붙여 넣으세요.':'복사됨');}
     catch {if(S.agentPrompt===prompt && $('cpDone'))$('cpDone').textContent=tr('요청을 복사하지 못했습니다. 다시 눌러 주세요.');}
   };
-  if(analysis){$('checkAnalysisResults').onclick=checkAnalysisResults;if($('viewAnalysisResults'))$('viewAnalysisResults').onclick=()=>{S.agentPrompt=null;S.view=request.command==='make_system' || request.command==='analysis_request'?'sys':request.command==='suggest_groups'?'map':S.view;render();};}
+  if(analysis){$('checkAnalysisResults').onclick=checkAnalysisResults;if($('viewAnalysisResults'))$('viewAnalysisResults').onclick=()=>{S.agentPrompt=null;S.view=request.command==='briefing_request'?'changes':request.command==='make_system' || request.command==='analysis_request'?'sys':request.command==='suggest_groups'?'map':S.view;render();};}
 }
 $('agent').onclick = async () => { S.agentPurpose='setup';try { S.agentPrompt = await invoke('setup_prompt', {lang: S.lang}); } catch (e) { S.agentPrompt = tr('프롬프트를 만들지 못했다: ') + e; } renderAgentPrompt(); };
 document.querySelectorAll('#branch button').forEach(b => b.onclick = () => { if (S.maps[b.dataset.b]) { S.agentPrompt = null; S.branch = b.dataset.b; S.open = null; render(); } });

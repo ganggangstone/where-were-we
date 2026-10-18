@@ -88,9 +88,11 @@ def base_map(branch, commit):
     run(os.path.join(HERE,'extract.py'),REPO,commit,path)
     return json.loads(Path(path).read_text())
 
+bases={}
 for branch, pinned in PINNED.items():
     cur=mapcore._read(PROJECT,branch) or {}
     base=git('rev-list','-1','--before='+since.isoformat(),pinned)
+    bases[branch]=base or None
     if not base or not cur.get('commit') or base==pinned:continue
     if (cur.get('analysis') or {}).get('source')=='ai':
         # Compare like extractors without overwriting the saved AI map or calling AI.
@@ -109,7 +111,7 @@ def place(p):  # 화면에 안 걸리는 PR 의 자리
     if any(f.startswith((".github/", "Makefile", "docker")) for f in fs): return ["배포·CI"]
     return []
 for p in m.status.get("merged_prs", []):
-    if not p.get("merged_at") or datetime.fromisoformat(p["merged_at"].replace("Z", "+00:00")) <= since: continue
+    if not p.get("merged_at") or not since < datetime.fromisoformat(p["merged_at"].replace("Z", "+00:00")) <= NOW: continue
     owners = sorted({o["name"] for f in p["files"] if (o := m.owner_of(f)) and o.get("kind") == "program" and not f.startswith("frontend/")})
     entry["prs"].append({"number": p["number"], "title": p["title"], "url": p["url"], "base": p["base"], "merged_at": p["merged_at"], "author": p.get("author"),
                          "kinds": mapcore.pr_kind(p["files"]), "screens": p["screens"], "groups": sorted({g for s in p["screens"] if (g := m.group_of(s))}) or place(p),
@@ -128,6 +130,7 @@ changed = entry["prs"] or any(v[k] for v in entry["branches"].values() for k in 
 if changed:
     ch["entries"] = ([entry] + ch["entries"])[:30]
 ch["last_refresh"] = NOW.isoformat()
-ch['last_result']={'at':NOW.isoformat(),'since':since.isoformat(),'since_note':since_note,'changed':bool(changed),'scope':'basic'}
+import briefing
+ch['last_result']={'at':NOW.isoformat(),'since':since.isoformat(),'since_note':since_note,'changed':bool(changed),'scope':'basic','evidence':briefing.freeze(m.status,entry,PINNED,bases)}
 json.dump(ch, open(cpath, "w"), ensure_ascii=False, indent=1)
 print(log + (f"달라진 것: PR {len(entry['prs'])}, " + ", ".join(f"{b} {v['from']}→{v['to']}" for b, v in entry["branches"].items()) if changed else f"{since_note} 달라진 것 없음"))

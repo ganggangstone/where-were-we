@@ -671,6 +671,11 @@ if Path(sys.argv[0]).name=='gh':
   if account!='alice' or os.environ.get('FAKE_GH_DENY'):print('access failed',file=sys.stderr);sys.exit(1)
   if args[:2]==['repo','view']:print('{}');sys.exit()
  if os.environ.get('FAKE_GH_FAIL'):print('GitHub denied',file=sys.stderr);sys.exit(1)
+ if os.environ.get('FAKE_GITHUB_DATA'):
+  data=json.load(open(os.environ['FAKE_GITHUB_DATA']))
+  if args[:2]==['pr','list']:print(json.dumps(data.get('merged',[]) if args[args.index('--state')+1]=='merged' else []));sys.exit()
+  if args[:2]==['issue','view']:print(json.dumps(data['linked'][args[2]]));sys.exit()
+  if args[:2]==['issue','list']:print('[]');sys.exit()
  print('[]');sys.exit()
 sources=json.load(open(os.environ['FAKE_SOURCES']));files={os.path.realpath(k):v for k,v in sources.items()}.get(os.path.realpath(repo),{})
 if args[0]=='fetch':
@@ -687,6 +692,34 @@ elif args[0]=='remote':print('https://github.com/example/studio.git' if os.envir
 '''
 
 class Collection(TemporaryProject):
+    def test_real_collection_preserves_pr_and_closed_issue_evidence_for_briefing(self):
+        from datetime import datetime,timedelta,timezone
+        env=self.environment();now=datetime.now(timezone.utc);merged=(now-timedelta(hours=1)).isoformat()
+        issue_url='https://github.com/example/web/issues/9'
+        pr={'number':7,'title':'Reuse a job','body':'Before retries duplicated jobs. After the change retries reuse one job.',
+            'url':'https://github.com/example/web/pull/7','headRefName':'fix/retry','baseRefName':'main','author':{'login':'demo'},
+            'createdAt':merged,'updatedAt':merged,'mergedAt':merged,
+            'files':[{'path':'src/Settings.tsx'}]+[{'path':f'src/item{i}.tsx'} for i in range(99)],
+            'closingIssuesReferences':[{'number':9,'title':'Retry creates duplicates','url':issue_url}]}
+        payload=self.root/'github-data.json';payload.write_text(json.dumps({'merged':[pr],'linked':{issue_url:{'number':9,'title':'Retry creates duplicates','url':issue_url,'body':'Repeating a request creates duplicate jobs.','state':'CLOSED'}}}))
+        env['FAKE_GITHUB_DATA']=str(payload)
+        configured=self.run_cli(env,'configure','studio',json.dumps({'repositories':[{'id':'web','path':str(self.root/'web')}]}))
+        self.assertEqual(configured.returncode,0,configured.stderr)
+        (Path(env['WHERE_WERE_WE_ROOT'])/'settings.json').write_text(json.dumps({'since':'time','since_time':(now-timedelta(hours=2)).isoformat(),'open_refresh':False}))
+        collected=self.run_cli(env,'refresh','studio');self.assertNotIn('FAILED',collected.stdout,collected.stderr)
+        state=json.loads((Path(env['WHERE_WERE_WE_ROOT'])/'studio/repository-state.json').read_text())
+        folder=Path(env['WHERE_WERE_WE_ROOT'])/'studio/repositories/web/snapshots'/state['web']['generation']
+        frozen=json.loads((folder/'changes.json').read_text())['last_result']['evidence']
+        self.assertEqual(frozen['prs'][0]['body'],pr['body'])
+        self.assertEqual(frozen['issues'][0]['body'],'Repeating a request creates duplicate jobs.')
+        self.assertTrue(frozen['collection']['pr_files']['possibly_truncated'])
+        import subprocess
+        result=subprocess.run([sys.executable,'-I','-B',str(Path(project.__file__).with_name('briefing.py')),'request','studio','--lang','en'],env=env,capture_output=True,text=True)
+        self.assertEqual(result.returncode,0,result.stderr)
+        request=json.loads(result.stdout)
+        self.assertEqual(request['input']['prs'][0]['number'],7)
+        self.assertTrue(any(w['code']=='collection_limited' for w in request['input']['warnings']))
+
     def test_real_git_credential_protocol_uses_child_account(self):
         import shutil,subprocess
         gh=shutil.which('gh')

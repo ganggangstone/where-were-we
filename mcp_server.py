@@ -298,6 +298,30 @@ def record_ai_task(project: str, repository: str, task: str, branch: str, lang: 
     return ai_extract.task_record(need(project),repository,task,branch,lang,target,commit,configuration,snapshot,result_json)
 
 
+@app.tool(description="문제별 변경 설명 요청. 저장된 비교 구간의 PR·이슈 근거와 schema를 받는다. AI를 실행하지 않는다. repository를 비우면 프로젝트 전체를 다룬다. briefing_source로 근거를 읽고 record_briefing으로 저장한다. refresh는 호출하지 않는다.")
+def request_briefing(project: str, repository: str = "", branch: str = "dev", lang: str = "ko") -> str:
+    import briefing
+    return json.dumps(briefing.request(need(project),repository,branch,lang),ensure_ascii=False)
+
+
+@app.tool(description="request_briefing이 지정한 고정 입력의 PR·이슈·구조 근거를 읽는다. source_arguments와 source_id를 넘긴다. start/limit은 문자 기준이며 next가 있으면 이어 읽는다. 입력이 갱신됐으면 새 요청이 필요하다.")
+def briefing_source(project: str, repository: str, branch: str, input_hash: str, source_id: str, start: int = 0, limit: int = 8000) -> str:
+    import briefing
+    return json.dumps(briefing.source(need(project),repository,branch,input_hash,source_id,start,limit),ensure_ascii=False)
+
+
+@app.tool(description="request_briefing의 record_arguments와 설명 JSON을 제출한다. 수집 구간·설정·코드·이전 결과와 인용 근거·PR 누락을 검사한다. 실패하면 이전 설명을 보존하며 변경 내역이나 비교 기준을 갱신하지 않는다.")
+def record_briefing(project: str, repository: str, branch: str, lang: str, input_hash: str, previous: str, result_json: str) -> str:
+    import briefing
+    return briefing.record(need(project),repository,branch,lang,input_hash,previous,result_json)
+
+
+@app.tool(description="저장된 문제별 변경 설명과 근거·상태를 읽는다. PR 머지와 배포·실제 동작 확인을 구분하며 이전 구간·부분 수집·수집 실패를 표시한다. 새로 수집하거나 AI를 실행하지 않는다.")
+def change_briefing(project: str, repository: str = "", branch: str = "dev", lang: str = "ko") -> str:
+    import briefing
+    return json.dumps(briefing.view(need(project),repository,branch,lang),ensure_ascii=False)
+
+
 @app.tool(description="이름으로 찾기: 화면·버튼·서버 기능 이름·주소·PR/이슈 번호. impact 에 넣을 대상을 고를 때 쓴다.")
 def find(query: str, project: str = "", repository: str = "") -> str:
     m = scoped_map(need(project), repository); q = query.lower().lstrip("#"); out = []

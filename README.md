@@ -41,7 +41,7 @@ The app starts in Korean. Choose **English** in the toolbar; the preference is s
 
 ### What changed
 
-New and removed screens, requests and navigation, merged PRs, and changed AI evidence.
+New and removed screens, requests and navigation, merged PRs, and changed AI evidence. After a refresh preserves the supporting PR/issue text, choose **Request change explanations**, send the request to your MCP agent, then **Check saved results**. Problem cards explain the reason, before/after behavior, resolution, data impact, recovery, terms and unknowns with source quotes and links. Related PRs can share a card, and one PR can appear on multiple cards; distinct PRs are counted separately. PR evidence includes every base branch of a repository; structure uses the selected map version. Each repository’s exact comparison window is shown. Missing evidence, collection limits, failed collections and previous results stay visible. Merge, deployment and runtime verification are separate states. Requesting, saving and checking explanations do not refresh PRs or move your comparison baseline.
 
 ![What changed: fictional Lumen Studio](docs/images/en/changes.png)
 

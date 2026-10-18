@@ -536,6 +536,8 @@ def read_bundle(name, repository='', branch='dev'):
                            'results':{role:analysis_results(raw,role) for role in ('dev','main')},
                            'analysis_scope':{role:analysis_scope(raw.get(role),{}) for role in ('dev','main')}}
         result['branch_details']={role:{key:branch_bundle(raw,role).get(key) for key in DETAILS} for role in ('dev','main')}
+        import briefing
+        result['briefings']=briefing.project_views(name,repository)
         return result
     state=states(name)
     raws={r['id']:raw_bundle(repository_folder(name,r,state)) for r in conf['repositories']}
@@ -545,6 +547,8 @@ def read_bundle(name, repository='', branch='dev'):
     for role in ('dev','main'):
         detail=result if role==branch else _compose(name,conf,state,raws,repository,role)
         result['branch_details'][role]={key:detail.get(key) for key in DETAILS}
+    import briefing
+    result['briefings']=briefing.project_views(name,repository)
     return result
 
 def child_environment(root,repo):

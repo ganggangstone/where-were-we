@@ -32,8 +32,8 @@ def git(*args, cwd=REPO):
     return sh("git", "-c", "core.quotepath=off", *args, cwd=cwd)
 
 
-def gh(*args):
-    command=["gh",*args,"--json","number,title,headRefName,baseRefName,url,author,createdAt,updatedAt,mergedAt,files,closingIssuesReferences,body"]
+def github_json(*args,fields):
+    command=["gh",*args,"--json",fields]
     result=subprocess.run(command,cwd=REPO,capture_output=True,text=True)
     if result.returncode:
         if os.environ.get('WHERE_WERE_WE_GITHUB'):
@@ -42,6 +42,9 @@ def gh(*args):
         sys.exit(result.stderr.strip() or 'GitHub collection failed')
     out=result.stdout
     return json.loads(out or "[]")
+
+def gh(*args):
+    return github_json(*args,fields="number,title,headRefName,baseRefName,url,author,createdAt,updatedAt,mergedAt,files,closingIssuesReferences,body")
 
 
 def iso(s):
@@ -78,14 +81,16 @@ if not PINNED: git("fetch", "-q", "origin")
 # --- PR ---
 def pr_row(pr):
     files = [f["path"] for f in pr.get("files") or []]
-    return {"number": pr["number"], "title": pr["title"], "url": pr["url"], "branch": pr["headRefName"], "base": pr["baseRefName"],
+    return {"number": pr["number"], "title": pr["title"], "body":pr.get("body", ""), "url": pr["url"], "branch": pr["headRefName"], "base": pr["baseRefName"],
             "author": (pr.get("author") or {}).get("login"), "created_at": pr["createdAt"], "updated_at": pr["updatedAt"], "merged_at": pr.get("mergedAt"),
             "files": files, "screens": screens_of(files), "common_files": common_of(files),
-            "issues": [{"number": i["number"], "title": i.get("title")} for i in pr.get("closingIssuesReferences") or []],
+            "issues": [{"number": i["number"], "title": i.get("title"), "url":i.get("url")} for i in pr.get("closingIssuesReferences") or []],
             "refs": sorted({int(n) for n in re.findall(r"(?<![\w/])#(\d+)\b", (pr.get("title") or "") + " " + (pr.get("body") or ""))})}
 
-merged = [pr_row(p) for p in gh("pr", "list", "--state", "merged", "--limit", "200", "--search", f"merged:>={SINCE.date().isoformat()}") if iso(p["mergedAt"]) >= SINCE]
-open_prs = [pr_row(p) for p in gh("pr", "list", "--state", "open", "--limit", "100")]
+merged_input = gh("pr", "list", "--state", "merged", "--limit", "200", "--search", f"merged:>={SINCE.date().isoformat()}")
+merged = [pr_row(p) for p in merged_input if SINCE <= iso(p["mergedAt"]) <= NOW]
+open_input=gh("pr", "list", "--state", "open", "--limit", "100")
+open_prs = [pr_row(p) for p in open_input]
 for p in open_prs:
     p["stale"] = (NOW - iso(p["updated_at"])).days >= STALE_DAYS
 
@@ -219,7 +224,8 @@ for p in open_prs + merged:
     for n in {i["number"] for i in p["issues"]} | set(p["refs"]):
         by_issue[n].append(p)
 issues = []
-for i in json.loads(sh("gh", "issue", "list", "--state", "open", "--limit", "300", "--json", "number,title,body,url") or "[]"):
+issue_input=github_json("issue","list","--state","open","--limit","300",fields="number,title,body,url")
+for i in issue_input:
     prs = [p for p in by_issue.get(i["number"], []) if p["number"] != i["number"]]
     if prs:
         scr, via, hits = sorted({s for p in prs for s in p["screens"]}), "pr", [f"PR #{p['number']}" for p in prs]
@@ -227,11 +233,24 @@ for i in json.loads(sh("gh", "issue", "list", "--state", "open", "--limit", "300
         text = (i.get("title") or "") + "\n" + (i.get("body") or "")
         found = [(s, w) for rx, s, w in needles if rx.search(text)]
         scr, via, hits = sorted({x for s, _ in found for x in s}), "text" if found else None, sorted({w for _, w in found})
-    issues.append({"number": i["number"], "title": i["title"], "url": i["url"], "via": via, "hits": hits[:6], "screens": scr})
+    issues.append({"number": i["number"], "title": i["title"], "body":i.get("body", ""), "state":"OPEN", "url": i["url"], "via": via, "hits": hits[:6], "screens": scr})
 print(f"열린 이슈 {len(issues)}: PR로 이어짐 {sum(i['via'] == 'pr' for i in issues)}, 글로 후보 {sum(i['via'] == 'text' for i in issues)}, 연결 안 됨 {sum(i['via'] is None for i in issues)}")
 
+linked_issues=[]
+known_urls={i['url'] for i in issues}
+for pr in merged:
+    for issue in pr['issues']:
+        url=issue.get('url')
+        if not url or url in known_urls or not re.fullmatch(r'https://github\.com/[^/\s]+/[^/\s]+/issues/[0-9]+',url):continue
+        known_urls.add(url)
+        try:linked_issues.append(github_json('issue','view',url,fields='number,title,body,url,state'))
+        except SystemExit:linked_issues.append({**issue,'body':'','unavailable':True})
+collection={key:{'limit':limit,'count':len(rows),'possibly_truncated':len(rows)>=limit}
+            for key,limit,rows in [('merged_prs',200,merged_input),('open_prs',100,open_input),('issues',300,issue_input)]}
+collection['pr_files']={'limit':100,'possibly_truncated':any(len(p.get('files',[]))>=100 for p in merged_input)}
+collection['linked_issues']={'unavailable':sum(bool(i.get('unavailable')) for i in linked_issues)}
 out = {"generated_at": NOW.isoformat(), "since": SINCE.isoformat(), "stale_days": STALE_DAYS,
-       "merged_prs": merged, "open_prs": open_prs, "issues": issues, "branches": branches, "worktrees": worktrees, "overlaps": overlaps}
+       "merged_prs": merged, "open_prs": open_prs, "issues": issues, "linked_issues":linked_issues, "collection":collection, "branches": branches, "worktrees": worktrees, "overlaps": overlaps}
 os.makedirs(HOME, exist_ok=True)
 json.dump(out, open(os.path.join(HOME, "status.json"), "w"), ensure_ascii=False, indent=1)
 print(f"{SINCE.date()} 이후 병합 PR {len(merged)}, 열린 PR {len(open_prs)} (멈춤 {sum(p['stale'] for p in open_prs)}), "
