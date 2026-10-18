@@ -2,50 +2,60 @@
 
 [English](README.md) · [한국어](README.ko.md)
 
-A local code map for people and AI agents working on a service that keeps changing.
+Explore your codebase with visual architecture maps, change tracking, and impact analysis. Available as a local desktop app and MCP server for AI agents.
 
-See how programs, screens, server requests, and data connect—and where ongoing GitHub work overlaps. Your agent reads the same map through MCP before planning and editing.
+Connect several repositories to one project to explore their screens, server requests, programs and shared data. Your AI agent can read the same map and highlight what you are discussing in the app.
 
 ![Explore Lumen Studio from architecture to render cancellation and shared data](docs/images/en/demo.gif)
 
-Screenshots use **Lumen Studio**, a fictional content creation platform. Maps, GitHub activity, AI explanations, and version information are sample data shown in the real UI.
+Screenshots show the real app with fictional **Lumen Studio** data.
 
 ## Install
 
-Apple Silicon Mac, macOS 11 or newer, and [Homebrew](https://brew.sh/) are required. Download the ZIP directly from [Releases](https://github.com/ganggangstone/where-were-we/releases/latest) if preferred.
+Requires an Apple Silicon Mac and macOS 11 or later.
 
 ```sh
 brew install --cask ganggangstone/tap/where-were-we
 gh auth login
 ```
 
-Python is included. Homebrew installs git and GitHub CLI. AI analysis, screen grouping, architecture, program jobs and request steps work through any MCP agent that supports tool calls; Claude Code is not required. The MCP server must be able to find git and gh on its PATH.
+[Homebrew](https://brew.sh/) installs the required Git and GitHub CLI. You can also download the app from [Releases](https://github.com/ganggangstone/where-were-we/releases/latest); ZIP installations need Git and GitHub CLI installed separately.
 
-**This initial build is unsigned and not notarized.** macOS may block its first launch; see Apple's [instructions for opening an app from an unidentified developer](https://support.apple.com/guide/mac-help/open-a-mac-app-from-an-unknown-developer-mh40616/mac).
+The app does not have Apple Developer ID signing or notarization. If macOS blocks its first launch, follow Apple's [instructions for opening an app from an unidentified developer](https://support.apple.com/guide/mac-help/open-a-mac-app-from-an-unknown-developer-mh40616/mac).
 
-### Create your first map
+## Get started
 
-Click **＋**, enter a service name, and paste a GitHub repository URL or a code folder on this computer. Names are filled automatically and can be edited. Add the service’s web, server, and worker repositories under **Manage code**; **All code** shows their combined map. A new GitHub connection downloads code to app storage and collects its first map. Existing local folders use **Refresh** after connecting.
+1. Open the app, click **＋**, and enter a project name and a GitHub URL or local code folder.
+2. Use **Manage code** to add the project's other repositories. Choose **All code** to see them together.
+3. GitHub connections collect their first map automatically. For a local folder, click **Refresh**.
 
-GitHub URLs support `https://github.com/owner/repository`, the `.git` form, `git@github.com:owner/repository.git`, and `owner/repository`. The same URL can only be connected once per project. Downloads use local disk space. **Manage code** shows the storage location and remembered account. Disconnecting retains code and maps; reconnecting the same URL reuses the code. If downloading fails, select an available GitHub account and save again. If map collection fails after saving, use **Refresh** to retry.
+GitHub connections follow the remote default branch. Local folders use committed code. Choose other branches or tags under **Code versions to analyze** when needed.
 
-GitHub connections follow the remote default branch (`origin/HEAD`) on each refresh. Local folder connections analyze committed code on the folder’s currently selected branch (`HEAD`). Under **Code versions to analyze**, choose another branch, tag or commit when needed; the comparison version is optional. Existing version settings are preserved. React Router frontends and FastAPI backends can live in separate repositories. The app detects `frontend/src` or `src`, and `backend/app` or `app`; set other source roots in repository settings. For other languages and frameworks, refresh first, select a repository, then choose **Request code analysis**. Copy the analysis request to your MCP-connected agent. That agent uses its own model to read the selected branch snapshot through MCP and submit a detailed map, including request steps. In the existing request pane, follow **Copy the request → Send it to your agent → Check saved results**. After the agent saves its output, **Check saved results** reads that analysis without collecting PRs or changing **What changed** or its comparison baseline. Copying a request does not start analysis. The pane distinguishes missing, previous, outdated, partially saved and newly saved results. The app validates and stores the result; it does not launch another model or pay for AI access. Matching source text verifies evidence, not the correctness of AI interpretations. Normal refresh does not call AI; changed code is marked as requiring analysis, and the previous AI map stays available. In **Settings**, choose whether to refresh on app open and compare changes since the previous refresh, your last commit in each repository, or a selected time. Refresh after saving to apply the baseline. A selected date and time stays fixed across refreshes until you change it in Settings.
+In **Settings**, select when the change comparison should start. A specific date and time stays fixed across refreshes until you change it.
 
-Under **Specify server connections and code locations**, select the receiving server by its display name. Matching endpoints are labeled as user-configured connections. Unconfigured or ambiguous matches remain candidates. Equal table names stay separate unless explicitly assigned to shared data. Under **Manage code → When code folders share the same data**, connect the code folders and table names that use the same database tables. Shared-data identifiers are generated automatically. You can edit or remove connections there; collected table names are suggested. Repository collection failures preserve the last successful map and appear beside the repository's commit and last success time.
+The app starts in Korean. Choose **English** in the toolbar to save your language preference.
 
-For github.com code, the app remembers the GitHub account at connection time (or the first refresh for existing projects). Changing the active account in another task does not change this connection. If collection fails, **Change GitHub account** lets you choose a saved login and retry. Tokens stay in GitHub CLI; only the account name is saved. HTTPS fetch uses that account; SSH fetch uses your configured SSH keys.
+## Use your AI agent
 
-Existing projects remain available. Open **Manage code** to keep the original repository and add others without moving or deleting the old map files.
+Click **Connect agent** and copy the instructions into Claude Code, Codex or another MCP-compatible agent. It will ask before changing its connection settings.
 
-With the app open and MCP connected, ask your agent: “Show me the upload retry feature in where-were-we.” It can find matching targets, open the right project and code version, select and highlight a target, and read back the selection you make in the app. Ask it to clarify when names match more than one target. Navigation and result checks do not refresh change history. The agent can also use the app's configuration, comparison settings, analysis requests and update actions. Preparing an analysis request does not run a model; result submission uses the existing analysis MCP tools. Both the app and MCP server need this version. If a command is still queued or running, its command ID lets the agent check completion without repeating it. After an interruption, inspect the app state before retrying.
+With the app open, try: **“Show me the upload retry feature in where-were-we.”** Your agent can find and highlight it, and read what you select in the app. Ask it to consult the map before planning or editing to find affected areas and overlapping work.
 
-The app starts in Korean. Choose **English** in the toolbar; the preference is saved locally. Project names, code, and AI explanations stay verbatim.
+For a more detailed map or other languages and frameworks, select a repository and choose **Request code analysis**:
+
+1. Copy the request into your connected agent's chat.
+2. Let the agent analyze the code and save its results.
+3. Click **Check saved results** in the app.
+
+Reading saved results preserves **What changed** and its comparison baseline. AI analysis uses your agent's account and plan; ordinary refresh does not run AI analysis.
+
+If tools are missing after an update, open **Connection diagnostics**, copy the repair request to your agent, and click **Check current connection** after it reconnects. You may need a new agent session.
 
 ## Explore the map
 
 ### What changed
 
-New and removed screens, requests and navigation, merged PRs, and changed AI evidence. After a refresh preserves the supporting PR/issue text, choose **Request change explanations**, send the request to your MCP agent, then **Check saved results**. Problem cards explain the reason, before/after behavior, resolution, data impact, recovery, terms and unknowns with source quotes and links. Related PRs can share a card, and one PR can appear on multiple cards; distinct PRs are counted separately. PR evidence includes every base branch of a repository; structure uses the selected map version. Each repository’s exact comparison window is shown. Missing evidence, collection limits, failed collections and previous results stay visible. Merge, deployment and runtime verification are separate states. Requesting, saving and checking explanations do not refresh PRs or move your comparison baseline.
+See changed screens and requests, merged PRs and explanations of what changed and why. Choose **Request change explanations**, send the request to your agent, then **Check saved results**. These actions keep your comparison baseline unchanged.
 
 ![What changed: fictional Lumen Studio](docs/images/en/changes.png)
 
@@ -134,40 +144,45 @@ View the installed version, stable releases, and bilingual notes; install Homebr
 
 </details>
 
-## Agent workflow
+## Connection help
 
-Click **Connect agent**, copy the instructions, and give them to Claude Code, Codex, or another MCP client. The agent asks permission before editing configuration.
-
-If tools are missing, choose **Connection diagnostics**, select the feature, and copy the repair request to your agent. After it reconnects and calls the confirmation tool, click **Check current connection**. The app checks its own server separately; a healthy app server alone does not confirm your agent reconnected. Settings are not rewritten automatically.
-
-Ask your agent to check `changes` before planning and `impact` before editing. It can use the same map to find affected areas and overlapping work. MCP tools accept a `repository` ID to narrow the scope; test-rule writes require a repository when the project has several.
+- **Collection failed:** use **Change GitHub account** to select a saved login and retry. Each code connection remembers its own account; the previous successful map stays available if a refresh fails.
+- **Several repositories use one database:** map their table names under **Manage code → When code folders share the same data**. Equal table names alone do not connect them.
+- **A request belongs to another repository:** choose its receiving server under **Specify server connections and code locations**.
+- **Disconnecting code:** the downloaded code and saved maps remain on your Mac.
 
 ## Updates
 
-The app checks for new versions when opened, at most once per day. Use **Version & updates** to read release notes, check manually, or turn automatic checks off.
+Open **Version & updates** and click **Update now** for Homebrew installations. The app closes and reopens after installation; saved maps remain in place. Reconnect your agent's MCP afterward.
 
-To upgrade, run:
+To update from a terminal:
 
 ```sh
 brew update && brew upgrade --cask ganggangstone/tap/where-were-we
 ```
 
-For Homebrew installations, click **Update now**. The app checks that the new version is available, closes, installs it through Homebrew, and reopens. Finish collection or AI work before updating. If installation or startup fails, the updater attempts to restore the previous app and shows the error; recovery files are retained if restoration fails. Maps remain in place.
+The app can notify you of new versions. Automatic checks can be turned off in **Version & updates**. For ZIP installations, download the latest ZIP from [Releases](https://github.com/ganggangstone/where-were-we/releases/latest).
 
-If an update is interrupted by shutdown or force quit, recovery details remain in `~/.where-were-we/.app-update.log` and `.app-update.json`. Open the log with `open -a TextEdit ~/.where-were-we/.app-update.log`. It records the retained app copy and its original destination: copy it back with Finder and choose Replace, or run the recorded Homebrew reinstall command.
+<details>
+<summary>If an update is interrupted</summary>
 
-After updating, reconnect where-were-we in your agent. If new tools are still missing, start a new session. **Version & updates → Connection diagnostics** helps check old paths and connections still running older code.
+The updater attempts to restore the previous app after an installation or startup failure. If recovery is interrupted, open the recovery log:
 
-The command above is the manual fallback, including for older versions that only offer command copying. A ZIP installation is not managed by the update button. Uninstalling the app preserves your maps.
+```sh
+open -a TextEdit ~/.where-were-we/.app-update.log
+```
 
-## Data and limits
+It shows the backup location and reinstall command. Restore the backup with Finder or follow that command.
 
-- Maps stay in `~/.where-were-we/`. They contain your project's structure; keep them out of public repositories.
-- The collector runs `git fetch` and reads local files, git history, GitHub activity and work folders. It does not check out another branch or modify target repository files.
-- Detailed analysis uses the connected MCP agent and its account. `analyze` returns the instructions and schema, `analysis_source` serves the pinned source, and `record_analysis` verifies and saves the result. After recording the detailed map, the same analysis request continues with architecture and program jobs through `request_ai_task` and `record_ai_task`. Architecture analysis saves what each program does alongside the structure. Select a program in the app to read its saved jobs directly; programs without results show an explicit empty state. Grouping and request-step actions also use the connected agent. Copy the request to the agent, then use **Check saved results** after it saves the result. This reads analysis without updating change history. Source processing follows the selected agent/provider settings.
-- Automatic code extraction supports React Router/axios, FastAPI, and SQLAlchemy. Explicit AI analysis accepts source code in other languages and frameworks, subject to what the model can establish; it does not guarantee complete coverage. AI provenance, source checks, unresolved areas and changed-commit warnings remain visible. Source roots are configurable per repository. Collection status is separate from analysis scope: unrecognized or unresolved areas remain unverified, and disabled areas are labeled separately. Regression fixtures cover React Router → FastAPI → SQLAlchemy tables, and Vue → Go → tables with supplied AI JSON. These tests verify source checks and map connections; they do not measure a real model’s analysis accuracy.
-- `dev` and `main` are code branch comparisons, not a check of what is actually deployed. Programs or runtime facts absent from git remain unverified until someone checks the running system.
-- Read/write grouping uses HTTP methods (GET versus other methods). Missing test or navigation links can reflect an unrecognized pattern. AI explanations and candidate matches still need checking; a matching code quote does not establish that an explanation is correct.
+</details>
+
+## Your data and analysis coverage
+
+- Maps and downloaded code stay under `~/.where-were-we/`. They describe your project; keep them out of public repositories.
+- Collection reads code, Git history and GitHub activity. It fetches updates without switching branches or changing your source files.
+- AI analysis provides source code to your connected agent. Its data handling follows the agent/provider settings you choose.
+- Automatic extraction supports React Router/axios, FastAPI and SQLAlchemy. Use agent analysis for other languages and frameworks. Check the displayed coverage, unresolved areas and source evidence when interpreting results.
+- Branch comparisons describe code, not what is deployed or verified in a running system.
 
 ## Contributing and license
 
@@ -206,46 +221,4 @@ The [license](LICENSE) permits personal use, internal business use, and free red
 
 </details>
 
-<details>
-<summary>v0.2.1 release notes</summary>
-
-### 한국어
-
-- 기본 Tauri 아이콘을 where-were-we 전용 로고로 교체했습니다. 연결된 W 모양과 초록색 점으로 코드의 연결 관계와 돌아올 위치를 표현했습니다.
-
-### English
-
-- Replaced the default Tauri icon with a dedicated where-were-we logo. The connected W shape and green dot represent code connections and a place to resume work.
-
-</details>
-
-<details>
-<summary>v0.2.0 release notes</summary>
-
-### 한국어
-
-- 한 프로젝트에 여러 레포를 연결하고 전체 또는 레포별 지도를 봅니다.
-- 웹·API가 나뉜 레포와 서로 다른 브랜치·소스 폴더를 지원합니다.
-- 레포별 수집 상태를 표시하고, 실패·중단 시 마지막 성공 지도를 유지합니다.
-- 사용자가 지정한 API 연결과 미확인 후보를 구분합니다. 같은 경로·PR 번호·테이블 이름을 레포별로 구분합니다.
-- MCP 조회와 테스트 기록에도 레포 범위를 지정할 수 있습니다. 기존 단일 레포 지도는 보존합니다.
-- 설정 화면에서 여러 레포가 함께 쓰는 데이터 연결을 관리합니다.
-- 상세 분석·화면 묶음·전체 구조·프로그램 작업·요청 단계를 연결된 MCP 에이전트로 만듭니다. 특정 AI CLI 설치가 필요하지 않습니다.
-- 에이전트 세션 수집과 세션 재개 기능을 제거했습니다.
-- Homebrew 설치본에서 버튼으로 업데이트하고 앱을 다시 엽니다. 실패 시 이전 앱 복구를 시도합니다.
-
-### English
-
-- Connect multiple repositories to one project and switch between service-wide and repository views.
-- Collect split frontend/backend repositories with independent refs and source roots.
-- Show collection status per repository and retain the last successful snapshot after failure or interruption.
-- Distinguish user-configured API destinations from unverified candidates; keep equal paths, PR numbers, and table names separate.
-- Scope MCP queries and test writes by repository while preserving existing single-repository maps.
-- Manage shared data mappings across repositories in settings.
-- Use your connected MCP agent for detailed maps, grouping, architecture, program jobs and request steps, without a provider-specific AI CLI.
-- Remove agent session collection and session-resume controls.
-- Install Homebrew updates from the app and reopen automatically, with recovery of the previous app on failure.
-
-</details>
-
-Implementation and configuration details: [multi-repository specification](docs/MULTI_REPO_SPEC.md).
+[All releases](https://github.com/ganggangstone/where-were-we/releases) · [Configuration and implementation](docs/MULTI_REPO_SPEC.md)
