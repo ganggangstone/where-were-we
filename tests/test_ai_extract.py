@@ -256,6 +256,51 @@ class Analysis(unittest.TestCase):
             self.assertIn('system',request['handoff'])
             self.assertIn('record_ai_task',request['handoff'])
 
+    def test_analysis_requests_and_records_preserve_change_history_and_baseline(self):
+        repo=self.conf['repositories'][0]
+        raw=project.raw_bundle(project.repository_folder('demo',repo,project.states('demo')))
+        raw['changes']={'last_refresh':'2026-10-01T00:00:00+00:00','entries':[{'at':'retained','prs':[]}], 'last_result':{'since':'fixed'}}
+        project.publish('demo','service',raw,{'fingerprint':project.fingerprint(repo)})
+        before=project.read_bundle('demo')['changes']
+        for lang in ('ko','en'):
+            request=ai_extract.request('demo','dev',lang,'service')
+            self.assertIn('result_before',request)
+            self.assertNotIn('then refresh the app',request['handoff'])
+            self.assertNotIn('저장 후 앱을 새로고침',request['handoff'])
+        self.record_map()
+        request=ai_extract.task_request('demo','groups','dev','en','service')
+        self.assertIn('result_before',request)
+        self.assertNotIn('then refresh the app',request['handoff'])
+        self.submit_task('groups',{'groups':[{'name':'Items','screens':['/items']}],'names':{},'request_names':{}})
+        bundle=project.read_bundle('demo')
+        self.assertEqual(bundle['changes'],before)
+        results=bundle['project']['repositories'][0]['results']['dev']
+        self.assertTrue(results['groups']['version'])
+        self.assertEqual(results['groups']['commit'],self.commit)
+
+    def test_result_versions_ignore_collection_checks_and_keep_branch_fallback(self):
+        base,_=self.normalize()
+        raw={'dev':{**copy.deepcopy(base),'commit':'dev-new','task_outputs':{'system':{'source':'ai','commit':'dev-new','generated_at':'dev-time'}}},
+             'main':{**copy.deepcopy(base),'commit':'main-old'},'system':{'source':'ai','commit':'main-old','generated_at':'main-time'}}
+        repo=self.conf['repositories'][0]
+        project.publish('demo','service',raw,{'fingerprint':project.fingerprint(repo)})
+        results=project.read_bundle('demo')['project']['repositories'][0]['results']
+        self.assertEqual(results['dev']['system']['commit'],'dev-new')
+        self.assertEqual(results['main']['system']['commit'],'main-old')
+        self.record_map()
+        folder=project.repository_folder('demo',repo,project.states('demo'));raw=project.raw_bundle(folder)
+        version=project.analysis_results(raw,'dev')['analysis']['version']
+        raw['dev']['analysis'].update(observed_commit=self.commit,stale=False)
+        self.assertEqual(project.analysis_results(raw,'dev')['analysis']['version'],version)
+        raw['dev']['analysis']['stale']=True
+        self.assertTrue(project.analysis_results(raw,'dev')['analysis']['stale'])
+
+    def test_manual_architecture_proposal_is_reported_as_separately_saved(self):
+        raw={'dev':{'commit':self.commit,'task_outputs':{'system':{'nodes':[]},'system.ai':{
+             'source':'ai','commit':self.commit,'generated_at':'proposal-time','nodes':[]}}}}
+        result=project.analysis_results(raw,'dev')['system']
+        self.assertTrue(result['proposal']);self.assertEqual(result['commit'],self.commit)
+
     def test_system_request_rejects_overwriting_newer_program_jobs(self):
         ev=self.seed_tasks()
         self.submit_task('system',{'nodes':[{'id':'worker','name':'Worker','kind':'program','code':['server'],'ev':[ev]}]})

@@ -285,6 +285,22 @@ def raw_bundle(folder):
         worktree.pop('sessions',None);worktree.pop('session_count',None)
     return bundle
 def empty_map():return {'repo':'','commit':'','screens':[],'api_functions':[],'backend_routes':[],'backend_routes_without_screen':[],'unresolved_calls':[],'models':{},'file_screens':{}}
+def analysis_results(raw,branch):
+    selected=branch_bundle(raw,branch)
+    current=raw.get(branch) or {}
+    def metadata(value):
+        if not value or value.get('source')!='ai':return None
+        stamp={key:value.get(key) for key in ('generated_at','source','provider','commit','branch','language')}
+        return {'version':hashlib.sha256(json.dumps(stamp,sort_keys=True,ensure_ascii=False).encode()).hexdigest(),
+                'commit':value.get('commit'),'generated_at':value.get('generated_at'),
+                'stale':bool(value.get('stale') or (current.get('analysis') or {}).get('stale') or
+                             value.get('commit') and current.get('commit') and not
+                             (str(value['commit']).startswith(current['commit']) or str(current['commit']).startswith(value['commit'])))}
+    return {'analysis':metadata((raw.get(branch) or {}).get('analysis')),
+            'groups':metadata(selected.get('groups')),
+            'system':({**metadata(selected['system.ai']),'proposal':True} if (selected.get('system.ai') or {}).get('source')=='ai' else metadata(selected.get('system'))),
+            'steps':{key:metadata(value) for key,value in (selected.get('flows') or {}).get('routes',{}).items()},
+            'jobs':{key:metadata(value) for key,value in (selected.get('jobs') or {}).get('nodes',{}).items()}}
 def analysis_scope(snapshot,layout):
     """Describe what was established; successful collection does not prove completeness."""
     if not snapshot:return None
@@ -349,6 +365,7 @@ def branch_bundle(raw,branch):
     return {**raw,**{key:outputs.get(key,raw.get(key)) for key in DETAILS}}
 
 def _compose(name, conf, state, raws, repository='', branch='dev'):
+    result_metadata={rid:{role:analysis_results(raw,role) for role in ('dev','main')} for rid,raw in raws.items()}
     raws={rid:branch_bundle(raw,branch) for rid,raw in raws.items()}
     selected=[r for r in conf['repositories'] if not repository or r['id']==repository]
     if repository and not selected:raise ValueError('Unknown repository')
@@ -361,6 +378,7 @@ def _compose(name, conf, state, raws, repository='', branch='dev'):
         interrupted = st.get('in_progress') and not collection_running(name)
         if interrupted:st={**st,'error':'Previous collection was interrupted; last successful snapshot retained','in_progress':False}
         metadata.append({**repo,**st,'configured_path':repo['path'],'path':(raw.get('dev') or raw.get('main') or {}).get('repo',repo['path']),'collected':bool(raw.get('dev') or raw.get('main')),
+            'results':result_metadata[repo['id']],
             'analysis':{role:(raw.get(role) or {}).get('analysis') for role in ('dev','main')},
             'analysis_scope':{role:analysis_scope(raw.get(role),repo['layout']) for role in ('dev','main')},
             'config_changed':bool(st.get('fingerprint') and st['fingerprint']!=fingerprint(repo)),
@@ -515,6 +533,7 @@ def read_bundle(name, repository='', branch='dev'):
         if repository:raise ValueError('This legacy project has no repository selector')
         raw=raw_bundle(home(name));result=branch_bundle(raw,branch)
         result['project']={'name':name,'repositories':[],'selected':'',
+                           'results':{role:analysis_results(raw,role) for role in ('dev','main')},
                            'analysis_scope':{role:analysis_scope(raw.get(role),{}) for role in ('dev','main')}}
         result['branch_details']={role:{key:branch_bundle(raw,role).get(key) for key in DETAILS} for role in ('dev','main')}
         return result

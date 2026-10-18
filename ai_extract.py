@@ -224,7 +224,10 @@ def request(name,branch='dev',lang='ko',repository=''):
                     f' After saving the map, call request_ai_task with {system_scope} to analyze architecture and the jobs of every program together. '
                     'Include source evidence in each program’s jobs using the returned schema; record unknowns explicitly. '
                     'Submit the result and returned record_arguments to record_ai_task to finish this analysis without another user request.')
+        handoff += (' 저장 후 앱의 ‘저장된 결과 확인’을 누르도록 안내하세요. 결과 확인을 위해 refresh 도구를 실행하지 마세요.' if lang=='ko' else ' Tell the user to select Check saved results in the app. Do not call refresh to display the result.')
+        results=project.analysis_results(raw,branch)
         return {'commit':commit,'record_arguments':arguments,'repository_path':repo['path'],
+                'result_before':[{'task':task,'before':results[task]} for task in ('analysis','system')],
                 'source_arguments':{'project':name,'repository':rid,'branch':branch,'commit':commit},
                 'prompt':analysis_prompt(commit,lang,repo['layout']),'schema':SCHEMA,'handoff':handoff}
 
@@ -338,11 +341,15 @@ def task_request(name,task,branch='dev',lang='ko',repository='',target=''):
                 'Return a JSON object using schema. Preserve unknown facts explicitly.')
         handoff=(f'where-were-we MCP의 request_ai_task를 {json.dumps(scope,ensure_ascii=False)} 인자로 호출하세요. '
                  '반환된 input·prompt·schema를 기준으로 현재 에이전트의 모델로 작업하세요. 필요한 코드는 source_arguments를 넣어 analysis_source로 읽으세요. '
-                 '다른 AI CLI를 실행하지 마세요. 결과 JSON을 record_arguments와 함께 record_ai_task의 result_json으로 제출하세요. 저장 후 앱을 새로고침하세요.') if lang=='ko' else (
+                 '다른 AI CLI를 실행하지 마세요. 결과 JSON을 record_arguments와 함께 record_ai_task의 result_json으로 제출하세요. 저장 후 앱의 ‘저장된 결과 확인’을 누르도록 안내하세요. 결과 확인을 위해 refresh 도구를 실행하지 마세요.') if lang=='ko' else (
                  f'Call where-were-we MCP request_ai_task with {json.dumps(scope)}. Use your current agent/model with the returned input, prompt and schema. '
                  'Read pinned source with analysis_source and source_arguments as needed. Do not launch another AI CLI. '
-                 'Submit result_json to record_ai_task with record_arguments, then refresh the app.')
+                 'Submit result_json to record_ai_task with record_arguments. Tell the user to select Check saved results in the app. Do not call refresh to display the result.')
+        results=project.analysis_results(raw,branch)
+        before=([{'task':task,'key':key,'before':results[task].get(key)} for key in (inputs['routes'] if task=='steps' else [target])]
+                if task in ('steps','jobs') else [{'task':task,'before':results[task]}])
         return {'commit':commit,'input':inputs,'prompt':prompt,'schema':TASK_SCHEMAS[task],'handoff':handoff,
+                'result_before':before,
                 'record_arguments':args,'source_arguments':{'project':name,'repository':rid,'branch':branch,'commit':commit}}
 
 def task_result(raw,task,branch,target,data,repo,commit,lang):
@@ -364,7 +371,7 @@ def task_result(raw,task,branch,target,data,repo,commit,lang):
                 result.append({'text':item['text'],'needs':item.get('needs') if item.get('needs') in ('ops','read') else 'read'})
             else:raise ValueError('Use text and needs for unknown facts')
         return result
-    meta={'source':'ai','provider':'mcp-agent','commit':commit,'branch':branch,'language':lang}
+    meta={'source':'ai','provider':'mcp-agent','commit':commit,'branch':branch,'language':lang,'generated_at':project.now()}
     updated=copy.deepcopy(raw)
     def program_jobs(node,payload):
         code=node['code'];jobs=[]

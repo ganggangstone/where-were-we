@@ -272,9 +272,14 @@ class Registration(TemporaryProject):
         if not chrome.is_file():self.skipTest('Chrome is required for the real registration-form check')
         source=(Path(project.__file__).parent/'ui/index.html').read_text()
         script=source.split('<script>',1)[1].rsplit('</script>',1)[0].split("$('q').oninput",1)[0]
+        script+=source[source.index('function renderAgentPrompt() {'):source.index("$('agent').onclick")]
         bootstrap=r'''
-const saved=[],accountChanges=[];let accountFailure=false;
+const saved=[],accountChanges=[],backendCalls=[];let accountFailure=false,analysisBundle=null,resultReadFailure=false,delayedResult=null;
 window.__TAURI__={core:{invoke:async(command,args)=>{
+  backendCalls.push(command);
+  if(command==='read_project'){if(delayedResult)return delayedResult;if(resultReadFailure)throw Error('Cannot read saved result');return JSON.stringify(analysisBundle);}
+  if(command==='make_system')return JSON.stringify({handoff:'Analyze pinned code',commit:'abc',record_arguments:{repository:'web'},result_before:[{task:'system',before:null}]});
+  if(command==='make_steps')return JSON.stringify({handoff:'Read '+args.repository,commit:'abc',record_arguments:{repository:args.repository},result_before:[{task:'steps',key:'server.py::Save',before:null}]});
   if(command==='save_project'){saved.push(JSON.parse(args.configuration));return '';}
   if(command==='list_projects')return ['demo'];
   if(command==='github_accounts')return JSON.stringify({accounts:['alice','bob'],selected:'bob'});
@@ -363,6 +368,56 @@ window.__TAURI__={core:{invoke:async(command,args)=>{
   S.lang='ko';await editGitHubAccount('');
   assert($('project-dialog').innerText.includes('다른 작업의 로그인 계정은 바꾸지 않습니다.'),'Legacy repair should use the same plain guidance');
   $('project-dialog').close();
+  S.lang='en';S.project='demo';S.repository='web';S.branch='dev';S.loadToken=5;
+  S.desiredProject='demo';S.desiredRepository='web';S.maps={dev:{repo:'/demo/web',screens:[]}};
+  S.projectInfo={repositories:[{id:'web',results:{dev:{system:null}}}]};
+  const changes={last_refresh:'fixed',entries:[{at:'retained'}]},settings={since:'time',since_time:'2026-10-01T18:30'};
+  S.changes=changes;S.settings=settings;S.chi=2;S.view='sys';S.node='web::worker';
+  render=()=>{if(S.agentPrompt)renderAgentPrompt();};
+  Object.defineProperty(navigator,'clipboard',{value:{writeText:async()=>{}},configurable:true});
+  await requestAgentAction('make_system');
+  assert($('insp').textContent.includes('1. Copy the request') && $('insp').textContent.includes('3. Check saved results'),'Use the chosen existing-pane sequence');
+  await $('cpAgent').onclick();
+  assert(!$('analysisResultState').textContent.includes('saved a new result'),'Copying must not imply saved or running analysis');
+  analysisBundle={project:{repositories:[{id:'web',results:{dev:{system:null}}}]},dev:{repo:'/demo/web',screens:[]},main:null,changes:{last_refresh:'must-not-replace'},branch_details:{}};
+  const beforeChecks=backendCalls.length;
+  await $('checkAnalysisResults').onclick();
+  assert($('analysisResultState').textContent.includes('No saved result'),'Missing results need an explicit state');
+  assert(S.changes===changes && S.chi===2 && S.settings===settings,'Checking results must preserve change history, selected entry and comparison settings');
+  assert(backendCalls.slice(beforeChecks).every(c=>c==='read_project'),'Result checks must only read saved data');
+  analysisBundle.project.repositories[0].results.dev.system={version:'new',commit:'abc',stale:false};
+  await $('checkAnalysisResults').onclick();
+  assert($('analysisResultState').textContent.includes('saved a new result'),'Completion requires a saved matching result');
+  analysisBundle.project.repositories[0].results.dev.system={version:'old',commit:'different',stale:false};
+  await $('checkAnalysisResults').onclick();
+  assert($('analysisResultState').textContent.includes('different code version'),'A stale saved result must be distinct from a new result');
+  const mapBefore=S.maps.dev;resultReadFailure=true;await $('checkAnalysisResults').onclick();
+  assert(S.maps.dev===mapBefore && S.changes===changes,'A failed result read must preserve the displayed map and changes');
+  resultReadFailure=false;S.lang='ko';renderAgentPrompt();
+  assert($('insp').textContent.includes('3. 저장된 결과 확인'),'Korean shows the same result-only path');
+  S.lang='en';
+  assert(tr('에이전트에 전달할 요청을 준비합니다. 앱에서 바로 분석하지 않습니다.').includes('does not run in the app'),'Step requests must not retain old automatic-analysis wording');
+  analysisBundle.project.repositories[0].results.dev.system={version:'proposal',commit:'abc',stale:false,proposal:true};
+  await $('checkAnalysisResults').onclick();
+  assert($('analysisResultState').textContent.includes('saved separately') && !$('viewAnalysisResults'),'A saved AI proposal must not offer the old manual map as its new result');
+  S.analysisRequest.requirements[0].before={version:'proposal'};await $('checkAnalysisResults').onclick();
+  assert($('analysisResultState').textContent.includes('earlier AI proposal') && !$('viewAnalysisResults'),'An earlier AI proposal must not link to the manual map either');
+  S.repository='';S.projectInfo={repositories:[{id:'api-a'},{id:'api-b'}]};
+  requests=()=>['api-a','api-b'].map(repository=>({route:{repository,file:repository+'/server.py',function:'Save'}}));
+  await requestAgentAction('make_steps',{screen:'/items'});
+  assert(S.analysisRequest.requirements.length===2,'A cross-code screen requires each server result');
+  analysisBundle={project:{repositories:[{id:'api-a',results:{dev:{steps:{'server.py::Save':{version:'a-new',commit:'abc'}}}}},
+    {id:'api-b',results:{dev:{steps:{}}}}]},dev:{repo:'/demo',screens:[]},main:null,branch_details:{},changes:{last_refresh:'do-not-use'}};
+  await $('checkAnalysisResults').onclick();
+  assert($('analysisResultState').textContent.includes('Some results'),'One saved server is partial completion');
+  analysisBundle.project.repositories[1].results.dev.steps['server.py::Save']={version:'b-new',commit:'abc'};
+  await $('checkAnalysisResults').onclick();
+  assert($('analysisResultState').textContent.includes('saved a new result'),'All server results must be saved before completion');
+  let resolveRead;delayedResult=new Promise(resolve=>{resolveRead=resolve;});
+  const originalMap=S.maps.dev,pendingCheck=$('checkAnalysisResults').onclick();
+  S.branch='main';resolveRead(JSON.stringify({...analysisBundle,dev:{repo:'/wrong'}}));await pendingCheck;
+  assert(S.maps.dev===originalMap,'A late result check must not apply to another branch');
+  assert(S.changes===changes && S.chi===2 && S.settings===settings,'All result paths preserve change history and baseline');
   document.body.dataset.registrationTest='passed';
   const output=document.createElement('pre');output.id='registration-result';output.textContent=JSON.stringify(saved);document.body.append(output);
 })().catch(error=>{document.body.dataset.registrationTest='failed';const output=document.createElement('pre');output.textContent=error.stack;document.body.append(output);});
