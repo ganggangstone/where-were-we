@@ -176,9 +176,39 @@ Report bugs or suggest improvements in [Issues](https://github.com/ganggangstone
 The [license](LICENSE) permits personal use, internal business use, and free redistribution under its conditions. Paid products and external paid services are restricted. This is a custom source-available license; third-party components retain their own licenses.
 
 <details>
-<summary>v0.2.1 release notes</summary>
+<summary>v0.3.0 release notes</summary>
 
 <!-- release-notes:start -->
+### 한국어
+
+- 코드 연결 화면을 쉬운 표현과 자동 입력으로 정리하고, 수집 성공과 실제 분석 범위를 구분했습니다.
+- 코드 연결마다 GitHub 계정을 기억하며 인증 실패 시 해당 연결의 계정을 바꿀 수 있습니다.
+- 저장된 분석 결과만 읽어 ‘바뀐 것’과 비교 기준을 유지합니다. 프로그램을 선택하면 저장된 하는 일을 바로 보여 줍니다.
+- 바뀐 내용을 문제별로 설명하고 PR·이슈 근거, 전후 동작과 확인하지 못한 부분을 함께 보여 줍니다.
+- GitHub 주소로 코드를 연결하면 앱 전용 위치에 내려받고 첫 지도를 수집합니다.
+- MCP 에이전트가 실행 앱의 대상을 찾고 선택·강조하며 실제 선택 상태를 읽을 수 있습니다.
+- 업데이트 후 연결 진단에서 앱 서버·등록 경로·현재 에이전트 연결을 구분하고, 재연결 여부를 확인합니다.
+- 앱이 뒤에 있을 때도 MCP 명령에 응답하도록 보완했습니다.
+- 앱 배포 파일에서 개발용 캐시를 제외했습니다.
+
+### English
+
+- Simplified code connection setup with clearer labels and automatic values, and separated collection success from analysis coverage.
+- Remember a GitHub account for each code connection and switch that connection’s account after an authentication failure.
+- Read saved analysis without changing change history or comparison settings. Select a program to read its saved jobs directly.
+- Explain changes by problem, with PR/issue evidence, before-and-after behavior and unresolved questions.
+- Connect a GitHub URL to download code into app-managed storage and collect its first map.
+- Let MCP agents find, select and highlight targets in the running app and read back the actual selection.
+- Diagnose the app server, registered paths and current agent connection separately, and verify reconnection after an update.
+- Keep MCP commands responsive when the app window is in the background.
+- Exclude development caches from app bundles.
+<!-- release-notes:end -->
+
+</details>
+
+<details>
+<summary>v0.2.1 release notes</summary>
+
 ### 한국어
 
 - 기본 Tauri 아이콘을 where-were-we 전용 로고로 교체했습니다. 연결된 W 모양과 초록색 점으로 코드의 연결 관계와 돌아올 위치를 표현했습니다.
@@ -186,7 +216,6 @@ The [license](LICENSE) permits personal use, internal business use, and free red
 ### English
 
 - Replaced the default Tauri icon with a dedicated where-were-we logo. The connected W shape and green dot represent code connections and a place to resume work.
-<!-- release-notes:end -->
 
 </details>
 

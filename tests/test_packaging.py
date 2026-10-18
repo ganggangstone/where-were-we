@@ -370,3 +370,18 @@ esac
 
 if __name__ == '__main__':
     unittest.main()
+
+class FrontendDistribution(unittest.TestCase):
+    def test_only_runtime_ui_assets_are_packaged_even_with_local_python_caches(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base=Path(tmp);source=base/'ui';output=base/'frontend';source.mkdir()
+            for name in ('index.html','app.css','tokens.css','tokens.generated.css','connection.js','control.js','vendor/dagre.min.js'):
+                p=source/name;p.parent.mkdir(parents=True,exist_ok=True);p.write_text('synthetic '+name)
+            (source/'__pycache__').mkdir();(source/'__pycache__/build_tokens.pyc').write_bytes(b'private build path')
+            (source/'build_tokens.py').write_text('build helper only')
+            builder.prepare_frontend(source,output)
+            files={str(p.relative_to(output)) for p in output.rglob('*') if p.is_file()}
+            self.assertNotIn('__pycache__/build_tokens.pyc',files);self.assertNotIn('build_tokens.py',files)
+            self.assertEqual((output/'vendor/dagre.min.js').read_text(),'synthetic vendor/dagre.min.js')
+            (source/'control.js').write_text('updated');builder.prepare_frontend(source,output)
+            self.assertEqual((output/'control.js').read_text(),'updated')

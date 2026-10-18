@@ -1,12 +1,15 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "where-were-we",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "identifier": "dev.ganggangstone.where-were-we",
   "build": {
-    "frontendDist": "../ui",
+    "frontendDist": "frontend",
     "beforeBuildCommand": "python3 scripts/prepare-runtime.py",
-    "beforeDevCommand": { "script": "python3 scripts/prepare-runtime.py", "wait": true }
+    "beforeDevCommand": {
+      "script": "python3 scripts/prepare-runtime.py",
+      "wait": true
+    }
   },
   "app": {
     "windows": [
@@ -29,7 +32,9 @@
     "resources": {
       "runtime/": "runtime/"
     },
-    "macOS": { "minimumSystemVersion": "11.0" },
+    "macOS": {
+      "minimumSystemVersion": "11.0"
+    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

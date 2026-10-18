@@ -10,3 +10,6 @@ src-tauri/.runtime-*/
 node_modules/
 __pycache__/
 .venv/
+
+# Generated runtime-only UI assets
+src-tauri/frontend/

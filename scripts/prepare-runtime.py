@@ -36,6 +36,24 @@ sys.path.insert(0,str(ROOT))
 from connection import BACKEND_FILES
 
 
+# Frontend sources also contain build helpers and their local Python caches.
+# Copy only runtime assets before Tauri compresses them into the executable.
+FRONTEND_FILES=('index.html','app.css','tokens.css','tokens.generated.css','connection.js','control.js','vendor/dagre.min.js')
+def prepare_frontend(source, output):
+    source=Path(source);output=Path(output);marker='.where-were-we-frontend'
+    if output.exists() and not (output/marker).is_file():
+        raise ValueError('Refusing to replace an unmanaged frontend directory')
+    output.parent.mkdir(parents=True,exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix='.frontend-',dir=output.parent) as tmp:
+        stage=Path(tmp)
+        for name in FRONTEND_FILES:
+            target=stage/name;target.parent.mkdir(parents=True,exist_ok=True)
+            shutil.copyfile(source/name,target)
+        (stage/marker).write_text('generated runtime UI assets\n')
+        if output.exists():shutil.rmtree(output)
+        shutil.move(str(stage),str(output))
+
+
 def digest(path):
     with open(path, 'rb') as stream:
         return hashlib.file_digest(stream, 'sha256').hexdigest()
@@ -257,6 +275,7 @@ if __name__ == '__main__':
     if args.build:
         build_app(args.target, args.no_sign)
     elif not args.release_preview:
+        prepare_frontend(ROOT / 'ui', ROOT / 'src-tauri/frontend')
         prepare(args.target, ROOT / 'src-tauri/runtime')
     if args.release_preview:
         print(json.dumps(release_preview(args.target), ensure_ascii=False, indent=2))
