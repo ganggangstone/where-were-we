@@ -12,6 +12,50 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 ROOT = os.environ.get("WHERE_WERE_WE_ROOT") or os.path.expanduser("~/.where-were-we")
 
+SETTINGS_DEFAULT = {'open_refresh':False, 'since':'last_refresh', 'since_time':''}
+
+def settings_path():
+    return os.environ.get('WHERE_WERE_WE_SETTINGS') or os.path.join(ROOT,'settings.json')
+
+def settings():
+    path=settings_path()
+    if not os.path.isfile(path):return dict(SETTINGS_DEFAULT)
+    with open(path) as stream:value=json.load(stream)
+    return {**SETTINGS_DEFAULT, **{k:v for k,v in value.items() if k in SETTINGS_DEFAULT}}
+
+def save_settings(value):
+    from datetime import datetime
+    from pathlib import Path
+    import project
+    if not isinstance(value,dict):raise ValueError('Invalid settings')
+    result={**SETTINGS_DEFAULT, **{k:v for k,v in value.items() if k in SETTINGS_DEFAULT}}
+    if type(result['open_refresh']) is not bool or result['since'] not in ('last_refresh','my_commit','time'):
+        raise ValueError('Invalid refresh settings')
+    if not isinstance(result['since_time'],str):raise ValueError('Invalid comparison time')
+    if result['since']=='time':
+        try:datetime.fromisoformat(result['since_time'])
+        except ValueError:raise ValueError('Choose a valid comparison time') from None
+    project.atomic(Path(settings_path()),result)
+    return result
+
+def since_of(repo,last_refresh,now):
+    """Resolve the selected baseline separately for each repository."""
+    from datetime import datetime,timedelta
+    import subprocess
+    st=settings();fallback=last_refresh or now-timedelta(days=1)
+    if st['since']=='time' and st['since_time']:
+        chosen=datetime.fromisoformat(st['since_time'])
+        return (chosen if chosen.tzinfo else chosen.astimezone()),'지정한 시각 이후'
+    if st['since']=='my_commit':
+        def git(*args):
+            result=subprocess.run(['git','-C',repo,*args],capture_output=True,text=True)
+            return result.stdout.strip() if result.returncode==0 else ''
+        email=git('config','user.email')
+        stamp=git('log','--all','--fixed-strings','--author=<'+email+'>','-1','--format=%cI') if email else ''
+        if stamp:return datetime.fromisoformat(stamp),'내 마지막 커밋 이후'
+        return fallback,'내 커밋을 찾지 못해 지난 새로고침 이후'
+    return fallback,'지난 새로고침 이후'
+
 def project_home(project):
     return os.path.join(ROOT, project)
 
@@ -58,10 +102,10 @@ class Map:
         cnt = defaultdict(int)
         for sc in s:
             for v in {a.get("via") for a in sc["actions"]} | {a.get("via") for a in sc["api_functions"]}:
-                if v: cnt[v] += 1
+                if v and v != sc.get('file'): cnt[v] += 1
         totals = defaultdict(int)
         for screen in s: totals[screen.get("repository", "")] += 1
-        self.common = {v for v, c in cnt.items() if c > totals.get(v.split("/", 1)[0] if self.m.get("multi_repo") else "", len(s)) / 3}
+        self.common = {v for v, c in cnt.items() if c > 1 and c > totals.get(v.split("/", 1)[0] if self.m.get("multi_repo") else "", len(s)) / 3}
         self._req = {}
 
     # ---------- 화면 ----------
@@ -127,7 +171,7 @@ class Map:
         rows, seen = [], set()
         for p in parts:
             for ref in p["api_functions"]:
-                if ref.get("via") in self.common: continue
+                if ref.get("via") != p.get('file') and ref.get("via") in self.common: continue
                 f = self.fn.get((ref["file"], ref["name"]))
                 if not f: continue
                 for c in f["calls"]:
@@ -470,7 +514,11 @@ else:
     if __name__ == "__main__" and "--lang=ko" in sys.argv:
         sys.argv.remove("--lang=ko")
 
-if __name__ == "__main__" and sys.argv[1:] == ["setup"]:
+if __name__ == "__main__" and sys.argv[1:] == ["settings"]:
+    print(json.dumps(settings(),ensure_ascii=False))
+elif __name__ == "__main__" and sys.argv[1:2] == ["save-settings"]:
+    print(json.dumps(save_settings(json.loads(sys.argv[2])),ensure_ascii=False))
+elif __name__ == "__main__" and sys.argv[1:] == ["setup"]:
     print(setup_prompt(lang=_prompt_lang))
 elif __name__ == "__main__" and sys.argv[1:2] == ["tests"]:  # mapcore.py tests <프로젝트> [서버 기능 …]
     print(tests_prompt(sys.argv[2], sys.argv[3:], lang=_prompt_lang, repository=_prompt_repository))

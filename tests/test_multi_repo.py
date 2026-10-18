@@ -26,7 +26,336 @@ class TemporaryProject(unittest.TestCase):
         self.patch = patch.object(mapcore, 'ROOT', str(self.root))
         self.patch.start(); self.addCleanup(self.patch.stop)
 
+class RefreshSettings(TemporaryProject):
+    def test_program_details_show_saved_jobs_and_empty_state_without_request_button(self):
+        import shutil,subprocess
+        node=shutil.which('node')
+        if not node:self.skipTest('Node is required for UI behavior checks')
+        script=r'''
+const fs=require('fs'),vm=require('vm'),assert=require('assert');
+const html=fs.readFileSync('ui/index.html','utf8');
+const js=html.slice(html.indexOf('<script>')+8,html.lastIndexOf('</script>'));
+global.window={__TAURI__:{core:{invoke:()=>{throw Error('Viewing details must not invoke analysis');}}}};
+global.localStorage={getItem:()=>null};
+vm.runInThisContext(js.slice(0,js.indexOf("$('q').oninput"))+`
+S.system={nodes:[{id:'service::backend',name:'API server',kind:'program',code:['service/server'],uses:[]}],links:[],externals:[]};
+S.node='service::backend';S.jobs={nodes:{}};S.status={};
+let view=sysInspector({});
+assert.ok(view.includes('아직 하는 일이 분석되지 않았습니다.'));
+assert.ok(!view.includes('mkJobs'));assert.ok(!view.includes('요청을 복사'));
+S.jobs.nodes[S.node]={jobs:[{name:'Store item',what:'Save the submitted item',starts_when:'On submit',routes:[]}]};
+view=sysInspector({});assert.ok(view.includes('Store item'));assert.ok(view.includes('Save the submitted item'));
+assert.ok(!view.includes('mkJobs'));assert.ok(!view.includes('요청을 복사'));
+S.jobs.nodes[S.node]={jobs:[]};S.lang='en';view=sysInspector({});
+assert.ok(view.includes('No jobs were established from the code.'));assert.ok(!view.includes('mkJobs'));
+S.jobs.nodes={};view=sysInspector({});assert.ok(view.includes('Program jobs have not been analyzed yet.'));
+`);
+'''
+        result=subprocess.run([node,'-e',script],cwd=Path(project.__file__).parent,capture_output=True,text=True)
+        self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+
+    def test_settings_round_trip_and_validation_preserve_saved_value(self):
+        self.assertFalse(mapcore.settings()['open_refresh'])
+        wanted={'open_refresh':True,'since':'time','since_time':'2026-10-01T18:30'}
+        mapcore.save_settings(wanted)
+        self.assertEqual(mapcore.settings(),wanted)
+        with self.assertRaises(ValueError):mapcore.save_settings({**wanted,'since_time':''})
+        self.assertEqual(mapcore.settings(),wanted)
+
+    def test_comparison_baselines_and_repository_specific_author(self):
+        from datetime import datetime, timezone, timedelta
+        now=datetime(2026,10,19,12,tzinfo=timezone.utc)
+        last=now-timedelta(days=2)
+        self.assertEqual(mapcore.since_of('/demo/a',last,now)[0],last)
+        self.assertEqual(mapcore.since_of('/demo/a',None,now)[0],now-timedelta(days=1))
+        mapcore.save_settings({'open_refresh':False,'since':'time','since_time':'2026-10-01T18:30+09:00'})
+        self.assertEqual(mapcore.since_of('/demo/a',last,now)[0].isoformat(),'2026-10-01T18:30:00+09:00')
+        mapcore.save_settings({'open_refresh':False,'since':'my_commit','since_time':''})
+        import subprocess
+        calls=[]
+        def git(args,**kwargs):
+            calls.append(args)
+            output='demo@example.invalid\n' if 'config' in args else '2026-10-10T19:00:00+09:00\n'
+            return subprocess.CompletedProcess(args,0,output,'')
+        with patch('subprocess.run',side_effect=git):
+            baseline,_=mapcore.since_of('/demo/a',last,now)
+        self.assertEqual(baseline.isoformat(),'2026-10-10T19:00:00+09:00')
+        self.assertTrue(all(args[:3]==['git','-C','/demo/a'] for args in calls))
+        with patch('subprocess.run',return_value=subprocess.CompletedProcess([],1,'','missing')):
+            self.assertEqual(mapcore.since_of('/demo/a',last,now)[0],last)
+
+    def test_child_collection_reads_same_settings_as_app(self):
+        mapcore.save_settings({'open_refresh':False,'since':'time','since_time':'2026-10-01T18:30'})
+        child=self.root/'staging'
+        env=project.child_environment(child,{'refs':{},'layout':{}})
+        with patch.dict(os.environ,env),patch.object(mapcore,'ROOT',str(child)):
+            self.assertEqual(mapcore.settings()['since'],'time')
+
+    def test_refresh_uses_selected_time_for_commits_and_pr_collection(self):
+        self.run_refresh_case(False)
+
+    def test_refresh_never_compares_static_baseline_against_retained_ai_map(self):
+        self.run_refresh_case(True)
+
+    def run_refresh_case(self, ai):
+        import runpy, subprocess
+        folder=self.root/'legacy';folder.mkdir()
+        current=sample('/demo/repo','bbbbbbbb')
+        current['extractor']=mapcore.extractor_id(str(folder))
+        if ai:
+            current['commit']='cccccccc'
+            current['analysis']={'source':'ai'}
+        (folder/'dev.json').write_text(json.dumps(current))
+        (folder/'status.json').write_text(json.dumps({'merged_prs':[]}))
+        (folder/'changes.json').write_text(json.dumps({'last_refresh':'2026-10-18T00:00:00+00:00','entries':[]}))
+        mapcore.save_settings({'open_refresh':False,'since':'time','since_time':'2026-10-01T18:30+09:00'})
+        calls=[]
+        def run(args,**kwargs):
+            args=list(map(str,args));calls.append(args)
+            if args[0]=='git':
+                output=''
+                if 'rev-parse' in args:output='bbbbbbbb' if '--short' in args else 'b'*40
+                if 'rev-list' in args:output='a'*40
+            else:
+                output=''
+                if any(a.endswith('extract.py') for a in args):
+                    previous=sample('/demo/repo','aaaaaaaa');previous['screens']=[]
+                    Path(args[-1]).write_text(json.dumps(previous))
+            return subprocess.CompletedProcess(args,0,output,'')
+        with patch.object(sys,'argv',['refresh.py','legacy','/demo/repo','7']), \
+             patch.dict(os.environ,{'WHERE_WERE_WE_REFS':'{"dev":"origin/dev"}'}), \
+             patch('subprocess.run',side_effect=run):
+            runpy.run_path(str(Path(project.__file__).with_name('refresh.py')),run_name='__main__')
+            first=json.loads((folder/'changes.json').read_text())
+            saved=mapcore.settings()
+            runpy.run_path(str(Path(project.__file__).with_name('refresh.py')),run_name='__main__')
+        changes=json.loads((folder/'changes.json').read_text())
+        self.assertEqual(changes['last_result']['since'],'2026-10-01T18:30:00+09:00')
+        self.assertEqual(changes['last_result']['since'],first['last_result']['since'])
+        self.assertGreater(changes['last_refresh'],first['last_refresh'])
+        self.assertEqual(mapcore.settings(),saved)
+        if ai:
+            self.assertEqual(changes['entries'],[])
+            self.assertEqual(json.loads((folder/'dev.json').read_text())['commit'],'cccccccc')
+        else:self.assertEqual(changes['entries'][0]['branches']['dev']['from'],'aaaaaaaa')
+        self.assertTrue(any('--before=2026-10-01T18:30:00+09:00' in a for args in calls for a in args))
+        collect=next(args for args in calls if any(a.endswith('collect.py') for a in args))
+        self.assertGreater(int(collect[-1]),7)
+
+    def test_project_preserves_each_repository_latest_comparison_result(self):
+        project.configure('studio',{'repositories':[{'id':'web','path':'/demo/web'},{'id':'api','path':'/demo/api'}]})
+        for rid in ('web','api'):
+            project.publish('studio',rid,{'dev':sample('/demo/'+rid),'changes':{'entries':[],
+                'last_result':{'at':'2026-10-19T00:00:00+00:00','since':'2026-10-01T00:00:00+00:00','changed':False}}},{})
+        results=project.read_bundle('studio')['changes']['last_results']
+        self.assertEqual({r['repository'] for r in results},{'web','api'})
+        self.assertTrue(all(r['changed'] is False for r in results))
+
+    def test_settings_ui_save_language_and_optional_open_refresh(self):
+        import shutil, subprocess
+        node=shutil.which('node')
+        if not node:self.skipTest('Node is required for UI behavior checks')
+        script=r'''
+const fs=require('fs'),vm=require('vm'),assert=require('assert');
+const html=fs.readFileSync('ui/index.html','utf8');
+const js=html.slice(html.indexOf('<script>')+8,html.lastIndexOf('</script>'));
+const elements={}, calls=[];let chosen='last_refresh',rejectSave=false;
+const element=id=>elements[id] ||= {innerHTML:'',value:'',checked:false,disabled:false,
+  querySelector:()=>({value:chosen}),querySelectorAll:()=>[],close(){this.open=false;}};
+global.document={getElementById:element,querySelectorAll:()=>[]};
+global.window={__TAURI__:{core:{invoke:async(name,args)=>{
+  calls.push([name,args]);
+  if(name==='read_project')return JSON.stringify({dev:{repo:'/demo',screens:[]},main:null});
+  if(name==='save_settings'){if(rejectSave)throw Error('disk full');return args.json;}
+  if(name==='refresh')return '';
+  throw Error(name);
+}}}};
+global.localStorage={getItem:()=>null};
+const source=js.slice(0,js.indexOf("$('q').oninput"));
+const settings=js.slice(js.indexOf('function renderSettings()'),js.indexOf("$('settings').onclick"));
+vm.runInThisContext(source+'\n'+settings+`\n(async()=>{
+  render=()=>{};
+  await loadProject('demo',true);
+  assert.equal(calls.filter(c=>c[0]==='refresh').length,0);
+  S.settings.open_refresh=true;await loadProject('demo',true);
+  assert.equal(calls.filter(c=>c[0]==='refresh').length,1);
+  await loadProject('demo',false);
+  assert.equal(calls.filter(c=>c[0]==='refresh').length,1);
+  renderSettings();assert.ok(element('settings-dialog').innerHTML.includes('앱을 열 때 새로고침'));
+  S.lang='en';renderSettings();assert.ok(element('settings-dialog').innerHTML.includes('Refresh when opening the app'));
+  chosen='time';element('sinceTime').value='';await element('saveSt').onclick();
+  assert.equal(calls.filter(c=>c[0]==='save_settings').length,0);
+  element('sinceTime').value='2026-10-01T18:30';element('openRefresh').checked=false;
+  rejectSave=true;await element('saveSt').onclick();assert.equal(S.settings.open_refresh,true);
+  rejectSave=false;await element('saveSt').onclick();
+  assert.deepEqual(S.settings,{open_refresh:false,since:'time',since_time:'2026-10-01T18:30'});
+  S.changes={entries:[],last_results:[{repository:'api',at:'2026-10-19T00:00:00Z',since:'2026-10-01T00:00:00Z',changed:false,scope:'basic'}]};
+  const view=changesView({});assert.ok(view.includes('No changes since the selected baseline'));assert.ok(view.includes('api'));assert.ok(!view.includes('이후'));
+})().catch(error=>{console.error(error);process.exitCode=1;});`);
+'''
+        result=subprocess.run([node,'-e',script],cwd=Path(project.__file__).parent,capture_output=True,text=True)
+        self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+
+class Registration(TemporaryProject):
+    def test_real_browser_connects_code_without_manual_ids_and_preserves_existing_settings(self):
+        import html as html_module,subprocess
+        chrome=Path('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome')
+        if not chrome.is_file():self.skipTest('Chrome is required for the real registration-form check')
+        source=(Path(project.__file__).parent/'ui/index.html').read_text()
+        script=source.split('<script>',1)[1].rsplit('</script>',1)[0].split("$('q').oninput",1)[0]
+        bootstrap=r'''
+const saved=[];
+window.__TAURI__={core:{invoke:async(command,args)=>{
+  if(command==='save_project'){saved.push(JSON.parse(args.configuration));return '';}
+  if(command==='list_projects')return ['demo'];
+  throw Error('Unexpected command: '+command);
+}}};
+'''
+        checks=r'''
+(async()=>{
+  const assert=(ok,message)=>{if(!ok)throw Error(message);};
+  loadProject=async()=>{};
+  const field=(i,key)=>document.querySelector(`[data-repository-row="${i}"] [data-field="${key}"]`);
+  const change=(i,key,value)=>{field(i,key).value=value;field(i,key).dispatchEvent(new Event('change'));};
+  S.project='demo';S.maps={};S.projectInfo={repositories:[],shared_data:[]};
+  editProject(true);$('projectName').value='demo';
+  assert(field(0,'id').type==='hidden','The user must not enter an internal repository ID');
+  change(0,'path','/demo/web');
+  assert(field(0,'name').value==='web','A missing display name should use the folder name');
+  $('addRepository').click();
+  change(1,'name','API Server');change(1,'path','/demo/api');
+  const apiId=field(1,'id').value;
+  const target=document.querySelector(`[data-repository-row="0"] [data-api-target][value="${apiId}"]`);
+  assert(target && target.parentElement.textContent.includes('API Server'),'Choose server code by display name');
+  target.checked=true;
+  change(1,'name','API Backend');
+  assert(target.isConnected && target.checked,'Renaming code must preserve server checkboxes and pending selection');
+  $('addSharedData').click();
+  let member=document.querySelector('[data-shared-member]');
+  member.querySelector('[data-member-repo]').value=field(0,'id').value;
+  member.querySelector('[data-member-table]').value='users';
+  document.querySelector('[data-add-member]').click();
+  member=document.querySelectorAll('[data-shared-member]')[1];
+  member.querySelector('[data-member-repo]').value=apiId;
+  member.querySelector('[data-member-table]').value='users';
+  await $('saveProject').onclick();
+  const created=saved.at(-1);
+  assert(created.repositories[0].id==='web','The folder should supply the ID');
+  assert(created.repositories[1].id==='api-server','The display name should supply the ID');
+  assert(created.repositories[0].refs.dev==='HEAD' && created.repositories[0].refs.main===null,'New code should not require a dev branch');
+  assert(created.repositories[0].api_targets[0]===apiId,'Server identity must survive the UI selection');
+  assert(created.shared_data[0].id && created.shared_data[0].members.length===2,'Shared-data IDs are automatic and members survive');
+  const existing={repositories:[{id:'custom-id',name:'Web',path:'/demo/old',refs:{dev:'origin/release',main:'v1.0'},
+    layout:{frontend:null,backend:'app'},api_targets:['server-key'],legacy:true},
+    {id:'server-key',name:'Server',path:'/demo/server',refs:{dev:'HEAD',main:null},layout:{},api_targets:[]}],
+    shared_data:[{id:'existing-data',members:[{repository:'custom-id',table:'users'},{repository:'server-key',table:'users'}]}]};
+  S.projectInfo=structuredClone(existing);editProject(false);change(0,'name','Renamed Web');
+  await $('saveProject').onclick();
+  const updated=saved.at(-1);
+  assert(updated.repositories[0].id==='custom-id' && updated.repositories[0].legacy,'Existing identity and legacy flag must stay');
+  assert(updated.repositories[0].refs.dev==='origin/release' && updated.repositories[0].refs.main==='v1.0','Existing branch/tag refs must stay');
+  assert(updated.repositories[0].layout.frontend===null && updated.repositories[0].layout.backend==='app','Existing source-root settings must stay');
+  assert(updated.shared_data[0].id==='existing-data','Existing shared-data identity must stay');
+  assert(updated.repositories[0].api_targets[0]==='server-key','Existing server connection must stay');
+  assert(updated.shared_data[0].members.length===2,'Existing shared members must stay');
+  assert(S.projectInfo.repositories[0].name==='Web','Editing must not mutate the loaded project before saving');
+  S.projectInfo={repositories:[],shared_data:[]};S.maps={main:{repo:'/demo/legacy'}};
+  editProject(false);await $('saveProject').onclick();
+  const legacy=saved.at(-1).repositories[0];
+  assert(legacy.legacy && legacy.id==='original' && legacy.refs.dev===null && legacy.refs.main==='origin/main','Main-only legacy maps must remain main-only');
+  S.lang='en';S.maps={};editProject(true);
+  assert(!/[가-힣]/.test($('project-dialog').innerText),'English form must not show untranslated interface text');
+  assert(registrationError('ValueError: Use an absolute repository folder path')==='Enter the full path to the folder containing the code.','Use plain English errors');
+  S.projectInfo={repositories:[{id:'vue',name:'Web',collected:true,commits:{dev:'demo'},
+    analysis_scope:{dev:{source:'basic',frontend:'needs_analysis',backend:'disabled'}}}]};
+  S.branch='dev';renderRepositories();
+  assert($('repository-bar').textContent.includes('Not identified by basic collection'),'A successful collection must not look like complete analysis');
+  assert($('repository-bar').textContent.includes('Excluded from analysis'),'Disabled areas must be distinct from missing analysis');
+  const screen=(path,file,via)=>({path,file,actions:[],api_functions:[{file:'src/api.ts',name:'load',via}]});
+  assert(!commonVia({screens:[screen('/one','src/One.tsx','src/Child.tsx')]}).has('src/Child.tsx'),'A component used on one screen is not shared');
+  assert(!commonVia({screens:[screen('/one','src/One.tsx','src/One.tsx')]}).has('src/One.tsx'),'Direct screen requests must stay visible');
+  assert(commonVia({screens:[screen('/one','src/One.tsx','src/Header.tsx'),screen('/two','src/Two.tsx','src/Header.tsx')]}).has('src/Header.tsx'),'Shared headers still count as shared');
+  document.body.dataset.registrationTest='passed';
+  const output=document.createElement('pre');output.id='registration-result';output.textContent=JSON.stringify(saved);document.body.append(output);
+})().catch(error=>{document.body.dataset.registrationTest='failed';const output=document.createElement('pre');output.textContent=error.stack;document.body.append(output);});
+'''
+        page=source.split('<script>',1)[0]+'<script>'+bootstrap+script+checks+'</script></body></html>'
+        page=page.replace('href="tokens.css"','href="'+(Path(project.__file__).parent/'ui/tokens.css').as_uri()+'"')
+        page=page.replace('href="app.css"','href="'+(Path(project.__file__).parent/'ui/app.css').as_uri()+'"')
+        target=self.root/'registration-check.html';target.write_text(page)
+        result=subprocess.run([str(chrome),'--headless','--disable-gpu','--no-first-run','--disable-background-networking',
+            '--disable-component-update','--no-default-browser-check','--user-data-dir='+str(self.root/'chrome'),
+            '--virtual-time-budget=1000','--dump-dom',target.as_uri()],capture_output=True,text=True,timeout=40)
+        self.assertEqual(result.returncode,0,result.stderr[-1200:])
+        self.assertTrue('data-registration-test="passed"' in result.stdout,result.stdout[-2000:])
+        import re
+        match=re.search(r'<pre id="registration-result">(.*?)</pre>',result.stdout,re.S)
+        self.assertIsNotNone(match)
+        configurations=json.loads(html_module.unescape(match.group(1)))
+        for value in configurations:project.validate(value)
+
+    def test_repository_identifiers_are_generated_without_renaming_existing_ones(self):
+        import shutil,subprocess
+        node=shutil.which('node')
+        if not node:self.skipTest('Node is required for UI behavior checks')
+        script=r'''
+const fs=require('fs'),vm=require('vm'),assert=require('assert');
+const html=fs.readFileSync('ui/index.html','utf8');
+const js=html.slice(html.indexOf('<script>')+8,html.lastIndexOf('</script>'));
+global.window={__TAURI__:{core:{invoke:async()=>[]}}};global.localStorage={getItem:()=>null};
+vm.runInThisContext(js.slice(0,js.indexOf("$('q').oninput"))+`
+assert.equal(newRepositoryId('Web app','/demo/web',[]),'web-app');
+assert.equal(newRepositoryId('웹 화면','/demo/frontend/',[]),'frontend');
+assert.equal(newRepositoryId('Web','/demo/web',['web']),'web-2');
+assert.equal(newRepositoryId('Web','/demo/web',['web','web-2']),'web-3');
+assert.equal(newRepositoryId('2026 app','/demo/app',[]),'repo-2026-app');
+assert.equal(newRepositoryId('한글','/demo/한글',[]),'repository');
+const name='x'.repeat(80),first=newRepositoryId(name,'/demo',[]),second=newRepositoryId(name,'/demo',[first]);
+assert.ok(first.length<=48 && second.length<=48);assert.notEqual(first,second);
+const existing=[{id:'original',name:'Renamed',path:'/demo/web'},{id:'custom-key',name:'Other',path:'/demo/other'},
+ {id:'',name:'Web',path:'/demo/new'},{id:'',name:'Web',path:'/demo/another'}];
+ensureRepositoryIds(existing);
+assert.deepEqual(existing.map(r=>r.id),['original','custom-key','web','web-2']);
+ensureRepositoryIds(existing);assert.deepEqual(existing.map(r=>r.id),['original','custom-key','web','web-2']);
+`);
+'''
+        result=subprocess.run([node,'-e',script],cwd=Path(project.__file__).parent,capture_output=True,text=True)
+        self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+
 class Projects(TemporaryProject):
+    def test_collection_success_distinguishes_unrecognized_analysis_from_disabled_roles(self):
+        project.configure('studio',{'repositories':[{'id':'web','path':'/demo/web','layout':{'frontend':'pages','backend':None}}]})
+        raw=sample('/demo/web');raw['screens']=[];raw['coverage']={'frontend':False,'backend':False}
+        project.publish('studio','web',{'dev':raw},{})
+        scope=project.read_bundle('studio')['project']['repositories'][0]['analysis_scope']['dev']
+        self.assertEqual(scope['frontend'],'needs_analysis')
+        self.assertEqual(scope['backend'],'disabled')
+        self.assertEqual(scope['source'],'basic')
+        folder=self.root/'legacy';folder.mkdir()
+        (folder/'dev.json').write_text(json.dumps(raw))
+        self.assertEqual(project.read_bundle('legacy')['project']['analysis_scope']['dev']['frontend'],'needs_analysis')
+
+    def test_ai_empty_results_and_legacy_missing_coverage_stay_unverified(self):
+        snapshot=sample('/demo/web');snapshot['screens']=[]
+        self.assertEqual(project.analysis_scope(snapshot,{})['frontend'],'unknown')
+        snapshot['analysis']={'source':'ai','unknown':['Navigation was not established']}
+        scope=project.analysis_scope(snapshot,{})
+        self.assertEqual(scope['frontend'],'not_established')
+        self.assertEqual(scope['unknown'],['Navigation was not established'])
+
+    def test_common_components_require_multiple_screens_and_keep_direct_requests(self):
+        pages=[]
+        for path in ('/one','/two','/three'):
+            page=sample('/demo/web')['screens'][0];page['path']=path;page['file']='src/'+path[1:]+'.tsx'
+            page['api_functions']=[{'file':'src/api.ts','name':'load','via':'src/Header.tsx'}]
+            pages.append(page)
+        snapshot=sample('/demo/web');snapshot['screens']=pages
+        self.assertIn('src/Header.tsx',mapcore.Map('unused',data=snapshot,bundle={}).common)
+        single={**snapshot,'screens':[pages[0]]}
+        self.assertNotIn('src/Header.tsx',mapcore.Map('unused',data=single,bundle={}).common)
+        pages[0]['api_functions'][0]['via']=pages[0]['file']
+        self.assertNotIn(pages[0]['file'],mapcore.Map('unused',data=snapshot,bundle={}).common)
+
     def test_two_repositories_keep_equal_paths_and_pr_numbers_distinct(self):
         project.configure('studio', {'repositories':[
             {'id':'web','path':'/demo/web'}, {'id':'admin','path':'/demo/admin'}]})
@@ -264,6 +593,25 @@ class Collection(TemporaryProject):
         self.assertIn('web: refreshed',result.stdout)
         self.assertIn('api: refreshed',result.stdout)
 
+    def test_react_fastapi_sqlalchemy_screen_request_table_chain_is_preserved(self):
+        env=self.environment();sources=json.loads(Path(env['FAKE_SOURCES']).read_text())
+        sources[str(self.root/'api')]={
+            'app/main.py':'from fastapi import FastAPI\nfrom app.models.settings import Setting\napp = FastAPI()\n@app.get("/settings")\ndef read_settings():\n    return session.query(Setting).all()\n',
+            'app/models/settings.py':'class Setting(Base):\n    __tablename__ = "settings"\n'}
+        Path(env['FAKE_SOURCES']).write_text(json.dumps(sources))
+        conf={'repositories':[{'id':'web','path':str(self.root/'web'),'api_targets':['api']},
+                              {'id':'api','path':str(self.root/'api')}]}
+        self.assertEqual(self.run_cli(env,'configure','studio',json.dumps(conf)).returncode,0)
+        result=self.run_cli(env,'refresh','studio');self.assertNotIn('FAILED',result.stdout,result.stdout)
+        bundle=json.loads(self.run_cli(env,'read','studio').stdout)
+        screen=bundle['dev']['screens'][0]
+        self.assertEqual(screen['source_path'],'/settings')
+        model=mapcore.Map('studio',data=bundle['dev'],bundle=bundle)
+        route=model.requests(screen['path'])[0]['route']
+        self.assertEqual((route['method'],route['path']),('GET','/settings'))
+        self.assertEqual(route['tables'],['api::settings'])
+        self.assertEqual(bundle['dev']['models']['api/Setting'],'api::settings')
+
     def test_real_isolated_collection_split_sources_and_partial_failure(self):
         env=self.environment()
         conf={'repositories':[
@@ -390,6 +738,14 @@ class MCP(TemporaryProject):
         self.server.set_test_rules(['spec_*.py'],['<function>('],'studio',repository='api')
         self.assertIn('spec_*.py',mapcore.tests_prompt('studio',lang='en',repository='api'))
         self.assertNotIn('spec_*.py',mapcore.tests_prompt('studio',lang='en',repository='web'))
+
+    def test_mcp_reports_unrecognized_basic_collection_instead_of_complete_analysis(self):
+        project.configure('studio',{'repositories':[{'id':'web','path':'/demo/web','layout':{'backend':None}}]})
+        raw=sample('/demo/web');raw['screens']=[];raw['coverage']={'frontend':False,'backend':False}
+        project.publish('studio','web',{'dev':raw},{})
+        for output in (self.server.overview('studio'),self.server.find('missing','studio')):
+            self.assertIn('frontend=needs_analysis',output)
+            self.assertIn('backend=disabled',output)
 
     def test_http_impact_includes_connected_work(self):
         web,api=self.inputs()

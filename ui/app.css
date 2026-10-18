@@ -127,4 +127,6 @@ details .kv { margin:var(--space-3) var(--space-0) var(--space-0); word-break:br
 #project-dialog fieldset { margin:var(--space-4) var(--space-0); padding:var(--space-4); border:var(--border-hairline); border-radius:var(--radius-control) }
 .repository-fields { display:flex; flex-wrap:wrap; gap:var(--space-3); margin-bottom:var(--space-3) }
 #project-dialog label { display:flex; flex-direction:column; flex:1; gap:var(--space-2); font:var(--font-secondary) }
+#project-dialog .repository-option { flex-direction:row; align-items:center; margin:var(--space-2) 0 }
+#project-dialog legend { font:var(--font-secondary); color:var(--color-text) }
 #project-dialog input, #repository-bar select { padding:var(--space-2); font:var(--font-secondary); border:var(--border-hairline); border-radius:var(--radius-control); background:var(--color-bg-content); color:var(--color-text) }

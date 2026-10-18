@@ -3,8 +3,8 @@
 
 사용: refresh.py <프로젝트 이름> [저장소 경로] [수집 기준 일수=7]
 1. git fetch 뒤 origin/dev·main 커밋이 지도의 기준 커밋과 다르면 지도를 다시 뽑는다(extract.py 가 전 지도를 .prev 로 남긴다).
-2. collect.py 로 PR·브랜치·이슈·세션을 모으고 AI 가 적은 것의 근거 줄을 대조한다.
-3. 지난 새로고침 뒤에 달라진 것을 changes.json 에 한 건으로 남긴다(달라진 것이 없으면 남기지 않는다).
+2. collect.py 로 PR·브랜치·이슈를 모으고 AI 가 적은 것의 근거 줄을 대조한다.
+3. 설정에서 고른 기준 시각 뒤에 달라진 것을 changes.json 에 한 건으로 남긴다.
 """
 import json, os, subprocess, sys
 from datetime import datetime, timedelta, timezone
@@ -60,21 +60,36 @@ for b in ("dev", "main"):
         log += run(os.path.join(HERE, "extract.py"), REPO, ref, path)
     else:
         log += f"origin/{b} ({now}) 그대로\n"
-log += run(os.path.join(HERE, "collect.py"), REPO, PROJECT, SINCE)
-
-# --- 지난 새로고침 뒤에 달라진 것 ---
+# --- 설정에서 고른 기준 시각 뒤에 달라진 것 ---
 cpath = os.path.join(HOME, "changes.json")
 ch = json.load(open(cpath)) if os.path.exists(cpath) else {"entries": []}
-since = datetime.fromisoformat(ch["last_refresh"]) if ch.get("last_refresh") else NOW - timedelta(days=1)
-entry = {"at": NOW.isoformat(), "since": since.isoformat(), "branches": {}, "prs": [], "ai_stale": {}}
-for b, (old, new) in moved.items():
-    prev = os.path.join(HOME, b + ".prev.json")
-    if old and os.path.exists(prev):
-        pm, cm = json.load(open(prev)), json.load(open(os.path.join(HOME, b + ".json")))
-        if pm.get("extractor") != cm.get("extractor"):  # 뽑는 방법이 바뀌었으면 전 커밋을 지금 방법으로 다시 뽑아 비교한다
-            run(os.path.join(HERE, "extract.py"), REPO, pm["commit"], prev)
-        d = mapcore.diff(mapcore.Map(PROJECT, b, json.load(open(prev))), mapcore.Map(PROJECT, b))
-        entry["branches"][b] = {"from": old, "to": new, **d}
+since, since_note = mapcore.since_of(REPO, datetime.fromisoformat(ch['last_refresh']) if ch.get('last_refresh') else None, NOW)
+days = max(int(SINCE), (NOW-since).days+2)
+log += run(os.path.join(HERE, 'collect.py'), REPO, PROJECT, str(days))
+entry = {"at": NOW.isoformat(), "since": since.isoformat(), "since_note":since_note, "branches": {}, "prs": [], "ai_stale": {}}
+
+def base_map(branch, commit):
+    for name in (branch+'.prev.json', branch+'.base.json'):
+        path=os.path.join(HOME,name)
+        if os.path.exists(path):
+            value=json.loads(Path(path).read_text())
+            if value.get('commit') and commit.startswith(value['commit']) and value.get('extractor')==mapcore.extractor_id(HOME) and (value.get('analysis') or {}).get('source')!='ai':return value
+    path=os.path.join(HOME,branch+'.base.json')
+    run(os.path.join(HERE,'extract.py'),REPO,commit,path)
+    return json.loads(Path(path).read_text())
+
+for branch, pinned in PINNED.items():
+    cur=mapcore._read(PROJECT,branch) or {}
+    base=git('rev-list','-1','--before='+since.isoformat(),pinned)
+    if not base or not cur.get('commit') or base==pinned:continue
+    if (cur.get('analysis') or {}).get('source')=='ai':
+        # Compare like extractors without overwriting the saved AI map or calling AI.
+        path=os.path.join(HOME,branch+'.current-basic.json')
+        run(os.path.join(HERE,'extract.py'),REPO,pinned,path)
+        cur=json.loads(Path(path).read_text())
+        log += branch+': structural comparison uses basic collection; AI-only details require agent analysis\n'
+    delta=mapcore.diff(mapcore.Map(PROJECT,branch,base_map(branch,base)),mapcore.Map(PROJECT,branch,cur))
+    entry['branches'][branch]={'from':base[:8],'to':pinned[:8],'scope':'basic',**delta}
 m = mapcore.Map(PROJECT, "dev" if os.path.exists(os.path.join(HOME,"dev.json")) else "main")
 def place(p):  # 화면에 안 걸리는 PR 의 자리
     fs = p["files"]
@@ -99,9 +114,10 @@ def stale(obj):
     return n
 for name in ("system", "jobs"):
     if (d := mapcore._read(PROJECT, name)) and (k := stale(d)): entry["ai_stale"][name] = k
-changed = entry["prs"] or any(v[k] for v in entry["branches"].values() for k in v if k not in ("from", "to"))
+changed = entry["prs"] or any(v[k] for v in entry["branches"].values() for k in v if k not in ("from", "to", "scope"))
 if changed:
     ch["entries"] = ([entry] + ch["entries"])[:30]
 ch["last_refresh"] = NOW.isoformat()
+ch['last_result']={'at':NOW.isoformat(),'since':since.isoformat(),'since_note':since_note,'changed':bool(changed),'scope':'basic'}
 json.dump(ch, open(cpath, "w"), ensure_ascii=False, indent=1)
-print(log + (f"달라진 것: PR {len(entry['prs'])}, " + ", ".join(f"{b} {v['from']}→{v['to']}" for b, v in entry["branches"].items()) if changed else "지난 새로고침 뒤 달라진 것 없음"))
+print(log + (f"달라진 것: PR {len(entry['prs'])}, " + ", ".join(f"{b} {v['from']}→{v['to']}" for b, v in entry["branches"].items()) if changed else f"{since_note} 달라진 것 없음"))

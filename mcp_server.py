@@ -51,12 +51,16 @@ def scope_notes(m):
                 status+=f"; {role} AI-inferred, source text checked"
                 if analysis.get('stale'):status+='; AI analysis required after commit change'
                 if analysis.get('unknown'):status+='; unknown: '+'; '.join(analysis['unknown'])
+        for role,scope in r.get('analysis_scope',{}).items():
+            if scope:status+=f"; {role} {scope['source']} analysis scope: frontend={scope['frontend']}, backend={scope['backend']}"
         notes.append(f"- {r['id']}: {r.get('commits', {})}; {status}; "
                      f"last success: {r.get('last_success') or 'none'}; last attempt: {r.get('last_attempt') or 'none'}")
     if not m.m.get('multi_repo') and m.m.get('analysis'):
         analysis=m.m['analysis'];status='AI-inferred, source text checked'
         if analysis.get('stale'):status+='; AI analysis required after commit change'
         notes.append('- '+status+'; unknown: '+'; '.join(analysis.get('unknown',[])))
+    if not m.m.get('multi_repo') and (scope:=project_store.analysis_scope(m.m,{})):
+        notes.append(f"- {scope['source']} analysis scope: frontend={scope['frontend']}, backend={scope['backend']}; unestablished items are not proof of absence")
     return notes
 
 
@@ -316,7 +320,7 @@ def find(query: str, project: str = "", repository: str = "") -> str:
     for t in sorted(set((m.m.get("models") or {}).values())):
         if q in t.lower(): out.append(f"저장소 {t}")
     out = list(dict.fromkeys(out))
-    return "\n".join(out[:40]) + (f"\n… {len(out) - 40}개 더" if len(out) > 40 else "") if out else "없다."
+    return "\n".join(out[:40]) + (f"\n… {len(out) - 40}개 더" if len(out) > 40 else "") if out else "\n".join(["지도에서 일치하는 대상을 찾지 못했습니다.",*scope_notes(m)])
 
 
 @app.tool(description="새로고침: git fetch 뒤 바뀐 브랜치의 지도를 다시 뽑고 PR·이슈·작업 폴더를 모아 달라진 것을 기록한다. 1~2분 걸린다. 지도 파일만 쓰고 대상 저장소에는 쓰지 않는다.")

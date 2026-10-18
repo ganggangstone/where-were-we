@@ -146,6 +146,20 @@ def raw_bundle(folder):
         worktree.pop('sessions',None);worktree.pop('session_count',None)
     return bundle
 def empty_map():return {'repo':'','commit':'','screens':[],'api_functions':[],'backend_routes':[],'backend_routes_without_screen':[],'unresolved_calls':[],'models':{},'file_screens':{}}
+def analysis_scope(snapshot,layout):
+    """Describe what was established; successful collection does not prove completeness."""
+    if not snapshot:return None
+    analysis=snapshot.get('analysis') or {};ai=analysis.get('source')=='ai'
+    result={'source':'ai' if ai else 'basic','unknown':list(analysis.get('unknown',[]))}
+    for area,key in (('frontend','screens'),('backend','backend_routes')):
+        if area in layout and layout[area] is None:status='disabled'
+        elif ai:status='ai' if snapshot.get(key) else 'not_established'
+        elif (snapshot.get('coverage') or {}).get(area) is False:status='needs_analysis'
+        elif snapshot.get(key):status='basic'
+        elif (snapshot.get('coverage') or {}).get(area) is True:status='needs_analysis'
+        else:status='unknown'
+        result[area]=status
+    return result
 def qfile(rid,value):return rid+'/'+value if value else value
 def qscreen(rid,value):
     if not value:return value
@@ -209,6 +223,7 @@ def _compose(name, conf, state, raws, repository='', branch='dev'):
         if interrupted:st={**st,'error':'Previous collection was interrupted; last successful snapshot retained','in_progress':False}
         metadata.append({**repo,**st,'configured_path':repo['path'],'path':(raw.get('dev') or raw.get('main') or {}).get('repo',repo['path']),'collected':bool(raw.get('dev') or raw.get('main')),
             'analysis':{role:(raw.get(role) or {}).get('analysis') for role in ('dev','main')},
+            'analysis_scope':{role:analysis_scope(raw.get(role),repo['layout']) for role in ('dev','main')},
             'config_changed':bool(st.get('fingerprint') and st['fingerprint']!=fingerprint(repo)),
             'tables':sorted({v for role in ('dev','main') for v in ((raw.get(role) or {}).get('models') or {}).values()} | {t for role in ('dev','main') for route in (raw.get(role) or {}).get('backend_routes',[]) for t in route.get('tables',[])}),
             'commits':{role:(raw.get(role) or {}).get('commit') for role in ('dev','main')}})
@@ -314,6 +329,8 @@ def _compose(name, conf, state, raws, repository='', branch='dev'):
         if rid in ids:
             ch=raw.get('changes') or {}
             bundle['changes']['last_refresh']=max(bundle['changes']['last_refresh'],ch.get('last_refresh',''))
+            if ch.get('last_result'):
+                bundle['changes'].setdefault('last_results',[]).append({**copy.deepcopy(ch['last_result']),'repository':rid})
             for entry in ch.get('entries',[]):
                 e=copy.deepcopy(entry);e['repository']=rid
                 for delta in e.get('branches',{}).values():
@@ -358,7 +375,8 @@ def read_bundle(name, repository='', branch='dev'):
     if not conf:
         if repository:raise ValueError('This legacy project has no repository selector')
         raw=raw_bundle(home(name));result=branch_bundle(raw,branch)
-        result['project']={'name':name,'repositories':[],'selected':''}
+        result['project']={'name':name,'repositories':[],'selected':'',
+                           'analysis_scope':{role:analysis_scope(raw.get(role),{}) for role in ('dev','main')}}
         result['branch_details']={role:{key:branch_bundle(raw,role).get(key) for key in DETAILS} for role in ('dev','main')}
         return result
     state=states(name)
@@ -372,7 +390,8 @@ def read_bundle(name, repository='', branch='dev'):
     return result
 
 def child_environment(root,repo):
-    env=dict(os.environ,WHERE_WERE_WE_ROOT=str(root),WHERE_WERE_WE_REFS=json.dumps(repo['refs']),WHERE_WERE_WE_LAYOUT=json.dumps(repo['layout']))
+    import mapcore
+    env=dict(os.environ,WHERE_WERE_WE_ROOT=str(root),WHERE_WERE_WE_REFS=json.dumps(repo['refs']),WHERE_WERE_WE_LAYOUT=json.dumps(repo['layout']),WHERE_WERE_WE_SETTINGS=mapcore.settings_path())
     return env
 
 def _transaction(name,repo,command, reset=False):

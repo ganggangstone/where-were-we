@@ -111,6 +111,16 @@ async fn save_project(app: tauri::AppHandle, project: String, configuration: Str
     run_py(&app, "project.py", &["configure", &project, &configuration])
 }
 
+#[tauri::command]
+async fn read_settings(app: tauri::AppHandle) -> Result<String, String> {
+    run_py(&app, "mapcore.py", &["settings"])
+}
+
+#[tauri::command]
+async fn save_settings(app: tauri::AppHandle, json: String) -> Result<String, String> {
+    run_py(&app, "mapcore.py", &["save-settings", &json])
+}
+
 fn task_request(app: &tauri::AppHandle, project: &str, branch: &str, lang: &str, repository: Option<&str>, task: &str, target: &str) -> Result<String, String> {
     run_py(app, "ai_extract.py", &[project, branch, lang, "--request", "--repository", repository.unwrap_or(""), "--task", task, "--target", target])
 }
@@ -579,7 +589,7 @@ async fn check_release(app: tauri::AppHandle) -> Result<ReleaseStatus, String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app = tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![list_projects, read_map, read_project, save_project, open_url, refresh, suggest_groups, make_steps, make_system, make_jobs, analysis_request, setup_prompt, tests_prompt, app_version, check_release, app_update_status, start_app_update])
+        .invoke_handler(tauri::generate_handler![list_projects, read_map, read_project, save_project, read_settings, save_settings, open_url, refresh, suggest_groups, make_steps, make_system, make_jobs, analysis_request, setup_prompt, tests_prompt, app_version, check_release, app_update_status, start_app_update])
         .build(tauri::generate_context!()).expect("error while building tauri application");
     app.run(|app, event| {
         if matches!(event, tauri::RunEvent::Ready) {

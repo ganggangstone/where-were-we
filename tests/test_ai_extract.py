@@ -229,6 +229,56 @@ class Analysis(unittest.TestCase):
         self.assertEqual(raw['system']['nodes'][0]['id'],'manual')
         self.assertEqual(project.branch_bundle(raw,'dev')['system.ai']['nodes'][0]['id'],'worker')
 
+    def test_system_analysis_also_saves_program_jobs_for_app_and_mcp(self):
+        ev=self.seed_tasks()
+        request=self.submit_task('system',{'nodes':[{'id':'backend','name':'Application server','kind':'program',
+            'code':['server'],'ev':[ev],'jobs':[{'name':'Store item','what':'Save the submitted item',
+                'starts_when':'An item is submitted','trigger':ev,'made_by':[dict(ev,routes=['server/items.go::SaveItem'])],
+                'steps':[dict(ev,text='Write the item',lane='저장소')]}]}]})
+        self.assertIn('jobs',request['schema']['nodes'][0])
+        bundle=project.read_bundle('demo')
+        self.assertEqual(bundle['jobs']['nodes']['service::backend']['jobs'][0]['name'],'Store item')
+        self.assertEqual(bundle['jobs']['nodes']['service::backend']['jobs'][0]['trigger']['file'],'service/server/items.go')
+        self.assertIn('Store item',json.dumps(mapcore.Map('demo').jobs))
+
+    def test_invalid_integrated_jobs_preserve_previous_snapshot(self):
+        ev=self.seed_tasks();before=project.states('demo')['service']['generation']
+        with self.assertRaisesRegex(ValueError,'evidence'):
+            self.submit_task('system',{'nodes':[{'id':'worker','name':'Worker','kind':'program','code':['server'],
+                'ev':[ev],'jobs':[{'name':'Invented','trigger':dict(ev,quote='fabricated trigger')}]}]})
+        self.assertEqual(project.states('demo')['service']['generation'],before)
+
+    def test_map_analysis_handoff_includes_system_and_jobs_without_extra_user_request(self):
+        self.seed_tasks()
+        for lang in ('ko','en'):
+            request=ai_extract.request('demo','dev',lang,'service')
+            self.assertIn('request_ai_task',request['handoff'])
+            self.assertIn('system',request['handoff'])
+            self.assertIn('record_ai_task',request['handoff'])
+
+    def test_system_request_rejects_overwriting_newer_program_jobs(self):
+        ev=self.seed_tasks()
+        self.submit_task('system',{'nodes':[{'id':'worker','name':'Worker','kind':'program','code':['server'],'ev':[ev]}]})
+        request=ai_extract.task_request('demo','system','dev','en','service')
+        self.submit_task('jobs',{'jobs':[{'name':'New result','trigger':ev}]},'worker')
+        with self.assertRaisesRegex(ValueError,'changed'):
+            ai_extract.task_record(**request['record_arguments'],result_json=json.dumps({'nodes':[{'id':'worker','name':'Worker',
+                'kind':'program','code':['server'],'ev':[ev],'jobs':[]}]}))
+
+    def test_system_request_tracks_legacy_auxiliary_job_results(self):
+        ev=self.seed_tasks()
+        folder=project.repository_folder('demo',self.conf['repositories'][0],project.states('demo'))
+        raw=project.raw_bundle(folder)
+        raw['system']={'source':'ai','nodes':[{'id':'worker','name':'Worker','kind':'program','code':['server'],'ev':[ev]}]}
+        raw['jobs']={'nodes':{}}
+        project.publish('demo','service',raw,{})
+        request=ai_extract.task_request('demo','system','dev','en','service')
+        raw['jobs']['nodes']['worker']={'jobs':[{'name':'Imported job','trigger':ev}]}
+        project.publish('demo','service',raw,{})
+        with self.assertRaisesRegex(ValueError,'changed'):
+            ai_extract.task_record(**request['record_arguments'],result_json=json.dumps({'nodes':[{'id':'worker','name':'Worker',
+                'kind':'program','code':['server'],'ev':[ev],'jobs':[]}]}))
+
     def test_task_outputs_stay_separate_between_branch_roles(self):
         ev=self.seed_tasks()
         conf=project.config('demo');conf['repositories'][0]['refs']['main']='HEAD';project.configure('demo',conf)

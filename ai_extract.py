@@ -217,6 +217,13 @@ def request(name,branch='dev',lang='ko',repository=''):
                  f"Analyze this project with the where-were-we MCP tools. First call analyze with {scope}. "
                  "Use analysis_source with the returned source_arguments to read the immutable commit and use your current agent/model to produce the returned schema. "
                  "Do not launch another AI CLI. Include literal evidence and unknown areas. Submit result_json to record_analysis with the returned record_arguments.")
+        system_scope=json.dumps({'project':name,'repository':rid,'task':'system','branch':branch,'lang':lang},ensure_ascii=False)
+        handoff += (f' 지도 저장이 끝나면 request_ai_task를 {system_scope} 인자로 호출해 전체 구조와 각 프로그램이 하는 일을 함께 분석하세요. '
+                    '반환된 schema의 프로그램별 jobs에 근거를 포함하고, 모르는 내용은 unknown에 적으세요. '
+                    '반환된 record_arguments와 결과를 record_ai_task로 저장하세요. 별도 사용자 요청을 기다리지 말고 이 분석을 마무리하세요.') if lang=='ko' else (
+                    f' After saving the map, call request_ai_task with {system_scope} to analyze architecture and the jobs of every program together. '
+                    'Include source evidence in each program’s jobs using the returned schema; record unknowns explicitly. '
+                    'Submit the result and returned record_arguments to record_ai_task to finish this analysis without another user request.')
         return {'commit':commit,'record_arguments':arguments,'repository_path':repo['path'],
                 'source_arguments':{'project':name,'repository':rid,'branch':branch,'commit':commit},
                 'prompt':analysis_prompt(commit,lang,repo['layout']),'schema':SCHEMA,'handoff':handoff}
@@ -251,17 +258,19 @@ def record(project,repository,branch,lang,commit,configuration,result_json):
 
 EV_SCHEMA={'file':'path/in/repository','line':1,'quote':'literal source text'}
 UNKNOWN_SCHEMA={'text':'Unverified fact','needs':'read'}
+JOB_SCHEMA={'name':'Job','what':'Purpose','starts_when':'Trigger condition','trigger':EV_SCHEMA,
+            'made_by':[{**EV_SCHEMA,'routes':['file::function']}],
+            'steps':[{**EV_SCHEMA,'lane':'프로그램','text':'Step'}]}
 TASK_SCHEMAS={
     'groups':{'groups':[{'name':'Name','description':'Description','screens':['/path']}],
               'names':{'/path':'Screen name'},'request_names':{'file::function':'Request name'}},
     'system':{'nodes':[{'id':'program','name':'Program','kind':'program','what':'Purpose','origin':'repo',
-                        'origin_text':'Source location','code':['src'],'uses':[],'unknown':[UNKNOWN_SCHEMA],'ev':[EV_SCHEMA]}],
+                        'origin_text':'Source location','code':['src'],'uses':[],'unknown':[UNKNOWN_SCHEMA],'ev':[EV_SCHEMA],
+                        'jobs':[JOB_SCHEMA]}],
               'links':[{'from':'program','to':'store','label':'Exchange','style':'','sure':'code','ev':[EV_SCHEMA]}],
               'externals':[{'id':'cloud','name':'Cloud','what':'External service','ev':[EV_SCHEMA]}],
               'others':[{'name':'Other program','what':'Purpose','ev':[EV_SCHEMA]}],'unknown':[UNKNOWN_SCHEMA]},
-    'jobs':{'jobs':[{'name':'Job','what':'Purpose','starts_when':'Trigger condition','trigger':EV_SCHEMA,
-                    'made_by':[{**EV_SCHEMA,'routes':['file::function']}],
-                    'steps':[{**EV_SCHEMA,'lane':'프로그램','text':'Step'}]}]},
+    'jobs':{'jobs':[JOB_SCHEMA]},
     'steps':{'routes':{'file::function':{'name':'Request name','steps':[{**EV_SCHEMA,'lane':'서버','text':'Step','uncertain':False}]}}}
 }
 
@@ -298,7 +307,7 @@ def task_input(raw,task,branch,target):
 
 def task_snapshot(raw,task,branch):
     raw=project.branch_bundle(raw,branch)
-    keys={'groups':['groups'],'system':['system','system.ai'],'jobs':['system','jobs'],'steps':['flows']}[task]
+    keys={'groups':['groups'],'system':['system','system.ai','jobs'],'jobs':['system','jobs'],'steps':['flows']}[task]
     return hashlib.sha256(json.dumps({k:raw.get(k) for k in [branch,*keys]},sort_keys=True,ensure_ascii=False).encode()).hexdigest()
 
 def task_context(name,task,branch,repository):
@@ -320,7 +329,7 @@ def task_request(name,task,branch='dev',lang='ko',repository='',target=''):
         scope={k:args[k] for k in ('project','repository','task','branch','lang','target')}
         rules={
             'groups':'Group all supplied screens exactly once by user activity. Keep screen paths and route keys unchanged. Name mounted requests too. Use only supplied metadata, not source code.',
-            'system':'Describe separately running programs, users, stores and copied code, their connections and external services. Each node, link, external and other item needs ev evidence. Give repository-relative code directories for each program. Keep unknown operational facts in unknown. Do not invent nodes or connections.',
+            'system':'Describe separately running programs, users, stores and copied code, their connections and external services. Each node, link, external and other item needs ev evidence. Give repository-relative code directories for each program. Include jobs for every program with repository code, including the API server and frontend: explain its purpose, trigger and steps with evidence within its code directories. made_by evidence may link supplied route keys only when supported by source. Keep existing node IDs for the same program. Use jobs:[] only when no jobs can be established and explain missing knowledge in unknown. Keep unknown operational facts in unknown. Do not invent nodes, jobs or connections.',
             'jobs':'Describe jobs of the selected node. Trigger and step evidence must be within its code directories. made_by evidence identifies server code that creates the trigger; attach existing route keys only when the relation is supported. Unresolved producers stay unknown; never infer a relation from a shared table name alone.',
             'steps':'Describe ordered request steps for the supplied route keys only. Each step needs its own file, exact line and quote. Include service calls and return values, mark uncertain interpretation. Keep route keys unchanged.'}[task]
         prompt=(f'Produce {task} for commit {commit}. {rules}\nUse analysis_source with source_arguments for immutable source reads; never launch another AI CLI, execute application code or edit files. '
@@ -357,6 +366,28 @@ def task_result(raw,task,branch,target,data,repo,commit,lang):
         return result
     meta={'source':'ai','provider':'mcp-agent','commit':commit,'branch':branch,'language':lang}
     updated=copy.deepcopy(raw)
+    def program_jobs(node,payload):
+        code=node['code'];jobs=[]
+        def within(ev):return any(c in ('','.','/') or ev['file']==c.rstrip('/') or ev['file'].startswith(c.rstrip('/')+'/') for c in code)
+        routes={r['file']+'::'+r['function']:r for r in raw[branch]['backend_routes'] if r.get('function')}
+        for job in rows(payload,'jobs'):
+            trigger=evidence(job.get('trigger'))
+            if not trigger or not within(trigger):continue
+            made=[];links={};steps=[]
+            for item in rows(job,'made_by'):
+                ev=evidence(item)
+                if not ev:continue
+                made.append(ev)
+                for key in item.get('routes',[]):
+                    route=routes.get(key)
+                    if route and ev['file'] in [route['file'],*route.get('services',[])]:links[key]={'key':key,'exact':False,'source':'ai'}
+            for step in rows(job,'steps'):
+                ev=evidence(step)
+                if ev and within(ev) and text(step,'text'):steps.append({**ev,'lane':step.get('lane') if step.get('lane') in ('프로그램','저장소','외부') else '프로그램','text':step['text']})
+            jobs.append({'name':text(job,'name'),'what':text(job,'what'),'starts_when':text(job,'starts_when'),
+                         'trigger':trigger,'made_by':made,'steps':steps,'routes':list(links.values())})
+        if not jobs and rows(payload,'jobs'):raise ValueError('No usable job trigger evidence; previous jobs preserved')
+        return {**meta,'jobs':jobs}
     if task=='groups':
         known={s['path'] for s in inputs['screens']};seen=set();groups=[]
         for g in rows(data,'groups'):
@@ -412,6 +443,20 @@ def task_result(raw,task,branch,target,data,repo,commit,lang):
                 'externals':externals,'others':others,'unknown':unknown(data.get('unknown',[]))}
         dest='system.ai' if raw.get('system') and raw['system'].get('source')!='ai' else 'system'
         updated[dest]=result
+        supplied={n['id']:n for n in rows(data,'nodes') if isinstance(n.get('id'),str)}
+        previous={n['id']:n for n in (raw.get('system') or {}).get('nodes',[])}
+        jobs=copy.deepcopy(raw.get('jobs') or {'nodes':{}})
+        if dest=='system':
+            # Reused identities with different code must not display old jobs.
+            jobs['nodes']={key:value for key,value in jobs['nodes'].items()
+                           if key in ids and previous.get(key,{}).get('code')==next(n for n in nodes if n['id']==key).get('code')}
+        for node in nodes:
+            payload=supplied[node['id']]
+            if node['kind']!='program' or not node['code'] or 'jobs' not in payload:continue
+            normalized=program_jobs(node,payload)
+            if dest=='system' or previous.get(node['id'],{}).get('code')==node['code']:
+                jobs['nodes'][node['id']]=normalized
+        if jobs!=raw.get('jobs'):updated['jobs']=jobs
     elif task=='steps':
         outputs=data.get('routes')
         if not isinstance(outputs,dict) or not outputs or any(k not in inputs['routes'] for k in outputs):raise ValueError('Choose known route targets')
@@ -430,28 +475,10 @@ def task_result(raw,task,branch,target,data,repo,commit,lang):
             for r in updated[branch]['backend_routes']:
                 if r['file']+'::'+str(r.get('function'))==key:r['flow']=flow
     else:
-        code=inputs['node']['code'];jobs=[]
-        def within(ev):return any(c in ('','.','/') or ev['file']==c.rstrip('/') or ev['file'].startswith(c.rstrip('/')+'/') for c in code)
-        routes={r['file']+'::'+r['function']:r for r in inputs['routes']}
-        for job in rows(data,'jobs'):
-            trigger=evidence(job.get('trigger'))
-            if not trigger or not within(trigger):continue
-            made=[];links={};steps=[]
-            for item in rows(job,'made_by'):
-                ev=evidence(item)
-                if not ev:continue
-                made.append(ev)
-                for key in item.get('routes',[]):
-                    route=routes.get(key)
-                    if route and ev['file'] in [route['file'],*route.get('services',[])]:links[key]={'key':key,'exact':False,'source':'ai'}
-            for step in rows(job,'steps'):
-                ev=evidence(step)
-                if ev and within(ev) and text(step,'text'):steps.append({**ev,'lane':step.get('lane') if step.get('lane') in ('프로그램','저장소','외부') else '프로그램','text':step['text']})
-            jobs.append({'name':text(job,'name'),'what':text(job,'what'),'starts_when':text(job,'starts_when'),
-                         'trigger':trigger,'made_by':made,'steps':steps,'routes':list(links.values())})
-        if not jobs:raise ValueError('No usable job trigger evidence; previous jobs preserved')
+        jobs=program_jobs(inputs['node'],data)
+        if not jobs['jobs']:raise ValueError('No usable job trigger evidence; previous jobs preserved')
         updated['jobs']=updated.get('jobs') or {'nodes':{}}
-        updated['jobs']['nodes'][target]={**meta,'jobs':jobs}
+        updated['jobs']['nodes'][target]=jobs
     # Task results travel with their exact branch map, rather than overwriting
     # the shared legacy auxiliary files used by the other branch.
     result=copy.deepcopy(original)
