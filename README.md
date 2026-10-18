@@ -138,6 +138,8 @@ View the installed version, stable releases, and bilingual notes; install Homebr
 
 Click **Connect agent**, copy the instructions, and give them to Claude Code, Codex, or another MCP client. The agent asks permission before editing configuration.
 
+If tools are missing, choose **Connection diagnostics**, select the feature, and copy the repair request to your agent. After it reconnects and calls the confirmation tool, click **Check current connection**. The app checks its own server separately; a healthy app server alone does not confirm your agent reconnected. Settings are not rewritten automatically.
+
 Ask your agent to check `changes` before planning and `impact` before editing. It can use the same map to find affected areas and overlapping work. MCP tools accept a `repository` ID to narrow the scope; test-rule writes require a repository when the project has several.
 
 ## Updates
@@ -153,6 +155,8 @@ brew update && brew upgrade --cask ganggangstone/tap/where-were-we
 For Homebrew installations, click **Update now**. The app checks that the new version is available, closes, installs it through Homebrew, and reopens. Finish collection or AI work before updating. If installation or startup fails, the updater attempts to restore the previous app and shows the error; recovery files are retained if restoration fails. Maps remain in place.
 
 If an update is interrupted by shutdown or force quit, recovery details remain in `~/.where-were-we/.app-update.log` and `.app-update.json`. Open the log with `open -a TextEdit ~/.where-were-we/.app-update.log`. It records the retained app copy and its original destination: copy it back with Finder and choose Replace, or run the recorded Homebrew reinstall command.
+
+After updating, reconnect where-were-we in your agent. If new tools are still missing, start a new session. **Version & updates → Connection diagnostics** helps check old paths and connections still running older code.
 
 The command above is the manual fallback, including for older versions that only offer command copying. A ZIP installation is not managed by the update button. Uninstalling the app preserves your maps.
 

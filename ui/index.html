@@ -349,6 +349,7 @@ Object.assign(UI_EN, {"같은 GitHub 저장소가 이미 연결되어 있습니�
 Object.assign(UI_EN, {"아직 코드가 없는 GitHub 저장소입니다.":"This GitHub repository does not have code yet."});
 Object.assign(UI_EN, {"앱의 코드 보관 위치가 바뀌었습니다. 연결 정보를 확인해 주세요.":"The app code storage location changed. Check the connection."});
 Object.assign(UI_EN,{"서버가 요청을 받는다":"The server receives the request"});
+Object.assign(UI_EN,{"연결 진단": "Connection diagnostics", "앱 서버와 현재 에이전트 연결을 따로 확인합니다. 설정은 자동으로 바꾸지 않습니다.": "Check the app server and the current agent connection separately. Settings are not changed automatically.", "사용할 기능": "Feature to use", "지도 읽기": "Read maps", "코드 자세히 읽기": "Read code in detail", "바뀐 것 설명": "Explain changes", "앱 화면 제어": "Control the app", "다시 진단": "Run diagnostics again", "연결 진단을 실행하지 못했습니다. 다시 시도하세요.": "Could not run diagnostics. Try again.", "앱에 포함된 서버를 확인하는 중…": "Checking the bundled server…", "1. 앱 서버": "1. App server", "2. 등록된 경로": "2. Registered paths", "3. 현재 에이전트 연결": "3. Current agent connection", "앱 버전": "App version", "확인할 수 없음": "Unavailable", "앱 서버 경로": "App server paths", "없는 도구": "Missing tools", "연결 수정 요청 복사": "Copy connection repair request", "현재 연결 확인": "Check current connection", "요청을 복사해 쓰는 에이전트에 전달하세요. 에이전트가 재연결 후 확인 도구를 호출하면 아래에서 결과를 확인할 수 있습니다.": "Copy the request to your agent. After reconnecting and calling the confirmation tool, check the result below.", "복사했습니다. 에이전트 채팅에 붙여 넣으세요.": "Copied. Paste it into your agent chat.", "연결 확인 결과를 읽지 못했습니다. 다시 진단하세요.": "Could not read the connection check. Run diagnostics again.", "앱 서버가 정상이어도 에이전트가 재연결한 것은 아닙니다. 프로젝트와 바뀐 것은 새로고침하지 않습니다.": "A healthy app server does not confirm the agent reconnected. Project data and changes are not refreshed.", "연결 상태를 읽지 못했습니다. 다시 진단하세요.": "Could not read the connection state. Run diagnostics again.", "업데이트 후 에이전트의 MCP를 재연결하세요. 새 도구가 보이지 않으면 새 세션을 여세요.": "Reconnect your agent’s MCP after updating. If new tools are missing, start a new session.", "앱 서버가 정상입니다.": "The app server is healthy.", "아직 현재 에이전트 연결을 확인하지 않았습니다.": "The current agent connection has not been verified.", "현재 에이전트가 앱 서버에 연결된 것을 확인했습니다.": "Verified: the current agent is connected to the app server.", "에이전트가 설정을 확인하면 등록된 경로를 표시합니다.": "Registered paths appear after the agent checks its settings.", "등록된 경로가 앱 서버와 같습니다.": "The registered paths match the app server.", "다른 경로의 서버가 등록돼 있습니다.": "A server at a different path is registered.", "에이전트가 다른 경로의 서버에 연결돼 있습니다.": "The agent is connected to a server at a different path.", "이전 코드로 실행 중인 연결입니다. MCP를 재연결하거나 새 세션을 여세요.": "The connection is running older code. Reconnect MCP or start a new session.", "이 기능에 필요한 도구가 없습니다. MCP를 재연결하거나 앱을 업데이트하세요.": "Required tools are missing. Reconnect MCP or update the app.", "확인 번호가 만료됐습니다. 다시 진단하세요.": "The confirmation code expired. Run diagnostics again.", "진단 후 앱 코드가 바뀌었습니다. 다시 진단하세요.": "The app code changed after diagnostics. Run diagnostics again.", "앱에 필요한 실행 파일이 없습니다. 앱을 다시 설치하세요.": "App runtime files are missing. Reinstall the app.", "등록된 실행 파일이나 서버를 찾지 못했습니다.": "The registered runtime or server was not found.", "등록된 위치에 앱이 없습니다. 앱 설치 위치를 확인하세요.": "The app is missing from its registered location. Check the install location.", "파일을 읽거나 실행할 권한이 없습니다.": "Permission to read or execute files was denied.", "앱 서버를 실행하지 못했습니다. 앱 설치 상태를 확인하세요.": "Could not start the app server. Check the app installation.", "서버 정보를 읽지 못했습니다. 앱을 업데이트하고 다시 진단하세요.": "Could not read server information. Update the app and run diagnostics again.", "이 연결 설정은 진단할 수 없습니다. 에이전트에게 설정 확인을 요청하세요.": "This registration cannot be diagnosed. Ask your agent to inspect it.", "실제 서버 경로를 확인하지 못했습니다. 에이전트에게 설정 확인을 요청하세요.": "The actual server path could not be resolved. Ask your agent to inspect it."});
 const UI_PATTERN = new RegExp(Object.keys(UI_EN).sort((a, b) => b.length - a.length).map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'g');
 function tr(text) { return S.lang === 'en' ? String(text).replace(UI_PATTERN, match => UI_EN[match]) : String(text); }
 function ui(parts, ...values) { return parts.reduce((out, part, i) => out + tr(part) + (i < values.length ? values[i] : ''), ''); }
@@ -400,9 +401,11 @@ function renderUpdates() {
     <p role="status">${esc(message)}${U.failed && release ? ui` ${tr('이전 확인에서 받은 정보입니다.')}` : ''}</p>
     <div class="ctl"><button class="btn" id="checkRelease" ${U.busy ? 'disabled' : ''}>${tr(U.busy ? '확인 중…' : '지금 확인')}</button></div>
     <p><label><input type="checkbox" id="autoRelease" ${U.auto ? 'checked' : ''}> ${tr('앱을 열 때 하루에 한 번 GitHub 공개 릴리즈 확인')}</label></p>
+    <p>${tr('업데이트 후 에이전트의 MCP를 재연결하세요. 새 도구가 보이지 않으면 새 세션을 여세요.')}</p><button class="btn" id="updateConnectionDiagnostic">${tr('연결 진단')}</button>
     <p role="status" id="updateStatus">${esc(updateMessage())}</p>
     ${release?.newer ? ui`<div class="sect"><button class="btn" id="installUpdate" ${U.installing ? 'disabled' : ''}>지금 업데이트</button><p>앱이 잠시 닫힌 뒤 자동으로 다시 열립니다.</p><details><summary>직접 업데이트하기</summary><pre class="mono release-notes" id="upgradeCommand">${UPGRADE_COMMAND}</pre><button class="btn" id="copyUpgrade">업데이트 명령 복사</button><span id="upgradeCopied"></span></details></div>` : ''}
     ${release ? ui`<div class="sect"><h3>릴리즈 노트</h3><p class="sub">변경 내용은 GitHub 릴리즈에 적힌 원문입니다.</p><pre class="release-notes">${esc(release.notes || tr('아직 변경 내용이 없습니다.'))}</pre><button class="btn" id="releasePage">릴리즈 페이지 열기</button></div>` : ''}`;
+  $('updateConnectionDiagnostic').onclick=()=>{$('release-dialog').close();startConnectionDiagnostic();};
   $('closeRelease').onclick = () => $('release-dialog').close();
   $('checkRelease').onclick = () => checkUpdates(true);
   $('autoRelease').onchange = (e) => {
@@ -1373,6 +1376,7 @@ document.querySelectorAll('#language button').forEach(b => b.onclick = () => set
 renderHeader();
 // 에이전트 연결: 프롬프트를 복사해 자기 에이전트에 붙이면 에이전트가 등록과 전역 지침 추가를 한다
 function renderAgentPrompt() {
+  if(S.agentPurpose==='connection')return renderConnectionDiagnostic();
   const analysis=S.agentPurpose==='analysis',request=S.analysisRequest;
   const heading=analysis ? '분석 요청 준비' : '에이전트 연결';
   const description=analysis ? '복사해 MCP가 연결된 에이전트에 전달하세요. 해당 에이전트가 자신의 모델로 코드를 읽고 결과를 저장합니다.' : '아래 글을 복사해 쓰는 에이전트(Claude Code, Codex 등)에 붙여 넣으면, 에이전트가 MCP 서버를 등록하고 전역 지침에 사용 규칙을 넣는다. 설정 파일을 바꾸기 전에 허락을 구하게 되어 있다.';
@@ -1380,12 +1384,13 @@ function renderAgentPrompt() {
   $('insp').innerHTML=`<h2>${tr(heading)}</h2><p class="sub">${tr(description)}</p>`+
     (analysis?`<h3>${tr('1. 요청 복사')}</h3>`:'')+
     ui`<div class="ctl"><button class="btn primary" id="cpAgent">복사</button><span id="cpDone">${request?.copied?tr('복사됨'):''}</span></div>`+
-    (analysis?`<h3>${tr('2. 에이전트에 전달')}</h3><p>${tr('복사한 요청을 MCP가 연결된 에이전트 채팅에 붙여 넣으세요.')}</p><h3>${tr('3. 저장된 결과 확인')}</h3><p>${tr('에이전트가 결과를 저장했다고 알려 주면 아래 버튼을 누르세요.')}</p><button class="btn primary" id="checkAnalysisResults" ${request?.state==='checking'?'disabled':''}>${tr('저장된 결과 확인')}</button><p class="s">${tr('분석 결과만 읽습니다. 바뀐 것과 비교 기준은 유지됩니다.')}</p><p id="analysisResultState" role="status">${request?.error?esc(tr('분석 결과를 읽지 못했습니다: ')+request.error):tr(states[request?.state] || states.prepared)}</p>${['saved','previous'].includes(request?.state)?`<button class="btn quiet" id="viewAnalysisResults">${tr('결과 보기')}</button>`:''}<details><summary>${tr('요청 내용 보기')}</summary><pre class="prompt mono">${esc(S.agentPrompt)}</pre></details>`:`<pre class="prompt mono">${esc(S.agentPrompt)}</pre>`);
+    (analysis?`<h3>${tr('2. 에이전트에 전달')}</h3><p>${tr('복사한 요청을 MCP가 연결된 에이전트 채팅에 붙여 넣으세요.')}</p><h3>${tr('3. 저장된 결과 확인')}</h3><p>${tr('에이전트가 결과를 저장했다고 알려 주면 아래 버튼을 누르세요.')}</p><button class="btn primary" id="checkAnalysisResults" ${request?.state==='checking'?'disabled':''}>${tr('저장된 결과 확인')}</button><p class="s">${tr('분석 결과만 읽습니다. 바뀐 것과 비교 기준은 유지됩니다.')}</p><p id="analysisResultState" role="status">${request?.error?esc(tr('분석 결과를 읽지 못했습니다: ')+request.error):tr(states[request?.state] || states.prepared)}</p>${['saved','previous'].includes(request?.state)?`<button class="btn quiet" id="viewAnalysisResults">${tr('결과 보기')}</button>`:''}<details><summary>${tr('요청 내용 보기')}</summary><pre class="prompt mono">${esc(S.agentPrompt)}</pre></details>`:`<button class="btn" id="openConnectionDiagnostic">${tr('연결 진단')}</button><pre class="prompt mono">${esc(S.agentPrompt)}</pre>`);
   $('cpAgent').onclick=async()=>{
     const prompt=S.agentPrompt,copyRequest=S.analysisRequest;
     try {await navigator.clipboard.writeText(prompt);if(S.agentPrompt!==prompt)return;if(analysis && copyRequest===S.analysisRequest)copyRequest.copied=true;$('cpDone').textContent=tr(analysis?'복사했습니다. MCP가 연결된 에이전트 채팅에 붙여 넣으세요.':'복사됨');}
     catch {if(S.agentPrompt===prompt && $('cpDone'))$('cpDone').textContent=tr('요청을 복사하지 못했습니다. 다시 눌러 주세요.');}
   };
+  if($('openConnectionDiagnostic'))$('openConnectionDiagnostic').onclick=()=>startConnectionDiagnostic();
   if(analysis){$('checkAnalysisResults').onclick=checkAnalysisResults;if($('viewAnalysisResults'))$('viewAnalysisResults').onclick=()=>{S.agentPrompt=null;S.view=request.command==='briefing_request'?'changes':request.command==='make_system' || request.command==='analysis_request'?'sys':request.command==='suggest_groups'?'map':S.view;render();};}
 }
 $('agent').onclick = async () => { S.agentPurpose='setup';try { S.agentPrompt = await invoke('setup_prompt', {lang: S.lang}); } catch (e) { S.agentPrompt = tr('프롬프트를 만들지 못했다: ') + e; } renderAgentPrompt(); };
@@ -1407,6 +1412,7 @@ $('updates').onclick = () => { renderUpdates(); $('release-dialog').showModal();
   window.appControlReady=true;
 })();
 </script>
+<script src="connection.js"></script>
 <script src="control.js"></script>
 </body>
 </html>

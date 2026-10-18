@@ -161,6 +161,38 @@ async fn setup_prompt(app: tauri::AppHandle, lang: Option<String>) -> Result<Str
     run_py(&app, "mapcore.py", &["setup", if lang.as_deref() == Some("en") { "--lang=en" } else { "--lang=ko" }])
 }
 
+fn connection_probe(backend: &Backend, feature: &str, lang: &str) -> Result<String, String> {
+    match backend.command("connection.py", &["diagnose", "--feature", feature, "--lang", lang]).output() {
+        Ok(out) if out.status.success() => Ok(String::from_utf8_lossy(&out.stdout).to_string()),
+        Err(error) => {
+            let state=match error.kind() {
+                std::io::ErrorKind::PermissionDenied => "permission_denied",
+                std::io::ErrorKind::NotFound => "missing_runtime",
+                _ => "server_unavailable",
+            };
+            Ok(serde_json::json!({"fresh_server":{"state":state},"connection":{"state":"not_verified"}}).to_string())
+        },
+        _ => Err("Connection diagnostics unavailable; no client settings were changed.".into()),
+    }
+}
+
+/// Probe only the app-owned backend. Never read or rewrite agent settings.
+#[tauri::command]
+async fn connection_diagnose(app: tauri::AppHandle, feature: String, lang: String) -> Result<String, String> {
+    let _work=BackendWork::start()?;
+    // The interpreter cannot report its own absence or execution denial.
+    match backend(&app) {
+        Ok(backend) => connection_probe(&backend, &feature, &lang),
+        Err(_) => Ok(serde_json::json!({"fresh_server":{"state":"missing_runtime"},"connection":{"state":"not_verified"}}).to_string()),
+    }
+}
+
+#[tauri::command]
+async fn connection_status(app: tauri::AppHandle, challenge: String) -> Result<String, String> {
+    run_py(&app, "connection.py", &["check", "--challenge", &challenge])
+        .map_err(|_| "Connection check unavailable; run diagnostics again.".into())
+}
+
 /// 테스트가 안 이어진 서버 기능 하나에 대해 에이전트가 테스트를 찾게 하는 글 (mapcore.py tests).
 #[tauri::command]
 async fn tests_prompt(app: tauri::AppHandle, project: String, route: String, lang: Option<String>, repository: Option<String>) -> Result<String, String> {
@@ -626,7 +658,7 @@ pub fn run() {
             if control::listen(app.state::<std::sync::Arc<control::Hub>>().inner().clone(), &root()).is_err() {eprintln!("App control unavailable; the app remains usable.");}
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![control_poll, control_ack, control_focus, list_projects, read_map, read_project, save_project, github_logins, github_accounts, use_github_account, read_settings, save_settings, open_url, refresh, suggest_groups, make_steps, make_system, make_jobs, analysis_request, briefing_request, setup_prompt, tests_prompt, app_version, check_release, app_update_status, start_app_update])
+        .invoke_handler(tauri::generate_handler![control_poll, control_ack, control_focus, list_projects, read_map, read_project, save_project, github_logins, github_accounts, use_github_account, read_settings, save_settings, open_url, refresh, suggest_groups, make_steps, make_system, make_jobs, analysis_request, briefing_request, setup_prompt, connection_diagnose, connection_status, tests_prompt, app_version, check_release, app_update_status, start_app_update])
         .build(tauri::generate_context!()).expect("error while building tauri application");
     app.run(|app, event| {
         if matches!(event, tauri::RunEvent::Ready) {
@@ -648,6 +680,20 @@ mod tests {
     fn release_json(tag: &str) -> String {
         serde_json::json!({"tag_name":tag, "draft":false, "prerelease":false,
             "body":"### 한국어\n- 예시\n\n### English\n- Example"}).to_string()
+    }
+
+    #[test]
+    fn connection_diagnostics_distinguish_denied_runtime_execution() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir=std::env::temp_dir().join(format!("www-connection-permission-{}",std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let python=dir.join("python");fs::write(&python,"#!/bin/sh\nexit 0\n").unwrap();
+        fs::set_permissions(&python,fs::Permissions::from_mode(0o600)).unwrap();
+        let value=connection_probe(&Backend {python,scripts:dir.clone()},"detail","en").unwrap();
+        let result:serde_json::Value=serde_json::from_str(&value).unwrap();
+        assert_eq!(result["fresh_server"]["state"],"permission_denied");
+        assert_eq!(result["connection"]["state"],"not_verified");
+        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

@@ -19,6 +19,9 @@ INSTRUCTIONS = """이 서버는 대상 서비스의 구조 지도(화면, 서버
 - 앱에서 보여 달라는 요청은 app_targets로 대상을 찾고 app_control로 표시한다. 현재 선택은 app_state로 읽는다. 명령 상태가 completed인 경우만 적용 완료로 말하고 queued/running/interrupted는 그대로 알린다. 분석 준비는 실행 완료가 아니다.
 답에 "후보", "추정", "확인 못 한 것"이 붙은 것은 사실로 옮기지 않고 그대로 전한다."""
 
+import connection
+SERVER_IDENTITY=connection.snapshot()  # Capture before any later app replacement.
+
 app = MCPServer("where-were-we", instructions=INSTRUCTIONS)
 
 
@@ -46,6 +49,15 @@ def app_control(action: str, arguments_json: str = "{}", command_id: str = "") -
 def app_command_result(command_id: str) -> str:
     import app_control
     return json.dumps(app_control.outcome(command_id),ensure_ascii=False)
+
+
+@app.tool(description="실제 연결된 MCP 서버의 시작 시점 코드·실행 경로·버전을 읽습니다. 앱 버전과 현재 연결을 구분합니다. Read this connected server's startup identity.")
+async def server_info() -> str:
+    return json.dumps({**SERVER_IDENTITY,'tools':[t.name for t in await app.list_tools()]},ensure_ascii=False)
+
+@app.tool(description="앱의 일회용 확인 번호에 현재 연결된 서버가 직접 응답합니다. 도구 목록은 서버가 확인하며 새 서버를 따로 실행하면 현재 에이전트의 재연결 확인을 대신할 수 없습니다. Confirm the actual live MCP connection.")
+async def confirm_connection(challenge: str, registration_json: str = "{}") -> str:
+    return json.dumps(connection.confirm(challenge,SERVER_IDENTITY,[t.name for t in await app.list_tools()],json.loads(registration_json)),ensure_ascii=False)
 
 
 def pick(project):
