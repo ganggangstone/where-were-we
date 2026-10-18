@@ -44,6 +44,7 @@ def git(*args):
         sys.exit(result.stderr.strip() or "Git command failed")
     return result.stdout.strip()
 git("fetch", "-q", "origin")
+if os.environ.get("WHERE_WERE_WE_MANAGED_CODE")=="1":git("remote", "set-head", "origin", "-a")
 PINNED = {role: git("rev-parse", "--verify", ref + "^{commit}") for role,ref in mapcore.configured_refs().items() if ref}
 os.environ["WHERE_WERE_WE_COMMITS"] = json.dumps(PINNED)
 log, moved = "", {}

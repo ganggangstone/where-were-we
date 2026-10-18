@@ -111,7 +111,8 @@ for line in git("for-each-ref", "--sort=-committerdate", "--format=%(refname:sho
 # --- 이 맥의 작업 폴더와 커밋하지 않은 변경 ---
 worktrees = []
 cur = {}
-for line in git("worktree", "list", "--porcelain").splitlines() + [""]:
+# App storage has no checkout and is not a user work folder.
+for line in ([] if os.environ.get("WHERE_WERE_WE_MANAGED_CODE")=="1" else git("worktree", "list", "--porcelain").splitlines()) + [""]:
     if not line:
         if cur.get("path") and not cur.get("bare"):
             files = [l[3:] for l in git("status", "--porcelain", cwd=cur["path"]).splitlines()]

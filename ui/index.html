@@ -297,21 +297,21 @@ Object.assign(UI_EN, {
   "연결할 코드": "Connect code",
   "프로젝트는 서비스 하나를 뜻합니다. 웹 화면·서버·작업 프로그램의 코드가 나뉘어 있어도 여기에 함께 연결하세요.": "A project represents one service. Connect its web, server, and worker code here, even when they live in separate repositories.",
   "서비스 이름": "Service name",
-  "이 컴퓨터에 있는 코드 폴더를 연결합니다. 아래에서 폴더마다 알아보기 쉬운 이름을 붙이세요.": "Connect code folders on this computer. Give each folder a name you can recognize below.",
-  "다른 코드 폴더 추가": "Add another code folder",
+  "GitHub 주소나 이 컴퓨터의 코드 폴더를 입력하세요. 웹 화면·서버·작업 프로그램을 같은 서비스 아래에 추가할 수 있습니다.": "Enter a GitHub URL or a code folder on this computer. Add web, server, and worker repositories under the same service.",
+  "다른 코드 추가": "Add more code",
   "여러 코드가 같은 데이터를 사용할 때": "When code folders share the same data",
   "같은 데이터베이스의 같은 테이블을 사용하는 경우에만 연결하세요. 이름이 같다는 이유만으로 연결하지 않습니다. 모르면 비워 두어도 됩니다.": "Connect only code that uses the same tables in the same database. Matching names do not establish a connection. You can leave this empty if unsure.",
   "함께 쓰는 데이터 추가": "Add shared data",
-  "저장하면 코드 연결을 등록합니다. 지도 데이터를 가져오려면 새로고침을 누르세요.": "Save to register these connections. Choose Refresh to collect map data.",
+  "GitHub 코드는 앱 전용 폴더에 내려받고 처음 지도를 가져옵니다. 이 컴퓨터의 기존 폴더는 연결 후 새로고침으로 지도를 가져오세요.": "GitHub code is downloaded to app storage and its first map is collected. For an existing local folder, choose Refresh after connecting.",
   "연결 저장": "Save connections",
   "다른 코드 폴더를 추가하면 여기서 선택할 수 있습니다.": "Add another code folder to select it here.",
   "새 코드 폴더": "New code folder",
   "화면에 표시할 이름": "Display name",
   "예: 웹 화면, 서버, 작업 프로그램": "For example: Web, Server, Worker",
-  "코드가 들어 있는 폴더": "Folder containing the code",
-  "이름을 비워 두면 폴더 이름을 사용합니다. 폴더는 Finder에서 선택한 뒤 ⌥⌘C로 전체 경로를 복사할 수 있습니다.": "Leave the name empty to use the folder name. In Finder, select the folder and press ⌥⌘C to copy its full path.",
+  "GitHub 주소 또는 코드 폴더": "GitHub URL or code folder",
+  "예: https://github.com/example/web 또는 /path/to/web. GitHub는 코드 보관소, 브랜치는 그 안의 코드 버전입니다. 이름은 자동으로 채워집니다.": "For example: https://github.com/example/web or /path/to/web. A repository stores code; a branch is a version of it. The name is filled automatically.",
   "분석할 코드 버전": "Code versions to analyze",
-  "새 연결은 폴더에서 현재 선택된 브랜치에 저장된 코드를 분석합니다. 다른 버전과 비교하려면 아래 값을 바꾸세요. 비교할 버전이 없으면 비교 기준을 비워 두세요.": "New connections analyze the committed code on the branch selected in the folder. Change these values to compare versions, or leave the comparison version empty.",
+  "GitHub 주소는 기본 브랜치의 최신 코드를, 기존 폴더는 현재 선택된 브랜치를 분석합니다. 다른 버전과 비교하려면 아래 값을 바꾸세요. 비교 기준은 비워 두어도 됩니다.": "GitHub connections use the latest default branch; local folders use their selected branch. Change the versions below to compare. The comparison version can be empty.",
   "분석할 버전": "Version to analyze",
   "비교할 기준 버전": "Comparison version",
   "브랜치·태그·커밋을 지정할 수 있습니다. origin/main은 GitHub에서 가져온 main 브랜치를 뜻합니다. 한쪽은 반드시 남겨 주세요.": "You can specify a branch, tag, or commit. origin/main means the main branch fetched from GitHub. Keep at least one version.",
@@ -323,7 +323,7 @@ Object.assign(UI_EN, {
   "자동으로 찾기": "Detect automatically",
   "코드 폴더 안의 상대 위치입니다. 예: frontend/src, backend/app. 자동으로 찾지 못할 때만 입력하세요.": "Paths are relative to the connected folder, for example frontend/src or backend/app. Enter them only if automatic detection does not find the code.",
   "이 코드 연결 해제": "Disconnect this code",
-  "연결을 해제해도 기존 지도는 남습니다.": "Existing maps are kept when code is disconnected.",
+  "연결을 해제해도 코드와 지도는 남습니다. 같은 GitHub 주소를 다시 연결하면 보관한 코드를 재사용합니다.": "Disconnecting keeps code and maps. Reconnecting the same GitHub URL reuses the stored code.",
   "함께 쓰는 데이터": "Shared data",
   "연결한 코드 선택": "Choose connected code",
   "데이터 테이블 이름": "Data table name",
@@ -339,6 +339,15 @@ Object.assign(UI_EN, {
   "연결을 저장하지 못했습니다: ": "Could not save connections: "
 });
 Object.assign(UI_EN, {"분석 대상에서 제외": "Excluded from analysis", "기본 수집으로 일부 확인": "Partially identified by basic collection", "에이전트 분석으로 확인": "Identified by agent analysis", "기본 수집에서 확인 못 함 · 코드 분석 요청 필요": "Not identified by basic collection · Request code analysis", "에이전트가 확인하지 못함": "Not established by the agent", "분석 범위 미확인": "Analysis scope not verified"});
+Object.assign(UI_EN, {"앱이 보관하는 코드":"Code stored by the app"});
+Object.assign(UI_EN, {"계정 선택":"Choose an account"});
+Object.assign(UI_EN, {"접근 권한 확인 · GitHub 코드 내려받는 중…":"Checking access and downloading GitHub code\u2026"});
+Object.assign(UI_EN, {"첫 지도 가져오는 중…":"Collecting the first map\u2026"});
+Object.assign(UI_EN, {"연결은 저장되었습니다. 가져오지 못한 코드는 새로고침으로 다시 시도하세요.":"Connections were saved. Choose Refresh to retry code that could not be collected."});
+Object.assign(UI_EN, {"GitHub 저장소 주소를 입력해 주세요.":"Enter a GitHub repository URL."});
+Object.assign(UI_EN, {"같은 GitHub 저장소가 이미 연결되어 있습니다.":"This GitHub repository is already connected."});
+Object.assign(UI_EN, {"아직 코드가 없는 GitHub 저장소입니다.":"This GitHub repository does not have code yet."});
+Object.assign(UI_EN, {"앱의 코드 보관 위치가 바뀌었습니다. 연결 정보를 확인해 주세요.":"The app code storage location changed. Check the connection."});
 const UI_PATTERN = new RegExp(Object.keys(UI_EN).sort((a, b) => b.length - a.length).map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'g');
 function tr(text) { return S.lang === 'en' ? String(text).replace(UI_PATTERN, match => UI_EN[match]) : String(text); }
 function ui(parts, ...values) { return parts.reduce((out, part, i) => out + tr(part) + (i < values.length ? values[i] : ''), ''); }
@@ -690,7 +699,7 @@ async function doRefresh() {
 function githubErrorText(error) {
   const hit=String(error).match(/GITHUB_ACCESS\|([a-zA-Z0-9.-]+)\|([a-zA-Z0-9-]*)\|([a-z_]+)/);
   if(!hit)return String(error).slice(0,200);
-  const messages={login:'로그인 상태와 인터넷 연결을 확인해 주세요.',repository:'이 계정으로 코드를 읽을 수 없습니다. 접근 권한이나 코드 주소를 확인해 주세요.',fetch:'코드 파일을 가져오지 못했습니다. Git 연결과 SSH 키를 확인해 주세요.',remote_changed:'연결된 코드 주소가 바뀌었습니다. 코드 연결을 확인해 주세요.'};
+  const messages={login:'로그인 상태와 인터넷 연결을 확인해 주세요.',repository:'이 계정으로 코드를 읽을 수 없습니다. 접근 권한이나 코드 주소를 확인해 주세요.',download:'코드 파일을 가져오지 못했습니다. Git 연결과 SSH 키를 확인해 주세요.',fetch:'코드 파일을 가져오지 못했습니다. Git 연결과 SSH 키를 확인해 주세요.',remote_changed:'연결된 코드 주소가 바뀌었습니다. 코드 연결을 확인해 주세요.'};
   return hit[1]+(hit[2]?' / @'+hit[2]:'')+' · '+tr(messages[hit[3]] || messages.login);
 }
 async function editGitHubAccount(repository) {
@@ -749,6 +758,10 @@ function ensureRepositoryIds(repositories) {
 function registrationError(error) {
   const message=String(error);
   const messages={
+    'Use a GitHub repository URL':'GitHub 저장소 주소를 입력해 주세요.',
+    'This GitHub repository is already connected':'같은 GitHub 저장소가 이미 연결되어 있습니다.',
+    'This GitHub repository has no default branch with code':'아직 코드가 없는 GitHub 저장소입니다.',
+    'Managed code location':'앱의 코드 보관 위치가 바뀌었습니다. 연결 정보를 확인해 주세요.',
     'Use an absolute repository folder path':'코드가 들어 있는 폴더의 전체 경로를 입력해 주세요.',
     'This repository folder is already registered':'같은 코드 폴더가 이미 연결되어 있습니다.',
     'Add at least one repository':'코드 폴더를 하나 이상 연결해 주세요.',
@@ -772,10 +785,10 @@ function editProject(create) {
   if (!repos.length) repos.push({id:'',name:'',path:'',refs:{dev:'HEAD',main:null},layout:{},api_targets:[]});
   dialog.innerHTML = `<h2>${tr(create ? '프로젝트 만들기' : '연결할 코드')}</h2><p class="sub">${tr('프로젝트는 서비스 하나를 뜻합니다. 웹 화면·서버·작업 프로그램의 코드가 나뉘어 있어도 여기에 함께 연결하세요.')}</p>
     <label>${tr('서비스 이름')} <input id="projectName" placeholder="Lumen Studio" value="${esc(create ? '' : S.project)}" ${create ? '' : 'disabled'}></label>
-    <p class="s">${tr('이 컴퓨터에 있는 코드 폴더를 연결합니다. 아래에서 폴더마다 알아보기 쉬운 이름을 붙이세요.')}</p>
-    <div id="repositoryRows"></div><button class="btn quiet" id="addRepository">${tr('다른 코드 폴더 추가')}</button>
+    <p class="s">${tr('GitHub 주소나 이 컴퓨터의 코드 폴더를 입력하세요. 웹 화면·서버·작업 프로그램을 같은 서비스 아래에 추가할 수 있습니다.')}</p>
+    <div id="repositoryRows"></div><button class="btn quiet" id="addRepository">${tr('다른 코드 추가')}</button>
     <details id="shared-data-options"><summary>${tr('여러 코드가 같은 데이터를 사용할 때')}</summary><p class="s">${tr('같은 데이터베이스의 같은 테이블을 사용하는 경우에만 연결하세요. 이름이 같다는 이유만으로 연결하지 않습니다. 모르면 비워 두어도 됩니다.')}</p><div id="sharedRows"></div><button class="btn quiet" id="addSharedData">${tr('함께 쓰는 데이터 추가')}</button></details>
-    <p class="s">${tr('저장하면 코드 연결을 등록합니다. 지도 데이터를 가져오려면 새로고침을 누르세요.')}</p>
+    <p class="s">${tr('GitHub 코드는 앱 전용 폴더에 내려받고 처음 지도를 가져옵니다. 이 컴퓨터의 기존 폴더는 연결 후 새로고침으로 지도를 가져오세요.')}</p>
     <div class="ctl"><span class="spacer"></span><button class="btn quiet" id="cancelProject">${tr('닫기')}</button><button class="btn primary" id="saveProject">${tr('연결 저장')}</button></div><p id="projectError" role="alert"></p>`;
   function targetOptions(index) {
     const repo=repos[index], others=repos.filter(r=>r!==repo && r.id);
@@ -798,12 +811,13 @@ function editProject(create) {
   }
   function rows() {
     $('repositoryRows').innerHTML = repos.map((r,i) => `<fieldset data-repository-row="${i}"><legend data-repository-title="${i}">${esc(r.name || tr('새 코드 폴더'))}</legend><input type="hidden" data-field="id" value="${esc(r.id)}">
-      <div class="repository-fields"><label>${tr('화면에 표시할 이름')}<input data-field="name" value="${esc(r.name)}" placeholder="${tr('예: 웹 화면, 서버, 작업 프로그램')}"></label><label>${tr('코드가 들어 있는 폴더')}<input data-field="path" value="${esc(r.path)}" placeholder="/path/to/web"></label></div>
-      <p class="s">${tr('이름을 비워 두면 폴더 이름을 사용합니다. 폴더는 Finder에서 선택한 뒤 ⌥⌘C로 전체 경로를 복사할 수 있습니다.')}</p>
-      <details><summary>${tr('분석할 코드 버전')}</summary><p class="s">${tr('새 연결은 폴더에서 현재 선택된 브랜치에 저장된 코드를 분석합니다. 다른 버전과 비교하려면 아래 값을 바꾸세요. 비교할 버전이 없으면 비교 기준을 비워 두세요.')}</p><div class="repository-fields">${[['dev','분석할 버전',r.refs.dev || ''],['main','비교할 기준 버전',r.refs.main || '']].map(([key,label,value])=>`<label>${tr(label)}<input data-field="${key}" value="${esc(value)}" placeholder="${key==='dev'?'HEAD':'origin/main'}"></label>`).join('')}</div><p class="s">${tr('브랜치·태그·커밋을 지정할 수 있습니다. origin/main은 GitHub에서 가져온 main 브랜치를 뜻합니다. 한쪽은 반드시 남겨 주세요.')}</p></details>
+      <div class="repository-fields"><label>${tr('화면에 표시할 이름')}<input data-field="name" value="${esc(r.name)}" placeholder="${tr('예: 웹 화면, 서버, 작업 프로그램')}"></label><label>${tr('GitHub 주소 또는 코드 폴더')}<input data-field="path" value="${esc(r.url || r.path)}" placeholder="https://github.com/example/web"></label></div>
+      <p class="s">${tr('예: https://github.com/example/web 또는 /path/to/web. GitHub는 코드 보관소, 브랜치는 그 안의 코드 버전입니다. 이름은 자동으로 채워집니다.')}</p>
+      ${r.managed?`<p class="s">${tr('앱이 보관하는 코드')} · ${esc(r.path)} · @${esc(r.github?.account || '')}</p>`:''}<div data-registration-account="${i}"></div>
+      <details><summary>${tr('분석할 코드 버전')}</summary><p class="s">${tr('GitHub 주소는 기본 브랜치의 최신 코드를, 기존 폴더는 현재 선택된 브랜치를 분석합니다. 다른 버전과 비교하려면 아래 값을 바꾸세요. 비교 기준은 비워 두어도 됩니다.')}</p><div class="repository-fields">${[['dev','분석할 버전',r.refs.dev || ''],['main','비교할 기준 버전',r.refs.main || '']].map(([key,label,value])=>`<label>${tr(label)}<input data-field="${key}" value="${esc(value)}" placeholder="${key==='dev'?'HEAD':'origin/main'}"></label>`).join('')}</div><p class="s">${tr('브랜치·태그·커밋을 지정할 수 있습니다. origin/main은 GitHub에서 가져온 main 브랜치를 뜻합니다. 한쪽은 반드시 남겨 주세요.')}</p></details>
       <details><summary>${tr('서버 연결과 코드 위치 직접 지정')}</summary><p class="s">${tr('이 코드에서 보낸 요청을 어느 서버 코드가 받는지 알고 있다면 선택하세요. 선택하지 않으면 주소만으로 서로 다른 코드를 연결하지 않습니다.')}</p><h4>${tr('요청을 받는 서버 코드')}</h4><div data-api-options="${i}">${targetOptions(i)}</div>
       <div class="repository-fields">${[['frontend','화면 코드 위치',r.layout.frontend || ''],['backend','서버 코드 위치',r.layout.backend || '']].map(([key,label,value])=>`<label>${tr(label)}<input data-field="${key}" value="${esc(value)}" placeholder="${tr('자동으로 찾기')}"></label>`).join('')}</div><p class="s">${tr('코드 폴더 안의 상대 위치입니다. 예: frontend/src, backend/app. 자동으로 찾지 못할 때만 입력하세요.')}</p></details>
-      <button class="btn quiet" data-remove="${i}">${tr('이 코드 연결 해제')}</button><span class="s">${tr('연결을 해제해도 기존 지도는 남습니다.')}</span></fieldset>`).join('');
+      <button class="btn quiet" data-remove="${i}">${tr('이 코드 연결 해제')}</button><span class="s">${tr('연결을 해제해도 코드와 지도는 남습니다. 같은 GitHub 주소를 다시 연결하면 보관한 코드를 재사용합니다.')}</span></fieldset>`).join('');
     document.querySelectorAll('[data-remove]').forEach(b=>b.onclick=()=>{collectShared();repos.splice(+b.dataset.remove,1);rows();sharedRows();});
     document.querySelectorAll('[data-field="path"], [data-field="name"]').forEach(input=>input.onchange=()=>{
       collectShared();updateTargets();
@@ -813,9 +827,15 @@ function editProject(create) {
   function collect() {
     document.querySelectorAll('[data-repository-row]').forEach(row=>{
       const r = repos[+row.dataset.repositoryRow], value = key => row.querySelector(`[data-field="${key}"]`).value.trim();
-      r.id=r.id || value('id');r.path=value('path');r.name=value('name') || r.path.split(/[\\/]/).filter(Boolean).pop() || '';
+      r.id=r.id || value('id');
+      const address=value('path'),isURL=address && !address.startsWith('/') && !address.startsWith('~');
+      const oldURL=r.url;
+      if(isURL){r.url=address;if(!oldURL || address!==oldURL){delete r.managed;r.path='';delete r.github;}}
+      else {r.path=address;delete r.url;delete r.managed;}
+      r.name=value('name') || address.replace(/\.git\/?$/,'').split(/[\\/]/).filter(Boolean).pop() || '';
       row.querySelector('[data-field="name"]').value=r.name;
       r.refs={dev:value('dev') || null, main:value('main') || null};
+      if(isURL && !oldURL && r.refs.dev==='HEAD'){r.refs.dev='origin/HEAD';row.querySelector('[data-field="dev"]').value=r.refs.dev;}
       const previousLayout=r.layout;
       r.layout={};for (const key of ['frontend','backend']) {
         if (value(key)) r.layout[key]=value(key);
@@ -848,12 +868,36 @@ function editProject(create) {
   $('cancelProject').onclick=()=>dialog.close();
   $('saveProject').onclick=async()=>{
     collect();collectShared(); const name=$('projectName').value.trim(); $('saveProject').disabled=true;
+    const pending=repos.filter(r=>r.url && !known.find(k=>k.id===r.id && k.url===r.url && k.collected));
+    const priorDisabled=new Map([...dialog.querySelectorAll('fieldset,input,button')].map(el=>[el,el.disabled]));
+    const setBusy=value=>{for(const [el,disabled] of priorDisabled)el.disabled=value || disabled;$('saveProject').disabled=value;};
+    setBusy(true);$('projectError').textContent=tr('접근 권한 확인 · GitHub 코드 내려받는 중…');
     try {
       if (create && [...$('project').options].some(o=>!o.hasAttribute('data-empty') && o.value===name)) throw Error('A project with this name already exists');
       await invoke('save_project',{project:name, configuration:JSON.stringify({repositories:repos,shared_data:shared})});
+      const logs=[];let collectionFailed=false;
+      for(const repo of pending){
+        $('projectError').textContent=repo.name+' · '+tr('첫 지도 가져오는 중…');
+        try {logs.push(await invoke('refresh',{project:name,repository:repo.id,repo:'',since:'7'}));}
+        catch(error){collectionFailed=true;logs.push(githubErrorText(error));}
+      }
       const ps=await invoke('list_projects');$('project').innerHTML=ps.map(p=>`<option ${p===name?'selected':''}>${esc(p)}</option>`).join('');
-      dialog.close();await loadProject(name,true,'');
-    } catch(e) {$('projectError').textContent=registrationError(e);$('saveProject').disabled=false;}
+      dialog.close();await loadProject(name,false,'');
+      if(collectionFailed || logs.some(log=>String(log).includes('FAILED') || String(log).includes('GITHUB_ACCESS'))) $('status').textContent=tr('연결은 저장되었습니다. 가져오지 못한 코드는 새로고침으로 다시 시도하세요.');
+    } catch(e) {
+      $('projectError').textContent=String(e).includes('GITHUB_ACCESS')?githubErrorText(e):registrationError(e);
+      setBusy(false);
+      const hit=String(e).match(/GITHUB_ACCESS\|[^|]+\|[^|]*\|[a-z_]+\|([a-z0-9-]+)/);
+      if(hit){
+        const index=repos.findIndex(r=>r.id===hit[1]),box=dialog.querySelector(`[data-registration-account="${index}"]`);
+        if(box)try{
+          const value=JSON.parse(await invoke('github_logins',{project:name}));
+          if(!box.isConnected)return;
+          box.innerHTML=value.accounts.length?`<label>${tr('이 코드에 사용할 계정')}<select data-registration-login><option value="">${tr('계정 선택')}</option>${value.accounts.map(a=>`<option value="${esc(a)}">${esc(a)}</option>`).join('')}</select></label><p class="s">${tr('다른 작업의 로그인 계정은 바꾸지 않습니다.')}</p>`:tr('로그인된 계정이 없습니다. 터미널에서 gh auth login으로 로그인한 뒤 다시 열어 주세요.');
+          const select=box.querySelector('select');if(select)select.onchange=()=>{if(select.value)repos[index].github={host:'github.com',account:select.value};};
+        }catch(error){box.textContent=githubErrorText(error);}
+      }
+    }
   };
   dialog.showModal();
 }

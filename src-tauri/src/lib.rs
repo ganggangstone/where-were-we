@@ -117,6 +117,11 @@ async fn github_accounts(app: tauri::AppHandle, project: String, repository: Str
 }
 
 #[tauri::command]
+async fn github_logins(app: tauri::AppHandle, project: String) -> Result<String, String> {
+    run_py(&app,"project.py",&["github-logins",&project])
+}
+
+#[tauri::command]
 async fn use_github_account(app: tauri::AppHandle, project: String, repository: String, account: String) -> Result<String, String> {
     run_py(&app,"project.py",&["github-account",&project,"--repository",&repository,&account])
 }
@@ -604,7 +609,7 @@ async fn check_release(app: tauri::AppHandle) -> Result<ReleaseStatus, String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app = tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![list_projects, read_map, read_project, save_project, github_accounts, use_github_account, read_settings, save_settings, open_url, refresh, suggest_groups, make_steps, make_system, make_jobs, analysis_request, briefing_request, setup_prompt, tests_prompt, app_version, check_release, app_update_status, start_app_update])
+        .invoke_handler(tauri::generate_handler![list_projects, read_map, read_project, save_project, github_logins, github_accounts, use_github_account, read_settings, save_settings, open_url, refresh, suggest_groups, make_steps, make_system, make_jobs, analysis_request, briefing_request, setup_prompt, tests_prompt, app_version, check_release, app_update_status, start_app_update])
         .build(tauri::generate_context!()).expect("error while building tauri application");
     app.run(|app, event| {
         if matches!(event, tauri::RunEvent::Ready) {

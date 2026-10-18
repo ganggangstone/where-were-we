@@ -77,12 +77,12 @@ def github_run(args,env,identity,kind):
     if result.returncode:raise github_error(identity,kind)
     return result.stdout.strip()
 
-def github_environment(repo,check_access=True):
+def github_environment(repo,check_access=True,origin=None):
     """Credentials live only in the collection child, never argv/config/logs."""
     env=dict(os.environ)
     for key in ('GH_REPO','GH_HOST','GH_DEBUG','DEBUG','GIT_TRACE','GIT_TRACE_CURL','GIT_CURL_VERBOSE','WHERE_WERE_WE_GITHUB'):
         env.pop(key,None)
-    origin=github_origin(repo['path']) if repo.get('path') else None
+    origin=origin or (github_origin(repo['path']) if repo.get('path') else None)
     identity=repo.get('github') or {}
     if not origin:return env
     if identity and identity['host']!=origin['host']:raise github_error(identity,'remote_changed')
@@ -205,6 +205,9 @@ def validate(data):
         for v in layout.values():
             if v is not None and (not isinstance(v,str) or not v or v.startswith('/') or '..' in v.split('/') or '\\' in v):raise ValueError('Source roots must be repository-relative paths')
         entry={'id':rid,'name':str(item.get('name') or rid),'path':path,'refs':refs,'layout':layout,'api_targets':item.get('api_targets',[])}
+        if item.get('url'):
+            import connections
+            entry.update(url=connections.parse_url(item['url']),managed=bool(item.get('managed')))
         if item.get('github'):
             identity=item['github']
             if not isinstance(identity,dict) or identity.get('host')!='github.com' or not isinstance(identity.get('account'),str) or not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9-]{0,38}',identity['account']):raise ValueError('Choose a GitHub account')
@@ -227,7 +230,8 @@ def validate(data):
     return result
 
 def configure(name, data):
-    proposed=validate(data)
+    import connections
+    proposed=connections.prepare(name,data)
     with locked(name):
         existing=read(home(name)/'project.json')
         for repo in proposed['repositories']:
@@ -235,7 +239,10 @@ def configure(name, data):
             if previous.get('github') and not repo.get('github'):repo['github']=previous['github']
             legacy=states(name).get('@github',{})
             if repo.get('legacy') and legacy.get('path')==repo['path'] and not repo.get('github'):repo['github']=legacy.get('github')
-            capture_github(repo)
+            if repo.get('managed'):
+                try:connections.ensure(name,repo)
+                except ValueError as error:raise ValueError(str(error)+'|'+repo['id']) from None
+            else:capture_github(repo)
         # IDs remain stable. A legacy association must describe the actual old map.
         for repo in proposed['repositories']:
             if repo.get('legacy'):
@@ -553,7 +560,7 @@ def read_bundle(name, repository='', branch='dev'):
 
 def child_environment(root,repo):
     import mapcore
-    env=dict(github_environment(repo),WHERE_WERE_WE_ROOT=str(root),WHERE_WERE_WE_REFS=json.dumps(repo['refs']),WHERE_WERE_WE_LAYOUT=json.dumps(repo['layout']),WHERE_WERE_WE_SETTINGS=mapcore.settings_path(),WHERE_WERE_WE_COLLECTION_STAGE='1')
+    env=dict(github_environment(repo),WHERE_WERE_WE_MANAGED_CODE='1' if repo.get('managed') else '',WHERE_WERE_WE_ROOT=str(root),WHERE_WERE_WE_REFS=json.dumps(repo['refs']),WHERE_WERE_WE_LAYOUT=json.dumps(repo['layout']),WHERE_WERE_WE_SETTINGS=mapcore.settings_path(),WHERE_WERE_WE_COLLECTION_STAGE='1')
     return env
 
 def _transaction(name,repo,command, reset=False):
@@ -585,6 +592,9 @@ def refresh_project(name, repository='', since='7'):
             old=states(name).get(repo['id'],{})
             state=states(name);state[repo['id']]={**old,'last_attempt':now(),'in_progress':True};atomic(home(name)/'repository-state.json',state)
             try:
+                if repo.get('managed'):
+                    import connections
+                    connections.ensure(name,repo)
                 remember_github(name,repo)
                 _transaction(name,repo,['refresh.py',repo['path'],since],reset=old.get('fingerprint')!=fingerprint(repo))
                 messages.append(repo['id']+': refreshed')
@@ -643,7 +653,7 @@ def record_test(name,rid,route,file,line,quote):
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command',choices=['read','configure','refresh','action','github-accounts','github-account']);parser.add_argument('project')
+    parser.add_argument('command',choices=['read','configure','refresh','action','github-accounts','github-account','github-logins']);parser.add_argument('project')
     parser.add_argument('--repository',default='');parser.add_argument('args',nargs='*')
     args,remaining=parser.parse_known_args()
     if remaining and args.command!='action':parser.error('unrecognized arguments: '+' '.join(remaining))
@@ -651,6 +661,9 @@ def main():
     if args.command=='read':print(json.dumps(read_bundle(args.project,args.repository),ensure_ascii=False))
     elif args.command=='configure':print(json.dumps(configure(args.project,json.loads(args.args[0]) if args.args else json.load(sys.stdin)),ensure_ascii=False))
     elif args.command=='refresh':print(refresh_project(args.project,args.repository))
+    elif args.command=='github-logins':
+        import connections
+        print(json.dumps(connections.accounts()))
     elif args.command=='github-accounts':print(json.dumps(github_accounts(args.project,args.repository)))
     elif args.command=='github-account':print(set_github_account(args.project,args.repository,args.args[0]))
     else:
