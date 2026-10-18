@@ -137,7 +137,8 @@ async function applyAppCommand(command) {
     case 'start_update':if(U.installing)controlError('update_already_running');if(!U.latest?.newer)controlError('no_update_available');await startUpdate();if(U.job?.stage==='failed')controlError('update_failed',U.job.error);output={started:true,completed:false,update:await invoke('app_update_status')};break;
     default:controlError('invalid_action');
   }
-  await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+  // DOM rendering above is synchronous. Animation frames pause in background
+  // webviews, so awaiting them would block every later command.
   return {ok:true,output,state:await controlState()};
 }
 let controlApplying=false;

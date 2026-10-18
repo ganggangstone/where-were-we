@@ -45,7 +45,8 @@ class Control(unittest.TestCase):
         controller=(folder/'ui/control.js').read_text()
         bootstrap=r'''
 const calls=[];
-window.requestAnimationFrame=fn=>setTimeout(fn,0);
+// Hidden native webviews can suspend animation frames.
+window.requestAnimationFrame=()=>0;
 window.__TAURI__={core:{invoke:async(command,args)=>{
  calls.push({command,args});
  if(command==='control_focus')return;
