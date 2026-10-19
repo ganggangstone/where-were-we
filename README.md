@@ -166,9 +166,23 @@ Report bugs or suggest improvements in [Issues](https://github.com/ganggangstone
 The [license](LICENSE) permits personal use, internal business use, and free redistribution under its conditions. Paid products and external paid services are restricted. This is a custom source-available license; third-party components retain their own licenses.
 
 <details>
-<summary>v0.2.0 release notes</summary>
+<summary>v0.2.1 release notes</summary>
 
 <!-- release-notes:start -->
+### 한국어
+
+- 기본 Tauri 아이콘을 where-were-we 전용 로고로 교체했습니다. 연결된 W 모양과 초록색 점으로 코드의 연결 관계와 돌아올 위치를 표현했습니다.
+
+### English
+
+- Replaced the default Tauri icon with a dedicated where-were-we logo. The connected W shape and green dot represent code connections and a place to resume work.
+<!-- release-notes:end -->
+
+</details>
+
+<details>
+<summary>v0.2.0 release notes</summary>
+
 ### 한국어
 
 - 한 프로젝트에 여러 레포를 연결하고 전체 또는 레포별 지도를 봅니다.
@@ -192,7 +206,6 @@ The [license](LICENSE) permits personal use, internal business use, and free red
 - Use your connected MCP agent for detailed maps, grouping, architecture, program jobs and request steps, without a provider-specific AI CLI.
 - Remove agent session collection and session-resume controls.
 - Install Homebrew updates from the app and reopen automatically, with recovery of the previous app on failure.
-<!-- release-notes:end -->
 
 </details>
 
