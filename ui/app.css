@@ -52,9 +52,9 @@ header input[type=search] { flex:1 1 var(--space-0); max-width:var(--size-search
 header .btn { background:var(--color-bg-toolbar-control); color:var(--color-text-on-toolbar); border:var(--border-toolbar) }
 
 /* 뼈대: 왼쪽 스토리 맵, 오른쪽 인스펙터 */
-main { flex:1; min-height:var(--space-0); display:grid; grid-template-columns:1fr var(--size-inspector) }
+main { flex:1; min-height:var(--space-0); display:grid; grid-template-columns:1fr auto }
 #map { overflow:auto; padding:var(--space-6) }
-#insp { overflow:auto; background:var(--color-bg-content); border-left:var(--border-hairline); padding:var(--space-6) var(--space-6) var(--space-8); user-select:text }
+#insp { width:var(--size-inspector); overflow:auto; background:var(--color-bg-content); border-left:var(--border-hairline); padding:var(--space-6) var(--space-6) var(--space-8); user-select:text }
 
 /* 작은 부품: 점, 막대, 알약 */
 .dot { display:inline-block; width:var(--size-dot); height:var(--size-dot); border-radius:var(--radius-pill); background:var(--color-bg-control); vertical-align:middle; margin-right:var(--space-2) }
@@ -128,7 +128,8 @@ details .kv { margin:var(--space-3) var(--space-0) var(--space-0); word-break:br
 .fcol { display:flex; flex-direction:column; gap:var(--space-3) } .fcol .card { margin:var(--space-0); z-index:1 }
 .card.plain { background:var(--color-bg-group) } .pill.click { cursor:pointer; color:var(--color-accent) } .pill.strong.click { color:var(--color-text-on-strong) } .pill.click[data-f]::after, .pill.click[data-goscr]::after { content:' ›' }
 /* 고른 것이 없을 때 상세 칸은 안내만 담으니 좁힌다 */
-main:has(#insp > .hint:only-child) { grid-template-columns:1fr var(--size-column) } main:has(#insp:empty) { grid-template-columns:1fr }
+/* WebKit does not re-match main:has(#insp…) when #insp changes; keep the state on #insp. */
+#insp:has(> .hint:only-child) { width:var(--size-column) } #insp:empty { display:none }
 .seg button[hidden] { display:none }
 .sys.three { grid-template-columns:repeat(3, 1fr) }
 /* 전체 구조: 상자 자리는 dagre 가 잡는다 */

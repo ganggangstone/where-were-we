@@ -62,3 +62,21 @@ try{
    syntax=subprocess.run(['/opt/homebrew/bin/node','--check'],input=bootstrap+script+checks,capture_output=True,text=True);self.assertEqual(syntax.returncode,0,syntax.stderr)
    result=subprocess.run([str(chrome),'--headless','--disable-gpu','--no-first-run','--disable-background-networking','--disable-component-update','--user-data-dir='+tmp+'/chrome','--virtual-time-budget=3000','--dump-dom',target.as_uri()],capture_output=True,text=True,timeout=30)
    self.assertTrue('data-clarity="passed"' in result.stdout,str(re.findall(r'<pre>(.*?)</pre>',result.stdout,re.S))[-1800:])
+
+class NativeLayout(unittest.TestCase):
+ def test_inspector_stays_beside_the_map_in_webkit_after_its_content_changes(self):
+  # Chrome re-matches main:has(#insp…) but WebKit (the macOS app) kept the stale one-column layout.
+  import shutil,sys
+  if sys.platform!='darwin' or not shutil.which('swiftc'):self.skipTest('macOS WebKit and swiftc are required')
+  root=Path(__file__).resolve().parents[1]
+  with tempfile.TemporaryDirectory() as tmp:
+   tmp=Path(tmp);page=tmp/'page.html';probe=tmp/'probe'
+   links=''.join(f'<link rel="stylesheet" href="{(root/"ui"/n).as_uri()}">' for n in ('tokens.css','app.css'))
+   page.write_text(f'<!doctype html><meta charset="utf-8">{links}<body><main><div id="map"></div><div id="insp"></div></main>')
+   subprocess.run(['swiftc','-O',str(root/'tests/webkit_layout_probe.swift'),'-o',str(probe)],check=True,capture_output=True)
+   rows=[json.loads(line) for line in subprocess.run([str(probe),str(page)],check=True,capture_output=True,text=True,timeout=60).stdout.split()]
+  empty,content,hint,empty2,content2=rows
+  for row in (content,content2):
+   self.assertEqual(row['insp_y'],0,row);self.assertGreater(row['insp_x'],0,row);self.assertEqual(row['map_w']+row['insp_w'],1446,row)
+  self.assertEqual(hint['insp_y'],0,hint);self.assertLess(hint['insp_w'],content['insp_w'],hint)
+  for row in (empty,empty2):self.assertEqual((row['map_w'],row['insp_w']),(1446,0),row)

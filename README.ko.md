@@ -148,19 +148,21 @@ open -a TextEdit ~/.where-were-we/.app-update.log
 
 ### 한국어
 
-- 코드 상태 표시, 연결 진단, 분석 방식 선택, 일부만 끝난 결과와 진행 문구, 동시에 시작한 새로고침이 프로젝트와 코드 범위마다 같은 방식으로 동작합니다.
-- 앱이 만드는 안내 문구를 한국어와 영어 모두로 보여 줍니다.
-- 누를 수 있는 카드·버튼·목록에 누른 느낌을 더했습니다. 주소가 없는 코드 링크도 키보드로 이동해 열 수 있습니다.
-- 데모 화면과 그래프 간격을 디자인 기준값에 맞췄습니다.
-- README 화면을 가상 데모 프로젝트로 다시 찍었습니다.
+- 상단 보기를 구조·하는 일·바뀐 것 세 가지로 정리했습니다. 기능 묶음·화면 지도·연결·데이터는 각 보기 안에서 고릅니다.
+- 설정·언어·에이전트 연결·버전·업데이트를 메뉴 하나에 모았습니다.
+- 운영·개발 대신 분석 버전과 비교 버전을 실제 브랜치·태그 이름으로 보여 줍니다.
+- 분석 요청과 결과 확인 흐름을 단순하게 바꾸고, 일부만 끝난 결과와 진행 상황을 코드 범위마다 정확히 보여 줍니다. 새로고침이 겹쳐도 화면이 엇갈리지 않습니다.
+- 코드 링크를 키보드로 찾아 열 수 있고, 누를 수 있는 항목은 누르면 반응합니다.
+- 앱이 보여 주는 안내를 한국어와 영어로 모두 제공합니다.
 
 ### English
 
-- Code status, connection diagnostics, analysis choices, partial results, progress text and overlapping refreshes behave the same way for every project and code scope.
-- App-generated messages are shown in both Korean and English.
-- Clickable cards, buttons and list rows give press feedback. Code links without an address can be reached and opened from the keyboard.
-- The demo overlay and graph spacing follow the design tokens.
-- README screenshots were re-taken with the fictional demo project.
+- The toolbar now has three views: Structure, What it does and Changes. Feature groups, screen map and connections/data are chosen inside each view.
+- Settings, language, agent connection and version/updates are in one menu.
+- Analyzed and compared versions are shown by their actual branch or tag names instead of production/development.
+- Requesting analysis and reading its results is simpler; partial results and progress are shown accurately for each code scope, and overlapping refreshes no longer leave the screen inconsistent.
+- Code links can be reached and opened from the keyboard, and clickable items respond when pressed.
+- Messages shown by the app are available in both Korean and English.
 
 
 [전체 릴리즈](https://github.com/ganggangstone/where-were-we/releases) · [설정과 구현 상세](docs/MULTI_REPO_SPEC.md)
