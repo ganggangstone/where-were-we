@@ -399,9 +399,9 @@ window.__TAURI__={core:{invoke:async(command,args)=>{
   assert(tr('에이전트에 전달할 요청을 준비합니다. 앱에서 바로 분석하지 않습니다.').includes('does not run in the app'),'Step requests must not retain old automatic-analysis wording');
   analysisBundle.project.repositories[0].results.dev.system={version:'proposal',commit:'abc',stale:false,proposal:true};
   await $('checkAnalysisResults').onclick();
-  assert($('analysisResultState').textContent.includes('saved separately') && !$('viewAnalysisResults'),'A saved AI proposal must not offer the old manual map as its new result');
+  assert($('analysisResultState').textContent.includes('saved separately') && $('viewAnalysisResults').textContent==='View AI proposal','A saved AI proposal is offered as the proposal, not as the old manual map');
   S.analysisRequest.requirements[0].before={version:'proposal'};await $('checkAnalysisResults').onclick();
-  assert($('analysisResultState').textContent.includes('earlier AI proposal') && !$('viewAnalysisResults'),'An earlier AI proposal must not link to the manual map either');
+  assert($('analysisResultState').textContent.includes('earlier AI proposal') && $('viewAnalysisResults').textContent==='View AI proposal','An earlier AI proposal is offered as the proposal too');
   S.repository='';S.projectInfo={repositories:[{id:'api-a'},{id:'api-b'}]};
   requests=()=>['api-a','api-b'].map(repository=>({route:{repository,file:repository+'/server.py',function:'Save'}}));
   await requestAgentAction('make_steps',{screen:'/items'});

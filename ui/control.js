@@ -16,11 +16,22 @@ function controlTargets() {
   for(const s of visibleScreens(m))add('screen',s.path,label(m,s.path),s.source_path || s.path,s,s.repository);
   for(const r of m.backend_routes || [])add('request',r.file+'::'+r.function,r.name || r.function,r.method+' '+r.path,r,r.repository);
   for(const n of S.system?.nodes || [])add('program',n.id,n.name,n.what,n,n.repository);
-  for(const t of new Set([...Object.values(m.models || {}),...Object.keys(tableUse(m)),...(S.system?.nodes || []).flatMap(n=>n.tables || [])]))add('data',t,t,'',{},t.split('::')[0]);
+  for(const t of new Set([...Object.values(m.models || {}),...Object.keys(tableUse(m)),...(S.system?.nodes || []).flatMap(n=>n.tables || [])]))add('data',t,tableName(t),t,{},t.split('::')[0]);
   for(const [node,value] of Object.entries(S.jobs?.nodes || {}))for(const job of value.jobs || [])add('job',{node,job},job.name,job.what,job,(S.system?.nodes || []).find(n=>n.id===node)?.repository);
-  for(const link of S.system?.links || [])add('connection',link,link.label,[(S.system.nodes.find(n=>n.id===link.from)?.name || link.from),(S.system.nodes.find(n=>n.id===link.to)?.name || link.to)].join(' → '),link);
+  for(const link of S.system?.links || [])add('connection',link,linkLabel(link),[(S.system.nodes.find(n=>n.id===link.from)?.name || link.from),(S.system.nodes.find(n=>n.id===link.to)?.name || link.to)].join(' → '),link);
   for(const group of groupsOf(m))add('feature',group.list.map(s=>s.path).sort(),group.name,group.description,{screens:group.list.map(s=>s.path)});
   return [...items.values()];
+}
+// Agent selection and the search box open targets the same way.
+function openTarget(target,relations=true) {
+  S.q='';$('q').value='';S.agentPrompt=null;S.step=-1;S.ev=-1;
+  if(target.kind==='screen'){if(relations)setFocus('screen|'+target.key);else selectScreen(target.key,false);}
+  else if(target.kind==='request')setFocus('route|'+target.key);
+  else if(target.kind==='data')setFocus('table|'+target.key);
+  else if(target.kind==='program')selectProgram(target.key,false);
+  else if(target.kind==='job')selectProgram(target.key.node,false);
+  else if(target.kind==='connection')selectProgram(target.key.from,false);
+  else if(target.kind==='feature'){S.view='feat';S.feat=groupsOf(M()).findIndex(g=>targetID('feature',g.list.map(s=>s.path).sort())===target.id);render();}
 }
 async function controlRevision() {
   const bytes=new TextEncoder().encode(JSON.stringify(controlCanonical({project:S.project,repository:S.repository,branch:S.branch,map:M(),system:S.system,jobs:S.jobs,groups:S.groups,flows:S.flows,config:S.projectInfo})));
@@ -37,7 +48,7 @@ async function controlState() {
   const selected=controlSelection(),targets=controlTargets();
   return {project:S.project,repository:S.repository,branch:S.branch,view:S.view,revision:await controlRevision(),selection:selected,
     selected:targets.filter(t=>selected.includes(t.id)),query:S.q,step:S.step,language:S.lang,settings:S.settings,
-    dialogs:[...document.querySelectorAll('dialog[open]')].map(d=>d.id),analysis:S.analysisRequest?{state:S.analysisRequest.state,scope:S.analysisRequest.scope,prepared:true}:null};
+    dialogs:[...document.querySelectorAll('dialog[open]')].map(d=>d.id),structure:S.showProposal && S.proposal?'ai_proposal':'written',analysis:S.analysisRequest?{state:S.analysisRequest.state,scope:S.analysisRequest.scope,prepared:true}:null};
 }
 function controlDecoration() {
   // Detailed job/connection selection complements the existing program inspector.
@@ -65,7 +76,7 @@ async function controlContext(args) {
     if(S.repository!==args.repository)controlError('context_unavailable');
   }
   if(args.branch){if(!['dev','main'].includes(args.branch) || !S.maps[args.branch])controlError('branch_unavailable');if(S.branch!==args.branch){S.branch=args.branch;S.sel=null;S.open=null;S.focus=null;S.node=null;S.feat=null;S.controlTarget=null;render();}}
-  if(S.branchDetails?.[S.branch])for(const k of ['system','jobs','groups','flows'])S[k]=S.branchDetails[S.branch][k];
+  applyBranchDetails();
 }
 async function applyAppCommand(command) {
   const a=command.arguments || {};let output=null;
@@ -85,14 +96,7 @@ async function applyAppCommand(command) {
       if(!a.project || a.repository===undefined || !a.branch || !a.revision)controlError('explicit_target_context_required');
       if(a.revision!==await controlRevision())controlError('stale_revision');
       const target=controlTargets().find(t=>t.id===a.target);if(!target)controlError('missing_target');
-      S.q='';$('q').value='';S.agentPrompt=null;S.step=-1;S.ev=-1;
-      if(target.kind==='screen'){if(a.relations===false)selectScreen(target.key,false);else setFocus('screen|'+target.key);}
-      else if(target.kind==='request')setFocus('route|'+target.key);
-      else if(target.kind==='data')setFocus('table|'+target.key);
-      else if(target.kind==='program')selectProgram(target.key,false);
-      else if(target.kind==='job')selectProgram(target.key.node,false);
-      else if(target.kind==='connection')selectProgram(target.key.from,false);
-      else if(target.kind==='feature'){S.view='feat';S.feat=groupsOf(M()).findIndex(g=>targetID('feature',g.list.map(s=>s.path).sort())===target.id);render();}
+      openTarget(target,a.relations!==false);
       S.controlTarget=target.id;S.controlAnchor=JSON.stringify([S.view,S.sel,S.open,S.node,S.focus,S.feat]);controlDecoration();controlScroll();
       await invoke('control_focus');break;
     }

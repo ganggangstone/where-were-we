@@ -49,23 +49,25 @@ async function checkCurrentConnection(){
 function renderConnectionDiagnostic(){
  const report=S.connectionDiagnostic||{feature:'detail'},fresh=report.fresh_server||{},actual=report.connection||{state:'not_verified'},registration=report.registration||{state:'not_inspected'};
  const valid=!!report.challenge&&fresh.state==='ready'&&!['expired','app_changed'].includes(actual.state);
- $('insp').innerHTML=`<h2>${tr('연결 진단')}</h2><p>${tr('앱 서버와 현재 에이전트 연결을 따로 확인합니다. 설정은 자동으로 바꾸지 않습니다.')}</p>
+ const verified=actual.state==='verified',missing=[...new Set([...(fresh.missing||[]),...(actual.missing||[])])];
+ $('insp').innerHTML=`<h2>${tr('연결 진단')}</h2>
+ ${report.busy?`<p role="status">${tr('앱에 포함된 서버를 확인하는 중…')}</p>`:report.error?`<p role="alert">${tr('연결 진단을 실행하지 못했습니다. 다시 시도하세요.')}</p>`:`<p id="liveConnectionState" role="status">${connectionMessage(actual.state)}</p>
+ ${fresh.state!=='ready'?`<p role="alert">${connectionMessage(fresh.state)}</p>`:''}
+ ${['not_inspected','matches_app'].includes(registration.state)?'':`<p role="alert">${connectionMessage(registration.state)}</p>`}
+ ${missing.length?`<p role="alert">${tr('없는 도구')}: ${esc(missing.join(', '))}</p>`:''}`}
  <label>${tr('사용할 기능')} <select id="connectionFeature">${Object.entries(connectionFeatures).map(([key,label])=>`<option value="${key}" ${key===report.feature?'selected':''}>${tr(label)}</option>`).join('')}</select></label>
  <button class="btn" id="runConnectionDiagnostic" ${report.busy?'disabled':''}>${tr(report.busy?'확인 중…':'다시 진단')}</button>
- ${report.error?`<p role="alert">${tr('연결 진단을 실행하지 못했습니다. 다시 시도하세요.')}</p>`:''}
- ${report.busy?`<p role="status">${tr('앱에 포함된 서버를 확인하는 중…')}</p>`:`<h3>${tr('1. 앱 서버')}</h3><p id="bundledConnectionState" role="status">${connectionMessage(fresh.state)}</p>
- ${report.app?`<p class="s">${tr('앱 버전')}: ${esc(report.app.app_version||tr('확인할 수 없음'))}</p><details><summary>${tr('앱 서버 경로')}</summary><pre class="prompt mono">${esc(report.app.python)}\n${esc(report.app.server)}</pre></details>`:''}
- ${fresh.missing?.length?`<p class="s">${tr('없는 도구')}: ${esc(fresh.missing.join(', '))}</p>`:''}
- <h3>${tr('2. 등록된 경로')}</h3><p id="registeredConnectionState">${connectionMessage(registration.state)}</p>${registration.server?`<pre class="prompt mono">${esc(registration.command)}\n${esc(registration.server)}</pre>`:''}
- <h3>${tr('3. 현재 에이전트 연결')}</h3><p id="liveConnectionState" role="status">${connectionMessage(actual.state)}</p>
- ${actual.missing?.length?`<p class="s">${tr('없는 도구')}: ${esc(actual.missing.join(', '))}</p>`:''}
- <p>${tr('요청을 복사해 쓰는 에이전트에 전달하세요. 에이전트가 재연결 후 확인 도구를 호출하면 아래에서 결과를 확인할 수 있습니다.')}</p>
- <div class="ctl"><button class="btn primary" id="copyConnectionRequest" ${valid?'':'disabled'}>${tr('연결 수정 요청 복사')}</button><button class="btn" id="checkCurrentConnection" ${report.challenge&&!report.checking?'':'disabled'}>${tr(report.checking?'확인 중…':'현재 연결 확인')}</button></div>
+ ${report.busy||report.error?'':`${verified?`<div class="ctl"><button class="btn primary" id="backToMap">${tr('지도로 돌아가기')}</button></div>`:`<p>${tr('요청을 에이전트에 전달한 뒤 현재 연결을 확인하세요.')}</p>`}
+ <div class="ctl"><button class="btn ${verified?'quiet':'primary'}" id="copyConnectionRequest" ${valid?'':'disabled'}>${tr('연결 수정 요청 복사')}</button><button class="btn" id="checkCurrentConnection" ${report.challenge&&!report.checking?'':'disabled'}>${tr(report.checking?'확인 중…':'현재 연결 확인')}</button></div>
  <p id="connectionCopyStatus" role="status">${report.copied?tr('복사했습니다. 에이전트 채팅에 붙여 넣으세요.'):''}</p>
  ${report.checkError?`<p role="alert">${tr('연결 확인 결과를 읽지 못했습니다. 다시 진단하세요.')}</p>`:''}
- <p class="s">${tr('앱 서버가 정상이어도 에이전트가 재연결한 것은 아닙니다. 프로젝트와 바뀐 것은 새로고침하지 않습니다.')}</p>
+ ${helpDetails(`<p>${tr('앱 서버와 현재 에이전트 연결을 따로 확인합니다. 설정은 자동으로 바꾸지 않습니다.')}</p><h3>${tr('1. 앱 서버')}</h3><p id="bundledConnectionState">${connectionMessage(fresh.state)}</p>
+ ${report.app?`<p class="s">${tr('앱 버전')}: ${esc(report.app.app_version||tr('확인할 수 없음'))}</p><pre class="prompt mono">${esc(report.app.python)}\n${esc(report.app.server)}</pre>`:''}
+ <h3>${tr('2. 등록된 경로')}</h3><p id="registeredConnectionState">${connectionMessage(registration.state)}</p>${registration.server?`<pre class="prompt mono">${esc(registration.command)}\n${esc(registration.server)}</pre>`:''}
+ <p class="s">${tr('앱 서버가 정상이어도 에이전트가 재연결한 것은 아닙니다. 프로젝트와 바뀐 것은 새로고침하지 않습니다.')}</p>`,'진단 상세')}
  ${valid?`<details><summary>${tr('요청 내용 보기')}</summary><pre class="prompt mono">${esc(report.handoff)}</pre></details>`:''}`}`;
  $('connectionFeature').onchange=e=>startConnectionDiagnostic(e.target.value);
+ if($('backToMap'))$('backToMap').onclick=()=>{S.agentPrompt=null;S.agentPurpose=null;render();};
  $('runConnectionDiagnostic').onclick=()=>startConnectionDiagnostic(report.feature);
  if($('checkCurrentConnection'))$('checkCurrentConnection').onclick=checkCurrentConnection;
  if($('copyConnectionRequest'))$('copyConnectionRequest').onclick=async()=>{

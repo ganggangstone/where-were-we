@@ -2,6 +2,7 @@
 * { box-sizing:border-box }
 html, body { height:100% }
 body { margin:var(--space-0); background:var(--color-bg-window); color:var(--color-text); font:var(--font-body); letter-spacing:var(--tracking-body); -webkit-font-smoothing:antialiased; display:flex; flex-direction:column; cursor:default; user-select:none }
+#map { user-select:text }
 .mono { font-family:var(--font-mono); font-size:var(--size-code); letter-spacing:normal }
 .strong { color:var(--color-text); font-weight:var(--weight-strong) } .regular { font-weight:var(--weight-regular) }
 .spacer, .grow { flex:1 } .grow { min-width:var(--space-0) }
@@ -19,13 +20,28 @@ a.lnk { color:var(--color-accent); text-decoration:none; cursor:pointer } a.lnk:
 header { display:flex; flex-wrap:wrap; align-items:center; gap:var(--space-4); padding:var(--space-3) var(--space-5); background:var(--color-bg-toolbar); color:var(--color-text-on-toolbar) }
 header select, header input[type=search] { font:var(--font-secondary); letter-spacing:var(--tracking-secondary); color:var(--color-text-on-toolbar); background:var(--color-bg-toolbar-control); border:var(--border-toolbar); padding:var(--space-2) var(--space-4); outline:none }
 header select { border-radius:var(--radius-control) }
-header input[type=search] { width:var(--size-search); border-radius:var(--radius-pill) } header input[type=search]:focus { outline:var(--outline-focus) }
+header input[type=search] { flex:1 1 var(--space-0); max-width:var(--size-search); min-width:var(--size-node); border-radius:var(--radius-pill) } header input[type=search]:focus { outline:var(--outline-focus) }
 .seg { display:inline-flex; gap:var(--space-2) }
 .seg button { font:var(--font-secondary); letter-spacing:var(--tracking-secondary); color:var(--color-text-on-toolbar-muted); border:var(--border-toolbar); background:none; padding:var(--space-2) var(--space-4); border-radius:var(--radius-pill) }
 .seg button.on { background:var(--color-toolbar-chip-on); color:var(--color-text-on-toolbar-chip); font-weight:var(--weight-strong) }
 .seg button:active, .btn:active { transform:var(--press) }
 .seg small { margin-left:var(--space-2) }
-.status { color:var(--color-text-on-toolbar-muted); font:var(--font-secondary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:var(--size-status-max) }
+/* 상태 줄: 위쪽 막대 아래 한 줄. 비어 있으면 자리를 차지하지 않고, 오류는 신호색으로 보인다. */
+#status { margin:var(--space-0); padding:var(--space-2) var(--space-5); font:var(--font-secondary); letter-spacing:var(--tracking-secondary); color:var(--color-text-secondary); background:var(--color-bg-content); border-bottom:var(--border-hairline); overflow-wrap:anywhere }
+#status:empty { display:none } #status.error, .s.error { color:var(--color-warn) }
+/* 드문 도구는 메뉴 안에 둔다 */
+#menu { position:relative } #menu > summary { list-style:none; margin:var(--space-0) } #menu > summary::-webkit-details-marker { display:none }
+.menu-panel { position:absolute; right:var(--space-0); top:100%; z-index:5; margin-top:var(--space-2); display:flex; flex-direction:column; align-items:stretch; gap:var(--space-2); padding:var(--space-3); min-width:var(--size-column); background:var(--color-bg-content); border:var(--border-hairline); border-radius:var(--radius-card) }
+.menu-panel .btn { text-align:left }
+/* 밝은 바탕 위의 선택 버튼 묶음 */
+.seg.light button { color:var(--color-text-secondary); border:var(--border-hairline) } .seg.light button.on { background:var(--color-fill-strong); color:var(--color-text-on-strong) }
+.seg[hidden] { display:none } .seg button:disabled { opacity:var(--opacity-disabled) }
+/* 검색 결과 */
+.search-results { margin-bottom:var(--space-6) } button.row { width:100%; font:inherit; color:inherit; text-align:left; background:none; border-left:none; border-right:none; border-bottom:none }
+.chips { display:inline-flex; flex-wrap:wrap; gap:var(--space-2) }
+.hint.start { text-align:left; max-width:calc(var(--size-inspector) + var(--size-column)); margin:var(--space-0) auto } .hint.start ol { padding-left:var(--space-6) }
+/* 키보드로 고른 곳이 보이게 */
+[role=button]:focus-visible, button:focus-visible, summary:focus-visible, select:focus-visible, input:focus-visible { outline:var(--outline-focus) }
 
 /* 버튼: 유틸리티(진한 사각), 주 버튼(파란 알약), 글자 버튼 */
 .btn { font:var(--font-secondary); letter-spacing:var(--tracking-secondary); color:var(--color-text-on-strong); background:var(--color-fill-strong); border:none; border-radius:var(--radius-control); padding:var(--space-2) var(--space-4) }
@@ -79,7 +95,7 @@ h2 { margin:var(--space-0); font:var(--font-title); letter-spacing:var(--trackin
 .detail { padding:var(--space-4) var(--space-4) var(--space-5); border-top:var(--border-hairline); background:var(--color-bg-content) }
 .flowline { display:flex; flex-wrap:wrap; gap:var(--space-2); align-items:center; margin:var(--space-0) var(--space-0) var(--space-4) }
 .ctl { display:flex; gap:var(--space-3); align-items:center; margin-top:var(--space-4); color:var(--color-text-secondary); font:var(--font-secondary); letter-spacing:var(--tracking-secondary) }
-details > summary { color:var(--color-text-secondary); font:var(--font-secondary); margin-top:var(--space-4); outline:none }
+details > summary { color:var(--color-text-secondary); font:var(--font-secondary); margin-top:var(--space-4) }
 details .kv { margin:var(--space-3) var(--space-0) var(--space-0); word-break:break-all }
 
 /* 블루프린트 계단: 화면·서버·저장소·외부 네 줄을 들여쓰기로 */
@@ -110,7 +126,9 @@ details .kv { margin:var(--space-3) var(--space-0) var(--space-0); word-break:br
 /* 이어진 것: 왼쪽에서 가운데로, 가운데에서 오른쪽으로 */
 .focus { position:relative; display:grid; grid-template-columns:repeat(3, 1fr); gap:var(--space-8); align-items:start }
 .fcol { display:flex; flex-direction:column; gap:var(--space-3) } .fcol .card { margin:var(--space-0); z-index:1 }
-.card.plain { background:var(--color-bg-group) } .pill.click { cursor:pointer }
+.card.plain { background:var(--color-bg-group) } .pill.click { cursor:pointer; color:var(--color-accent) } .pill.strong.click { color:var(--color-text-on-strong) } .pill.click[data-f]::after, .pill.click[data-goscr]::after { content:' ›' }
+/* 고른 것이 없을 때 상세 칸은 안내만 담으니 좁힌다 */
+main:has(#insp > .hint:only-child) { grid-template-columns:1fr var(--size-column) } main:has(#insp:empty) { grid-template-columns:1fr }
 .seg button[hidden] { display:none }
 .sys.three { grid-template-columns:repeat(3, 1fr) }
 /* 전체 구조: 상자 자리는 dagre 가 잡는다 */
@@ -133,3 +151,9 @@ details .kv { margin:var(--space-3) var(--space-0) var(--space-0); word-break:br
 
 /* Keep agent selections visible with the existing focus color. */
 .agent-highlight { outline: var(--outline-selected); outline-offset: var(--space-1); }
+
+/* 요청 줄: 이름이 알약에 밀려 잘리지 않게, 자리가 모자라면 알약이 아랫줄로 내려간다 */
+.row[data-req] { flex-wrap:wrap } .row[data-req] > .grow { flex-basis:var(--size-node) } .row[data-req] .t { white-space:normal; overflow-wrap:anywhere }
+/* 누르는 동안: 버튼처럼 생긴 카드·알약은 줄어들고, 목록 줄은 바탕이 바뀐다(줄 전체가 줄면 옆 줄과 어긋난다) */
+.card:is([data-scr], [data-feat], [data-node], [data-f]):active, .pill.click:active { transform:var(--press) }
+:is(.row.click, button.row, .row[data-node], .row[data-req], .row[data-url], .step[data-step], .tw.click):active { background:var(--color-bg-control) }

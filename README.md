@@ -25,49 +25,53 @@ The app does not have Apple Developer ID signing or notarization. If macOS block
 
 ## Get started
 
-1. Open the app, click **＋**, and enter a project name and a GitHub URL or local code folder.
-2. Use **Manage code** to add the project's other repositories. Choose **All code** to see them together.
+1. Open the app, click **Create project** (the **＋** in the toolbar), and enter a project name and a GitHub URL or local code folder.
+2. Use **Manage code** to add the project's other code. Choose **All code** to see it together. With two or more connections, choose each one's **Server code receiving requests**. Without that choice, matching addresses do not connect different code; when the app shows connection candidates, confirm them with **Connect to this server**.
 3. GitHub connections collect their first map automatically. For a local folder, click **Refresh**.
 
-GitHub connections follow the remote default branch. Local folders use committed code. Choose other branches or tags under **Code versions to analyze** when needed.
+GitHub connections follow the remote default branch. Local folders use committed code. Choose other branches or tags under **Code versions to analyze** when needed. The toolbar version buttons show the **Analyzed** and **Compared** versions by their actual branch or tag names. They compare code, not deployment state.
 
-In **Settings**, select when the change comparison should start. A specific date and time stays fixed across refreshes until you change it.
+In **Menu → Settings**, select when the change comparison should start. Settings apply to all projects; **Save and refresh** applies them right away. A specific date and time stays fixed across refreshes until you change it.
 
-The app starts in Korean. Choose **English** in the toolbar to save your language preference.
+The app starts in Korean. Choose **English** in the **Menu** to save your language preference.
 
 ## Use your AI agent
 
-Click **Connect agent** and copy the instructions into Claude Code, Codex or another MCP-compatible agent. It will ask before changing its connection settings.
+Click **Menu → Connect agent** and copy the instructions into Claude Code, Codex or another MCP-compatible agent. It will ask before changing its connection settings.
 
 With the app open, try: **“Show me the upload retry feature in where-were-we.”** Your agent can find and highlight it, and read what you select in the app. Ask it to consult the map before planning or editing to find affected areas and overlapping work.
 
-For a more detailed map or other languages and frameworks, select a repository and choose **Request code analysis**:
+For a more detailed map or other languages and frameworks, choose **AI analysis**, then the code and the kind of analysis (code analysis, system, screen groups, or change explanations). When **All code** is selected, choose the code first:
 
 1. Copy the request into your connected agent's chat.
 2. Let the agent analyze the code and save its results.
-3. Click **Check saved results** in the app.
+3. Click **Check saved results** in the app. After browsing elsewhere, **AI analysis · waiting for result check** reopens the same request.
 
-Reading saved results preserves **What changed** and its comparison baseline. AI analysis uses your agent's account and plan; ordinary refresh does not run AI analysis.
+Reading saved results preserves **Changes** and its comparison baseline. AI analysis uses your agent's account and plan; ordinary refresh does not run AI analysis.
 
 If tools are missing after an update, open **Connection diagnostics**, copy the repair request to your agent, and click **Check current connection** after it reconnects. You may need a new agent session.
 
 ## Explore the map
 
-### What changed
+The three toolbar views are **Structure · What it does · Changes**. **What it does** contains **Features · Screen map · Connections & data**. Search works in every view and finds screens, endpoints, programs, data, features, and PR or issue numbers linked to screens.
+
+### Changes
 
 See changed screens and requests, merged PRs and explanations of what changed and why. Choose **Request change explanations**, send the request to your agent, then **Check saved results**. These actions keep your comparison baseline unchanged.
 
-![What changed: fictional Lumen Studio](docs/images/en/changes.png)
+![Changes: fictional Lumen Studio](docs/images/en/changes.png)
 
-### System overview
+### Structure
 
 Programs, queues, shared data, providers, and things that require access to the running system.
 
-![System overview: fictional Lumen Studio](docs/images/en/overview.png)
+![Structure: fictional Lumen Studio](docs/images/en/overview.png)
+
+An AI proposal saved by your agent never replaces the written structure. Choose **AI proposal** to view it separately.
 
 ### Screen map and ongoing work
 
-See requests, tests, dev/main differences, overlapping PRs, branches without PRs, local work folders, and linked issues.
+In **What it does → Screen map**, see requests, tests, differences between the analyzed and compared versions, overlapping PRs, branches without PRs, local work folders, and linked issues.
 
 ![Screen map and ongoing work: fictional Lumen Studio](docs/images/en/screen-map.png)
 
@@ -83,77 +87,29 @@ Find screens and workers touching the same data.
 
 ![Shared data impact: fictional Lumen Studio](docs/images/en/data-impact.png)
 
-<details>
-<summary>More screenshots</summary>
+### More views
 
-### Features
+Each item links to a screenshot of the same fictional project.
 
-Group screens by purpose and follow connections across features.
-
-![Features: fictional Lumen Studio](docs/images/en/features.png)
-
-### Trace connections
-
-Focus on one screen or request and see its callers, data, and external services.
-
-![Trace connections: fictional Lumen Studio](docs/images/en/connections.png)
-
-### Workers and copied code
-
-Inspect background jobs, directly accessed data, copied files that differ from the source branch, and unverified operational details.
-
-![Workers and copied code: fictional Lumen Studio](docs/images/en/worker.png)
-
-### Find missing test links
-
-Copy a prompt for an agent to locate tests and register repeatable patterns or individual verified lines. Missing links do not establish that tests are absent.
-
-![Find missing test links: fictional Lumen Studio](docs/images/en/tests.png)
-
-### Connect your agent
-
-Generate MCP registration instructions for the installed runtime. Ask the agent to show proposed configuration edits and request permission.
-
-![Connect your agent: fictional Lumen Studio](docs/images/en/agent-setup.png)
-
-### Versions and updates
-
-View the installed version, stable releases, and bilingual notes; install Homebrew updates with **Update now**.
-
-![Versions and updates: fictional Lumen Studio](docs/images/en/updates.png)
-
-**Server requests with no mapped screen**
-
-![Server requests with no mapped screen](docs/images/en/orphan-requests.png)
-
-**Requests whose destination cannot be resolved**
-
-![Requests whose destination cannot be resolved](docs/images/en/unresolved-requests.png)
-
-**Issues with no screen link**
-
-![Issues with no screen link](docs/images/en/unlinked-issues.png)
-
-**Screens and requests removed since the previous map**
-
-![Screens and requests removed since the previous map](docs/images/en/removed-items.png)
-
-**Search screens, actions, requests, PRs, and issues**
-
-![Search screens, actions, requests, PRs, and issues](docs/images/en/search.png)
-
-</details>
+- **Features:** in **What it does → Features**, group screens by purpose and follow connections across features. [Screenshot](docs/images/en/features.png)
+- **Connections & data:** in **What it does → Connections & data**, focus on one screen or request and see its callers, data, and external services. [Screenshot](docs/images/en/connections.png)
+- **Workers and copied code:** inspect background jobs, directly accessed data, copied files that differ from the source branch, and unverified operational details. [Screenshot](docs/images/en/worker.png)
+- **Find missing test links:** copy a prompt for an agent to locate tests and register repeatable patterns or individual verified lines. Missing links do not establish that tests are absent. [Screenshot](docs/images/en/tests.png)
+- **Connect your agent:** in **Menu → Connect agent**, generate MCP registration instructions for the installed runtime. Ask the agent to show proposed configuration edits and request permission. [Screenshot](docs/images/en/agent-setup.png)
+- **Version & updates:** in **Menu → Version & updates**, view the installed version, stable releases, and bilingual notes; install Homebrew updates with **Update now**. [Screenshot](docs/images/en/updates.png)
+- **Map gaps:** server requests with no mapped screen ([screenshot](docs/images/en/orphan-requests.png)), requests whose destination cannot be resolved ([screenshot](docs/images/en/unresolved-requests.png)), issues with no screen link ([screenshot](docs/images/en/unlinked-issues.png)), and screens and requests removed since the previous map ([screenshot](docs/images/en/removed-items.png)).
+- **Search:** find screens, actions, requests, PRs, and issues from any view. [Screenshot](docs/images/en/search.png)
 
 ## Connection help
 
 - **Collection failed:** use **Change GitHub account** to select a saved login and retry. Each code connection remembers its own account; the previous successful map stays available if a refresh fails.
 - **Several repositories use one database:** map their table names under **Manage code → When code folders share the same data**. Equal table names alone do not connect them.
-- **A request belongs to another repository:** choose its receiving server under **Specify server connections and code locations**.
+- **A request belongs to another repository:** choose its receiving server under **Server code receiving requests** in **Manage code**.
 - **Disconnecting code:** the downloaded code and saved maps remain on your Mac.
 
 ## Updates
 
-Open **Version & updates** and click **Update now** for Homebrew installations. The app closes and reopens after installation; saved maps remain in place. Reconnect your agent's MCP afterward.
+Open **Menu → Version & updates** and click **Update now** for Homebrew installations. **View update** in the new-version banner only opens this window. The app closes and reopens after installation; saved maps remain in place. Reconnect your agent's MCP afterward.
 
 To update from a terminal:
 
@@ -161,10 +117,9 @@ To update from a terminal:
 brew update && brew upgrade --cask ganggangstone/tap/where-were-we
 ```
 
-The app can notify you of new versions. Automatic checks can be turned off in **Version & updates**. For ZIP installations, download the latest ZIP from [Releases](https://github.com/ganggangstone/where-were-we/releases/latest).
+The app can notify you of new versions. Automatic checks can be turned off in **Menu → Version & updates**. For ZIP installations, download the latest ZIP from [Releases](https://github.com/ganggangstone/where-were-we/releases/latest).
 
-<details>
-<summary>If an update is interrupted</summary>
+**If an update is interrupted**
 
 The updater attempts to restore the previous app after an installation or startup failure. If recovery is interrupted, open the recovery log:
 
@@ -174,7 +129,6 @@ open -a TextEdit ~/.where-were-we/.app-update.log
 
 It shows the backup location and reinstall command. Restore the backup with Finder or follow that command.
 
-</details>
 
 ## Your data and analysis coverage
 
@@ -190,8 +144,7 @@ Report bugs or suggest improvements in [Issues](https://github.com/ganggangstone
 
 The [license](LICENSE) permits personal use, internal business use, and free redistribution under its conditions. Paid products and external paid services are restricted. This is a custom source-available license; third-party components retain their own licenses.
 
-<details>
-<summary>v0.3.0 release notes</summary>
+**v0.3.0 release notes**
 
 <!-- release-notes:start -->
 ### 한국어
@@ -219,6 +172,5 @@ The [license](LICENSE) permits personal use, internal business use, and free red
 - Exclude development caches from app bundles.
 <!-- release-notes:end -->
 
-</details>
 
 [All releases](https://github.com/ganggangstone/where-were-we/releases) · [Configuration and implementation](docs/MULTI_REPO_SPEC.md)
