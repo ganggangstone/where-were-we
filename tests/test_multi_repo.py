@@ -781,7 +781,6 @@ class Collection(TemporaryProject):
         self.assertEqual(active.read_text(),'bob')
 
     def environment(self):
-        import stat
         sources={}
         for rid in ('web','api','worker','broken'):
             path=self.root/rid;path.mkdir();sources[str(path)]={}

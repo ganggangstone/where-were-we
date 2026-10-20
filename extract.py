@@ -4,7 +4,7 @@
 사용: extract.py <저장소 경로> <ref> [출력 json]
 저장소는 체크아웃을 건드리지 않고 `git show <ref>:<path>` 로만 읽는다.
 """
-import fnmatch, json, os, re, subprocess, sys
+import json, os, re, subprocess, sys
 from collections import defaultdict
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import mapcore

@@ -199,7 +199,7 @@ if os.path.exists(sys_path):
     json.dump(system, open(sys_path, "w"), ensure_ascii=False, indent=1)
     print(f"AI가 적은 것(전체 구조·하는 일)의 근거 {n}줄 대조, 달라진 것 {miss}")
 
-# --- 이슈(R7): 열린 이슈를 화면에 잇는다. PR 이 그 이슈 번호를 적었으면 확정, 이슈 글에 화면 주소·서버 주소·파일 이름이 나오면 후보 ---
+# --- 이슈: 열린 이슈를 화면에 잇는다. PR 이 그 이슈 번호를 적었으면 확정, 이슈 글에 화면 주소·서버 주소·파일 이름이 나오면 후보 ---
 dev_map = json.load(open(os.path.join(HOME, "dev.json" if REFS.get("dev") else "main.json"))) if os.path.exists(os.path.join(HOME, "dev.json" if REFS.get("dev") else "main.json")) else {"screens": [], "api_functions": [], "backend_routes": []}
 fn_ix = {(f["file"], f["name"]): f for f in dev_map["api_functions"]}
 route_screens = defaultdict(set)

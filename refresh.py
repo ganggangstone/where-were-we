@@ -7,7 +7,7 @@
 3. 설정에서 고른 기준 시각 뒤에 달라진 것을 changes.json 에 한 건으로 남긴다.
 """
 import json, os, subprocess, sys
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
 import mapcore

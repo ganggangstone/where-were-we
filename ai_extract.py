@@ -6,7 +6,6 @@ Accepts results from any connected MCP agent. CLI commands only prepare requests
 import copy
 import hashlib
 import json
-import os
 from pathlib import Path, PurePosixPath
 import re
 import subprocess

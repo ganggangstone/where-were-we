@@ -3,7 +3,7 @@
 const fs = require('fs'), os = require('os'), { execFileSync } = require('child_process');
 const [project, branch = 'dev'] = process.argv.slice(2);
 const html = fs.readFileSync(__dirname + '/ui/index.html', 'utf8');
-const js = html.slice(html.indexOf('<script>') + 8, html.lastIndexOf('</script>'));
+const start = html.indexOf('<script>') + 8, js = html.slice(start, html.indexOf('</script>', start));
 const el = () => ({ innerHTML: '', style: {}, dataset: {}, classList: { toggle() {} }, querySelectorAll() { return []; } });
 const els = {}; global.document = { getElementById: (id) => els[id] ??= el(), querySelectorAll() { return []; } };
 global.window = { __TAURI__: { core: { invoke: async () => [] } } }; global.navigator = {};
