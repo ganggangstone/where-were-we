@@ -47,7 +47,8 @@ try{
   card.remaining={text:'Fictional unresolved fact',unknown:true,evidence:[]};
   S.briefings.dev[lang]={state:'saved',warnings,result:{cards:[card],pr_count:1,branch:'dev',input:{repositories:[{id:'worker',since:'2026-10-01T00:00:00Z',at:'2026-10-21T00:00:00Z',refs:{dev:'feature/work'},commits:{from:'aaaa1111',to:'bbbb2222'}}]},unknown:[]}};
   pane.innerHTML=briefingPanel();text=visibleText(pane);
-  assert(text.includes('Fictional unresolved fact'),'Unknown claim stays visible');
+  const unknownFold=[...pane.querySelectorAll('summary')].find(x=>x.textContent.includes(tr('확인이 필요한 내용')));
+  assert(unknownFold&&text.includes(unknownFold.textContent)&&unknownFold.textContent.includes('1')&&unknownFold.parentElement.textContent.includes('Fictional unresolved fact'),'Unknown claims keep a visible count and their own details');
   assert(!text.includes('aaaa1111'),'Comparison provenance is collapsed');
   const coverage=[...pane.querySelectorAll('details')].find(d=>d.textContent.includes('aaaa1111'));assert(coverage&&!coverage.open,'Provenance remains available');coverage.querySelector('summary').click();assert(visibleText(pane).includes('aaaa1111'),'Provenance can be opened');
   assert(pane.querySelector('[data-url="https://example.invalid/pull/42"]'),'Original PR action retained');
@@ -56,10 +57,10 @@ try{
   S.agentPurpose='setup';S.agentPrompt='LONG SYNTHETIC MCP CONFIGURATION';renderAgentPrompt();
   assert(!visibleText(pane).includes(S.agentPrompt),'Setup instructions are collapsed until requested');assert($('cpAgent')&&!$('cpAgent').disabled,'Copy stays available');assert($('openConnectionDiagnostic'),'Diagnostics stays available');
   S.agentPurpose='analysis';S.analysisRequest={state:'prepared'};renderAgentPrompt();
-  text=visibleText(pane);assert(text.includes(tr('1. 요청 복사'))&&text.includes(tr('3. 저장된 결과 확인')),'Chosen three-step actions stay visible');
-  assert(!text.includes(tr('분석 결과만 읽습니다. 바뀐 것과 비교 기준은 유지됩니다.')),'Repeated policy text is collapsed');assert($('checkAnalysisResults'),'Result check remains available');
+  text=visibleText(pane);assert(text.includes(tr('1. 요청 복사'))&&text.includes(tr('3. 결과 확인')),'Chosen three-step actions stay visible');
+  assert(!text.includes(tr('결과만 읽습니다. 새로고침이 아니며 바뀐 것과 비교 시작점은 유지됩니다.')),'Repeated policy text is collapsed');assert($('checkAnalysisResults'),'Result check remains available');
   renderSettings();assert(!visibleText($('settings-dialog')).includes(tr('각 레포의 Git 작성자 이메일로 커밋을 찾습니다.')),'Settings implementation detail is collapsed');assert($('sinceTime')&&$('saveSt'),'Comparison settings remain editable');
-  editProject(true);assert(!visibleText($('project-dialog')).includes(tr('프로젝트는 서비스 하나를 뜻합니다. 웹 화면·서버·작업 프로그램의 코드가 나뉘어 있어도 여기에 함께 연결하세요.')),'Repeated project tutorial is collapsed');assert($('saveProject')&&$('addRepository'),'Registration actions remain available');$('project-dialog').close();
+  editProject(true);assert(!visibleText($('project-dialog')).includes(tr('서비스 하나에 웹 화면·서버·작업 프로그램의 코드를 함께 연결하세요. 코드가 나뉘어 있어도 됩니다.')),'Repeated project tutorial is collapsed');assert($('saveProject')&&$('addRepository'),'Registration actions remain available');$('project-dialog').close();
   S.agentPurpose='connection';S.connectionDiagnostic={feature:'detail',challenge:'synthetic',fresh_server:{state:'ready'},registration:{state:'not_inspected'},connection:{state:'not_verified'},app:{app_version:'test',python:'/synthetic/python3',server:'/synthetic/mcp_server.py'},handoff:'Synthetic repair'};
   renderConnectionDiagnostic();text=visibleText(pane);assert(!text.includes('/synthetic/mcp_server.py'),'Diagnostic paths are collapsed');assert(text.includes(connectionMessage('not_verified')),'Actual connection is not falsely verified');assert($('copyConnectionRequest')&&$('checkCurrentConnection'),'Recovery actions stay visible');
   S.connectionDiagnostic.fresh_server.state='missing_runtime';renderConnectionDiagnostic();assert(visibleText(pane).includes(connectionMessage('missing_runtime')),'A broken app runtime remains visible');assert($('copyConnectionRequest').disabled,'Broken runtime is not offered as a repair target');

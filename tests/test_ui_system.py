@@ -81,6 +81,14 @@ ACTUAL_CHECKS=r'''
     const ds=getComputedStyle($('settings-dialog'));check(ds.borderTopStyle==='solid'&&parseFloat(ds.borderTopWidth)>0&&parseFloat(ds.borderTopWidth)<=1,'Actual settings native border');
     const date=$('sinceTime');check(date.disabled,'Inactive date remains disabled');$('settings-dialog').querySelector('input[value=time]').click();check(!date.disabled,'Date radio interaction lost');date.value='2026-10-21T09:00';check(date.value==='2026-10-21T09:00','Actual date edit');
     $('settings-dialog').close();editProject(true);geometry('project'+lang+zoom);const field=$('project-dialog').querySelector('.repository-fields label input');check(Math.abs(field.getBoundingClientRect().width-field.parentElement.getBoundingClientRect().width)<2,'Stacked field fails to fill its label');$('project-dialog').close();
+    openGuide();for(const step of [0,1,2,3]){G.step=step;if(step===1)G.connection={feature:'detail',challenge:'x',fresh_server:{state:'ready'},registration:{state:'not_inspected'},connection:{state:'not_verified'},handoff:long};renderGuide();
+     const g=$('guide'),card=g.querySelector('.guide-step').getBoundingClientRect(),gs=getComputedStyle(g);
+     // Visible width: innerWidth also counts a page scrollbar (Chrome 640px at zoom 1.5 measured 625 vs 640).
+     const view=document.documentElement.clientWidth,gw=g.getBoundingClientRect().width;check(Math.abs(gw-view)<2,'Guide does not fill the window '+lang+step+zoom+' '+gw+'/'+view);
+     check(g.scrollWidth<=g.clientWidth+1&&card.left>=0&&card.right<=view+1,'Guide overflows the viewport '+lang+step+zoom+' '+card.right+'/'+view);
+     {const w=parseFloat(getComputedStyle(g.querySelector('.guide-step')).borderTopWidth);check(parseFloat(gs.borderTopWidth||0)===0&&w>0&&w<=1,'Guide uses hairlines only '+w+' '+gs.borderTopWidth);}
+     g.querySelectorAll('button').forEach(b=>check(b.scrollWidth<=b.clientWidth+1,'Clipped guide button '+b.id+lang+zoom));}
+    closeGuide();geometry('afterGuide'+lang+zoom);
    }
   }
   check(!window.errors.length,'Uncaught fixture errors '+window.errors.join(' | '));
@@ -92,7 +100,7 @@ ACTUAL_CHECKS=r'''
 def actual_page():
  from test_ui_flows import BOOTSTRAP
  source=(ROOT/'ui/index.html').read_text().replace('<script>','<script>'+BOOTSTRAP,1)
- for name in ('tokens.css','app.css','vendor/dagre.min.js','connection.js','control.js'):
+ for name in ('tokens.css','app.css','vendor/dagre.min.js','connection.js','onboarding.js','control.js'):
   source=source.replace('"'+name+'"','"'+(ROOT/'ui'/name).as_uri()+'"')
  return source.replace('</body>','<script>'+ACTUAL_CHECKS+'</script></body>')
 
@@ -108,7 +116,8 @@ class AppSystem(unittest.TestCase):
     for width in (1446,1280,640):
      with self.subTest(engine='Chrome',mode=mode,width=width):
       command=[str(chrome),'--headless','--disable-gpu','--no-first-run','--disable-background-networking','--user-data-dir='+str(tmp/'chrome'),f'--window-size={width},900','--virtual-time-budget=3000','--dump-dom',path.as_uri()+'?mode='+mode]
-      if mode=='dark':command.insert(1,'--force-dark-mode')
+      # Light is requested explicitly: without it Chrome follows the host appearance (a Dark Mac failed the light case).
+      command.insert(1,'--force-dark-mode' if mode=='dark' else '--blink-settings=preferredColorScheme=1')
       output=subprocess.run(command,capture_output=True,text=True,timeout=30)
       import html
       result=re.search(r'data-result="([^"]*)"',output.stdout)

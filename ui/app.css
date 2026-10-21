@@ -48,6 +48,7 @@ header > input[type=search] { flex:1 1 var(--space-0); max-width:var(--size-sear
 /* 상태 줄: 위쪽 막대 아래 한 줄. 비어 있으면 자리를 차지하지 않고, 오류는 신호색으로 보인다. */
 #status { margin:var(--space-0); padding:var(--space-2) var(--space-5); font:var(--font-secondary); letter-spacing:var(--tracking-secondary); color:var(--color-text-secondary); background:var(--color-bg-content); border-bottom:var(--border-hairline); overflow-wrap:anywhere }
 #status:empty { display:none } #status.error, .s.error { color:var(--color-warn) }
+#error-detail { margin:var(--space-0); padding:var(--space-2) var(--space-5); background:var(--color-bg-content); border-bottom:var(--border-hairline) } #error-detail[hidden] { display:none }
 /* 드문 도구는 메뉴 안에 둔다 */
 #menu { position:relative } #menu > summary { list-style:none; margin:var(--space-0) } #menu > summary::-webkit-details-marker { display:none }
 .menu-panel { position:absolute; right:var(--space-0); top:100%; z-index:5; margin-top:var(--space-2); display:flex; flex-direction:column; align-items:stretch; gap:var(--space-2); padding:var(--space-3); min-width:var(--size-column); background:var(--color-bg-content); border:var(--border-hairline); border-radius:var(--radius-card) }
@@ -184,3 +185,15 @@ details .kv { margin:var(--space-3) var(--space-0) var(--space-0); word-break:br
 /* 누르는 동안: 버튼처럼 생긴 카드·알약은 줄어들고, 목록 줄은 바탕이 바뀐다(줄 전체가 줄면 옆 줄과 어긋난다) */
 .card:is([data-scr], [data-feat], [data-node], [data-f]):active, .pill.click:active { transform:var(--press) }
 :is(.row.click, button.row, .row[data-node], .row[data-req], .row[data-url], .step[data-step], .tw.click):active { background:var(--color-bg-control) }
+
+/* 처음 안내: 창 전체를 덮는 대화상자. 왼쪽에 단계, 오른쪽에 한 단계의 카드. 좁으면 단계가 위로 간다. */
+#guide { width:100%; height:100%; max-width:100%; max-height:100%; margin:var(--space-0); padding:var(--space-0); border:none; border-radius:var(--space-0); background:var(--color-bg-window) }
+.guide-frame { display:flex; flex-wrap:wrap; justify-content:center; align-items:flex-start; gap:var(--space-8); min-height:100%; padding:var(--space-8) var(--space-6) }
+.guide-rail { flex:0 1 var(--size-column); min-width:var(--space-0); display:flex; flex-direction:column; gap:var(--space-5) }
+.guide-rail ol { list-style:none; margin:var(--space-0); padding:var(--space-0); display:flex; flex-direction:column; gap:var(--space-3); font:var(--font-secondary); letter-spacing:var(--tracking-secondary); color:var(--color-text-secondary) }
+.guide-rail li.on { color:var(--color-text); font-weight:var(--weight-strong) }
+.guide-step { flex:1 1 var(--size-inspector); min-width:var(--space-0); max-width:calc(var(--size-inspector) + var(--size-column)); background:var(--color-bg-content); border:var(--border-hairline); border-radius:var(--radius-card); padding:var(--space-6) }
+.guide-step h2:focus { outline:none }
+.guide-visual { display:flex; flex-wrap:wrap; align-items:center; gap:var(--space-3); margin:var(--space-5) var(--space-0) }
+.guide-visual .card { flex:1; min-width:var(--size-bar-inline); margin:var(--space-0) }
+.guide-nav { margin-top:var(--space-6); padding-top:var(--space-4); border-top:var(--border-hairline) }

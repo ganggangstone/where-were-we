@@ -250,8 +250,8 @@ vm.runInThisContext(source+'\n'+settings+`\n(async()=>{
   assert.equal(calls.filter(c=>c[0]==='refresh').length,1);
   await loadProject('demo',false);
   assert.equal(calls.filter(c=>c[0]==='refresh').length,1);
-  renderSettings();assert.ok(element('settings-dialog').innerHTML.includes('앱을 열 때 새로고침'));
-  S.lang='en';renderSettings();assert.ok(element('settings-dialog').innerHTML.includes('Refresh when opening the app'));
+  renderSettings();assert.ok(element('settings-dialog').innerHTML.includes('서비스를 열 때 새로고침'));
+  S.lang='en';renderSettings();assert.ok(element('settings-dialog').innerHTML.includes('Refresh when opening a service'));
   chosen='time';element('sinceTime').value='';await element('saveSt').onclick();
   assert.equal(calls.filter(c=>c[0]==='save_settings').length,0);
   element('sinceTime').value='2026-10-01T18:30';element('openRefresh').checked=false;
@@ -341,7 +341,7 @@ window.__TAURI__={core:{invoke:async(command,args)=>{
   assert(legacy.legacy && legacy.id==='original' && legacy.refs.dev===null && legacy.refs.main==='origin/main','Main-only legacy maps must remain main-only');
   S.lang='en';S.maps={};editProject(true);
   assert(!/[가-힣]/.test($('project-dialog').innerText),'English form must not show untranslated interface text');
-  assert(registrationError('ValueError: Use an absolute repository folder path')==='Enter the full path to the folder containing the code.','Use plain English errors');
+  const shownError=registrationError('ValueError: Use an absolute repository folder path');assert(shownError.startsWith('Enter the full path to the folder containing the code.') && shownError.includes('Use an absolute repository folder path</pre>'),'Use plain English errors and keep the original in details');
   S.projectInfo={repositories:[{id:'vue',name:'Web',collected:true,commits:{dev:'demo'},
     analysis_scope:{dev:{source:'basic',frontend:'needs_analysis',backend:'disabled'}}}]};
   S.branch='dev';renderRepositories();
@@ -354,7 +354,9 @@ window.__TAURI__={core:{invoke:async(command,args)=>{
   S.project='demo';S.repository='';S.projectInfo={repositories:[{id:'web',name:'Web',collected:true,commits:{dev:'abc'},error:'GITHUB_ACCESS|github.com|bob|repository'}]};
   S.lang='en';renderRepositories();
   assert(document.querySelector('[data-github-repair]'),'Offer account repair only on authentication-related failure');
-  assert($('repository-bar').textContent.includes('@bob') && !$('repository-bar').textContent.includes('GITHUB_ACCESS'),'Use readable account-aware errors');
+  const folded=$('repository-bar').cloneNode(true);folded.querySelectorAll('details').forEach(d=>d.remove());
+  assert(folded.textContent.includes('@bob') && !folded.textContent.includes('GITHUB_ACCESS'),'Use readable account-aware errors');
+  assert([...$('repository-bar').querySelectorAll('details')].some(d=>d.textContent.includes('GITHUB_ACCESS|github.com|bob|repository')),'The original error stays in details');
   await editGitHubAccount('web');
   assert($('githubAccount').value==='bob','Preselect the remembered account');
   assert(!/[가-힣]/.test($('project-dialog').innerText),'Account repair is translated');
@@ -366,7 +368,7 @@ window.__TAURI__={core:{invoke:async(command,args)=>{
   S.projectInfo.repositories[0].error=null;renderRepositories();
   assert(!document.querySelector('[data-github-repair]'),'Normal collection should not add an account selector');
   S.lang='ko';await editGitHubAccount('');
-  assert($('project-dialog').innerText.includes('다른 작업의 로그인 계정은 바꾸지 않습니다.'),'Legacy repair should use the same plain guidance');
+  assert($('project-dialog').innerText.includes('선택한 계정은 이 코드에만 사용합니다.'),'Legacy repair should use the same plain guidance');
   $('project-dialog').close();
   S.lang='en';S.project='demo';S.repository='web';S.branch='dev';S.loadToken=5;
   S.desiredProject='demo';S.desiredRepository='web';S.maps={dev:{repo:'/demo/web',screens:[]}};
@@ -376,13 +378,13 @@ window.__TAURI__={core:{invoke:async(command,args)=>{
   render=()=>{if(S.agentPrompt)renderAgentPrompt();};
   Object.defineProperty(navigator,'clipboard',{value:{writeText:async()=>{}},configurable:true});
   await requestAgentAction('make_system');
-  assert($('insp').textContent.includes('1. Copy the request') && $('insp').textContent.includes('3. Check saved results'),'Use the chosen existing-pane sequence');
+  assert($('insp').textContent.includes('1. Copy the request') && $('insp').textContent.includes('3. Check results'),'Use the chosen existing-pane sequence');
   await $('cpAgent').onclick();
   assert(!$('analysisResultState').textContent.includes('saved a new result'),'Copying must not imply saved or running analysis');
   analysisBundle={project:{repositories:[{id:'web',results:{dev:{system:null}}}]},dev:{repo:'/demo/web',screens:[]},main:null,changes:{last_refresh:'must-not-replace'},branch_details:{}};
   const beforeChecks=backendCalls.length;
   await $('checkAnalysisResults').onclick();
-  assert($('analysisResultState').textContent.includes('No saved result'),'Missing results need an explicit state');
+  assert($('analysisResultState').textContent.includes('No new result yet'),'Missing results need an explicit state');
   assert(S.changes===changes && S.chi===2 && S.settings===settings,'Checking results must preserve change history, selected entry and comparison settings');
   assert(backendCalls.slice(beforeChecks).every(c=>c==='read_project'),'Result checks must only read saved data');
   analysisBundle.project.repositories[0].results.dev.system={version:'new',commit:'abc',stale:false};
@@ -394,9 +396,9 @@ window.__TAURI__={core:{invoke:async(command,args)=>{
   const mapBefore=S.maps.dev;resultReadFailure=true;await $('checkAnalysisResults').onclick();
   assert(S.maps.dev===mapBefore && S.changes===changes,'A failed result read must preserve the displayed map and changes');
   resultReadFailure=false;S.lang='ko';renderAgentPrompt();
-  assert($('insp').textContent.includes('3. 저장된 결과 확인'),'Korean shows the same result-only path');
+  assert($('insp').textContent.includes('3. 결과 확인'),'Korean shows the same result-only path');
   S.lang='en';
-  assert(tr('에이전트에 전달할 요청을 준비합니다. 앱에서 바로 분석하지 않습니다.').includes('does not run in the app'),'Step requests must not retain old automatic-analysis wording');
+  assert(tr('AI에게 보낼 요청만 만듭니다. 앱에서 바로 분석하지 않습니다.').includes('Nothing is analyzed in the app'),'Step requests must not retain old automatic-analysis wording');
   analysisBundle.project.repositories[0].results.dev.system={version:'proposal',commit:'abc',stale:false,proposal:true};
   await $('checkAnalysisResults').onclick();
   assert($('analysisResultState').textContent.includes('saved separately') && $('viewAnalysisResults').textContent==='View AI proposal','A saved AI proposal is offered as the proposal, not as the old manual map');

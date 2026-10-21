@@ -456,12 +456,38 @@ assert call_regex("<module>.<function>(").search("await ProjectRouter.delete_pro
 
 
 # ---------- 에이전트 연결 프롬프트 (앱의 "에이전트 연결" 버튼과 README 가 이것 하나를 쓴다) ----------
-def setup_prompt(lang="ko"):
+def setup_prompt(lang="ko", onboarding=False):
     here = os.path.dirname(os.path.abspath(__file__))
     py, server = sys.executable, os.path.join(here, "mcp_server.py")
     command = python_command(server)
     shell_command = shlex.join(command)
     toml_command, toml_args = json.dumps(py, ensure_ascii=False), json.dumps(command[1:], ensure_ascii=False)
+    other = "Other agents" if lang == "en" else "다른 에이전트"
+    registration = (f"   - Claude Code: claude mcp add --scope user where-were-we -- {shell_command}\n"
+                    f"   - Codex (~/.codex/config.toml):\n      [mcp_servers.where-were-we]\n      command = {toml_command}\n      args = {toml_args}\n"
+                    f"   - {other}: stdio command {toml_command}, args {toml_args}")
+    if onboarding:
+        if lang == "en":
+            return f"""Connect the service we are working on to where-were-we so I can see its code as a map. Do the setup for me; do not send me back to a project form or ask me to provide paths and branch names you can read yourself.
+
+1. Inspect this agent's current MCP registration. If it needs changing, show the exact change and ask my permission first. Use only the configuration for this agent:
+{registration}
+Call projects to check the connection. If the tools are not available until a new session, explain that and stop; do not claim the service is connected.
+2. From the current working folder and our conversation, identify the service and its code repositories. Read Git metadata to propose their names, locations and actual refs. Do not search unrelated folders or assume a linked repository is part of this service. Ask me about anything you cannot establish. Suggest a project name; check projects for an existing match and preserve existing repositories, refs, api_targets and shared_data when adding code.
+3. Show a short proposal: service name, each repository and why it belongs. Ask me to confirm before saving, downloading code or collecting its first map. Do not include credentials in the proposal or configuration. Do not infer cross-repository API or shared database relationships from names alone.
+4. After confirmation, use app_control action=catalog for the current command contract, then action=configure with project and configuration containing repositories and shared_data. Read the existing configuration first when changing a saved project; if you cannot read it, stop rather than replace it. Each repository needs a stable unique id, name, absolute local path or GitHub url, and refs based on real code. Preserve existing IDs and configuration. Use the existing code folder where available; do not move or edit the service code. For a new local folder connection, collect its initial map with refresh only if that collection was confirmed. Do not refresh already connected code or move an existing change comparison baseline as part of this setup.
+5. A queued/running response is not completion. Query app_command_result with the same command ID until completed, then verify the actual result and app_state. Report each repository's connection and map separately; a saved connection is not proof that collection succeeded. Keep the guide available and tell me to continue to Connected code in the app. If a step fails, show what succeeded and the next action instead of claiming completion.
+{reply_language(lang)}"""
+        return f"""지금 함께 만드는 서비스를 where-were-we에 연결해서 코드 지도로 보고 싶어. 설정은 네가 도와줘. 앱에서 프로젝트 양식을 작성하라고 돌려보내거나, 네가 읽을 수 있는 폴더 경로와 브랜치 이름을 나에게 묻지 마.
+
+1. 이 에이전트의 현재 MCP 등록을 확인해. 설정을 바꿔야 하면 바꿀 내용을 보여 주고 먼저 허락을 받아. 지금 사용하는 에이전트에 맞는 설정 하나만 사용해.
+{registration}
+projects를 불러 연결을 확인해. 새 세션을 열어야 도구가 보이면 그 사실과 다음 행동을 알려 주고 멈춰. 서비스를 연결했다고 말하지 마.
+2. 현재 작업 폴더와 대화에서 서비스와 관련 코드 저장소를 확인해. Git 정보를 읽어 이름·위치·실제 refs를 제안하고, 관계없는 폴더를 탐색하거나 링크된 저장소를 모두 같은 서비스라고 단정하지 마. 알 수 없는 것만 물어봐. 프로젝트 이름을 제안하고 projects에서 같은 서비스가 이미 있는지 확인해. 기존 프로젝트에 추가할 때는 원래 repositories, refs, api_targets, shared_data를 보존해.
+3. 저장하기 전에 서비스 이름·연결할 저장소·각 저장소를 포함하는 이유를 짧게 보여 줘. 저장·코드 다운로드·첫 지도 수집을 하기 전에 내 확인을 받아. 비밀값은 제안과 설정에 넣지 마. 이름만 보고 저장소 사이의 API 연결이나 같은 데이터베이스를 쓴다고 단정하지 마.
+4. 확인받으면 app_control action=catalog로 현재 명령 형식을 읽고, action=configure에 project와 repositories·shared_data를 담은 configuration을 전달해. 기존 프로젝트를 바꿀 때는 원래 설정부터 읽고, 읽을 수 없으면 덮어쓰지 말고 멈춰. 저장소마다 고유하고 유지되는 id, name, 이 컴퓨터의 절대 path 또는 GitHub url, 실제 코드를 가리키는 refs를 써. 기존 ID와 설정을 보존해. 코드 폴더가 이미 있으면 그 폴더를 연결하고, 서비스 코드를 옮기거나 수정하지 마. 새로 연결한 폴더의 첫 지도는 내가 수집까지 확인한 경우에만 refresh로 가져와. 이미 연결된 코드에는 새로고침을 실행하거나 바뀐 것의 비교 시작점을 옮기지 마.
+5. queued/running은 완료가 아니야. 같은 명령 ID로 app_command_result를 조회해 completed와 실제 결과를 확인하고 app_state를 읽어. 저장소마다 연결과 지도 수집 결과를 나눠 알려 줘. 연결 저장만 성공한 것을 지도 수집도 성공했다고 말하지 마. 안내 창은 남겨 두고 앱의 ‘연결한 코드’ 단계로 이어가도록 알려 줘. 실패하면 성공한 부분과 다음 행동을 알려 줘.
+{reply_language(lang)}"""
     repos = []
     targets = []
     for p in projects():
@@ -484,12 +510,7 @@ def setup_prompt(lang="ko"):
         return f"""Connect where-were-we (a code structure map) to this agent and adapt it to my workflow. Before changing configuration, show the proposed edits and ask my permission.
 
 1. Register the MCP server using the configuration for the agent you are running:
-   - Claude Code: claude mcp add --scope user where-were-we -- {shell_command}
-   - Codex: add to ~/.codex/config.toml:
-     [mcp_servers.where-were-we]
-     command = {toml_command}
-     args = {toml_args}
-   - Other agents: register the command `{py}` with arguments {toml_args} as a stdio MCP server.
+{registration}
 2. Call the projects tool to verify the connection and show the result. Explain if a new session is needed to discover the tools.
 3. Update the existing matching section in my global instructions (Claude Code: ~/.claude/CLAUDE.md; Codex: ~/.codex/AGENTS.md; otherwise the agent's global instructions). Add a section only if there is no matching one:
 
@@ -508,12 +529,7 @@ def setup_prompt(lang="ko"):
     return f"""where-were-we(코드 구조 지도)를 너에게 연결하고 내 작업 방식에 맞게 설정해 줘. 아래를 순서대로 하고, 설정 파일을 바꾸기 전에는 바꿀 내용을 보여 주고 내 허락을 받아.
 
 1. MCP 서버를 등록한다. 지금 네가 어느 에이전트인지 보고 맞는 것 하나만 한다.
-   - Claude Code: claude mcp add --scope user where-were-we -- {shell_command}
-   - Codex: ~/.codex/config.toml 에 아래를 추가한다.
-     [mcp_servers.where-were-we]
-     command = {toml_command}
-     args = {toml_args}
-   - 다른 에이전트: 그 에이전트의 MCP 설정 방식대로, 명령 `{py}` 와 인자 {toml_args} 를 stdio 서버로 등록한다.
+{registration}
 2. 등록이 끝나면 where-were-we 의 projects 도구를 불러 연결을 확인하고 결과를 보여 준다. 도구가 안 보이면 새 세션에서 다시 확인해야 하는지 알려 준다.
 3. 내 전역 지침 파일(Claude Code 는 ~/.claude/CLAUDE.md, Codex 는 ~/.codex/AGENTS.md, 다른 에이전트는 그 에이전트의 전역 지침)에 아래 단락을 넣는다. 비슷한 단락이 이미 있으면 새로 덧붙이지 말고 그 자리를 고친다.
 
@@ -550,5 +566,7 @@ elif __name__ == "__main__" and sys.argv[1:2] == ["save-settings"]:
     print(json.dumps(save_settings(json.loads(sys.argv[2])),ensure_ascii=False))
 elif __name__ == "__main__" and sys.argv[1:] == ["setup"]:
     print(setup_prompt(lang=_prompt_lang))
+elif __name__ == "__main__" and sys.argv[1:] == ["setup", "--onboarding"]:
+    print(setup_prompt(lang=_prompt_lang, onboarding=True))
 elif __name__ == "__main__" and sys.argv[1:2] == ["tests"]:  # mapcore.py tests <프로젝트> [서버 기능 …]
     print(tests_prompt(sys.argv[2], sys.argv[3:], lang=_prompt_lang, repository=_prompt_repository))

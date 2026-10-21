@@ -78,9 +78,13 @@ async function controlContext(args) {
   if(args.branch){if(!['dev','main'].includes(args.branch) || !S.maps[args.branch])controlError('branch_unavailable');if(S.branch!==args.branch){S.branch=args.branch;S.sel=null;S.open=null;S.focus=null;S.node=null;S.feat=null;S.controlTarget=null;render();}}
   applyBranchDetails();
 }
+// A shown target must be visible: an explicit navigate/select closes the first-run guide without recording it as skipped or done.
+function closeCoveringGuide(){if($('guide')?.open)closeGuide();}
 async function applyAppCommand(command) {
   const a=command.arguments || {};let output=null;
   const contextActions=['targets','navigate','select','refresh','prepare_analysis','github_accounts','github_account'];
+  // A dialog opened from the guide holds the user's draft; refuse before changing anything.
+  if(['navigate','select'].includes(command.action) && $('guide')?.open && document.querySelectorAll('dialog[open]').length>1)controlError('guide_dialog_open','Close the open dialog in the app first; its draft is kept.');
   if(contextActions.includes(command.action))await controlContext(a);
   switch(command.action){
     case 'state':break;
@@ -91,11 +95,13 @@ async function applyAppCommand(command) {
     }
     case 'navigate':
       if(!['changes','sys','feat','map','focus'].includes(a.view))controlError('invalid_view');
+      closeCoveringGuide();
       S.agentPrompt=null;S.view=a.view;S.controlTarget=null;render();break;
     case 'select':{
       if(!a.project || a.repository===undefined || !a.branch || !a.revision)controlError('explicit_target_context_required');
       if(a.revision!==await controlRevision())controlError('stale_revision');
       const target=controlTargets().find(t=>t.id===a.target);if(!target)controlError('missing_target');
+      closeCoveringGuide();
       openTarget(target,a.relations!==false);
       S.controlTarget=target.id;S.controlAnchor=JSON.stringify([S.view,S.sel,S.open,S.node,S.focus,S.feat]);controlDecoration();controlScroll();
       await invoke('control_focus');break;
@@ -120,7 +126,9 @@ async function applyAppCommand(command) {
     case 'settings':await persistSettings(a.value);break;
     case 'configure':{
       if(!a.project || !a.configuration)controlError('configuration_required');
-      output=await saveConnections(a.project,a.configuration,S.project===a.project?S.projectInfo?.repositories || []:[]);
+      const projects=await invoke('list_projects');
+      const known=projects.includes(a.project)?JSON.parse(await invoke('read_project',{project:a.project,repository:''})).project?.repositories || []:[];
+      output=await saveConnections(a.project,a.configuration,known);
       const ps=await invoke('list_projects');$('project').innerHTML=ps.map(p=>`<option>${esc(p)}</option>`).join('');
       await loadProject(a.project,false,'');break;
     }

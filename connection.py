@@ -27,6 +27,8 @@ FEATURES={
  'detail':('analyze','analysis_source','record_analysis','request_ai_task','record_ai_task'),
  'briefing':('request_briefing','briefing_source','record_briefing','change_briefing'),
  'app':('app_state','app_targets','app_control','app_command_result'),
+ # The first-run request registers the service through projects and app_control (see mapcore.setup_prompt onboarding).
+ 'onboarding':('projects','refresh','app_state','app_control','app_command_result'),
 }
 
 def required(feature):
@@ -141,7 +143,7 @@ Expected app registration (paths remain valid after updates at the same install 
 Required tools for {feature}: {needed}
 Inspect the selected registration's command and arguments. Preserve unrelated registrations, project overrides, extra arguments and environment settings. Never print credentials or send env/header/token values to diagnostics. If an intentional development server is selected, explain the difference and ask which server to keep. If the app moved or its runtime is missing, resolve that before changing the connection.
 Reconnect this MCP server using the client's reconnect function, or start a new agent session if it cannot rediscover tools. Do not kill unrelated sessions or processes. Config edits and a newly spawned test server do not prove the current connection changed.
-AFTER reconnecting, use confirm_connection(challenge="{challenge}", registration_json=<ONLY command and args of the selected registration>) through THIS agent's connected MCP. The server reports its own startup fingerprint and actual tools. Do not launch a separate server/CLI or call the app's diagnostic probe to simulate this confirmation. If confirm_connection is unavailable, report that and leave it unverified. After a verified result, invoke server_info once through the same connection. Tell me the result; I will use Check current connection in the app. Do not refresh project data or change comparison settings.
+AFTER reconnecting, use confirm_connection(challenge="{challenge}", registration_json=<ONLY command and args of the selected registration>) through THIS agent's connected MCP. The server reports its own startup fingerprint and actual tools. Do not launch a separate server/CLI or call the app's diagnostic probe to simulate this confirmation. If confirm_connection is unavailable, report that and leave it unverified. After a verified result, invoke server_info once through the same connection. Tell me the result; I will use Check the connection in the app. Do not refresh project data or change comparison settings.
 {mapcore.reply_language(lang)}'''
  return f'''지금 이 에이전트가 사용하는 where-were-we MCP 연결 하나만 확인해 주세요. 선택한 클라이언트·등록 범위·연결 이름과 고칠 내용을 먼저 보여 주고 허락받은 뒤 설정을 수정하세요. 앱은 진단·수정 안내 방식을 사용하며 설정을 자동으로 덮어쓰지 않습니다.
 앱에 포함된 서버의 연결 설정(같은 설치 위치에서 업데이트하면 경로가 유지됩니다):
@@ -149,7 +151,7 @@ AFTER reconnecting, use confirm_connection(challenge="{challenge}", registration
 선택한 기능 {feature}에 필요한 도구: {needed}
 선택한 연결의 command와 args를 확인하세요. 다른 연결·프로젝트별 설정·추가 인자·환경 설정은 보존하세요. 자격 증명을 출력하거나 env·헤더·토큰을 진단으로 보내지 마세요. 의도해서 개발 서버를 사용 중이면 차이를 설명하고 어느 쪽을 유지할지 물어보세요. 앱이 이동했거나 런타임이 없으면 먼저 해결하세요.
 클라이언트의 MCP 재연결 기능을 사용하세요. 새 도구를 찾지 못하면 새 에이전트 세션이 필요할 수 있습니다. 무관한 세션·프로세스는 종료하지 마세요. 설정 수정이나 별도로 실행한 시험 서버만으로 현재 연결이 바뀌었다고 말하지 마세요.
-재연결한 뒤 반드시 이 에이전트에 연결된 MCP의 confirm_connection(challenge="{challenge}", registration_json=<선택한 연결의 command·args만>)를 호출하세요. 서버가 시작할 때의 코드 정보와 실제 도구를 직접 확인합니다. 별도 서버나 CLI를 실행해 확인을 대신하지 마세요. 도구가 없으면 없다고 보고하고 미확인으로 남기세요. 확인에 성공하면 같은 연결의 server_info도 한 번 호출하세요. 결과를 알려 주면 앱에서 ‘현재 연결 확인’을 누르겠습니다. 프로젝트 새로고침과 비교 설정 변경은 하지 마세요.
+재연결한 뒤 반드시 이 에이전트에 연결된 MCP의 confirm_connection(challenge="{challenge}", registration_json=<선택한 연결의 command·args만>)를 호출하세요. 서버가 시작할 때의 코드 정보와 실제 도구를 직접 확인합니다. 별도 서버나 CLI를 실행해 확인을 대신하지 마세요. 도구가 없으면 없다고 보고하고 미확인으로 남기세요. 확인에 성공하면 같은 연결의 server_info도 한 번 호출하세요. 결과를 알려 주면 앱에서 ‘연결됐는지 확인’을 누르겠습니다. 프로젝트 새로고침과 비교 설정 변경은 하지 마세요.
 {mapcore.reply_language(lang)}'''
 
 def diagnose(feature='detail',lang='ko',configuration=None):

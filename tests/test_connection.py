@@ -9,6 +9,25 @@ class Connection(unittest.TestCase):
  def setUp(self):
   self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
   self.root=Path(self.tmp.name);p=patch.object(mapcore,'ROOT',str(self.root));p.start();self.addCleanup(p.stop)
+ def test_onboarding_prompt_connects_service_before_any_manual_project_setup(self):
+  with patch.object(mapcore,'projects',return_value=[]):
+   for lang in ('ko','en'):
+    prompt=mapcore.setup_prompt(lang,onboarding=True)
+    for token in ('app_control','catalog','configure','app_command_result','completed','repositories','api_targets'):
+     self.assertIn(token,prompt)
+    self.assertNotIn('extract a project first',prompt)
+    self.assertNotIn('앱에서 프로젝트를 먼저',prompt)
+    self.assertIn('confirm' if lang=='en' else '확인',prompt)
+    from tests.reply_language import assert_reply_language
+    assert_reply_language(self,prompt,lang)
+
+ def test_onboarding_check_requires_the_tools_the_onboarding_request_uses(self):
+  import connection
+  needed=connection.required('onboarding')
+  for tool in ('projects','app_control','app_command_result','app_state','server_info','confirm_connection'):self.assertIn(tool,needed)
+  challenge=connection.begin(self.identity(),'onboarding')
+  self.assertEqual(connection.confirm(challenge,self.identity(),list(connection.required('detail')))['state'],'missing_tools')
+  self.assertEqual(connection.confirm(challenge,self.identity(),needed)['state'],'verified')
  def identity(self):
   return {'python':'/Applications/Example.app/python3','server':'/Applications/Example.app/mcp_server.py','digest':'new','pid':11,'started_at':'2026-10-19T10:00:00+00:00','app_version':'0.3.0'}
  def test_fresh_server_is_not_evidence_that_current_agent_reconnected(self):
@@ -128,7 +147,7 @@ Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{windo
  await $('copyConnectionRequest').onclick();assert(window.copied==='Synthetic repair request','Repair request copied');
  assert($('liveConnectionState').textContent.includes('아직'),'Copying is not verification');
  live={state:'running_old_server',registration:{state:'different_path',command:'/old/python3',server:'/old/mcp_server.py'}};
- await checkCurrentConnection();assert($('liveConnectionState').textContent.includes('이전 코드'),'Old live server is distinct');
+ await checkCurrentConnection();assert($('liveConnectionState').textContent.includes('이전 연결'),'Old live server is distinct');
  assert($('registeredConnectionState').textContent.includes('다른 경로'),'Actual registration is separate');
  live={state:'verified',registration:{state:'matches_app'}};await checkCurrentConnection();assert($('liveConnectionState').textContent.includes('확인했습니다'),'Live MCP confirmation becomes verified');
  live={state:'app_changed'};await checkCurrentConnection();assert($('copyConnectionRequest').disabled,'An app update invalidates the request');
@@ -136,7 +155,7 @@ Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{windo
  S.lang='en';await startConnectionDiagnostic('app');assert($('insp').textContent.includes('Connection diagnostics'),'English heading');
  assert(!/[가-힣]/.test($('insp').textContent),'English pane has no untranslated Korean');
  for(const state of Object.keys(connectionMessages))assert(!/[가-힣]/.test(connectionMessage(state)),'Translated status '+state);
- assert(tr('업데이트 후 에이전트의 MCP를 재연결하세요. 새 도구가 보이지 않으면 새 세션을 여세요.').startsWith('Reconnect'),'Translated update guidance');
+ assert(tr('업데이트 뒤 AI 연결을 다시 확인하세요.').startsWith('Check'),'Translated update guidance');
  // Two feature requests resolve in reverse order; stale responses cannot replace the newer one.
  waitNext=true;const first=startConnectionDiagnostic('detail');const oldFinish=finishNext;
  waitNext=false;await startConnectionDiagnostic('maps');oldFinish();await first;

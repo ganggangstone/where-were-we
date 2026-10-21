@@ -157,8 +157,10 @@ async fn suggest_groups(app: tauri::AppHandle, project: String, branch: String, 
 
 /// 에이전트 연결 프롬프트 (mapcore.py setup). 이 맥의 경로가 채워진다.
 #[tauri::command]
-async fn setup_prompt(app: tauri::AppHandle, lang: Option<String>) -> Result<String, String> {
-    run_py(&app, "mapcore.py", &["setup", if lang.as_deref() == Some("en") { "--lang=en" } else { "--lang=ko" }])
+async fn setup_prompt(app: tauri::AppHandle, lang: Option<String>, onboarding: Option<bool>) -> Result<String, String> {
+    let mut args = vec!["setup", if lang.as_deref() == Some("en") { "--lang=en" } else { "--lang=ko" }];
+    if onboarding.unwrap_or(false) { args.push("--onboarding"); }
+    run_py(&app, "mapcore.py", &args)
 }
 
 fn connection_probe(backend: &Backend, feature: &str, lang: &str) -> Result<String, String> {

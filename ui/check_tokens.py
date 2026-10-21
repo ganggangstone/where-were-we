@@ -61,7 +61,7 @@ for n, line in enumerate(html.splitlines(), 1):
     for m in re.finditer(r'style="([^"]*)"', line):
         if not re.fullmatch(r"width:\$\{[^}]*\}%", m.group(1)):  # 자료에서 계산하는 막대 길이만 허용
             bad.append(f"index.html:{n}: style=\"{m.group(1)[:50]}\"")
-for fname, text in (("index.html", html), ("control.js", read("control.js")), ("connection.js", read("connection.js"))):
+for fname, text in (("index.html", html), ("control.js", read("control.js")), ("connection.js", read("connection.js")), ("onboarding.js", read("onboarding.js"))):
     for n, line in enumerate(text.splitlines(), 1):
         found = [m.group(0) for m in JS_RAW.finditer(line)] + [m.group(0) for m in FALLBACK.finditer(line)]
         found += [f"{m.group(1)}={v}" for rx in ASSIGN for m in rx.finditer(line) if (v := literal(m.group(2)))]
