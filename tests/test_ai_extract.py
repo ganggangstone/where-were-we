@@ -67,6 +67,22 @@ class Analysis(unittest.TestCase):
         request=ai_extract.request('demo','dev','en','service')
         return ai_extract.record(**request['record_arguments'],result_json=json.dumps(self.data if data is None else data))
 
+    def test_copied_requests_reply_in_conversation_language(self):
+        from reply_language import assert_reply_language
+        for lang,saved in (('ko','Korean'),('en','English')):
+            request=ai_extract.request('demo','dev',lang,'service')
+            assert_reply_language(self,request['handoff'],lang,saved_results=True)
+            # analyze can be called without the handoff, so its prompt carries the rule too (written in English).
+            assert_reply_language(self,request['prompt'],lang,'en',saved_results=True)
+            self.assertIn(f'Labels, descriptions and unknown entries must be in {saved}.',request['prompt'])
+            self.assertEqual(request['record_arguments']['lang'],lang)
+        self.record_map()
+        for lang,saved in (('ko','Korean'),('en','English')):
+            request=ai_extract.task_request('demo','groups','dev',lang,'service')
+            assert_reply_language(self,request['handoff'],lang,saved_results=True)
+            assert_reply_language(self,request['prompt'],lang,'en',saved_results=True)
+            self.assertIn(f'Use {saved} for names and explanations',request['prompt'])
+            self.assertEqual(request['record_arguments']['lang'],lang)
     def test_map_requests_never_invoke_ai_or_modify_the_checkout(self):
         before=self.git('status','--porcelain');generation=project.states('demo')['service']['generation']
         for _ in range(2):

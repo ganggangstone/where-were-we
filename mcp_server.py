@@ -17,7 +17,7 @@ INSTRUCTIONS = """이 서버는 대상 서비스의 구조 지도(화면, 서버
 - 무엇을 고치기 전에 impact 에 파일 경로·화면 주소·저장소 이름·서버 주소를 넣어, 닿는 화면·서버 기능·저장소·서버 밖 프로그램·지금 같은 곳에서 작업 중인 PR·브랜치·이슈를 확인하고 계획에 반영한다.
 - 서비스 전체가 낯설면 overview 를 먼저 본다.
 - 앱에서 보여 달라는 요청은 app_targets로 대상을 찾고 app_control로 표시한다. 현재 선택은 app_state로 읽는다. 명령 상태가 completed인 경우만 적용 완료로 말하고 queued/running/interrupted는 그대로 알린다. 분석 준비는 실행 완료가 아니다.
-답에 "후보", "추정", "확인 못 한 것"이 붙은 것은 사실로 옮기지 않고 그대로 전한다."""
+답에 "후보", "추정", "확인 못 한 것"이 붙은 것은 사실로 옮기지 않고 그대로 전한다.""" + "\n" + mapcore.reply_language("ko")
 
 import connection
 SERVER_IDENTITY=connection.snapshot()  # Capture before any later app replacement.

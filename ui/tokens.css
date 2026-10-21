@@ -105,6 +105,7 @@
   --outline-selected:var(--app-focus-width) solid var(--color-accent);
   --press:scale(var(--app-press-scale));
   /* 크기 */
+  --size-inspector-share:var(--app-inspector-share);
   --size-inspector:var(--app-inspector-width); --size-column:var(--app-column-width); --size-node:var(--app-node-width); --size-search:var(--app-search-width); --size-status-max:var(--app-status-max);
   --size-dot:var(--app-dot); --size-badge:var(--app-badge); --size-bar:var(--app-bar); --size-bar-min:var(--app-bar-min); --size-bar-inline:var(--app-bar-inline); --size-desc-min:var(--app-desc-min);
   --size-wire:var(--app-focus-width);

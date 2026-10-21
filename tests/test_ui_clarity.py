@@ -41,6 +41,18 @@ try{
   assert(!text.includes(rule),'Method explanation should be collapsed');
   const help=[...pane.querySelectorAll('details')].find(d=>d.textContent.includes(rule));assert(help&&!help.open,'Method details are still available');help.querySelector('summary').click();assert(visibleText(pane).includes(rule),'User can open the method details');
   assert(JSON.stringify(warnings)===input,'Presentation does not modify evidence warnings');
+  const value={text:'Fictional saved explanation',unknown:false,evidence:[{quote:'Exact fictional evidence',source:'PR #42',url:'https://example.invalid/pull/42'}]};
+  const card={title:'Fictional change',merge:'merged',prs:[{repository:'worker',number:42,url:'https://example.invalid/pull/42',branch:'feature/work',base:'main',issues:[]}],terms:[]};
+  for(const key of ['problem','why','before','after','resolution','impact','recovery','remaining'])card[key]=value;
+  card.remaining={text:'Fictional unresolved fact',unknown:true,evidence:[]};
+  S.briefings.dev[lang]={state:'saved',warnings,result:{cards:[card],pr_count:1,branch:'dev',input:{repositories:[{id:'worker',since:'2026-10-01T00:00:00Z',at:'2026-10-21T00:00:00Z',refs:{dev:'feature/work'},commits:{from:'aaaa1111',to:'bbbb2222'}}]},unknown:[]}};
+  pane.innerHTML=briefingPanel();text=visibleText(pane);
+  assert(text.includes('Fictional unresolved fact'),'Unknown claim stays visible');
+  assert(!text.includes('aaaa1111'),'Comparison provenance is collapsed');
+  const coverage=[...pane.querySelectorAll('details')].find(d=>d.textContent.includes('aaaa1111'));assert(coverage&&!coverage.open,'Provenance remains available');coverage.querySelector('summary').click();assert(visibleText(pane).includes('aaaa1111'),'Provenance can be opened');
+  assert(pane.querySelector('[data-url="https://example.invalid/pull/42"]'),'Original PR action retained');
+  const ev=[...pane.querySelectorAll('details')].find(d=>d.textContent.includes('Exact fictional evidence'));assert(ev,'Exact evidence retained');ev.querySelector('summary').click();assert(visibleText(pane).includes('Exact fictional evidence'),'Evidence can be opened');
+
   S.agentPurpose='setup';S.agentPrompt='LONG SYNTHETIC MCP CONFIGURATION';renderAgentPrompt();
   assert(!visibleText(pane).includes(S.agentPrompt),'Setup instructions are collapsed until requested');assert($('cpAgent')&&!$('cpAgent').disabled,'Copy stays available');assert($('openConnectionDiagnostic'),'Diagnostics stays available');
   S.agentPurpose='analysis';S.analysisRequest={state:'prepared'};renderAgentPrompt();

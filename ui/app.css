@@ -2,6 +2,26 @@
 * { box-sizing:border-box }
 html, body { height:100% }
 body { margin:var(--space-0); background:var(--color-bg-window); color:var(--color-text); font:var(--font-body); letter-spacing:var(--tracking-body); -webkit-font-smoothing:antialiased; display:flex; flex-direction:column; cursor:default; user-select:none }
+/* Native button chrome is reset before component variants, including button.row. */
+button { appearance:none; -webkit-appearance:none; font:inherit; letter-spacing:inherit; color:inherit; background:none; border:none; padding:var(--space-0); max-width:100%; overflow-wrap:anywhere; cursor:pointer }
+button:disabled { opacity:var(--opacity-disabled); cursor:default }
+input, select, textarea { font:var(--font-secondary); letter-spacing:var(--tracking-secondary); color:var(--color-text); max-width:100%; min-width:var(--space-0); accent-color:var(--color-accent) }
+:where(input:not([type=checkbox]):not([type=radio]), select, textarea) { border:var(--border-hairline); border-radius:var(--radius-control); background:var(--color-bg-content); padding:var(--space-2) var(--space-3) }
+h1, h2 { color:var(--color-text); margin:var(--space-0); font:var(--font-title); letter-spacing:var(--tracking-title) }
+h3 { color:var(--color-text); margin:var(--space-5) var(--space-0) var(--space-3); font:var(--font-heading) }
+h4 { margin:var(--space-4) var(--space-0) var(--space-2); font:var(--font-secondary); font-weight:var(--weight-strong); color:var(--color-text-secondary) }
+p, blockquote, ul, ol { margin:var(--space-3) var(--space-0); font:inherit }
+ul, ol { padding-left:var(--space-6) }
+blockquote { padding-left:var(--space-4); border-left:var(--border-hairline) }
+strong, b { font-weight:var(--weight-strong) }
+.s, small { color:var(--color-text-secondary); font:var(--font-secondary); letter-spacing:var(--tracking-secondary) }
+:is(h1,h2,h3,h4,p,blockquote,li,.s,.t,.nm,.sub,.kv) { overflow-wrap:anywhere; min-width:var(--space-0) }
+:is(.row,.detail,.group,.sect,.grow) > :first-child { margin-top:var(--space-0) }
+:is(.row,.detail,.group,.sect,.grow) > :last-child { margin-bottom:var(--space-0) }
+dialog { width:calc(var(--size-inspector) + var(--size-column)); max-width:calc(100% - var(--space-8)); max-height:calc(100% - var(--space-8)); padding:var(--space-6); border:var(--border-hairline); border-radius:var(--radius-card); color:var(--color-text); background:var(--color-bg-content); font:var(--font-body); overflow:auto; user-select:text }
+dialog label { display:block; margin:var(--space-3) var(--space-0); font:var(--font-secondary) }
+dialog label.opt { display:flex; align-items:center; gap:var(--space-2) }
+input:disabled, select:disabled, textarea:disabled { opacity:var(--opacity-disabled) }
 #map { user-select:text }
 .mono { font-family:var(--font-mono); font-size:var(--size-code); letter-spacing:normal }
 .strong { color:var(--color-text); font-weight:var(--weight-strong) } .regular { font-weight:var(--weight-regular) }
@@ -13,15 +33,14 @@ a.lnk { color:var(--color-accent); text-decoration:none; cursor:pointer } a.lnk:
 
 #release-banner { padding:var(--space-3) var(--space-5); background:var(--color-accent-tint); border-bottom:var(--border-hairline) }
 #release-banner > * { margin-right:var(--space-4) }
-#release-dialog { width:calc(var(--size-inspector) + var(--size-column)); max-width:calc(100% - var(--space-8)); max-height:calc(100% - var(--space-8)); padding:var(--space-6); border:var(--border-hairline); border-radius:var(--radius-card); color:var(--color-text); background:var(--color-bg-content); font:var(--font-body); overflow:auto; user-select:text }
 .release-notes { white-space:pre-wrap; overflow-wrap:anywhere; font:inherit; user-select:text }
 
 /* 위쪽 막대: 검정 */
 header { display:flex; flex-wrap:wrap; align-items:center; gap:var(--space-4); padding:var(--space-3) var(--space-5); background:var(--color-bg-toolbar); color:var(--color-text-on-toolbar) }
-header select, header input[type=search] { font:var(--font-secondary); letter-spacing:var(--tracking-secondary); color:var(--color-text-on-toolbar); background:var(--color-bg-toolbar-control); border:var(--border-toolbar); padding:var(--space-2) var(--space-4); outline:none }
-header select { border-radius:var(--radius-control) }
-header input[type=search] { flex:1 1 var(--space-0); max-width:var(--size-search); min-width:var(--size-node); border-radius:var(--radius-pill) } header input[type=search]:focus { outline:var(--outline-focus) }
-.seg { display:inline-flex; gap:var(--space-2) }
+header > select, header > input[type=search] { font:var(--font-secondary); letter-spacing:var(--tracking-secondary); color:var(--color-text-on-toolbar); background:var(--color-bg-toolbar-control); border:var(--border-toolbar); padding:var(--space-2) var(--space-4); outline:none }
+header > select { border-radius:var(--radius-control) }
+header > input[type=search] { flex:1 1 var(--space-0); max-width:var(--size-search); min-width:var(--size-node); border-radius:var(--radius-pill) } header > input[type=search]:focus { outline:var(--outline-focus) }
+.seg { display:inline-flex; max-width:100%; flex-wrap:wrap; gap:var(--space-2) }
 .seg button { font:var(--font-secondary); letter-spacing:var(--tracking-secondary); color:var(--color-text-on-toolbar-muted); border:var(--border-toolbar); background:none; padding:var(--space-2) var(--space-4); border-radius:var(--radius-pill) }
 .seg button.on { background:var(--color-toolbar-chip-on); color:var(--color-text-on-toolbar-chip); font-weight:var(--weight-strong) }
 .seg button:active, .btn:active { transform:var(--press) }
@@ -32,13 +51,12 @@ header input[type=search] { flex:1 1 var(--space-0); max-width:var(--size-search
 /* 드문 도구는 메뉴 안에 둔다 */
 #menu { position:relative } #menu > summary { list-style:none; margin:var(--space-0) } #menu > summary::-webkit-details-marker { display:none }
 .menu-panel { position:absolute; right:var(--space-0); top:100%; z-index:5; margin-top:var(--space-2); display:flex; flex-direction:column; align-items:stretch; gap:var(--space-2); padding:var(--space-3); min-width:var(--size-column); background:var(--color-bg-content); border:var(--border-hairline); border-radius:var(--radius-card) }
-.menu-panel .btn { text-align:left }
 /* 밝은 바탕 위의 선택 버튼 묶음 */
 .seg.light button { color:var(--color-text-secondary); border:var(--border-hairline) } .seg.light button.on { background:var(--color-fill-strong); color:var(--color-text-on-strong) }
 .seg[hidden] { display:none } .seg button:disabled { opacity:var(--opacity-disabled) }
 /* 검색 결과 */
 .search-results { margin-bottom:var(--space-6) } button.row { width:100%; font:inherit; color:inherit; text-align:left; background:none; border-left:none; border-right:none; border-bottom:none }
-.chips { display:inline-flex; flex-wrap:wrap; gap:var(--space-2) }
+.chips { display:inline-flex; max-width:100%; min-width:var(--space-0); flex-wrap:wrap; gap:var(--space-2) }
 .hint.start { text-align:left; max-width:calc(var(--size-inspector) + var(--size-column)); margin:var(--space-0) auto } .hint.start ol { padding-left:var(--space-6) }
 /* 키보드로 고른 곳이 보이게 */
 [role=button]:focus-visible, button:focus-visible, summary:focus-visible, select:focus-visible, input:focus-visible { outline:var(--outline-focus) }
@@ -49,19 +67,23 @@ header input[type=search] { flex:1 1 var(--space-0); max-width:var(--size-search
 .btn.primary { background:var(--color-accent); color:var(--color-text-on-fill); border-radius:var(--radius-pill); padding:var(--space-3) var(--space-5) }
 .btn.plain { background:none; color:var(--color-accent); padding:var(--space-1) var(--space-2) }
 .btn.quiet { background:var(--color-bg-control); color:var(--color-text) }
-header .btn { background:var(--color-bg-toolbar-control); color:var(--color-text-on-toolbar); border:var(--border-toolbar) }
+header > .btn, #menu > summary.btn { background:var(--color-bg-toolbar-control); color:var(--color-text-on-toolbar); border:var(--border-toolbar) }
+.menu-panel .btn { text-align:left; background:none; border-radius:var(--radius-control); color:var(--color-text); padding:var(--space-3) var(--space-4) }
+.menu-panel .btn:hover { background:var(--color-bg-control) }
+
 
 /* 뼈대: 왼쪽 스토리 맵, 오른쪽 인스펙터 */
-main { flex:1; min-height:var(--space-0); display:grid; grid-template-columns:1fr auto }
-#map { overflow:auto; padding:var(--space-6) }
-#insp { width:var(--size-inspector); overflow:auto; background:var(--color-bg-content); border-left:var(--border-hairline); padding:var(--space-6) var(--space-6) var(--space-8); user-select:text }
+main { flex:1; min-height:var(--space-0); display:flex }
+#map { flex:1; min-width:var(--space-0); overflow:auto; padding:var(--space-6) }
+#insp { flex:none; min-width:var(--space-0); max-width:var(--size-inspector-share); width:var(--size-inspector); overflow:auto; background:var(--color-bg-content); border-left:var(--border-hairline); padding:var(--space-6) var(--space-6) var(--space-8); user-select:text }
 
 /* 작은 부품: 점, 막대, 알약 */
 .dot { display:inline-block; width:var(--size-dot); height:var(--size-dot); border-radius:var(--radius-pill); background:var(--color-bg-control); vertical-align:middle; margin-right:var(--space-2) }
 .dot.ok { background:var(--color-ok) } .dot.warn { background:var(--color-warn) } .dot.strong { background:var(--color-fill-strong) }
 .bar { flex:1; min-width:var(--size-bar-min); height:var(--size-bar); border-radius:var(--radius-bar); background:var(--color-bg-control); overflow:hidden } .bar i { display:block; height:100%; background:var(--color-ok) }
 .bar.inline { max-width:var(--size-bar-inline) }
-.pill { display:inline-block; font:var(--font-micro); letter-spacing:var(--tracking-micro); border-radius:var(--radius-pill); padding:var(--space-2) var(--space-3); background:var(--color-bg-control); color:var(--color-text-secondary); white-space:nowrap }
+.pill { display:inline-block; font:var(--font-micro); letter-spacing:var(--tracking-micro); border-radius:var(--radius-pill); padding:var(--space-2) var(--space-3); background:var(--color-bg-control); color:var(--color-text-secondary); white-space:normal; overflow-wrap:anywhere; max-width:100% }
+button.pill, .pill.click { font:var(--font-secondary); letter-spacing:var(--tracking-secondary) }
 .pill.warn { background:var(--color-warn-tint); color:var(--color-warn) } .pill.ok { background:var(--color-ok-tint); color:var(--color-ok) }
 .pill.ai { background:var(--color-ai-tint); color:var(--color-ai) } .pill.strong { background:var(--color-fill-strong); color:var(--color-text-on-strong) }
 .legend { display:flex; gap:var(--space-5); align-items:center; color:var(--color-text-secondary); font:var(--font-secondary); letter-spacing:var(--tracking-secondary); margin:var(--space-0) var(--space-0) var(--space-5); flex-wrap:wrap }
@@ -70,7 +92,7 @@ main { flex:1; min-height:var(--space-0); display:grid; grid-template-columns:1f
 /* 스토리 맵: 묶음이 가로줄, 화면이 그 아래 카드 */
 .cols { display:flex; gap:var(--space-5); align-items:flex-start; min-width:min-content }
 .col { width:var(--size-column); flex:none }
-.col h3 { margin:var(--space-0); font:var(--font-heading) }
+.col h3 { color:var(--color-text); margin:var(--space-0); font:var(--font-heading) }
 .col p { margin:var(--space-2) var(--space-0) var(--space-4); color:var(--color-text-secondary); font:var(--font-secondary); letter-spacing:var(--tracking-secondary); min-height:var(--size-desc-min) }
 .card { position:relative; overflow:hidden; background:var(--color-bg-card); border:var(--border-hairline); border-radius:var(--radius-card); padding:var(--space-4) var(--space-5); margin-bottom:var(--space-3) }
 .card:hover { border:var(--border-hover) }
@@ -82,20 +104,26 @@ main { flex:1; min-height:var(--space-0); display:grid; grid-template-columns:1f
 .card .meta { color:var(--color-text-secondary); font:var(--font-secondary); letter-spacing:var(--tracking-secondary); margin-top:var(--space-2); display:flex; gap:var(--space-2); align-items:center; flex-wrap:wrap }
 
 /* 인스펙터 */
-.head { display:flex; align-items:flex-start; gap:var(--space-3) }
-h2 { margin:var(--space-0); font:var(--font-title); letter-spacing:var(--tracking-title) }
+.head { display:flex; flex-wrap:wrap; align-items:flex-start; gap:var(--space-3) }
 .sub { color:var(--color-text-secondary); font:var(--font-secondary); letter-spacing:var(--tracking-secondary); margin:var(--space-2) var(--space-0) var(--space-0) }
 .sect { margin-top:var(--space-6) }
 .sect > h4 { margin:var(--space-0) var(--space-0) var(--space-3); font:var(--font-secondary); font-weight:var(--weight-strong); color:var(--color-text-secondary); display:flex; align-items:center; gap:var(--space-3) }
+.group + .group { margin-top:var(--space-4) }
 .group { background:var(--color-bg-group); border:var(--border-hairline); border-radius:var(--radius-card); overflow:hidden }
-.row { padding:var(--space-3) var(--space-4); border-top:var(--border-hairline); display:flex; gap:var(--space-3); align-items:center } .row:first-child { border-top:none }
+.row > * { min-width:var(--space-0) }
+.row > .grow { flex-basis:var(--size-node) }
+.row { flex-wrap:wrap; padding:var(--space-3) var(--space-4); border-top:var(--border-hairline); display:flex; gap:var(--space-3); align-items:center } .row:first-child { border-top:none }
 .row.click:hover { background:var(--color-bg-control) }
 .row .chev, .arrow { color:var(--color-text-secondary) }
-.row .t { white-space:nowrap; overflow:hidden; text-overflow:ellipsis } .row .s { color:var(--color-text-secondary); font:var(--font-secondary); letter-spacing:var(--tracking-secondary) }
+.row .t { white-space:normal; overflow-wrap:anywhere }
 .detail { padding:var(--space-4) var(--space-4) var(--space-5); border-top:var(--border-hairline); background:var(--color-bg-content) }
 .flowline { display:flex; flex-wrap:wrap; gap:var(--space-2); align-items:center; margin:var(--space-0) var(--space-0) var(--space-4) }
-.ctl { display:flex; gap:var(--space-3); align-items:center; margin-top:var(--space-4); color:var(--color-text-secondary); font:var(--font-secondary); letter-spacing:var(--tracking-secondary) }
-details > summary { color:var(--color-text-secondary); font:var(--font-secondary); margin-top:var(--space-4) }
+.ctl { display:flex; flex-wrap:wrap; gap:var(--space-3); align-items:center; margin-top:var(--space-4); color:var(--color-text-secondary); font:var(--font-secondary); letter-spacing:var(--tracking-secondary) }
+details > summary { cursor:pointer; overflow-wrap:anywhere; letter-spacing:var(--tracking-secondary); color:var(--color-text-secondary); font:var(--font-secondary); margin-top:var(--space-4) }
+.group > details { padding:var(--space-3) var(--space-4); border-top:var(--border-hairline) }
+.group > details > summary { margin:var(--space-0) }
+.group > details > .row { padding-left:var(--space-0); padding-right:var(--space-0); margin-top:var(--space-3) }
+.repository-detail > summary { margin-top:var(--space-0) }
 details .kv { margin:var(--space-3) var(--space-0) var(--space-0); word-break:break-all }
 
 /* 블루프린트 계단: 화면·서버·저장소·외부 네 줄을 들여쓰기로 */
@@ -139,14 +167,14 @@ details .kv { margin:var(--space-3) var(--space-0) var(--space-0); word-break:br
 /* Project and repository controls reuse the shared design tokens. */
 #repository-bar { display:flex; align-items:center; flex-wrap:wrap; gap:var(--space-3); padding:var(--space-3) var(--space-5); border-bottom:var(--border-hairline); background:var(--color-bg-content) }
 #repository-bar[hidden] { display:none }
+#repository-bar > * { min-width:var(--space-0); max-width:100% }
 #repository-bar .s { overflow-wrap:anywhere }
-#project-dialog { width:calc(var(--size-inspector) + var(--size-column)); max-width:calc(100% - var(--space-8)); max-height:calc(100% - var(--space-8)); overflow:auto; padding:var(--space-6); border:var(--border-hairline); border-radius:var(--radius-card); color:var(--color-text); background:var(--color-bg-content); font:var(--font-body) }
 #project-dialog fieldset { margin:var(--space-4) var(--space-0); padding:var(--space-4); border:var(--border-hairline); border-radius:var(--radius-control) }
+.repository-fields > * { min-width:var(--space-0) }
 .repository-fields { display:flex; flex-wrap:wrap; gap:var(--space-3); margin-bottom:var(--space-3) }
 #project-dialog label { display:flex; flex-direction:column; flex:1; gap:var(--space-2); font:var(--font-secondary) }
 #project-dialog .repository-option { flex-direction:row; align-items:center; margin:var(--space-2) 0 }
 #project-dialog legend { font:var(--font-secondary); color:var(--color-text) }
-#project-dialog input, #repository-bar select { padding:var(--space-2); font:var(--font-secondary); border:var(--border-hairline); border-radius:var(--radius-control); background:var(--color-bg-content); color:var(--color-text) }
 
 /* Keep agent selections visible with the existing focus color. */
 .agent-highlight { outline: var(--outline-selected); outline-offset: var(--space-1); }

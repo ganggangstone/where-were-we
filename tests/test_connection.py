@@ -19,6 +19,14 @@ class Connection(unittest.TestCase):
   self.assertEqual(result['connection']['state'],'not_verified')
   self.assertEqual(connection.check(result['challenge'])['state'],'not_verified')
   self.assertIn('confirm_connection',result['handoff'])
+ def test_handoff_replies_in_conversation_language(self):
+  import connection
+  from reply_language import assert_reply_language
+  expected=self.identity()
+  for lang in ('ko','en'):
+   with patch.object(connection,'snapshot',return_value=expected),patch.object(connection,'probe',return_value={'identity':expected,'tools':list(connection.required('detail'))}):
+    result=connection.diagnose('detail',lang)
+   assert_reply_language(self,result['handoff'],lang)
  def test_running_old_code_is_rejected_even_if_path_and_version_are_unchanged(self):
   import connection
   challenge=connection.begin(self.identity(),'detail');old=dict(self.identity(),digest='old')

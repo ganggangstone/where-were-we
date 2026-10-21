@@ -387,6 +387,28 @@ def extractor_id(home):
     return hashlib.sha1(raw).hexdigest()[:10]
 
 
+# 에이전트에게 복사해 주는 모든 안내가 이 문장을 붙인다. 사용자에게 답하는 언어만 정하고, 저장하는 결과의 언어는 각 요청이 정한다.
+_REPLY_LANGUAGE = {
+    "en": "Reply to the user in the language of the current conversation. If the user has explicitly asked for a language, use it. "
+          "Use {} only when the conversation language is unknown.",
+    "ko": "사용자에게는 지금 대화에서 쓰는 언어로 답하세요. 사용자가 언어를 직접 정해 달라고 했으면 그 언어를 따르세요. "
+          "대화 언어를 알 수 없을 때만 {}로 답하세요.",
+}
+_SAVED_RESULT_LANGUAGE = {
+    "en": "Saved results keep the language this request specifies.",
+    "ko": "저장하는 결과의 언어는 요청이 정한 대로 둡니다.",
+}
+_LANGUAGE_NAMES = {"en": {"ko": "Korean", "en": "English"}, "ko": {"ko": "한국어", "en": "영어"}}
+
+
+def reply_language(lang, written=None, *, saved_results=False):
+    """lang 은 앱에서 고른 언어(대화 언어를 모를 때만 쓴다), written 은 이 문장을 쓰는 언어다. saved_results 는 저장 언어가 정해진 요청에만 쓴다."""
+    lang = "en" if lang == "en" else "ko"
+    written = lang if written is None else ("en" if written == "en" else "ko")
+    policy = _REPLY_LANGUAGE[written].format(_LANGUAGE_NAMES[written][lang])
+    return policy + (" " + _SAVED_RESULT_LANGUAGE[written] if saved_results else "")
+
+
 def tests_prompt(project, routes=(), lang="ko", repository=""):
     """테스트가 안 이어진 서버 기능에 붙는 안내. MCP impact 답과 앱의 "프롬프트 복사"가 이것 하나를 쓴다."""
     rules_home = os.path.join(ROOT, project)
@@ -410,7 +432,9 @@ where-were-we({project}) could not link tests to these server requests. It only 
 1. Find tests in the repository that call these requests, including HTTP clients, direct imports, and shared helpers. Do not write to the target repository.
 2. If the pattern repeats, update set_test_rules. Include the existing rules too: omitted rules are removed. Available placeholders: <method>, <path>, <function>, <module> (the imported server module). Examples: 'client.<method>("<path>")', '<module>.<function>(', '<function>('. Then call refresh and check that the requests have linked tests.
 3. For one-off patterns or helper calls, use record_test with the server request, test file, line number, and exact text on that line. Only matching evidence is stored.
-4. If nothing is found, report that result. Do not conclude that tests do not exist."""
+4. If nothing is found, report that result. Do not conclude that tests do not exist.
+
+{reply_language(lang)}"""
     return f"""## 테스트 코드가 안 보인다면?
 where-were-we({project})가 아래 서버 기능에 테스트를 잇지 못했다. 지도는 정해 둔 찾는 규칙으로만 테스트를 잇기 때문에, 테스트가 없다는 뜻이 아닐 수 있다.
 {lines}
@@ -421,7 +445,9 @@ where-were-we({project})가 아래 서버 기능에 테스트를 잇지 못했�
    부르는 모양에 쓸 수 있는 자리: <method>, <path>, <function>, <module>(서버 기능 파일을 import 한 이름). 예: 'client.<method>("<path>")', '<module>.<function>(', '<function>('
    그다음 refresh 를 불러 "테스트가 닿는 백엔드 경로" 수가 늘었는지, 위 서버 기능에 테스트가 붙었는지 본다.
 3. 규칙으로 잡히지 않는 테스트(한 곳에서만 쓰는 모양, 도우미를 거치는 것)는 record_test 로 하나씩 넘긴다. 서버 기능, 테스트 파일, 서버 기능을 부르는 줄 번호, 그 줄의 글자를 그대로 넘긴다. 지도는 그 줄에 그 글자가 실제로 있는 것만 저장한다.
-4. 찾지 못했으면 "못 찾음"으로 보고한다. 테스트가 없다고 단정하지 않는다."""
+4. 찾지 못했으면 "못 찾음"으로 보고한다. 테스트가 없다고 단정하지 않는다.
+
+{reply_language(lang)}"""
 
 
 assert call_regex('client.<method>("<path>")').search('client.delete(\n  f"/generations/{gid}")').group("path") == "/generations/{gid}"
@@ -474,6 +500,7 @@ def setup_prompt(lang="ko"):
    - Before editing files, screens, server requests, or data stores, call impact to check affected areas and overlapping PRs, branches, and issues. Include the affected areas in the plan.
    - To show a discussed feature in the running app, use app_targets to obtain its target ID and revision, then app_control select with the explicit project/repository/branch. Read app_state for the current selection. Only completed responses confirm application; use app_command_result for queued/running commands.
    - Preserve qualifications such as candidate, inferred, and unverified; do not report them as confirmed facts.
+   - {reply_language(lang)}
 
 4. Ask how much impact detail to include (screen count, screen/request lists, or overlapping work too). Apply my answer to the section.
 5. Show the files and lines you changed."""
@@ -497,6 +524,7 @@ def setup_prompt(lang="ko"):
    - 파일·화면·서버 기능·저장소를 고치기 전에 impact 로 닿는 곳과 같은 곳에서 진행 중인 PR·브랜치·이슈를 보고, 계획에 영향받는 곳을 적는다.
    - 대화 중인 기능을 실행 앱에 표시하려면 app_targets로 대상 ID와 revision을 얻고, 프로젝트·레포·브랜치를 명시해 app_control select로 선택한다. 현재 선택은 app_state로 읽는다. completed만 적용 완료이며 queued/running은 app_command_result로 확인한다.
    - 답에 "후보", "추정", "확인 못 한 것"이 붙은 내용은 사실로 옮기지 않는다.
+   - {reply_language(lang)}
 
 4. impact 결과를 계획에 얼마나 자세히 적을지 묻고 3번 단락에 반영한다(닿는 화면 수만 / 화면·서버 기능 목록까지 / 진행 중인 작업까지).
 5. 마지막에 바꾼 파일과 바꾼 줄을 보여 준다."""

@@ -45,6 +45,17 @@ class Briefing(unittest.TestCase):
         return {'cards':[card],'unknown':['Runtime behavior has not been verified.']}
     def record(self,request,data=None):
         return briefing.record(**request['record_arguments'],result_json=json.dumps(data or self.response(request)))
+    def test_copied_request_replies_in_conversation_language(self):
+        from reply_language import assert_reply_language
+        for lang,saved in (('ko','Korean'),('en','English')):
+            request=briefing.request('demo','','dev',lang)
+            assert_reply_language(self,request['handoff'],lang,saved_results=True)
+            assert_reply_language(self,request['prompt'],lang,'en',saved_results=True)
+            self.assertIn(f'Write explanations in {saved}; preserve identifiers.',request['prompt'])
+            self.assertEqual(request['record_arguments']['lang'],lang)
+        # The Korean handoff keeps the no-refresh contract in Korean, without an English sentence.
+        self.assertIn('결과를 보여 주려고 refresh를 실행하지 마세요.',request_ko:=briefing.request('demo','','dev','ko')['handoff'])
+        self.assertNotIn('Do not call refresh',request_ko)
     def test_freezes_bodies_and_qualifies_equal_pr_numbers_without_mutating_changes(self):
         before=copy.deepcopy(project.read_bundle('demo')['changes'])
         request=self.request();self.assertEqual(len(request['input']['prs']),2)

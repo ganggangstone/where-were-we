@@ -29,6 +29,22 @@ spec.loader.exec_module(builder)
 
 
 class PromptPaths(unittest.TestCase):
+    def test_mcp_instructions_follow_conversation_language(self):
+        import mcp_server
+        from reply_language import assert_reply_language
+        assert_reply_language(self,mcp_server.INSTRUCTIONS,'ko')
+
+    def test_copied_prompts_reply_in_conversation_language(self):
+        from reply_language import assert_reply_language
+        for lang in ('ko','en'):
+            with patch.object(mapcore, 'projects', return_value=[]):
+                prompt = mapcore.setup_prompt(lang=lang)
+            assert_reply_language(self, prompt, lang)
+            # The global-instructions section is copied into the agent's settings, so it must carry the rule itself.
+            section = prompt[prompt.index('## where-were-we'):prompt.index('\n\n4.')]
+            assert_reply_language(self, section, lang)
+            with patch.object(mapcore, 'tests_conf', return_value={'files':['test_*.py'], 'calls':['<function>(']}):
+                assert_reply_language(self, mapcore.tests_prompt('demo', ['api/x.py::run'], lang=lang), lang)
     def test_prompt_languages_keep_commands_and_project_text(self):
         with patch.object(mapcore, 'projects', return_value=[]):
             default = mapcore.setup_prompt()

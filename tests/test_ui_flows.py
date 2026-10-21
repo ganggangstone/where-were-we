@@ -95,6 +95,22 @@ class Flows(unittest.TestCase):
         seen=[a or b for a,b in keys];duplicates=sorted({k for k in seen if seen.count(k)>1})
         self.assertGreater(len(seen),300);self.assertEqual(duplicates,[])
 
+    def test_code_buttons_name_the_code_and_keep_the_existing_selection(self):
+        self.check(r'''
+ const bar=$('branch');assert(bar.getAttribute('aria-label')===tr('지도에서 볼 코드'),'Code selector has a plain label');
+ assert(bar.previousElementSibling.textContent===tr('지도에서 볼 코드'),'Label is visible beside the buttons');
+ assert(bar.querySelector('[data-b=dev]').textContent==='HEAD','First button names its actual ref');
+ assert(bar.querySelector('[data-b=main]').textContent==='v1.0','Second button names its actual ref');
+ S.projectInfo.repositories[1].refs.dev='origin/next';renderRepositories();
+ assert($('branch').querySelector('[data-b=dev]').textContent==='HEAD · origin/next','Mixed code refs stay visible');
+ assert($('branch').querySelector('[data-b=dev]').title.includes('API server: origin/next'),'Tooltip identifies each code');
+ const changes=S.changes,settings=JSON.stringify(S.settings);
+ $('branch').querySelector('[data-b=main]').click();
+ assert(S.branch==='main'&&$('branch').querySelector('[data-b=main]').getAttribute('aria-pressed')==='true','Second code is selected');
+ assert(S.changes===changes&&JSON.stringify(S.settings)===settings,'Viewing another code does not move the comparison start');
+ assert(!window.calls.some(c=>c.command==='refresh'),'Selection does not collect again');
+''')
+
     def test_switching_version_keeps_rendering_when_the_selected_screen_is_missing(self):
         self.check(r'''
  setFocus('screen|web::/items/new');assert(S.view==='focus','Connections of an analysis-only screen are open');
