@@ -1,6 +1,6 @@
 [package]
 name = "where-were-we"
-version = "0.5.0"
+version = "0.6.0"
 description = "AI가 만드는 프로젝트의 화면·동작·흐름 현황판"
 authors = ["ganggangstone"]
 license-file = "../LICENSE"

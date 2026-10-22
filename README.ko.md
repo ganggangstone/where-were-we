@@ -147,27 +147,20 @@ open -a TextEdit ~/.where-were-we/.app-update.log
 
 [라이선스](LICENSE)는 조건에 따라 개인·회사 내부 사용과 무료 재배포를 허용하며, 유료 제품·외부 유료 서비스를 제한합니다. 별도의 소스 공개 라이선스이며, 제삼자 구성 요소에는 각각의 라이선스가 적용됩니다.
 
-**v0.5.0 릴리즈 노트**
+**v0.6.0 릴리즈 노트**
 
 ### 한국어
 
-- 처음 안내에서 작업하던 AI에게 서비스 연결을 맡기고, 연결한 코드와 첫 지도를 확인할 수 있습니다.
-- 서비스·AI·연결한 코드로 표현을 통일하고, 중복 설명은 상세로 옮겼습니다.
-- 분석 요청 복사와 결과 확인을 단계별로 안내합니다. 결과 확인은 바뀐 것의 비교 시작점을 바꾸지 않습니다.
-- 변경 설명에서 문제와 바뀐 점을 먼저 보여 주고, 미확인 항목과 두 비교 기간을 구별합니다.
-- 기존 서비스의 코드 연결을 바로 수정하고, 코드마다 위치·지도 준비 상태를 확인할 수 있습니다.
-- 오류 원인에 맞는 다음 행동을 안내하며, 오류 원문과 복구 위치는 펼쳐 보고 복사할 수 있습니다.
-- 한국어·영어 화면의 글자·버튼·메뉴 스타일을 정리하고, 작은 창에서도 시작 안내를 사용할 수 있도록 다듬었습니다.
+- 요청문 하나로 상세 지도, 서비스 구성과 하는 일, 화면 묶음, 동작 과정, 변경 설명을 함께 분석합니다.
+- 최신 결과를 재사용하고, 새로고침 후 부족하거나 오래된 분석만 다음 요청에 모읍니다.
+- 결과 확인은 변경 비교 시작점을 유지하며, 다른 코드 버전이나 언어의 결과를 완료로 표시하지 않습니다.
+- 코드로 확인되지 않는 내용과 일부 저장소의 실패를 구분하고, 기존의 정상 결과를 보존합니다.
 
 ### English
 
-- Use the getting-started guide to ask your coding AI to connect a service, review its connected code and open the first map.
-- Consistent service, AI and connected-code labels replace mixed terminology; repeated explanations move into details.
-- Copy analysis requests and check results in clear steps. Checking results preserves the Changes comparison start.
-- Change explanations lead with the problem and what changed, with separate unknown items and comparison periods.
-- Edit an existing service's code connections and check each location and map readiness.
-- Errors explain the next action for their cause, while original messages and recovery locations remain available to open and copy.
-- Korean and English typography, buttons and menus are more consistent, and the getting-started guide fits smaller windows.
-
+- Analyze detailed maps, architecture and program jobs, screen groups, action steps, and change explanations with one copied request.
+- Reuse current results and prepare only missing or outdated analysis after refresh.
+- Checking results preserves the change comparison start and rejects completion for a different code version or language.
+- Distinguish unknown facts and partial repository failures while preserving previously successful results.
 
 [전체 릴리즈](https://github.com/ganggangstone/where-were-we/releases) · [설정과 구현 상세](docs/MULTI_REPO_SPEC.md)
