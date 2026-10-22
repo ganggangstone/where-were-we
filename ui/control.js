@@ -138,7 +138,7 @@ async function applyAppCommand(command) {
     case 'github_account':await invoke('use_github_account',{project:S.project,repository:S.repository,account:a.account});await reloadCurrent();break;
     case 'refresh':output=await refreshConnectedCode(S.project,S.repository);break;
     case 'prepare_analysis':{
-      const tasks={analysis:'analysis_request',system:'make_system',groups:'suggest_groups',jobs:'make_jobs',steps:'make_steps',briefing:'briefing_request'};
+      const tasks={all:'analysis_plan',analysis:'analysis_request',system:'make_system',groups:'suggest_groups',jobs:'make_jobs',steps:'make_steps',briefing:'briefing_request'};
       if(!tasks[a.task])controlError('invalid_analysis_task');
       output=await requestAgentAction(tasks[a.task],a.task==='jobs'?{node:a.target}:a.task==='steps'?{screen:a.target}:{});
       if(!output)controlError('analysis_request_failed');output={prepared:true,executed:false,request:output};break;

@@ -325,6 +325,12 @@ def record_analysis(project: str, repository: str, branch: str, lang: str, commi
     return ai_extract.record(need(project),repository,branch,lang,commit,configuration,result_json)
 
 
+@app.tool(description="지금 코드 기준으로 아직 없거나 오래된 분석 목록(상세 지도·구성과 프로그램별 일·화면 묶음·요청 단계·변경 설명)과 기준값을 받는다. 읽기만 하고 AI·새로고침을 실행하지 않는다. 작업 하나를 저장할 때마다 다시 호출해 다음 작업과 새 대상을 받는다. repository를 비우거나 *이면 연결한 코드 전체.")
+def analysis_plan(project: str = "", branch: str = "dev", lang: str = "ko", repository: str = "") -> str:
+    import ai_extract
+    return json.dumps(ai_extract.plan(need(project),branch,lang,repository),ensure_ascii=False)
+
+
 @app.tool(description="묶음(groups), 전체 구조(system), 프로그램 작업(jobs), 요청 단계(steps)의 분석 안내·입력·schema를 받는다. AI를 실행하지 않는다. 연결된 에이전트가 analysis_source로 코드를 읽고 record_ai_task로 제출한다. jobs target은 node ID, steps target은 화면 주소 또는 @routes:[route keys]. 멀티레포는 repository 필수.")
 def request_ai_task(project: str, task: str, repository: str = "", branch: str = "dev", lang: str = "ko", target: str = "") -> str:
     import ai_extract
@@ -386,11 +392,24 @@ def find(query: str, project: str = "", repository: str = "") -> str:
     return "\n".join(out[:40]) + (f"\n… {len(out) - 40}개 더" if len(out) > 40 else "") if out else "\n".join(["지도에서 일치하는 대상을 찾지 못했습니다.",*scope_notes(m)])
 
 
+def plan_note(project, repository):
+    """Collection result and analysis preparation stay separate: a plan error never reads as a refresh failure."""
+    import ai_extract
+    try:
+        repos = (project_store.config(project) or {}).get("repositories", [])
+        branch = "dev" if any(r["refs"].get("dev") for r in repos) else "main"
+        plan = ai_extract.plan(project, branch, "ko", repository)
+    except Exception as error:
+        return f"\n분석 요청 준비 실패(새로고침과 별개): {error}"
+    if plan["up_to_date"]:return "\n분석 결과: 모두 최신"
+    return f"\n필요한 분석 {len(plan['tasks'])}건, 요청하지 못한 분석 {len(plan['blocked'])}건. analysis_plan으로 목록을 받는다."
+
+
 @app.tool(description="새로고침: git fetch 뒤 바뀐 브랜치의 지도를 다시 뽑고 PR·이슈·작업 폴더를 모아 달라진 것을 기록한다. 1~2분 걸린다. 지도 파일만 쓰고 대상 저장소에는 쓰지 않는다.")
 def refresh(project: str = "", repository: str = "") -> str:
     p = need(project)
     if project_store.config(p):
-        return project_store.refresh_project(p, repository) + "\n\n" + changes(p, repository=repository)
+        return project_store.refresh_project(p, repository) + plan_note(p, repository) + "\n\n" + changes(p, repository=repository)
     r = subprocess.run(mapcore.python_command(os.path.join(HERE, "refresh.py"), p), capture_output=True, text=True, timeout=900)
     return (r.stdout[-1500:] if r.returncode == 0 else "실패: " + r.stderr[-800:]) + "\n\n" + changes(p)
 

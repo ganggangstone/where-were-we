@@ -209,22 +209,26 @@ class Briefing(unittest.TestCase):
         chrome=Path('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome')
         if not chrome.is_file():self.skipTest('Chrome is required for the real briefing UI check')
         request=self.request()
+        import ai_extract
+        plan=ai_extract.plan('demo','dev','en')
+        self.assertIn('briefing',[t['task'] for t in plan['tasks']])
         before=project.read_bundle('demo')
         data=self.response(request);data['cards'][0]['title']='Retries <img data-injected src=x onerror="document.body.dataset.injected=1">'
         data['cards'][0]['terms']=[{'term':'<img data-injected src=x onerror="document.body.dataset.injected=1">','explanation':data['cards'][0]['impact']}]
-        self.record(request,data);after=project.read_bundle('demo')
+        self.record(request,data);after=project.read_bundle('demo');plan_after=ai_extract.plan('demo','dev','en')
         ko_request=briefing.request('demo','','dev','ko')
         briefing.record(**ko_request['record_arguments'],result_json=json.dumps(self.response(ko_request)))
         korean=project.read_bundle('demo')
         source=(Path(project.__file__).parent/'ui/index.html').read_text()
         script=source.split('<script>',1)[1].split('</script>',1)[0].split("$('q').oninput",1)[0]
         script+=source[source.index('function renderAgentPrompt() {'):source.index("$('agent').onclick")]
-        fixtures=json.dumps({'request':request,'before':before,'after':after,'korean':korean}).replace('</','<\\/')
+        fixtures=json.dumps({'plan':plan,'planAfter':plan_after,'request':request,'before':before,'after':after,'korean':korean}).replace('</','<\\/')
         bootstrap='const fixtures='+fixtures+r''';
 let saved=fixtures.before;const calls=[];
 window.__TAURI__={core:{invoke:async(command,args)=>{
  calls.push(command);
  if(command==='briefing_request')return JSON.stringify(fixtures.request);
+ if(command==='analysis_plan')return JSON.stringify(saved===fixtures.after?fixtures.planAfter:fixtures.plan);
  if(command==='read_project')return JSON.stringify(saved);
  if(command==='open_url')return '';
  throw Error('Unexpected backend operation: '+command);
@@ -243,14 +247,14 @@ window.__TAURI__={core:{invoke:async(command,args)=>{
  assert(tr('같은 문제의 PR은 묶고, 다른 문제를 푼 PR은 나눠 설명합니다.').includes('distinct problems'),'New copy must not be overridden by an old translation key');
  Object.defineProperty(navigator,'clipboard',{value:{writeText:async()=>{}},configurable:true});
  await $('requestBriefing').onclick();
- assert(S.analysisRequest.command==='briefing_request' && S.analysisRequest.scope.repository==='','Keep project-wide scope');
+ assert(S.analysisRequest.command==='analysis_plan' && S.analysisRequest.scope.repository==='','Keep project-wide scope');
  await $('cpAgent').onclick();
  assert(S.analysisRequest.state==='prepared','Copying is not analysis completion');
  await $('checkAnalysisResults').onclick();
  assert(S.analysisRequest.state==='missing','No recorded cards is not completion');
  saved=fixtures.after;
  await $('checkAnalysisResults').onclick();
- assert(S.analysisRequest.state==='saved','Only a recorded result completes the request');
+ assert(S.analysisRequest.remaining.every(t=>t.task!=='briefing') && S.analysisRequest.state==='partial','The recorded briefing is done; codes that could not be read keep it partial');
  assert(S.changes===changes && S.settings===settings && S.chi===3,'Preserve changes and the comparison baseline');
  $('viewAnalysisResults').click();
  assert(S.view==='changes' && $('map').textContent.includes('Related PRs 2'),'Cards and PRs are counted independently');

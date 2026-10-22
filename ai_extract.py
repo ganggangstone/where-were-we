@@ -115,7 +115,11 @@ def normalize(data,repo,commit,ref,layout=None):
             screen['actions'].append({**aev,'kind':action['kind'],'label':text(action.get('label')),'to':target if isinstance(target,str) else None,
                 'targets':[],'api_functions':[],'calls':[],'via':None,'source':'ai'})
         screens.append(screen)
-    if not screens and not routes:raise ValueError('No usable AI map evidence; previous map was preserved')
+    inspected=[ev for item in rows(data,'inspected') if (ev:=evidence(item))]
+    unknown_areas=[v for v in rows(data,'unknown') if isinstance(v,str) and v.strip()]
+    # No endpoints is a finished answer only when the agent says so and cites code it inspected.
+    # Rejected claims are never an empty answer: the supplied lists themselves must be empty.
+    if not screens and not routes and not (inspected and unknown_areas and not rows(data,'screens') and not rows(data,'backend_routes')):raise ValueError('No usable AI map evidence; previous map was preserved')
     for screen in screens:
         for action in screen['actions']:
             if action['to'] not in seen:action['to']=None
@@ -124,7 +128,7 @@ def normalize(data,repo,commit,ref,layout=None):
         backend_routes_without_screen=[r for r in routes if (r['file'],r['line']) not in used],unresolved_calls=unresolved,
         models={t:t for r in routes for t in r['tables']},coverage={'frontend':bool(screens),'backend':bool(routes)},
         analysis={'source':'ai','version':VERSION,'commit':commit,'generated_at':project.now(),'stale':False,'rejected':rejections(),
-                  'unknown':[v for v in rows(data,'unknown') if isinstance(v,str)],'evidence_check':'literal-source-match; semantics are AI-inferred'})
+                  'unknown':[v for v in rows(data,'unknown') if isinstance(v,str)],'inspected':inspected,'evidence_check':'literal-source-match; semantics are AI-inferred'})
     return output,flows
 
 def refresh_test_links(snapshot,conf):
@@ -146,7 +150,8 @@ SCHEMA={
  'backend_routes':[{'file':'server/main.go','line':4,'quote':'literal registration source','method':'POST','path':'/items',
                     'function':'SaveItem','name':'Save item','tables':[{'name':'items','file':'server/main.go','line':8,'quote':'literal source'}],
                     'services':[],'externals':[],'steps':[{'file':'server/main.go','line':8,'quote':'literal source','lane':'저장소',
-                    'text':'Store item','uncertain':False}]}], 'unknown':['Anything not established from code']}
+                    'text':'Store item','uncertain':False}]}], 'unknown':['Anything not established from code'],
+ 'inspected':[{'file':'path/in/repository','line':1,'quote':'literal source text; required only when no screens or routes exist'}]}
 
 def analysis_prompt(commit,lang,layout):
     return f'''Analyze the tracked source at commit {commit} of this repository, regardless of programming language or framework.
@@ -165,7 +170,7 @@ Return exactly one JSON object with this schema (examples are illustrative, do n
 {json.dumps(SCHEMA,ensure_ascii=False)}'''
 
 
-def apply_result(raw,repo,refs,branch,lang,response,commit,layout):
+def apply_result(raw,repo,refs,branch,lang,response,commit,layout,configuration=None):
     current=raw.get(branch) or {}
     text=response.strip()
     if len(text)>8_000_000:raise ValueError('AI output was too large')
@@ -175,7 +180,10 @@ def apply_result(raw,repo,refs,branch,lang,response,commit,layout):
     for key,area in [('screens','frontend'),('backend_routes','backend')]:
         if area in layout:
             data[key]=[] if layout[area] is None else [item for item in data.get(key,[]) if isinstance(item,dict) and isinstance(item.get('file'),str) and item['file'].startswith(layout[area].rstrip('/')+'/')]
-    m,flows=normalize(data,repo,commit,refs[branch]);m['analysis']['language']=lang
+    m,flows=normalize(data,repo,commit,refs[branch]);m['analysis'].update(language=lang,configuration=configuration)
+    meta={'source':'ai','provider':'mcp-agent','commit':commit,'branch':branch,'language':lang,'configuration':configuration,'generated_at':m['analysis']['generated_at']}
+    for flow in flows['routes'].values():flow.update(meta)
+    if flows['routes']:m['task_outputs']={'flows':flows}
     conf={**mapcore.TESTS_DEFAULT,'records':[],**(raw.get('tests') or {})}
     refresh_test_links(m,conf)
     updated=copy.deepcopy(raw)
@@ -252,7 +260,7 @@ def record(project,repository,branch,lang,commit,configuration,result_json):
         repo,raw,rid,head=context(project,repository,branch)
         if configuration!=store.fingerprint(repo):raise ValueError('Repository configuration changed; request a new analysis')
         if commit!=head:raise ValueError('Repository commit changed; request a new analysis')
-        updated,message=apply_result(raw,repo['path'],repo['refs'],branch,lang,result_json,commit,repo['layout'])
+        updated,message=apply_result(raw,repo['path'],repo['refs'],branch,lang,result_json,commit,repo['layout'],configuration)
         updated[branch]['analysis']['provider']='mcp-agent'
         if rid:store._publish(project,rid,updated,{},collection=False)
         else:
@@ -273,9 +281,11 @@ TASK_SCHEMAS={
                         'jobs':[JOB_SCHEMA]}],
               'links':[{'from':'program','to':'store','label':'Exchange','style':'','sure':'code','ev':[EV_SCHEMA]}],
               'externals':[{'id':'cloud','name':'Cloud','what':'External service','ev':[EV_SCHEMA]}],
-              'others':[{'name':'Other program','what':'Purpose','ev':[EV_SCHEMA]}],'unknown':[UNKNOWN_SCHEMA]},
+              'others':[{'name':'Other program','what':'Purpose','ev':[EV_SCHEMA]}],'unknown':[UNKNOWN_SCHEMA],
+              'ev':[{**EV_SCHEMA,'quote':'inspected code; required only when nodes is empty'}]},
     'jobs':{'jobs':[JOB_SCHEMA]},
-    'steps':{'routes':{'file::function':{'name':'Request name','steps':[{**EV_SCHEMA,'lane':'서버','text':'Step','uncertain':False}]}}}
+    'steps':{'routes':{'file::function':{'name':'Request name','steps':[{**EV_SCHEMA,'lane':'서버','text':'Step','uncertain':False}],
+                                         'unknown':'Only with steps:[] when the code does not establish the steps'}}}
 }
 
 def task_input(raw,task,branch,target):
@@ -354,7 +364,7 @@ def task_request(name,task,branch='dev',lang='ko',repository='',target=''):
                 'result_before':before,
                 'record_arguments':args,'source_arguments':{'project':name,'repository':rid,'branch':branch,'commit':commit}}
 
-def task_result(raw,task,branch,target,data,repo,commit,lang):
+def task_result(raw,task,branch,target,data,repo,commit,lang,configuration=None):
     original=raw;raw=project.branch_bundle(raw,branch)
     inputs=task_input(raw,task,branch,target)
     evidence,cache,rejected=evidence_reader(repo,commit)
@@ -373,7 +383,7 @@ def task_result(raw,task,branch,target,data,repo,commit,lang):
                 result.append({'text':item['text'],'needs':item.get('needs') if item.get('needs') in ('ops','read') else 'read'})
             else:raise ValueError('Use text and needs for unknown facts')
         return result
-    meta={'source':'ai','provider':'mcp-agent','commit':commit,'branch':branch,'language':lang,'generated_at':project.now()}
+    meta={'source':'ai','provider':'mcp-agent','commit':commit,'branch':branch,'language':lang,'configuration':configuration,'generated_at':project.now()}
     updated=copy.deepcopy(raw)
     def program_jobs(node,payload):
         code=node['code'];jobs=[]
@@ -424,7 +434,9 @@ def task_result(raw,task,branch,target,data,repo,commit,lang):
                 if ev:result.append({**{k:item[k] for k in fields if k in item},'ev':ev})
             return result
         nodes=items('nodes');externals=items('externals');ids=[n.get('id') for n in nodes]
-        if not nodes:raise ValueError('No usable system evidence; previous system preserved')
+        # nodes:[] is a finished answer only with stated unknowns and cited code; rejected nodes never are.
+        empty=not rows(data,'nodes') and unknown(data.get('unknown',[])) and verified(data.get('ev',[]) if isinstance(data.get('ev',[]),list) else [])
+        if not nodes and not empty:raise ValueError('No usable system evidence; previous system preserved')
         if any(not isinstance(v,str) or not v for v in ids) or len(set(ids))!=len(ids):raise ValueError('Invalid or duplicate node identity')
         extids=[x.get('id') for x in externals]
         if any(not isinstance(v,str) or not v for v in extids) or len(set(extids))!=len(extids):raise ValueError('Invalid external identity')
@@ -448,7 +460,7 @@ def task_result(raw,task,branch,target,data,repo,commit,lang):
         for item in others:
             if not text(item,'name'):raise ValueError('Name each other program')
             item['what']=text(item,'what')
-        result={**meta,'written':'MCP agent · source text checked','checked':commit,'nodes':nodes,'links':links,
+        result={**meta,'written':'MCP agent · source text checked','checked':commit,'nodes':nodes,'ev':verified(data.get('ev',[])) if empty else [],'links':links,
                 'externals':externals,'others':others,'unknown':unknown(data.get('unknown',[]))}
         dest='system.ai' if raw.get('system') and raw['system'].get('source')!='ai' else 'system'
         updated[dest]=result
@@ -477,8 +489,10 @@ def task_result(raw,task,branch,target,data,repo,commit,lang):
                 ev=evidence({**step,'file':step.get('file',route['file'])})
                 if ev and text(step,'text'):steps.append({**ev,'lane':step.get('lane') if step.get('lane') in ('서버','저장소','외부','화면') else '서버',
                                                          'text':step['text'],'uncertain':bool(step.get('uncertain'))})
-            if not steps:raise ValueError('No usable step evidence; previous steps preserved')
-            flow={**meta,'name':text(got,'name'),'file':route['file'],'function':route['function'],'steps':steps,
+            reason=text(got,'unknown').strip()
+            # Steps the code does not establish are recorded as unknown; supplied steps must still verify.
+            if not steps and (got.get('steps') or not reason):raise ValueError('No usable step evidence; previous steps preserved')
+            flow={**meta,**({'unknown':reason} if not steps else {}),'name':text(got,'name'),'file':route['file'],'function':route['function'],'steps':steps,
                   'hash':hashlib.sha1(git(repo,'show',commit+':'+route['file']).encode()).hexdigest()[:12]}
             flows[key]=flow
             for r in updated[branch]['backend_routes']:
@@ -507,12 +521,94 @@ def task_record(project,repository,task,branch,lang,target,commit,configuration,
         repo,raw,rid,head=task_context(project,task,branch,repository)
         if configuration!=store.fingerprint(repo) or commit!=head or snapshot!=task_snapshot(raw,task,branch):
             raise ValueError('Task source or stored input changed; request it again')
-        updated=task_result(raw,task,branch,target,data,repo['path'],commit,lang)
+        updated=task_result(raw,task,branch,target,data,repo['path'],commit,lang,configuration)
         if rid:store._publish(project,rid,updated,{},collection=False)
         else:
             for key,value in updated.items():
                 if value!=raw.get(key):store.atomic(store.home(project)/(key+'.json'),value)
         return 'Saved '+task+' from connected MCP agent'
+
+PLAN_TEXT={
+ 'ko':{'head':'where-were-we MCP로 이 프로젝트에 필요한 분석을 모두 마치세요. 지금 사용하는 에이전트의 모델로 분석하고 다른 AI CLI를 실행하지 마세요. '
+              '먼저 analysis_plan을 {scope} 인자로 호출하고, 돌려받은 tasks의 첫 작업만 아래 방법으로 저장한 뒤 analysis_plan을 다시 호출하세요. tasks가 빌 때까지 반복합니다. '
+              '저장된 최신 결과는 목록에 나오지 않으니 다시 분석하지 마세요. 각 도구가 돌려준 handoff 안내 대신 이 방법을 따르세요. '
+              '돌려받은 commit·configuration·input_hash가 아래 기준값과 다르면 그 코드의 남은 작업을 멈추고 알려 주세요.',
+       'how':'작업별 방법: analysis는 analyze를 호출하고 source_arguments로 analysis_source를 읽어 record_analysis로 저장합니다. '
+             'system·groups·steps는 그때 request_ai_task를 task와 target 그대로 호출해 받은 input·schema·record_arguments로 record_ai_task에 저장합니다. '
+             'briefing은 request_briefing을 호출하고 briefing_source로 근거를 읽어 record_briefing으로 저장합니다. '
+             '원문 근거를 붙이고, 코드로 확인되지 않는 것은 지어내지 말고 schema의 unknown으로 남기세요.',
+       'pins':'매번 작업 전에 반환된 pins 전체를 이 기준과 대조하세요. 저장소가 추가·제거되거나 값이 달라지면 작업을 멈추고 새 요청이 필요하다고 알려 주세요. 기준 pins: ',
+       'now':'지금 필요한 작업과 기준값:','tail':'한 작업이 실패해도 이미 저장된 결과는 남습니다. 실패한 작업과 이유를 알려 주세요. 모두 끝나면 앱의 ‘결과 확인’을 누르도록 안내하세요. 결과 확인을 위해 refresh 도구를 실행하지 마세요.'},
+ 'en':{'head':'Complete all the analysis this project needs with the where-were-we MCP tools. Use your current agent/model and do not launch another AI CLI. '
+              'First call analysis_plan with {scope}, save only the first returned task as described below, then call analysis_plan again. Repeat until tasks is empty. '
+              'Current saved results are never listed; do not reanalyze them. Follow this method instead of the handoff text a tool returns. '
+              'If a returned commit, configuration or input_hash differs from the reference values below, stop the remaining work for that code and report it.',
+       'how':'Per task: analysis calls analyze, reads source with analysis_source and source_arguments, and saves with record_analysis. '
+             'system, groups and steps call request_ai_task then, with the task and target unchanged, and save to record_ai_task with the returned input, schema and record_arguments. '
+             'briefing calls request_briefing, reads evidence with briefing_source and saves with record_briefing. '
+             'Include literal evidence; record what the code does not establish as unknown in the schema instead of inventing it.',
+       'pins':'Before every task, compare the entire returned pins object with this reference. If a repository is added or removed, or a value changes, stop and report that a new request is needed. Reference pins: ',
+       'now':'Tasks needed now and reference values:','tail':'A failed task leaves saved results intact; report which task failed and why. When all are done, tell the user to select Check results in the app. Do not call refresh to display the result.'}}
+READ_ERRORS=(ValueError,subprocess.CalledProcessError,OSError)
+
+def plan(name,branch='dev',lang='ko',repository=''):
+    """Only missing or outdated analysis, for the connected agent to repeat after each save. Reads only."""
+    import briefing
+    if lang not in ('ko','en'):raise ValueError('Choose ko or en')
+    repository='' if repository=='*' else repository
+    conf=project.config(name)
+    if conf:
+        repos=[r for r in conf['repositories'] if not repository or r['id']==repository]
+        if repository and not repos:raise ValueError('Unknown repository')
+    else:repos=[None]
+    tasks=[];blocked=[];skipped=[];pins={}
+    same=lambda a,b:bool(a and b) and (str(a).startswith(str(b)) or str(b).startswith(str(a)))
+    for repo in repos:
+        rid=repo['id'] if repo else ''
+        if repo and not repo['refs'].get(branch):skipped.append({'repository':rid,'reason':'no_branch'});continue
+        try:
+            req=request(name,branch,lang,rid)
+            with project.locked(name):_,raw,_,head=context(name,rid,branch)
+            if head!=req['commit']:raise ValueError('Repository commit changed while preparing; request again')
+        except READ_ERRORS as error:blocked.append({'repository':rid,'task':'analysis','reason':str(error)});continue
+        config=req['record_arguments']['configuration'];pin={'commit':head,'configuration':config};pins[rid]=pin
+        res=project.analysis_results(raw,branch);sel=project.branch_bundle(raw,branch);m=raw[branch]
+        fresh=lambda meta:bool(meta) and not meta['stale'] and meta.get('language')==lang and same(meta.get('commit'),head) and meta.get('configuration')==config
+        add=lambda task,before,target='':tasks.append({'repository':rid,'task':task,'target':target,'before':before,**pin})
+        if not fresh(res['analysis']):
+            # Dependents are known only after the new map is saved; the agent re-plans then.
+            add('analysis',res['analysis']);add('system',res['system']);add('groups',res['groups']);continue
+        proposal=(sel.get('system.ai') or {}).get('source')=='ai'
+        nodes=(sel.get('system.ai') if proposal else sel.get('system') or {}).get('nodes',[])
+        human={n.get('id'):n.get('code') for n in (sel.get('system') or {}).get('nodes',[])} if proposal else None
+        missing=[]
+        for node in nodes:
+            if node.get('kind','program')!='program' or not node.get('code'):continue
+            if proposal and human.get(node['id'])!=node['code']:
+                blocked.append({'repository':rid,'task':'jobs','target':node['id'],'review_required':True,
+                                'reason':'Review the saved AI structure proposal; its program identity differs from the written structure.'});continue
+            if not fresh(res['jobs'].get(node['id'])):missing.append(node['id'])
+        if not fresh(res['system']) or missing:add('system',res['system'])
+        if any(not s.get('redirect') for s in m.get('screens',[])) and not fresh(res['groups']):add('groups',res['groups'])
+        keys=[r['file']+'::'+r['function'] for r in m.get('backend_routes',[]) if r.get('mounted') and r.get('function')]
+        keys=[k for k in dict.fromkeys(keys) if not fresh(res['steps'].get(k))]
+        if keys:add('steps',{k:res['steps'].get(k) for k in keys},'@routes:'+json.dumps(keys,ensure_ascii=False))
+    try:
+        view=briefing.view(name,repository,branch,lang)
+        if view.get('input_hash'):pins['@briefing']={'input_hash':view['input_hash']}
+        # A new window without collected changes is not a reason to explain again.
+        if view['state'] in ('not_analyzed','stale') and (view.get('input') or {}).get('has_changes'):
+            b=briefing.request(name,repository,branch,lang)
+            tasks.append({'repository':repository,'task':'briefing','target':'','before':b['result_before'][0]['before'],'commit':b['commit'],'input_hash':b['record_arguments']['input_hash']})
+        elif view['state']=='needs_collection':skipped.append({'repository':repository,'task':'briefing','reason':'needs_collection'})
+    except READ_ERRORS as error:blocked.append({'repository':repository,'task':'briefing','reason':str(error)})
+    text=PLAN_TEXT[lang];scope=json.dumps({'project':name,'repository':repository,'branch':branch,'lang':lang},ensure_ascii=False)
+    lines=[f"- {t['repository'] or name} · {t['task']}"+(f" · target {t['target']}" if t['target'] else '')+
+           (f" · input_hash {t['input_hash']}" if t['task']=='briefing' else f" · commit {t['commit']} · configuration {t['configuration']}") for t in tasks]
+    handoff='\n'.join([text['head'].format(scope=scope),text['how'],text['pins']+json.dumps(pins,ensure_ascii=False,sort_keys=True),text['now'],*lines,text['tail']+' '+mapcore.reply_language(lang,saved_results=True)]) if tasks else ''
+    return {'project':name,'repository':repository,'branch':branch,'lang':lang,'tasks':tasks,'blocked':blocked,'skipped':skipped,'pins':pins,
+            'up_to_date':not tasks and not blocked,'handoff':handoff,
+            'requirements':[{k:t.get(k) for k in ('task','repository','target','before','commit')} for t in tasks]}
 
 def task_cli(task,argv=None,emit=True):
     """Compatibility commands prepare MCP requests; they never invoke AI."""
@@ -537,10 +633,11 @@ def task_cli(task,argv=None,emit=True):
 def analysis_cli(argv=None):
     import argparse
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--request',action='store_true');parser.add_argument('--repository',default='')
+    parser.add_argument('--request',action='store_true');parser.add_argument('--plan',action='store_true');parser.add_argument('--repository',default='')
     parser.add_argument('--task',choices=list(TASK_SCHEMAS));parser.add_argument('--target',default='')
     parser.add_argument('project');parser.add_argument('branch',choices=['dev','main']);parser.add_argument('lang',nargs='?',default='ko',choices=['ko','en'])
     args=parser.parse_args(argv)
+    if args.plan:return plan(args.project,args.branch,args.lang,args.repository)
     if args.task:return task_request(args.project,args.task,args.branch,args.lang,args.repository,args.target)
     return request(args.project,args.branch,args.lang,args.repository)
 

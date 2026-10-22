@@ -22,7 +22,7 @@ ACTIONS={
  'github_logins':{},'update_settings':{'automatic':'boolean'},
  'github_accounts':{'project':'project','repository':'ID'},'github_account':{'project':'project','repository':'ID','account':'login'},
  'refresh':{'project':'project','repository':'optional scope'},
- 'prepare_analysis':{'project':'project','repository':'scope','branch':'dev|main','task':'analysis|system|groups|jobs|steps|briefing','target':'program ID or screen path where needed'},
+ 'prepare_analysis':{'project':'project','repository':'scope','branch':'dev|main','task':'all|analysis|system|groups|jobs|steps|briefing (all: one request with only missing or outdated analysis)','target':'program ID or screen path where needed'},
  'read_results':{},'update_state':{},'check_update':{},'start_update':{},
 }
 

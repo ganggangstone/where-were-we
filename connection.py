@@ -24,7 +24,7 @@ import project
 BACKEND_FILES=('mapcore.py','project.py','mcp_server.py','extract.py','ai_extract.py','briefing.py','connections.py','app_control.py','connection.py','refresh.py','collect.py','group.py','steps.py','system.py','jobs.py')
 FEATURES={
  'maps':('projects','overview','changes','find','impact','refresh','record_test','set_test_rules'),
- 'detail':('analyze','analysis_source','record_analysis','request_ai_task','record_ai_task'),
+ 'detail':('analyze','analysis_source','record_analysis','request_ai_task','record_ai_task','analysis_plan'),
  'briefing':('request_briefing','briefing_source','record_briefing','change_briefing'),
  'app':('app_state','app_targets','app_control','app_command_result'),
  # The first-run request registers the service through projects and app_control (see mapcore.setup_prompt onboarding).

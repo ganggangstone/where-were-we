@@ -299,7 +299,7 @@ def analysis_results(raw,branch):
         if not value or value.get('source')!='ai':return None
         stamp={key:value.get(key) for key in ('generated_at','source','provider','commit','branch','language')}
         return {'version':hashlib.sha256(json.dumps(stamp,sort_keys=True,ensure_ascii=False).encode()).hexdigest(),
-                'commit':value.get('commit'),'generated_at':value.get('generated_at'),
+                'commit':value.get('commit'),'generated_at':value.get('generated_at'),'language':value.get('language'),'configuration':value.get('configuration'),
                 'stale':bool(value.get('stale') or (current.get('analysis') or {}).get('stale') or
                              value.get('commit') and current.get('commit') and not
                              (str(value['commit']).startswith(current['commit']) or str(current['commit']).startswith(value['commit'])))}

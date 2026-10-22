@@ -44,7 +44,7 @@ Click **Menu → Connect your AI** and copy the instructions into Claude Code, C
 
 With the app open, try: **“Show me the upload retry feature in where-were-we.”** Your agent can find and highlight it, and read what you select in the app. Ask it to consult the map before planning or editing to find affected areas and overlapping work.
 
-For a more detailed map or other languages and frameworks, choose **Ask your AI**, then the code and what to ask (**Explore screens and server code**, which also organizes the service architecture and each program's jobs; **Explore service architecture**; **Organize screens by feature**; or **Explain what changed**). When **All code** is selected, choose the code first:
+For a closer look, choose **Ask your AI → Request all needed analysis**. One request covers the detailed map, architecture and program jobs, screen groups, action steps, and change explanations. Current saved results are reused.
 
 1. Copy the request.
 2. Paste it into your coding AI chat and let it analyze the code and save its results.

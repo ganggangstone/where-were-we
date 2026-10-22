@@ -38,7 +38,7 @@ window.__TAURI__={core:{invoke:async(command,args)=>{
  if(command==='refresh' && window.holdRefresh)await window.holdRefresh;
  if(command==='read_project' && window.holdRead && args.repository===window.holdRead.repository)await window.holdRead.promise;
  if(command==='refresh' && window.failRefresh)throw Error('web: FAILED: fictional collection error');
- if(command==='refresh')return 'Fictional refresh';
+ if(command==='refresh')return window.refreshOutput || 'Fictional refresh';
  if(command==='setup_prompt' && window.holdSetup)await window.holdSetup;
  if(command==='setup_prompt')return 'Fictional setup '+args.lang;
  if(command==='connection_diagnose'){if(window.holdDiagnose)await window.holdDiagnose;return JSON.stringify({challenge:'challenge-'+(window.calls.filter(c=>c.command==='connection_diagnose').length),feature:args.feature,handoff:'Fictional repair '+args.lang,fresh_server:{state:'ready'},registration:{state:'not_inspected'},connection:{state:'not_verified'}});}
@@ -56,6 +56,7 @@ window.__TAURI__={core:{invoke:async(command,args)=>{
  if(command==='app_update_status')return null;
  if(command==='control_poll')return null;
  if(command==='control_focus')return null;
+ if(command==='analysis_plan'){if(window.holdPlan)await window.holdPlan;if(window.failPlan)throw Error('fictional plan failure');return JSON.stringify(window.planResult||{tasks:[],blocked:[],requirements:[],handoff:'',up_to_date:true});}
  if(['analysis_request','make_system','suggest_groups'].includes(command))return JSON.stringify({handoff:'Analyze '+args.repository,commit:'aaaaaaaa1111',record_arguments:{repository:args.repository},result_before:command==='analysis_request'?[{task:'analysis',before:null},{task:'system',before:null}]:[{task:'analysis',before:null}]});
  throw Error('Unexpected native action '+command);
 }}};
@@ -372,6 +373,30 @@ class Flows(unittest.TestCase):
             with self.subTest(lang=lang):
                 ok,error=page(checks,lang,query);self.assertTrue(ok,error)
 
+    def test_unified_result_check_keeps_target_and_original_pins(self):
+        self.check(r'''
+ window.planResult={tasks:[{repository:'web',task:'groups',commit:'old',configuration:'layout-a'}],requirements:[],pins:{web:{commit:'old',configuration:'layout-a'}},blocked:[],handoff:'one request'};
+ await requestAgentAction('analysis_plan',{repository:'web'});
+ window.planResult={tasks:[],blocked:[],pins:{web:{commit:'new',configuration:'layout-a'}},up_to_date:true};
+ await checkAnalysisResults();
+ assert(S.analysisRequest.state==='stale','A newer code result is not the requested result');
+ assert(calls.filter(c=>c.command==='analysis_plan').at(-1).args.repository==='web','Check only the originally requested code');
+ window.planResult.pins.web.commit='old';await checkAnalysisResults();
+ assert(S.analysisRequest.state==='saved','Original pinned results can complete');
+ const request=S.analysisRequest;window.holdPlan=new Promise(r=>window.releasePlan=r);
+ const checking=checkAnalysisResults();await wait();setLanguage(S.lang==='ko'?'en':'ko');
+ window.releasePlan();await checking;
+ assert(request.state!=='saved' && !activeAnalysis(),'A language change does not apply the old request');
+''')
+
+    def test_failed_collection_does_not_prepare_or_overwrite_failure(self):
+        self.check(r'''
+ window.refreshOutput='web: FAILED: unavailable';
+ await doRefresh();await wait();
+ assert(!calls.some(c=>c.command==='analysis_plan'),'Failed collection does not prepare an analysis');
+ assert($('status').textContent.includes(tr('최신 지도를 가져오지 못했습니다. 오류 내용을 확인하세요.')),'Keep the collection failure visible');
+''')
+
     def test_dictionary_has_no_duplicate_interface_keys(self):
         source=(ROOT/'ui/index.html').read_text();table=source[source.index('const UI_EN = {'):source.index('const UI_PATTERN')]
         keys=re.findall(r'''(?:^|[{,\s])(?:'((?:[^'\\]|\\.)*)'|"((?:[^"\\]|\\.)*)")\s*:''',table)
@@ -440,11 +465,74 @@ class Flows(unittest.TestCase):
  document.querySelector('[data-analysis-task="analysis_request"]').click();await new Promise(r=>setTimeout(r,20));
  assert(calls.some(c=>c.command==='analysis_request' && c.args.repository==='web'),'Request goes to the chosen code');
  assert(pane().includes(tr('1. 요청 복사')),'The prepared request is shown');
- S.view='sys';S.system=null;S.branchDetails=null;render();$('remakeSys').click();await new Promise(r=>setTimeout(r,0));
- assert(!$('status').textContent && $('analysisTarget'),'Contextual analysis buttons also offer the code choice');
+ S.view='sys';S.system=null;S.branchDetails=null;render();$('remakeSys').click();await new Promise(r=>setTimeout(r,20));
+ assert(!$('status').textContent && calls.some(c=>c.command==='analysis_plan' && c.args.repository===''),'Contextual buttons request all connected code without forcing a code choice');
  $('analysisTarget').value='*';$('analysisTarget').dispatchEvent(new Event('change'));
  document.querySelector('[data-analysis-task="make_system"]').click();await new Promise(r=>setTimeout(r,20));
- assert(['web','api'].every(id=>calls.some(c=>c.command==='make_system' && c.args.repository===id)),'All code prepares one request per code');
+ assert(['web','api'].every(id=>calls.some(c=>c.command==='make_system' && c.args.repository===id)),'Explicit re-analysis still prepares one request per code');
+''')
+
+    def test_every_request_button_prepares_one_unified_request(self):
+        self.check(r'''
+ const blocked=[{repository:'api',task:'analysis',reason:'Refresh after configuration changes first'}];
+ const plan={tasks:[{repository:'web',task:'analysis',commit:'aaaaaaaa1111'},{repository:'web',task:'groups',commit:'aaaaaaaa1111'},{repository:'',task:'briefing',commit:'h'}],blocked,
+  requirements:[{repository:'web',task:'analysis',before:null,commit:'aaaaaaaa1111'},{repository:'web',task:'groups',before:null,commit:'aaaaaaaa1111'},{repository:'',task:'briefing',before:null,commit:'h'}],handoff:'Unified handoff',up_to_date:false};
+ window.planResult=plan;
+ S.view='feat';render();$('regroup').click();await wait();
+ assert(calls.filter(c=>c.command==='analysis_plan').length===1 && !calls.some(c=>c.command==='suggest_groups'),'Grouping uses the unified request');
+ assert(pane().includes(tr('1. 요청 복사')) && S.analysisRequest.handoff==='Unified handoff','One handoff is shown');
+ assert(pane().includes(tr('요청할 분석: ')) && pane().includes(tr('요청하지 못한 분석: ')) && pane().includes(tr('설정이 바뀌었거나 코드가 바뀌었습니다. 먼저 새로고침하세요.')),'Queued, blocked and refresh-needed work is listed');
+ assert($('insp').textContent.includes('Refresh after configuration changes first'),'The raw reason stays available');
+ await $('cpAgent').onclick();assert(window.copied==='Unified handoff','Only an explicit copy writes the clipboard');
+ window.planResult={tasks:[{repository:'web',task:'steps',target:'@routes:["app/items.py::save_item"]',commit:'aaaaaaaa1111'}],blocked,requirements:[],handoff:'x',up_to_date:false};
+ await $('checkAnalysisResults').onclick();
+ assert(S.analysisRequest.state==='partial' && pane().includes(tr('남은 분석: ')) && pane().includes(tr('동작 과정')),'Targets that appeared after the map was saved are still needed');
+ window.planResult={tasks:[],blocked,requirements:[],handoff:'',up_to_date:false};
+ await $('checkAnalysisResults').onclick();
+ assert(S.analysisRequest.state==='partial' && S.analysisRequest.codes.waiting.includes('api') && pane().includes(tr('결과를 기다리는 코드: ')),'A blocked code keeps the request partial');
+ window.planResult={tasks:[],blocked:[],requirements:[],handoff:'',up_to_date:true};
+ await $('checkAnalysisResults').onclick();
+ assert(S.analysisRequest.state==='saved','Only nothing left completes it');
+ assert(!calls.some(c=>c.command==='refresh'),'Checking results never refreshes');
+ S.view='sys';render();$('remakeSys').click();await wait();
+ assert(pane().includes(tr('모든 분석 결과가 최신입니다. 새로 요청할 것이 없습니다.')) && !$('cpAgent'),'Nothing to do reports up to date without a copy step');
+ $('analysisTarget').value='*';$('analysisTarget').dispatchEvent(new Event('change'));
+ document.querySelector('[data-analysis-task="analysis_plan"]').click();await wait();
+ assert(calls.filter(c=>c.command==='analysis_plan').every(c=>c.args.repository!=='*'),'The advanced selector never sends a wildcard to the plan');
+''')
+
+    def test_action_steps_use_the_unified_request_and_unknown_steps_settle(self):
+        self.check(r'''
+ window.planResult={tasks:[{repository:'api',task:'steps',target:'@routes:["app/items.py::save_item"]',commit:'cccccccc3333'}],blocked:[],requirements:[{repository:'api',task:'steps',before:null,commit:'cccccccc3333'}],handoff:'Steps handoff',up_to_date:false};
+ S.view='screen';S.sel='web::/items';render();
+ const mk=$('mk') || document.querySelector('[data-mk]');assert(mk,'A steps request is offered while steps are missing');
+ mk.click();await wait();
+ assert(calls.some(c=>c.command==='analysis_plan') && !calls.some(c=>c.command==='make_steps'),'Steps use the unified request');
+ S.agentPrompt=null;S.agentPurpose=null;S.maps.dev.backend_routes[0].flow={steps:[],unknown:'Fictional handler is generated'};render();
+ assert(!$('mk'),'An explicit unknown is a finished analysis');
+ document.querySelector('[data-req]').click();await wait();
+ assert(document.body.textContent.includes('Fictional handler is generated') && !document.querySelector('[data-mk]'),'The reason is shown without another request button: '+S.open);
+''')
+
+    def test_refresh_prepares_the_request_quietly_and_never_applies_an_old_project(self):
+        self.check(r'''
+ window.planResult={tasks:[{repository:'web',task:'analysis',commit:'aaaaaaaa1111'}],blocked:[],requirements:[{repository:'web',task:'analysis',before:null,commit:'aaaaaaaa1111'}],handoff:'After refresh',up_to_date:false};
+ S.agentPrompt=null;render();await doRefresh();await wait();
+ assert(calls.filter(c=>c.command==='analysis_plan').length===1 && S.analysisRequest?.handoff==='After refresh','Refresh prepares the same unified request once');
+ assert(window.copied===undefined && S.agentPurpose!=='analysis','No clipboard write and no panel opened');
+ assert($('analyzeMap').innerText.includes(tr('결과 확인 대기')),'The prepared request is visible on the button');
+ S.analysisRequest={...S.analysisRequest,copied:true,scope:{...S.analysisRequest.scope,project:'Second'},handoff:'Other project'};
+ let before=calls.filter(c=>c.command==='analysis_plan').length;
+ await applyAppCommand({id:'app-refresh-1',action:'refresh',arguments:{}});await wait();
+ assert(calls.filter(c=>c.command==='analysis_plan').length===before+1 && S.analysisRequest.handoff==='After refresh','App-control refresh prepares it too; another project copied request does not block it');
+ window.failPlan=true;S.analysisRequest=null;await doRefresh();await wait();
+ assert($('status').textContent===tr('새로고침은 끝났지만 분석 요청을 준비하지 못했습니다.') && !S.githubFailure,'A preparation error is not a refresh failure');
+ window.failPlan=false;S.analysisRequest=null;
+ let release;window.holdPlan=new Promise(r=>release=r);
+ $('analyzeMap').click();document.querySelector('[data-analysis-task="analysis_plan"]').click();await wait();
+ $('project').value='Second';$('project').dispatchEvent(new Event('change'));await wait(60);
+ release();window.holdPlan=null;await wait();
+ assert(S.project==='Second' && !S.analysisRequest,'A request prepared for the previous project is discarded');
 ''')
 
     def test_prepared_analysis_can_be_reopened_after_browsing(self):

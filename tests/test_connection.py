@@ -28,6 +28,11 @@ class Connection(unittest.TestCase):
   challenge=connection.begin(self.identity(),'onboarding')
   self.assertEqual(connection.confirm(challenge,self.identity(),list(connection.required('detail')))['state'],'missing_tools')
   self.assertEqual(connection.confirm(challenge,self.identity(),needed)['state'],'verified')
+ def test_detail_check_requires_the_unified_plan_tool(self):
+  import connection
+  older=[t for t in connection.required('detail') if t!='analysis_plan']+['request_briefing','briefing_source','record_briefing']
+  challenge=connection.begin(self.identity(),'detail')
+  self.assertEqual(connection.confirm(challenge,self.identity(),older)['state'],'missing_tools')
  def identity(self):
   return {'python':'/Applications/Example.app/python3','server':'/Applications/Example.app/mcp_server.py','digest':'new','pid':11,'started_at':'2026-10-19T10:00:00+00:00','app_version':'0.3.0'}
  def test_fresh_server_is_not_evidence_that_current_agent_reconnected(self):
