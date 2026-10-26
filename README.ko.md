@@ -155,6 +155,7 @@ open -a TextEdit ~/.where-were-we/.app-update.log
 - 최신 결과를 재사용하고, 새로고침 후 부족하거나 오래된 분석만 다음 요청에 모읍니다.
 - 결과 확인은 변경 비교 시작점을 유지하며, 다른 코드 버전이나 언어의 결과를 완료로 표시하지 않습니다.
 - 코드로 확인되지 않는 내용과 일부 저장소의 실패를 구분하고, 기존의 정상 결과를 보존합니다.
+- 날짜·상태·개수를 공통 배치로 정리하고, 지도 범례와 한 단계의 상세·근거 보기를 제공합니다.
 
 ### English
 
@@ -162,5 +163,6 @@ open -a TextEdit ~/.where-were-we/.app-update.log
 - Reuse current results and prepare only missing or outdated analysis after refresh.
 - Checking results preserves the change comparison start and rejects completion for a different code version or language.
 - Distinguish unknown facts and partial repository failures while preserving previously successful results.
+- Read dates, status, and counts in a shared layout, with map legends and one-level details and evidence.
 
 [전체 릴리즈](https://github.com/ganggangstone/where-were-we/releases) · [설정과 구현 상세](docs/MULTI_REPO_SPEC.md)

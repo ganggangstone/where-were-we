@@ -86,7 +86,7 @@ main { flex:1; min-height:var(--space-0); display:flex }
 .pill { display:inline-block; font:var(--font-micro); letter-spacing:var(--tracking-micro); border-radius:var(--radius-pill); padding:var(--space-2) var(--space-3); background:var(--color-bg-control); color:var(--color-text-secondary); white-space:normal; overflow-wrap:anywhere; max-width:100% }
 button.pill, .pill.click { font:var(--font-secondary); letter-spacing:var(--tracking-secondary) }
 .pill.warn { background:var(--color-warn-tint); color:var(--color-warn) } .pill.ok { background:var(--color-ok-tint); color:var(--color-ok) }
-.pill.ai { background:var(--color-ai-tint); color:var(--color-ai) } .pill.strong { background:var(--color-fill-strong); color:var(--color-text-on-strong) }
+.pill.ai { background:var(--color-ai-tint); color:var(--color-ai); border:none } .pill.strong { background:var(--color-fill-strong); color:var(--color-text-on-strong) }
 .legend { display:flex; gap:var(--space-5); align-items:center; color:var(--color-text-secondary); font:var(--font-secondary); letter-spacing:var(--tracking-secondary); margin:var(--space-0) var(--space-0) var(--space-5); flex-wrap:wrap }
 .legend.tight { margin-bottom:var(--space-3) }
 
@@ -106,6 +106,42 @@ button.pill, .pill.click { font:var(--font-secondary); letter-spacing:var(--trac
 
 /* 인스펙터 */
 .head { display:flex; flex-wrap:wrap; align-items:flex-start; gap:var(--space-3) }
+.section-heading, .heading-label, .heading-actions { display:flex; flex-wrap:wrap; align-items:center; gap:var(--space-3) }
+.section-heading { justify-content:space-between; margin-bottom:var(--space-4) }
+.heading-label { min-width:var(--space-0) }
+.metadata { display:flex; flex-wrap:wrap; gap:var(--space-4) var(--space-6); margin:var(--space-4) var(--space-0) }
+.metadata > div { display:flex; flex-wrap:wrap; align-items:baseline; gap:var(--space-2); min-width:var(--space-0); max-width:100% }
+.metadata dt { color:var(--color-text-secondary); font:var(--font-secondary) }
+.metadata dd { display:flex; flex-wrap:wrap; gap:var(--space-3); margin:var(--space-0); overflow-wrap:anywhere; min-width:var(--space-0); font:var(--font-secondary) }
+.period-list, .reference-list { display:flex; flex-direction:column; gap:var(--space-3) }
+.period-row, .period-dates, .pr-reference { display:flex; flex-wrap:wrap; align-items:baseline; gap:var(--space-3); min-width:var(--space-0) }
+.period-row { justify-content:space-between; color:var(--color-text-secondary); font:var(--font-secondary) }
+.period-name { overflow-wrap:anywhere; min-width:var(--space-0) }
+.period-dates { font-variant-numeric:tabular-nums }
+.status-list { list-style:none; padding:var(--space-0); margin:var(--space-4) var(--space-0); display:flex; flex-wrap:wrap; gap:var(--space-3) var(--space-5) }
+.status-list > li { display:flex; align-items:baseline; gap:var(--space-2); min-width:var(--space-0); max-width:100%; font:var(--font-secondary) }
+.line-legend, .line-legend > span { display:inline-flex; align-items:center; flex-wrap:wrap; gap:var(--space-3) }
+.line-legend { gap:var(--space-4); color:var(--color-text-secondary); font:var(--font-secondary) }
+.legend-sample { display:inline-block; flex:none; width:var(--size-badge); border-top:var(--border-hover) }
+.legend-sample.shared { border-top-style:dashed }
+.legend-sample.selected { border:none; height:var(--size-dot); border-radius:var(--radius-control); background:var(--color-bg-related) }
+.change-card { margin-top:var(--space-5) }
+.change-card-heading { padding:var(--space-5); display:flex; flex-direction:column; gap:var(--space-3) }
+.change-card-heading h3 { margin:var(--space-0) }
+.claim-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,var(--size-column)),1fr)); gap:var(--space-5); padding:var(--space-5); border-top:var(--border-hairline) }
+.claim { min-width:var(--space-0) }
+.claim h4 { margin:var(--space-0) var(--space-0) var(--space-2) }
+.claim p { margin:var(--space-0) }
+.change-details > .claim-grid { padding:var(--space-4) var(--space-0); border:none }
+.change-details .evidence-list { border-top:var(--border-hairline); padding-top:var(--space-3) }
+.request-steps { list-style:none; padding:var(--space-0); display:flex; flex-wrap:wrap; gap:var(--space-3); margin:var(--space-5) var(--space-0) }
+.request-steps > li { flex:1 1 var(--size-node); padding:var(--space-4); border:var(--border-hairline); border-radius:var(--radius-control); min-width:var(--space-0) }
+.request-steps strong { display:block; font:var(--font-secondary); font-weight:var(--weight-strong); margin-bottom:var(--space-3) }
+.request-steps [aria-current=step] { background:var(--color-accent-tint); border-color:var(--color-accent) }
+.setting-options { display:flex; flex-wrap:wrap; gap:var(--space-3); margin:var(--space-4) var(--space-0) }
+.setting-options > div { flex:1 1 var(--size-node); padding:var(--space-3); border:var(--border-hairline); border-radius:var(--radius-control); min-width:var(--space-0) }
+.setting-options label { margin:var(--space-0) }
+.setting-options p { margin:var(--space-2) var(--space-0) var(--space-0) }
 .sub { color:var(--color-text-secondary); font:var(--font-secondary); letter-spacing:var(--tracking-secondary); margin:var(--space-2) var(--space-0) var(--space-0) }
 .sect { margin-top:var(--space-6) }
 .sect > h4 { margin:var(--space-0) var(--space-0) var(--space-3); font:var(--font-secondary); font-weight:var(--weight-strong); color:var(--color-text-secondary); display:flex; align-items:center; gap:var(--space-3) }

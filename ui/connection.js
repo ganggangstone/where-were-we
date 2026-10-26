@@ -76,21 +76,14 @@ function connectionHtml(report,fresh,actual,registration,valid,verified,missing,
  const copyFirst=valid&&!verified&&!report.copied,checkFirst=!verified&&!!report.copied;
  return `${place.compact?'':`<h2>${tr('연결 진단')}</h2>`}
  ${report.busy?`<p role="status">${tr('앱의 연결 기능을 확인하는 중…')}</p>`:report.error?`<p role="alert">${tr('연결 진단을 실행하지 못했습니다. 다시 시도하세요.')}</p>`:`<p id="liveConnectionState" role="status">${connectionMessage(actual.state)}</p>
- ${fresh.state!=='ready'?`<p role="alert">${connectionMessage(fresh.state)}</p>`:''}
- ${['not_inspected','matches_app'].includes(registration.state)?'':`<p role="alert">${connectionMessage(registration.state)}</p>`}
  ${missing.length?`<p role="alert">${tr('AI 연결에 필요한 기능이 빠져 있습니다')}</p>`:''}`}
- <p class="s">${tr('확인 범위')}: ${tr(connectionFeatures[report.feature]||connectionFeatures.detail)}</p>
- <button class="btn" id="runConnectionDiagnostic" ${report.busy?'disabled':''}>${tr(report.busy?'확인 중…':'다시 진단')}</button>
- ${report.busy||report.error?'':`${verified&&place===inspectorConnection?`<div class="ctl"><button class="btn primary" id="backToMap">${tr('지도로 돌아가기')}</button></div>`:verified?'':`<p>${tr('요청을 AI에게 보낸 뒤 연결됐는지 확인하세요.')}</p>`}
+ <div class="section-heading"><label>${tr('확인 범위')} <select id="connectionFeature">${Object.entries(connectionFeatures).map(([key,label])=>`<option value="${key}" ${key===report.feature?'selected':''}>${tr(label)}</option>`).join('')}</select></label>
+ <button class="btn" id="runConnectionDiagnostic" ${report.busy?'disabled':''}>${tr(report.busy?'확인 중…':'다시 진단')}</button></div>
+ ${report.busy||report.error?'':`${verified&&place===inspectorConnection?`<div class="ctl"><button class="btn primary" id="backToMap">${tr('지도로 돌아가기')}</button></div>`:verified?'':''}
  <div class="ctl"><button class="btn ${copyFirst?'primary':'quiet'}" id="copyConnectionRequest" ${valid?'':'disabled'}>${tr('연결 수정 요청 복사')}</button><button class="btn ${checkFirst?'primary':''}" id="checkCurrentConnection" ${report.challenge&&!report.checking?'':'disabled'}>${tr(report.checking?'확인 중…':'연결됐는지 확인')}</button></div>
  <p id="connectionCopyStatus" role="status">${report.copied?tr('복사했습니다. 작업하던 AI 채팅에 붙여 넣으세요.'):''}</p>
  ${report.checkError?`<p role="alert">${tr('연결 확인 결과를 읽지 못했습니다. 다시 진단하세요.')}</p>`:''}`}
- ${helpDetails(`<p>${tr('앱의 연결 기능과 현재 AI 연결을 따로 확인합니다. 설정은 자동으로 바꾸지 않습니다.')}</p>
- <label>${tr('AI 연결 확인')} <select id="connectionFeature">${Object.entries(connectionFeatures).map(([key,label])=>`<option value="${key}" ${key===report.feature?'selected':''}>${tr(label)}</option>`).join('')}</select></label>
- ${missing.length?`<p class="s">${tr('빠진 도구')}: <span class="mono">${esc(missing.join(', '))}</span></p>`:''}
- <h3>${tr('1. 앱의 연결 기능')}</h3><p id="bundledConnectionState">${connectionMessage(fresh.state)}</p>
- ${report.app?`<p class="s">${tr('앱 버전')}: ${esc(report.app.app_version||tr('확인할 수 없음'))}</p><pre class="prompt mono">${esc(report.app.python)}\n${esc(report.app.server)}</pre>`:''}
- <h3>${tr('2. 등록된 경로')}</h3><p id="registeredConnectionState">${connectionMessage(registration.state)}</p>${registration.server?`<pre class="prompt mono">${esc(registration.command)}\n${esc(registration.server)}</pre>`:''}
- <p class="s">${tr('앱의 연결 기능이 정상이어도 AI가 다시 연결한 것은 아닙니다. 서비스와 바뀐 것은 새로고침하지 않습니다.')}</p>`,'진단 상세')}
+ ${metaList([['앱 실행',`<span id="bundledConnectionState" role="${fresh.state==='ready'?'status':'alert'}">${connectionMessage(fresh.state)}</span>`],['등록 경로',`<span id="registeredConnectionState" role="${['not_inspected','matches_app'].includes(registration.state)?'status':'alert'}">${connectionMessage(registration.state)}</span>`]])}
+ ${helpDetails(`${missing.length?metaList([['빠진 도구',`<span class="mono">${esc(missing.join(', '))}</span>`]]):''}${report.app?`${metaList([['앱 버전',esc(report.app.app_version||tr('확인할 수 없음'))]])}<pre class="prompt mono">${esc(report.app.python)}\n${esc(report.app.server)}</pre>`:''}${registration.server?`<pre class="prompt mono">${esc(registration.command)}\n${esc(registration.server)}</pre>`:''}`,'진단 상세')}
  ${!report.busy&&!report.error&&valid?`<details><summary>${tr('요청 내용 보기')}</summary><pre class="prompt mono">${esc(report.handoff)}</pre></details>`:''}`;
 }

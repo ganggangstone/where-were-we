@@ -249,7 +249,7 @@ const UI_EN = {
   '일부 설명의 근거 코드가 바뀌었습니다. 현재 코드로 다시 확인하세요.': 'Code cited by some explanations has changed. Check them against the current code.',
   '작업하던 AI에게 이 프로그램이 하는 일을 현재 코드로 다시 읽어 달라고 요청하세요.': 'Ask your coding AI to reanalyze this program using the current code.', '지도와 연결하지 못한 변경': 'Changes without a map match',
   '곳 더': ' more', '이슈 #': 'Issue #', ' · 파일 ': ' · Files: ', '화면 변경': 'Screen change', '서버 흐름': 'Server flow', 'DB·배포·설정': 'Database & deployment', '화면이 달라진 PR': 'PRs that change screens', '서버 코드의 흐름이 달라진 PR': 'PRs that change server behavior',
-  'DB·배포·설정·서버 밖 프로그램이 달라진 PR': 'PRs that change databases, deployment, configuration, or workers', '이전 기록': 'Earlier records', '설명 구간': 'Explanation period', '새로고침 기록 구간': 'Refresh record period', '아래 새로고침 기록 선택과 별개로 최신 근거를 설명합니다.': 'These explain the latest evidence, independent of the refresh record selected below.', '자세한 변경 내용': 'Change details', '확인이 필요한 내용': 'Needs verification', '바뀐 점': 'What changed', '새 화면 · 사라진 화면': 'Added / removed screens',
+  'DB·배포·설정·서버 밖 프로그램이 달라진 PR': 'PRs that change databases, deployment, configuration, or workers', '이전 기록': 'Earlier records', '설명 구간': 'Explanation period', '새로고침 기록 구간': 'Refresh record period', '자세한 변경 내용': 'Change details', '확인이 필요한 내용': 'Needs verification', '바뀐 점': 'What changed', '새 화면 · 사라진 화면': 'Added / removed screens',
   '새 요청 · 사라진 요청': 'Added / removed requests', '새 길 · 끊긴 길': 'Added / removed links', '화면 이름을 누르면 화면 지도에서 그 화면이 열립니다.': 'Select a screen name to open it in the screen map.',
   '시스템': 'System', ' 기능 묶음 · 화면 ': ' feature groups · Screens: ',
   '실선은 화면에서 화면으로 넘어가는 길, 점선은 데이터만 주고받는 사이': 'Solid lines: screen navigation. Dotted lines: shared data only.',
@@ -368,6 +368,12 @@ Object.assign(UI_EN,{"AI에게 맡기기": "Ask your AI", "연결한 코드": "C
 Object.assign(UI_EN,{"필요한 분석 모두 요청":"Request all needed analysis","아직 없거나 코드가 바뀐 분석만 한 번에 요청합니다. 최신 결과는 다시 분석하지 않습니다.":"Requests only missing or outdated analysis at once. Current results are not reanalyzed.","하나씩 다시 분석하기":"Reanalyze one at a time","모든 분석 결과가 최신입니다. 새로 요청할 것이 없습니다.":"All analysis results are current. Nothing needs to be requested.","요청할 분석: ":"Analysis to request: ","요청하지 못한 분석: ":"Could not request: ","요청하지 못한 분석":"Could not request","남은 분석: ":"Still needed: ","코드에서 이 동작의 순서를 확인하지 못했습니다: ":"The code does not establish the steps of this action: ","상세 지도":"Detailed map","화면 묶음":"Screen groups","설정이 바뀌었거나 코드가 바뀌었습니다. 먼저 새로고침하세요.":"Settings or code changed. Refresh first.","새로고침 뒤 필요한 분석 요청을 준비했습니다. AI에게 알아보기에서 확인하세요.":"After refreshing, the needed analysis request is ready. Open Ask your AI to review it.","새로고침은 끝났지만 분석 요청을 준비하지 못했습니다.":"Refresh finished, but the analysis request could not be prepared."});
 const BASELINE_NOTICE = '지난 새로고침 이후를 선택하면 다음 새로고침은 이번 시각 이후부터 비교합니다. 시작점을 고정하려면 날짜·시각을 지정하세요.';
 Object.assign(UI_EN,{'직접 작성한 구성과 다른 AI 제안이 있습니다. 제안을 확인하세요.':'The AI proposal differs from your written structure. Review the proposal.'});
+Object.assign(UI_EN,{'전체 대상 브랜치':'All target branches','구조 기준':'Structure version','수집 범위':'Collection scope','상세·근거':'Details & evidence','추가 항목':'More items','검토 필요':'Review needed','호출·읽기·쓰기':'Calls, reads & writes','코드·설정 공유':'Shared code & configuration','화면 이동':'Screen navigation','데이터 전달':'Data exchange','선택과 연결됨':'Connected to selection','테스트 연결':'Linked tests','원문 대조':'Source check','자동 이동':'Moves on refresh','고정된 시작점':'Fixed start','연결 상태':'Connection status','앱 실행':'App runtime','등록 경로':'Registered path','범위 선택':'Choose scope','AI 채팅에 붙여 넣기':'Paste into your AI chat','자동 확인':'Automatic check','하루 한 번':'Once a day','추가 분석':'Additional analysis'});
+Object.assign(UI_EN,{'배포·동작 미확인':'Deployment & behavior unverified','수집 근거':'Collected evidence','기본 수집':'Basic collection','데이터 목록':'Data list','화면 주소':'Screen path','모든 서비스':'All services','아직 분석 전':'Not analyzed','분석 범위':'Analysis scope'});
+Object.assign(UI_EN,{'병합됨':'Merged','PR 근거 없음':'No PR evidence','작성':'Written by','운영 확인':'Operational check'});
+Object.assign(UI_EN,{'새로고침마다 시작점 이동':'Start moves on each refresh','요청 방식 기준':'Based on request method','실제 데이터 변경은 미확인':'Actual data changes unverified'});
+Object.assign(UI_EN,{'아는 서버만 선택하세요. 지도에만 연결하며 실제 통신은 바뀌지 않습니다.':'Select only a known server. This changes the map, not actual communication.','브랜치·태그·커밋 중 하나를 입력하세요. 비교할 기준 버전은 비워 두어도 됩니다.':'Enter a branch, tag, or commit. The comparison version is optional.','자동으로 찾지 못할 때만 입력하세요. 예: frontend/src, backend/app.':'Enter a path only if detection fails, e.g. frontend/src or backend/app.'});
+Object.assign(UI_EN,{'마지막 새로고침':'Last refresh'});
 const UI_PATTERN = new RegExp(Object.keys(UI_EN).sort((a, b) => b.length - a.length).map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'g');
 function tr(text) { return S.lang === 'en' ? String(text).replace(UI_PATTERN, match => UI_EN[match]) : String(text); }
 function ui(parts, ...values) { return parts.reduce((out, part, i) => out + tr(part) + (i < values.length ? values[i] : ''), ''); }
@@ -375,6 +381,19 @@ function helpDetails(html,title='자세히') {
   return `<details class="context-help"><summary>${esc(tr(title))}</summary>${html}</details>`;
 }
 function helpText(text,title='자세히') { return helpDetails(`<p class="s">${esc(tr(text))}</p>`,title); }
+// Shared presentation only: values are escaped by callers; no collection or analysis state is changed.
+function metaList(items) {
+  return `<dl class="metadata">${items.filter(([,value])=>value!==null && value!==undefined && value!=='').map(([label,value,translate=true])=>`<div><dt>${esc(translate?tr(label):label)}</dt><dd>${value}</dd></div>`).join('')}</dl>`;
+}
+function sectionHeading(title,actions='',status='',id='') {
+  return `<div class="section-heading"><div class="heading-label"><h2${id?` id="${esc(id)}"`:""}>${esc(tr(title))}</h2>${status}</div>${actions?`<div class="heading-actions">${actions}</div>`:''}</div>`;
+}
+function periodRows(repositories) {
+  return `<div class="period-list">${repositories.map(r=>`<div class="period-row"><span class="period-name">${esc(connectionDisplayName(r.id || r.repository || 'legacy'))}</span><span class="period-dates"><time ${r.since?`datetime="${esc(r.since)}"`:''}>${r.since?when(r.since):'—'}</time><span aria-hidden="true">→</span><time ${r.at?`datetime="${esc(r.at)}"`:''}>${r.at?when(r.at):'—'}</time></span></div>`).join('')}</div>`;
+}
+function lineLegend(items) {
+  return `<div class="line-legend">${items.map(([type,label])=>`<span><i class="legend-sample ${type}" aria-hidden="true"></i>${esc(tr(label))}</span>`).join('')}</div>`;
+}
 // 알려진 오류는 번역한 안내로 보여 주고, 원문(경로·명령·복구 위치 포함)은 접힌 칸에서 그대로 읽고 복사할 수 있게 둔다.
 function errorDetails(raw) { return raw ? `<details class="context-help error-detail"><summary>${tr('오류 내용')}</summary><pre class="prompt mono">${esc(raw)}</pre><button class="btn quiet" data-copy-error>${tr('오류 내용 복사')}</button></details>` : ''; }
 function errorHtml(message,raw) { return esc(message)+errorDetails(raw); }
@@ -451,10 +470,10 @@ function renderUpdates() {
     !release ? tr('공개된 정식 릴리즈가 아직 없습니다.') :
     release.newer ? tr('새 버전 알림') : tr('새 업데이트가 없습니다.');
   $('release-dialog').innerHTML = ui`<div class="ctl"><h2 id="releaseTitle">버전·업데이트</h2><span class="spacer"></span><button class="btn" id="closeRelease">닫기</button></div>
-    <p>${tr('현재 버전')}: <b>${esc(U.current || '…')}</b>${release ? ui` · 최신 공개 버전: <b>${esc(release.version)}</b>` : ''}</p>
+    ${metaList([['현재 버전',esc(U.current || '…')],...(release?[['최신 공개 버전',esc(release.version)]]:[])])}
     <p role="status">${esc(message)}${U.failed && release ? ui` ${tr('이전 확인에서 받은 정보입니다.')}` : ''}</p>
     <div class="ctl"><button class="btn" id="checkRelease" ${U.busy ? 'disabled' : ''}>${tr(U.busy ? '확인 중…' : '지금 확인')}</button></div>
-    <p><label><input type="checkbox" id="autoRelease" ${U.auto ? 'checked' : ''}> ${tr('앱을 열 때 새 버전 확인')}</label></p>${helpText('앱을 열 때 하루에 한 번 GitHub 공개 릴리즈를 확인합니다. 설치는 직접 눌러야 시작됩니다.','업데이트 도움말')}
+    <p><label><input type="checkbox" id="autoRelease" ${U.auto ? 'checked' : ''}> ${tr('앱을 열 때 새 버전 확인')}</label></p>${metaList([['자동 확인',esc(tr('하루 한 번'))]])}
     ${U.job?.stage==='completed' ? `<p role="status">${tr('업데이트 뒤 AI 연결을 다시 확인하세요.')}</p><button class="btn primary" id="updateConnectionDiagnostic">${tr('연결 진단')}</button>` : ''}
     <p role="status" id="updateStatus">${esc(updateMessage())}</p>${U.job?.stage==='failed' ? errorDetails(U.job.error || '') : ''}
     ${release?.newer ? ui`<div class="sect"><button class="btn" id="installUpdate" ${U.installing ? 'disabled' : ''}>지금 업데이트</button><p>앱을 닫고 새 버전을 설치한 뒤 다시 엽니다.</p><details><summary>직접 업데이트하기</summary><pre class="mono release-notes" id="upgradeCommand">${UPGRADE_COMMAND}</pre><button class="btn" id="copyUpgrade">업데이트 명령 복사</button><span id="upgradeCopied"></span></details></div>` : ''}
@@ -634,7 +653,7 @@ function analysisChooser() {
     return `<div class="row"><div class="grow"><div class="t">${tr(name)}</div><div class="s">${tr(what)}</div></div><button class="btn ${primary?'primary':'quiet'}" data-analysis-task="${key}" ${disabled || pendingActions.has(key)?'disabled':''}>${tr('AI에게 보낼 요청 만들기')}</button></div>`;};
   // The whole-project request is the normal path; single tasks stay available for explicit re-analysis.
   const advanced=choice.task && choice.task!=='analysis_plan';
-  return `<section class="sect"><h3>${tr(activeAnalysis() ? '다른 분석 요청' : '새 분석 요청')}</h3><p class="s">${tr('AI에게 보낼 요청만 만듭니다. 앱에서 바로 분석하지 않습니다.')}</p><div class="group">${row(ANALYSIS_TASKS[0])}</div><details ${advanced?'open':''}><summary>${tr('하나씩 다시 분석하기')}</summary>${target}<div class="group">${ANALYSIS_TASKS.slice(1).map(row).join('')}</div>${helpText('이 동작의 과정은 화면 지도에서 화면을 고른 뒤 요청합니다.','분석 도움말')}</details></section>`;
+  return `<section class="sect"><h3>${tr(activeAnalysis() ? '다른 분석 요청' : '새 분석 요청')}</h3><p class="s">${tr('AI에게 보낼 요청만 만듭니다. 앱에서 바로 분석하지 않습니다.')}</p><div class="group">${row(ANALYSIS_TASKS[0])}</div><details ${advanced?'open':''}><summary>${tr('하나씩 다시 분석하기')}</summary>${target}<div class="group">${ANALYSIS_TASKS.slice(1).map(row).join('')}</div><p class="s">${tr('이 동작의 과정은 화면 지도에서 화면을 고른 뒤 요청합니다.')}</p></details></section>`;
 }
 function savedAnalysisState(info,request,briefings) {
   const values=(request.requirements || []).map(item=>{
@@ -911,7 +930,12 @@ function renderRepositories() {
   // 접힌 상세를 열지 않아도 왜 주황인지와 다음 행동이 보이게: 재분석 필요는 칩 글과 버튼, 모르는 것은 개수와 툴팁.
   const unknown=r=>r.analysis?.[S.branch]?.unknown || [];
   const chip=r=>`<span class="pill ${tone(r)}" title="${esc(unknown(r).join('\n'))}">${esc(r.name)} · ${short(r)}${unknown(r).length ? ' · '+ui`모르는 것 ${unknown(r).length}` : ''}</span>${r.analysis?.[S.branch]?.stale && !r.error && r.collected && !r.config_changed ? `<button class="btn plain" data-reanalyze="${esc(r.id || '')}">${tr('다시 분석 요청')}</button>` : ''}`;
-  const detail=r=>`<p class="s">${esc(r.name)}: ${!r.collected ? tr('아직 지도 없음') : `${esc(r.commits?.[S.branch] || '—')} · ${tr('마지막 성공')} ${r.last_success ? esc(when(r.last_success)) : '—'}`}${r.config_changed ? ' · '+tr('설정 변경 후 다시 수집해야 합니다') : ''}${r.analysis_scope?.[S.branch] ? ' · '+esc(analysisScopeText(r.analysis_scope[S.branch])) : ''}${r.analysis?.[S.branch] ? ' · '+tr(r.analysis[S.branch].stale ? 'AI 재분석 필요' : 'AI 분석 · 원문 대조') : ''}${r.analysis?.[S.branch]?.unknown?.length ? ' · '+r.analysis[S.branch].unknown.map(esc).join('; ') : ''}</p>`;
+  const detail=r=>`<section class="repository-status"><h4>${esc(r.name)}</h4>${metaList([
+    ['지도에 표시할 버전',`<span class="mono">${esc(r.commits?.[S.branch] || '—')}</span>`],
+    ['마지막 성공',r.last_success?esc(when(r.last_success)):'—'],
+    ['연결 상태',esc(!r.collected?tr('아직 지도 없음'):r.config_changed?tr('설정 변경 후 다시 수집해야 합니다'):r.analysis?.[S.branch]?tr(r.analysis[S.branch].stale?'AI 재분석 필요':'AI 분석 · 원문 대조'):tr('기본 수집'))],
+    ...(r.analysis_scope?.[S.branch]?[['분석할 코드',esc(analysisScopeText(r.analysis_scope[S.branch]))]]:[])
+  ])}${unknown(r).length?`<ul class="status-list">${unknown(r).map(text=>`<li><span class="pill warn">${tr('확인 못 한 것')}</span><span>${esc(text)}</span></li>`).join('')}</ul>`:''}</section>`;
   const failure=r=>`<div class="s error" role="alert"><b>${esc(r.name)} · ${failed(r)}</b> ${String(r.error).includes('GITHUB_ACCESS|') ? esc(githubErrorText(r.error))+` <button class="btn quiet" data-github-repair="${esc(r.id || '')}">${tr('GitHub 계정 바꾸기')}</button>` : ''}${errorDetails(String(r.error))}</div>`;
   const unlinked=repos.length>1 && !repos.some(r=>r.api_targets?.length), candidates=M()?.connection_candidates?.length || 0;
   bar.innerHTML = `<select id="repository" aria-label="${tr('연결한 코드')}"><option value="">${tr('모든 코드')}</option>${repos.map(r => `<option value="${esc(r.id)}" ${r.id === S.repository ? 'selected' : ''}>${esc(r.name)}</option>`).join('')}</select><span class="s">${tr('지도에 표시할 버전')}</span><div class="seg light" id="branch" role="group" aria-label="${tr('지도에 표시할 버전')}"><button data-b="dev"></button><button data-b="main"></button></div><button class="btn quiet" id="manageRepositories">${tr('코드 연결')}</button><button class="btn quiet" id="analyzeMap">${esc(analysisButtonText())}</button>`+
@@ -989,11 +1013,11 @@ function editProject(create, focus=null) {
   if (!repos.length) repos.push({id:'',name:'',path:'',refs:{dev:'HEAD',main:null},layout:{},api_targets:[]});
   const linkFrom=focus?.link && repos.find(r=>r.id===focus.link[0]);
   if (linkFrom && !linkFrom.api_targets.includes(focus.link[1])) linkFrom.api_targets=[...linkFrom.api_targets,focus.link[1]];
-  dialog.innerHTML = `<h2>${tr(create ? '서비스 만들기' : '연결할 코드')}</h2>${helpText('서비스 하나에 웹 화면·서버·작업 프로그램의 코드를 함께 연결하세요. 코드가 나뉘어 있어도 됩니다.','연결 도움말')}
+  dialog.innerHTML = `<h2>${tr(create ? '서비스 만들기' : '연결할 코드')}</h2>
     ${linkFrom ? `<p role="status">${tr('후보를 체크해 두었습니다. 저장해야 반영됩니다.')}</p>` : ''}<label>${tr('서비스 이름')} <input id="projectName" placeholder="Lumen Studio" value="${esc(create ? '' : S.project)}" ${create ? '' : 'disabled'}></label>
     <div id="repositoryRows"></div><button class="btn quiet" id="addRepository">${tr('다른 코드 추가')}</button>
     <details id="shared-data-options"><summary>${tr('같은 데이터베이스를 함께 쓸 때')}</summary><p class="s">${tr('같은 데이터베이스의 같은 테이블을 사용하는 경우에만 연결하세요. 이름이 같다는 이유만으로 연결하지 않습니다. 모르면 비워 두어도 됩니다.')}</p><div id="sharedRows"></div><button class="btn quiet" id="addSharedData">${tr('함께 쓰는 데이터 추가')}</button></details>
-    <p class="s">${tr('GitHub 코드는 앱 전용 폴더에 내려받고 처음 지도를 가져옵니다. 이 컴퓨터의 기존 폴더는 연결 후 새로고침으로 지도를 가져오세요.')}</p>
+
     <div class="ctl"><span class="spacer"></span><button class="btn quiet" id="cancelProject">${tr('닫기')}</button><button class="btn primary" id="saveProject">${tr('코드 연결')}</button></div><p id="projectProgress" role="status"></p><div id="projectError" role="alert"></div>`;
   function targetOptions(index) {
     const repo=repos[index], others=repos.filter(r=>r!==repo && r.id);
@@ -1017,11 +1041,11 @@ function editProject(create, focus=null) {
   function rows() {
     $('repositoryRows').innerHTML = repos.map((r,i) => `<fieldset data-repository-row="${i}"><legend data-repository-title="${i}">${esc(r.name || tr('새 코드 폴더'))}</legend><input type="hidden" data-field="id" value="${esc(r.id)}">
       <div class="repository-fields"><label>${tr('GitHub 주소 또는 코드 폴더')}<input data-field="path" value="${esc(r.url || r.path)}" placeholder="https://github.com/example/web"></label><label>${tr('화면에 표시할 이름 (선택)')}<input data-field="name" value="${esc(r.name)}" placeholder="${tr('예: 웹 화면, 서버, 작업 프로그램')}"></label></div>
-      ${repos.length>1 ? `<div class="sect"><h4>${tr('이 코드가 요청을 보내는 서버')}</h4><p class="s">${tr('지도에서 이 코드의 요청을 받는 서버를 연결합니다. 알고 있을 때만 선택하세요. 주소가 같다는 이유만으로 연결하지 않으며, 서비스의 실제 통신은 바뀌지 않습니다.')}</p><div data-api-options="${i}">${targetOptions(i)}</div></div>` : ''}
+      ${repos.length>1 ? `<div class="sect"><h4>${tr('이 코드가 요청을 보내는 서버')}</h4><p class="s">${tr('아는 서버만 선택하세요. 지도에만 연결하며 실제 통신은 바뀌지 않습니다.')}</p><div data-api-options="${i}">${targetOptions(i)}</div></div>` : ''}
       ${r.managed?helpDetails(`<p class="s">${esc(r.path)} · @${esc(r.github?.account || '')}</p>`,'코드 보관 위치'):''}<div data-registration-account="${i}"></div>
-      <details><summary>${tr('지도에 표시할 버전')}</summary><p class="s">${tr('GitHub 주소는 기본 브랜치의 최신 코드를, 기존 폴더는 현재 선택된 브랜치를 분석합니다. 다른 버전과 비교하려면 아래 값을 바꾸세요. 비교 기준은 비워 두어도 됩니다.')}</p><div class="repository-fields">${[['dev','분석할 버전',r.refs.dev || ''],['main','비교할 기준 버전',r.refs.main || '']].map(([key,label,value])=>`<label>${tr(label)}<input data-field="${key}" value="${esc(value)}" placeholder="${key==='dev'?'HEAD':'origin/main'}"></label>`).join('')}</div><p class="s">${tr('브랜치·태그·커밋을 지정할 수 있습니다. origin/main은 GitHub에서 가져온 main 브랜치를 뜻합니다. 한쪽은 반드시 남겨 주세요.')}</p></details>
+      <details><summary>${tr('지도에 표시할 버전')}</summary><div class="repository-fields">${[['dev','분석할 버전',r.refs.dev || ''],['main','비교할 기준 버전',r.refs.main || '']].map(([key,label,value])=>`<label>${tr(label)}<input data-field="${key}" value="${esc(value)}" placeholder="${key==='dev'?'HEAD':'origin/main'}"></label>`).join('')}</div><p class="s">${tr('브랜치·태그·커밋 중 하나를 입력하세요. 비교할 기준 버전은 비워 두어도 됩니다.')}</p></details>
       <details><summary>${tr('코드 위치 직접 지정')}</summary>
-      <div class="repository-fields">${[['frontend','화면 코드 위치',r.layout.frontend || ''],['backend','서버 코드 위치',r.layout.backend || '']].map(([key,label,value])=>`<label>${tr(label)}<input data-field="${key}" value="${esc(value)}" placeholder="${tr('자동으로 찾기')}"></label>`).join('')}</div><p class="s">${tr('코드 폴더 안의 상대 위치입니다. 예: frontend/src, backend/app. 자동으로 찾지 못할 때만 입력하세요.')}</p></details>
+      <div class="repository-fields">${[['frontend','화면 코드 위치',r.layout.frontend || ''],['backend','서버 코드 위치',r.layout.backend || '']].map(([key,label,value])=>`<label>${tr(label)}<input data-field="${key}" value="${esc(value)}" placeholder="${tr('자동으로 찾기')}"></label>`).join('')}</div><p class="s">${tr('자동으로 찾지 못할 때만 입력하세요. 예: frontend/src, backend/app.')}</p></details>
       ${repos.length>1 ? `<button class="btn quiet" data-remove="${i}">${tr('이 코드 연결 해제')}</button><span class="s">${tr('코드와 지도는 남습니다.')}</span>` : ''}</fieldset>`).join('');
     document.querySelectorAll('[data-remove]').forEach(b=>b.onclick=()=>{collectShared();repos.splice(+b.dataset.remove,1);rows();sharedRows();});
     document.querySelectorAll('[data-field="path"], [data-field="name"]').forEach(input=>input.onchange=()=>{
@@ -1123,7 +1147,7 @@ function storyMap(m) {
   const aiCount = (S.groups ? S.groups.groups.length + Object.keys(S.groups.names || {}).length + Object.keys(S.groups.request_names || {}).length : 0) + Object.keys((S.flows && S.flows.routes) || {}).length;
   let h = ui`<div class="legend"><span><b class="strong">${visibleScreens(m).length}</b> 화면 · <b class="strong">${gs.length}</b> 묶음</span>
     <span><i class="dot ok"></i>테스트가 연결된 요청 비율 (통과 여부 아님)</span><span><span class="ai">AI가 정리한 이름</span> ${aiCount}개</span>
-    ${S.sel && !S.sel.startsWith('!') ? helpText('옅은 카드는 선택 화면과 연결됨 · 라벨의 화살표가 이동 방향','지도 읽는 법') : ''}
+    ${S.sel && !S.sel.startsWith('!') ? lineLegend([['selected','선택과 연결됨']]) : ''}
     <span class="spacer"></span><button class="btn plain" id="regroup" title="화면 주소·제목·버튼 글자만 AI에게 넘겨 묶음과 이름을 다시 받습니다">화면을 기능별로 정리하기</button></div><div class="cols">`;
   for (const g of gs) {
     h += `<div class="col"><h3><span class="${g.ai ? 'ai' : ''}">${esc(g.name)}</span></h3><p>${esc(g.description || '')}</p>`;
@@ -1240,13 +1264,13 @@ const evHtml = (m, evs) => (evs || []).map(e => e.repo ? `<div class="kv">${esc(
 const needHtml = (u) => `<div class="row"><span class="arrow">${u.needs === 'ops' ? '🔒' : '?'}</span><div class="grow"><div class="tw">${esc(u.text)}</div><div class="s">${tr(NEED[u.needs])}</div></div></div>`;
 function proposalSwitch() {
   if (!S.proposal) return '';
-  return `<span class="seg light" role="group" aria-label="${tr('보여 줄 구조')}"><button data-proposal="0" aria-pressed="${!S.showProposal}" class="${S.showProposal ? '' : 'on'}">${tr('기존 서비스 구성')}</button><button data-proposal="1" aria-pressed="${!!S.showProposal}" class="${S.showProposal ? 'on' : ''}">${tr('AI 제안')}</button></span>${S.showProposal ? `<span class="pill ai">${tr('AI 제안 · 기존 서비스 구성은 바뀌지 않았습니다')}</span>` : ''}${helpText('AI 제안은 따로 저장되며 기존 서비스 구성을 바꾸지 않습니다.')}`;
+  return `<span class="seg light" role="group" aria-label="${tr('보여 줄 구조')}"><button data-proposal="0" aria-pressed="${!S.showProposal}" class="${S.showProposal ? '' : 'on'}">${tr('기존 서비스 구성')}</button><button data-proposal="1" aria-pressed="${!!S.showProposal}" class="${S.showProposal ? 'on' : ''}">${tr('AI 제안')}</button></span>${S.showProposal ? `<span class="pill ai">${tr('AI 제안 · 기존 서비스 구성은 바뀌지 않았습니다')}</span>` : ''}`;
 }
 function sysView(m) {
   const y = S.system; if (!y) return ui`<div class="hint">서비스 구성이 아직 없습니다.<br><br><button class="btn primary" id="remakeSys">AI에게 서비스 구성 요청</button></div>`; const stale = y.checked && m.commit && !m.commit.startsWith(y.checked);
   const LINKS = sysLinks(y); const near = new Set(LINKS.filter(l => l.from === S.node || l.to === S.node).flatMap(l => [l.from, l.to]));
   let h = ui`<div class="legend"><span><b class="strong">${y.nodes.filter(n => n.kind !== 'user').length}</b> 덩어리 · 바깥 서비스 <b class="strong">${y.externals.length}</b></span>
-    ${helpDetails(ui`<p>실선은 부르거나 읽고 쓰는 길, 점선은 코드나 설정을 같이 쓰는 사이</p><p>🔒 ${tr(NEED.ops)}</p><p>${esc(y.written)} · 근거 대조 ${esc(y.checked || tr('안 함'))}</p>`,'지도 읽는 법')}
+    ${lineLegend([['calls','호출·읽기·쓰기'],['shared','코드·설정 공유']])}<span class="s" title="${esc(tr(NEED.ops))}">🔒 ${tr('운영 확인')}</span>${metaList([['작성',esc(y.written || '—')],['원문 대조',`<span class="mono">${esc(y.checked || tr('안 함'))}</span>`]])}
     ${proposalSwitch()}<span class="spacer"></span><button class="btn plain" id="remakeSys">AI에게 서비스 구성 요청</button>${stale ? tr('<span class="pill warn">지도와 기준 커밋이 다름</span>') : ''}</div>
     <div class="sysrow"><div class="graph" id="sys">${WIRES}`;
   for (const n of y.nodes) {
@@ -1325,42 +1349,44 @@ function briefingPanel() {
     if(!groups.has(key))groups.set(key,[]);groups.get(key).push(warning);
   }
   const other=S.lang==='en'?'ko':'en',otherSaved=!result && S.briefings?.[S.branch]?.[other]?.state==='saved';
-  let h=`<section class="sect"><div class="ctl"><h2>${tr('변경 설명')}</h2><span class="spacer"></span><button class="btn quiet" id="requestBriefing" ${!view || ['needs_collection','no_changes'].includes(view.state)?'disabled':''}>${tr('무엇이 바뀌었는지 알아보기')}</button></div><p class="sub">${tr(labels[view?.state] || labels.needs_collection)}</p>${otherSaved ? `<p class="s">${tr(other==='ko' ? '한국어로 저장된 설명이 있습니다. 언어를 바꾸면 볼 수 있습니다.' : '영어로 저장된 설명이 있습니다. 언어를 바꾸면 볼 수 있습니다.')}</p>` : ''}`;
-  for(const items of groups.values()){
-    const warning=items[0];h+=`<p class="s" role="status">${esc(connectionDisplayName(warning.repository))} · ${tr(warnings[warning.code] || '자료를 확인해 주세요.')}</p>`;
-  }
+  const action=`<button class="btn quiet" id="requestBriefing" ${!view || ['needs_collection','no_changes'].includes(view.state)?'disabled':''}>${tr('무엇이 바뀌었는지 알아보기')}</button>`;
+  let h=`<section class="sect briefing-section">${sectionHeading('변경 설명',action,result?`<span class="pill ai">${tr('AI 설명')}</span>`:'')}`;
+  if(view?.state!=='saved')h+=`<p class="sub" role="status">${tr(labels[view?.state] || labels.needs_collection)}</p>`;
+  if(otherSaved)h+=`<p class="s">${tr(other==='ko' ? '한국어로 저장된 설명이 있습니다. 언어를 바꾸면 볼 수 있습니다.' : '영어로 저장된 설명이 있습니다. 언어를 바꾸면 볼 수 있습니다.')}</p>`;
+  if(result)h+=`<div class="period-block"><span class="s">${tr('설명 구간')}</span>${periodRows(result.input.repositories)}</div>`;
   const parts={merged_prs:'병합 PR',open_prs:'열린 PR',issues:'이슈',pr_files:'PR의 변경 파일',linked_issues:'연결된 이슈'};
-  const limitations=[...groups.values()].map(items=>{
-    const sources=[...new Set(items.flatMap(w=>[w.part?tr(parts[w.part] || '기타 자료'):'',w.source || '']).filter(Boolean))];
-    return sources.length?`<p class="s">${esc(connectionDisplayName(items[0].repository))}: ${esc(sources.join(', '))}</p>`:'';
-  }).join('');
-  // 설명 구간(위)과 아래에서 고른 새로고침 기록 구간은 다를 수 있어 각자 제목 아래에 보인다. 커밋 같은 기술 정보만 접는다.
-  if(result)h+=`<h4>${tr('설명 구간')}</h4><p class="s">${tr('아래 새로고침 기록 선택과 별개로 최신 근거를 설명합니다.')}</p>${result.input.repositories.map(r=>`<p class="s">${esc(connectionDisplayName(r.id))} · ${r.since?when(r.since):'—'} → ${r.at?when(r.at):'—'}</p>`).join('')}`;
-  const comparison=result ? result.input.repositories.map(r=>`<p class="s">${esc(connectionDisplayName(r.id))} · ${esc(r.refs?.[result.branch] || '—')} · ${esc(r.commits?.from?.slice(0,8) || '—')} → ${esc(r.commits?.to?.slice(0,8) || '—')}</p>`).join('') : '';
-  h+=helpDetails(`${comparison}<p>${tr('PR은 각 코드의 모든 대상 브랜치를 포함하며, 구조 근거는 선택한 코드 버전만 다룹니다.')}</p><p>${tr('같은 문제의 PR은 묶고, 다른 문제를 푼 PR은 나눠 설명합니다.')}</p><p>${tr('AI가 근거를 읽고 해석한 설명입니다. 인용 일치는 해석의 정확성을 보장하지 않습니다.')}</p>${limitations}`,'설명과 수집 범위');
+  if(groups.size)h+=`<ul class="status-list">${[...groups.values()].map(items=>{
+    const warning=items[0],sources=[...new Set(items.flatMap(w=>[w.part?tr(parts[w.part] || '기타 자료'):'',w.source || '']).filter(Boolean))];
+    return `<li role="status"><span class="pill warn">${esc(connectionDisplayName(warning.repository))}</span><span>${tr(warnings[warning.code] || '자료를 확인해 주세요.')}${sources.length?` <span class="s">(${esc(sources.join(', '))})</span>`:''}</span></li>`;
+  }).join('')}</ul>`;
   if(!result)return h+'</section>';
-  h+=`<p class="s">${tr('변경 묶음')} ${result.cards.length} · ${tr('관련 PR')} ${result.pr_count}</p>`;
-  const claim=(title,value,translate=true)=>`<div class="row"><div class="grow"><h4>${esc(translate?tr(title):title)}</h4><p>${value.unknown?`<span class="pill warn">${tr('확인 못 한 것')}</span> `:''}${esc(value.text)}</p>${value.evidence?.length?`<details><summary>${tr('근거 보기')} ${value.evidence.length}</summary>${value.evidence.map(ev=>`<blockquote><p>${esc(ev.quote)}</p><span class="s">${esc(ev.source)}</span>${ev.url?` <button class="btn quiet" data-url="${esc(ev.url)}">↗</button>`:''}</blockquote>`).join('')}</details>`:''}</div></div>`;
-  for(const card of result.cards)h+=`<article class="group"><div class="row"><div class="grow"><h3>${esc(card.title)}</h3><p class="s">${tr(card.merge==='merged'?'병합됨 · 배포·동작 미확인':'PR 근거 없음 · 배포·동작 미확인')}</p><div class="flowline">${card.prs.map(pr=>`<button class="pill click" data-url="${esc(pr.url)}">${esc(connectionDisplayName(pr.repository))} #${pr.number} ↗</button><span class="s">${esc(pr.branch || '')} → ${esc(pr.base || '')}</span>`).join('')}</div><div class="flowline">${card.prs.flatMap(pr=>(pr.issues || []).filter(issue=>/^https:\/\/github\.com\/[^/]+\/[^/]+\/issues\/[0-9]+$/.test(issue.url || '')).map(issue=>`<button class="pill click" data-url="${esc(issue.url)}">${tr('연결된 이슈')} ${esc(connectionDisplayName(pr.repository))} #${issue.number} ↗</button>`)).join('')}</div></div></div>`+
-    (()=>{const fields=[['problem','해결한 문제'],['why','바꾼 이유'],['before','바뀌기 전'],['after','바뀐 점'],['resolution','해결한 방법'],['impact','데이터에 미치는 영향'],['recovery','중단·복구'],['remaining','확인된 남은 문제']];
-      // 기본은 문제와 바뀐 점. 확인 못 한 항목은 개수가 보이는 따로 접힌 칸에 모아, 확인된 상세와 섞이지 않게 한다.
-      const shown=fields.filter(([key])=>['problem','after'].includes(key)),rest=fields.filter(f=>!shown.includes(f));
-      const unknown=rest.filter(([key])=>card[key].unknown),known=rest.filter(([key])=>!card[key].unknown);
-      const fold=(title,list)=>list.length?`<details><summary>${tr(title)} ${list.length}</summary>${list.join('')}</details>`:'';
-      return shown.map(([key,title])=>claim(title,card[key])).join('')+fold('확인이 필요한 내용',unknown.map(([key,title])=>claim(title,card[key])))+
-        fold('자세한 변경 내용',known.map(([key,title])=>claim(title,card[key])))+fold('용어 풀이',card.terms.map(term=>claim(term.term,term.explanation,false)));})()+'</article>';
-  if(result.unknown.length)h+=`<h4>${tr('확인 못 한 것')}</h4><ul>${result.unknown.map(text=>`<li>${esc(text)}</li>`).join('')}</ul>`;
+  h+=metaList([['변경 묶음',result.cards.length],['관련 PR',result.pr_count],['수집 범위',esc(tr('전체 대상 브랜치'))],['구조 기준',result.input.repositories.map(r=>`<span>${esc(connectionDisplayName(r.id))} · <span class="mono">${esc(r.refs?.[result.branch] || '—')}</span></span>`).join('')]]);
+  h+=helpDetails(metaList(result.input.repositories.map(r=>[connectionDisplayName(r.id),`<span class="mono">${esc(r.commits?.from?.slice(0,8) || '—')} → ${esc(r.commits?.to?.slice(0,8) || '—')}</span>`,false])),'코드 상태 자세히');
+  const fields=[['problem','해결한 문제'],['why','바꾼 이유'],['before','바뀌기 전'],['after','바뀐 점'],['resolution','해결한 방법'],['impact','데이터에 미치는 영향'],['recovery','중단·복구'],['remaining','확인된 남은 문제']];
+  const claim=(title,value)=>`<div class="claim"><h4>${esc(tr(title))}${value.unknown?` <span class="pill warn">${tr('확인 못 한 것')}</span>`:''}</h4><p>${esc(value.text)}</p></div>`;
+  for(const card of result.cards){
+    const primary=fields.filter(([key])=>['problem','after'].includes(key)),extra=fields.filter(([key])=>!['problem','after'].includes(key));
+    const unknown=extra.filter(([key])=>card[key].unknown).length;
+    const evidence=[...fields.map(([key,title])=>({title:tr(title),value:card[key]})),...card.terms.map(term=>({title:term.term,value:term.explanation}))].filter(item=>item.value.evidence?.length);
+    const links=card.prs.map(pr=>`<div class="pr-reference"><button class="pill click" data-url="${esc(pr.url)}">${esc(connectionDisplayName(pr.repository))} #${pr.number} ↗</button><span class="s">${esc(pr.branch || '')} → ${esc(pr.base || '')}</span>${(pr.issues || []).filter(issue=>/^https:\/\/github\.com\/[^/]+\/[^/]+\/issues\/[0-9]+$/.test(issue.url || '')).map(issue=>`<button class="pill click" data-url="${esc(issue.url)}">${tr('연결된 이슈')} #${issue.number} ↗</button>`).join('')}</div>`).join('');
+    h+=`<article class="group change-card"><div class="change-card-heading"><h3>${esc(card.title)}</h3><div class="chips"><span class="pill">${tr(card.merge==='merged'?'병합됨':'PR 근거 없음')}</span><span class="pill">${tr('배포·동작 미확인')}</span>${unknown?`<span class="pill warn">${tr('확인이 필요한 내용')} ${unknown}</span>`:''}</div><div class="reference-list">${links}</div></div>`;
+    h+=`<div class="claim-grid">${primary.map(([key,title])=>claim(title,card[key])).join('')}</div>`;
+    h+=`<details class="change-details"><summary>${tr('상세·근거')}</summary><div class="claim-grid">${extra.map(([key,title])=>claim(title,card[key])).join('')}</div>`;
+    if(card.terms.length)h+=`<h4>${tr('용어 풀이')}</h4>${metaList(card.terms.map(term=>[term.term,`${term.explanation.unknown?`<span class="pill warn">${tr('확인 못 한 것')}</span> `:''}${esc(term.explanation.text)}`,false]))}`;
+    h+=`<div class="evidence-list">${evidence.map(({title,value})=>`<section><h4>${esc(title)} · ${tr('근거 보기')}</h4>${value.evidence.map(ev=>`<blockquote><p>${esc(ev.quote)}</p><span class="s">${esc(ev.source)}</span>${ev.url?` <button class="btn plain" data-url="${esc(ev.url)}" aria-label="${esc(tr('근거 보기'))}">↗</button>`:''}</blockquote>`).join('')}</section>`).join('')}</div></details></article>`;
+  }
+  if(result.unknown.length)h+=`<div class="sect"><h4>${tr('확인 못 한 것')}</h4><ul class="status-list">${result.unknown.map(text=>`<li><span class="pill warn">${tr('검토 필요')}</span><span>${esc(text)}</span></li>`).join('')}</ul></div>`;
   return h+'</section>';
 }
 function changesView(m) {
   const c = S.changes,brief=briefingPanel();
   const results=c?.last_results || (c?.last_result ? [c.last_result] : []);
-  const latest=results.map(result=>`<div class="sect"><p class="sub">${result.repository ? esc(connectionDisplayName(result.repository))+' · ' : ''}${when(result.at)} · ${when(result.since)} ${tr('이후')}${result.changed ? '' : ' · '+tr('선택한 기준 이후 달라진 것 없음')}</p>${result.scope==='basic' ? helpText('기본 수집으로 비교한 변경 내역입니다. AI가 필요한 부분은 AI에게 알아보기에서 ‘화면과 서버 코드 자세히 보기’를 요청하세요.','비교 방법') : ''}</div>`).join('');
+  const latest=results.length?`<section class="sect collection-section">${sectionHeading('마지막 새로고침')}${periodRows(results.map(r=>({...r,id:r.repository || ''})))}${metaList([['수집 범위',esc(tr('기본 수집'))]])}${results.filter(r=>!r.changed).map(r=>`<p class="s">${r.repository?esc(connectionDisplayName(r.repository))+' · ':''}${tr('선택한 기준 이후 달라진 것 없음')}</p>`).join('')}</section>`:'';
   if (!c || !c.entries.length) return brief+(latest || ui`<div class="hint">아직 기록이 없습니다. 새로고침해 주세요.</div>`);
   const e = c.entries[Math.min(S.chi, c.entries.length - 1)]; const b = e.branches[S.branch];
-  let h = brief+latest + ui`<div class="legend"><span>마지막 새로고침 ${when(c.last_refresh)}</span></div><h4>새로고침 기록 구간</h4>
+  let h = brief + ui`<section class="sect collection-history">${sectionHeading('새로고침 기록 구간')}${metaList([['마지막 새로고침',results.length?results.map(r=>`<span>${r.repository?esc(connectionDisplayName(r.repository))+' · ':''}${when(r.at)}${!r.changed?' · '+tr('선택한 기준 이후 달라진 것 없음'):''}</span>`).join(''):c.last_refresh?when(c.last_refresh):'—']])}
     <div class="flowline">${c.entries.slice(0, 12).map((x, i) => `<span class="pill ${i === S.chi ? 'strong' : ''} click" data-chi="${i}">${x.repository ? esc(connectionDisplayName(x.repository))+' · ' : ''}${when(x.at)}</span>`).join('')}${c.entries.length > 12 ? `<select id="olderChanges" aria-label="${tr('이전 기록')}"><option value="">${tr('이전 기록')} ${c.entries.length - 12}</option>${c.entries.slice(12).map((x, i) => `<option value="${i + 12}" ${i + 12 === S.chi ? 'selected' : ''}>${x.repository ? esc(connectionDisplayName(x.repository))+' · ' : ''}${when(x.at)}</option>`).join('')}</select>` : ''}</div>
-    <h2>${e.repository ? esc(connectionDisplayName(e.repository))+' · ' : ''}${when(e.since)} → ${when(e.at)}</h2><p class="sub">병합된 변경(PR) ${e.prs.length}${b ? ` · ${esc(versionName(S.branch))} <span class="mono">${esc(b.from)} → ${esc(b.to)}</span>` : ` · ${esc(versionName(S.branch))} · ${tr('이 사이에 코드 그대로')}`}</p>`;
+    ${periodRows([{...e,id:e.repository || ''}])}${metaList([['병합된 변경(PR)',e.prs.length],['지도에 표시할 버전',esc(versionName(S.branch))],['구조 기준',b?`<span class="mono">${esc(b.from)} → ${esc(b.to)}</span>`:esc(tr('이 사이에 코드 그대로'))]])}`;
   const go = (p, name) => `<span class="pill click" data-goscr="${esc(p)}">${esc(m.screens.some(s => s.path === p) ? label(m, p) : displayIds(name || p))}</span>`;
   const sect = (title, items, row) => items && items.length ? `<div class="sect"><h4>${title} ${items.length}</h4><div class="group">${items.map(row).join('')}</div></div>` : '';
   if (b) { h += ui`<div class="sect"><h4>구조가 달라진 것</h4></div>`;
@@ -1381,7 +1407,7 @@ function changesView(m) {
   for (const [k, ps] of [...by].sort((a, b) => (a[0] === NO_PLACE) - (b[0] === NO_PLACE) || b[1].length - a[1].length))
     h += `<div class="sect"><h4>${esc(PR_PLACES[k] ? (S.lang === 'en' ? PR_PLACES[k] : k) : displayIds(k))} ${ps.length}</h4><div class="group">${ps.map(p => ui`<div class="row"><div class="grow"><div class="tw click" data-url="${esc(p.url)}">#${p.number} ${esc(p.title)} ↗</div>
       <div class="flowline">${p.kinds.map(x => `<span class="pill ${KIND[x]?.[1] || ''}">${tr(KIND[x]?.[0] || x)}</span>`).join('')}${p.base !== 'dev' ? `<span class="pill strong">${esc(p.base)}</span>` : ''}${p.screens.slice(0, 6).map(x => go(x)).join('')}${p.screens.length > 6 ? ui`<span class="s">화면 ${p.screens.length - 6}곳 더</span>` : ''}${p.issues.map(n => ui`<span class="pill">이슈 #${n}</span>`).join('')}<span class="s">${esc(p.author || '')} · ${when(p.merged_at)} · 파일 ${p.files}</span></div></div></div>`).join('')}</div></div>`;
-  return h;
+  return h+'</section>';
 }
 function changesInspector(m) {
   const c = S.changes; const e = c && c.entries[Math.min(S.chi, c.entries.length - 1)]; if (!e) return '';
@@ -1391,7 +1417,7 @@ function changesInspector(m) {
     ${Object.entries(KIND).map(([key, [name, tone]]) => `<div class="row"><div class="grow"><span class="pill ${tone}">${tr(name)}</span></div>${k(key)}</div>`).join('')}
     <div class="row"><div class="grow">지도와 연결하지 못한 변경</div>${e.prs.filter(p => !p.groups.length && !p.programs.length).length}</div>
     ${b ? ui`<div class="row"><div class="grow">새 화면 · 사라진 화면</div>${b.screens_added.length} · ${b.screens_removed.length}</div><div class="row"><div class="grow">새 요청 · 사라진 요청</div>${b.requests_added.length} · ${b.requests_removed.length}</div><div class="row"><div class="grow">새 길 · 끊긴 길</div>${b.flows_added.length} · ${b.flows_removed.length}</div>` : ''}
-  </div></div><p class="empty">화면 이름을 누르면 화면 지도에서 그 화면이 열립니다.</p>`;
+  </div></div>`;
 }
 
 // ---------- 그리기: 기능 (묶음이 상자, 묶음 사이를 넘어가는 길과 주고받는 데이터가 선) ----------
@@ -1422,7 +1448,7 @@ function featureGraph(m) {
 }
 function featView(m) {
   const f = featureGraph(m); const sel = S.feat; const near = (i) => sel == null || i === sel || f.links.some(l => (l.a === sel && l.b === i) || (l.b === sel && l.a === i)); const on = (l) => sel == null || l.a === sel || l.b === sel;
-  let h = ui`<div class="legend"><span><b class="strong">${f.gs.length}</b> 기능 묶음 · 화면 <b class="strong">${visibleScreens(m).length}</b></span>${helpText('실선은 화면에서 화면으로 넘어가는 길, 점선은 데이터만 주고받는 사이','지도 읽는 법')}${S.groups ? ui`<span><span class="ai">묶음과 이름은 AI가 붙였습니다</span></span>` : ui`<span>AI 묶음이 아직 없어 화면 주소의 첫 부분으로 묶었습니다.</span>`}<span class="spacer"></span><button class="btn plain" id="regroup" title="화면 주소·제목·버튼 글자만 AI에게 넘겨 묶음과 이름을 다시 받습니다">화면을 기능별로 정리하기</button></div><div class="sys three" id="sys">${WIRES}`;
+  let h = ui`<div class="legend"><span><b class="strong">${f.gs.length}</b> 기능 묶음 · 화면 <b class="strong">${visibleScreens(m).length}</b></span>${lineLegend([['calls','화면 이동'],['shared','데이터 전달']])}${S.groups ? `<span class="pill ai">${tr('AI가 정리한 이름')}</span>` : `<span class="pill">${tr('화면 주소')}</span>`}<span class="spacer"></span><button class="btn plain" id="regroup" title="화면 주소·제목·버튼 글자만 AI에게 넘겨 묶음과 이름을 다시 받습니다">화면을 기능별로 정리하기</button></div><div class="sys three" id="sys">${WIRES}`;
   f.gs.forEach((g, i) => { const st = f.stat[i];
     h += ui`<div class="card node gc${f.pos[i].col} gr${f.pos[i].row} ${i === sel ? 'sel' : ''} ${near(i) ? '' : 'dim'}" data-feat="${i}" data-w="G${i}"><div class="nm"><span class="${g.ai ? 'ai' : ''}">${esc(g.name)}</span></div><div class="s">${esc(g.description || '')}</div>
       <div class="meta"><span>화면 ${g.list.length} · 서버에 하는 일 ${st.reqs}</span>${st.reqs ? ui`<span class="bar" title="테스트 연결 ${st.tested}/${st.reqs}"><i style="width:${Math.round(st.tested / st.reqs * 100)}%"></i></span>` : ''}</div><div class="meta">${st.ext.map(x => `<span class="pill">${esc(x)}</span>`).join('')}</div></div>`; });
@@ -1490,11 +1516,11 @@ function focusView(m) {
   if (S.focus?.t === 'screen' && !m.screens.some(x => x.path === S.focus.id)) return ui`<div class="hint">이 버전에는 선택한 화면이 없습니다.<br><br><button class="btn plain" id="unfocus">‹ 데이터 목록</button></div>`;
   const d = S.focus && focusData(m);
   if (!d) { const tu = tableUse(m); const all = [...new Set([...Object.values(m.models || {}), ...Object.keys(tu)])].map(t => ({ t, w: tu[t] ? tu[t].w.size : 0, r: tu[t] ? tu[t].r.size : 0, p: progs(t) })).sort((a, b) => (b.w + b.r) - (a.w + a.r) || a.t.localeCompare(b.t));
-    return ui`<div class="legend"><span>데이터를 골라 연결된 화면과 서버 동작을 확인하세요.</span>${helpText('고른 것 하나를 가운데 두고 그것과 닿는 것만 그립니다. 화면은 화면 지도에서, 서버 기능은 화면의 요청에서, 데이터는 아래 목록에서 고릅니다.')}</div>
+    return ui`<div class="legend"><h2>${tr('데이터 목록')}</h2>${lineLegend([['calls','호출·읽기·쓰기']])}</div>
       <div class="sect"><h4>데이터 ${all.length}</h4><div class="group">` + all.map(x => `<div class="row click" data-f="table|${esc(x.t)}"><div class="grow"><div class="t mono">${esc(tableName(x.t))}</div></div><span class="s">${x.w + x.r ? ui`바꾸는 화면 ${x.w} · 읽는 화면 ${x.r}` : tr('화면에서 닿지 않음')}</span>${x.p.map(n => ui`<span class="pill warn">${esc(n.name)}도 직접 씀</span>`).join('')}</div>`).join('') + `</div></div>`; }
   const card = (c, w) => `<div class="card node ${c.f ? '' : 'plain'}" data-w="${w}" ${c.f ? `data-f="${esc(c.f)}"` : ''}><div class="nm"><span class="${c.ai ? 'ai' : ''}">${esc(c.name)}</span></div><div class="s">${esc(c.sub || '')}</div></div>`;
   const col = (title, list, k) => `<div class="fcol"><div class="zone">${title} ${list.length}</div>${list.map((c, i) => card(c, k + i)).join('') || tr('<div class="empty">없음</div>')}</div>`;
-  return ui`<div class="legend"><button class="btn plain" id="unfocus">‹ 데이터 목록</button><span>${esc(d.note)}</span>${helpDetails(`<p class="s">${tr('옆 카드를 누르면 그것이 가운데로 옵니다.')}</p>${d.help ? `<p class="s">${tr(d.help)}</p>` : ''}`)}</div><div class="focus" id="sys">${WIRES}${col(d.lt, d.left, 'L')}
+  return ui`<div class="legend"><button class="btn plain" id="unfocus">‹ 데이터 목록</button><span>${esc(d.note)}</span>${d.help?`<span class="pill warn">${tr('요청 방식 기준')}</span><span class="s">${tr('실제 데이터 변경은 미확인')}</span>`:''}</div><div class="focus" id="sys">${WIRES}${col(d.lt, d.left, 'L')}
     <div class="fcol"><div class="zone">${d.kind}</div><div class="card node sel" data-w="C"><div class="nm"><span class="${d.ai ? 'ai' : ''}">${esc(d.name)}</span></div><div class="s mono">${esc(d.sub)}</div>${d.chips ? `<div class="meta">${d.chips.map(t => `<span class="pill click" data-f="table|${esc(t)}">${esc(tableName(t))}</span>`).join('')}</div>` : ''}</div></div>${col(d.rt, d.right, 'R')}</div>`;
 }
 function focusInspector(m) {
@@ -1601,12 +1627,11 @@ $('refresh').onclick = doRefresh;
 function renderSettings() {
   const dialog=$('settings-dialog'), st=S.settings;
   const radio=(value,label)=>`<label class="kv opt"><input type="radio" name="since" value="${value}" ${st.since===value?'checked':''}> ${tr(label)}</label>`;
-  dialog.innerHTML=`<h2 id="settingsTitle">${tr('설정')}</h2><p class="s">${tr('이 설정은 모든 서비스에 적용됩니다.')}</p><h3>${tr('언제부터 바뀐 내용을 볼까요?')}</h3>
-    ${radio('last_refresh','지난 새로고침 이후')}<p class="s" id="baselineNotice">${tr(BASELINE_NOTICE)}</p>${radio('my_commit','내 마지막 커밋 이후')}
-    ${radio('time','지정한 시각 이후')}<label>${tr('시작 시각')} <input type="datetime-local" id="sinceTime" value="${esc(st.since_time)}"></label>
+  dialog.innerHTML=`${sectionHeading('설정',`<button class="btn quiet" id="closeSettings">${tr('닫기')}</button>`,`<span class="pill">${tr('모든 서비스')}</span>`,'settingsTitle')}<h3>${tr('언제부터 바뀐 내용을 볼까요?')}</h3>
+    <div class="setting-options"><div>${radio('last_refresh','지난 새로고침 이후')}<p class="s" id="baselineNotice" title="${esc(tr(BASELINE_NOTICE))}">${tr('새로고침마다 시작점 이동')}</p></div><div>${radio('my_commit','내 마지막 커밋 이후')}</div><div>${radio('time','지정한 시각 이후')}<p class="s">${tr('고정된 시작점')}</p></div></div>
+    <label>${tr('시작 시각')} <input type="datetime-local" id="sinceTime" value="${esc(st.since_time)}"></label>
     <h3>${tr('새로고침')}</h3><label class="kv opt"><input type="checkbox" id="openRefresh" ${st.open_refresh?'checked':''}> ${tr('서비스를 열 때 새로고침')}</label>
-    <p class="s">${tr('저장 후 새로고침하면 반영됩니다.')}</p>${helpDetails(`<p>${tr('앱을 시작할 때와 다른 서비스로 바꿀 때 모두 새로고침합니다.')}</p><p>${tr('내 마지막 커밋은 Git에 저장한 기록이며, 코드마다 이 컴퓨터의 Git 이메일과 같은 작성자의 마지막 커밋을 찾습니다.')}</p><p>${tr('지정한 시각은 새로고침해도 유지됩니다. 시작점을 옮기려면 이 설정에서 날짜·시각을 바꾸세요.')}</p>`,'비교 기준 도움말')}
-    <div class="ctl"><button class="btn primary" id="saveRefresh" ${S.project?'':'disabled'}>${tr('저장하고 새로고침')}</button><button class="btn" id="saveSt">${tr('저장')}</button><button class="btn quiet" id="closeSettings">${tr('닫기')}</button></div><div id="settingsError" role="alert"></div>`;
+    <div class="ctl"><button class="btn primary" id="saveRefresh" ${S.project?'':'disabled'}>${tr('저장하고 새로고침')}</button><button class="btn" id="saveSt">${tr('저장')}</button></div><div id="settingsError" role="alert"></div>`;
   $('closeSettings').onclick=()=>dialog.close();
   const timeState=()=>{const since=dialog.querySelector('input[name=since]:checked').value;$('sinceTime').disabled=since!=='time';$('baselineNotice').hidden=since!=='last_refresh';};
   dialog.querySelectorAll('input[name=since]').forEach(input=>input.onchange=timeState);timeState();
@@ -1631,8 +1656,8 @@ function renderAgentPrompt() {
   const task=request && (ANALYSIS_TASKS.find(t=>t[0]===request.command)?.[1] || (request.command==='make_steps'?'동작 과정':''));
   const target=request?.target==='*' ? tr('연결한 코드 전체') : request?.target ? connectionDisplayName(request.target) : '';
   // 복사 → AI에 붙여 넣기 → 결과 확인 순서의 정본은 이 세 단계다. 단계마다 같은 설명을 되풀이하지 않는다.
-  const steps=request && ['up_to_date','blocked'].includes(request.state)?`<p class="sub">${esc(tr(task || ''))}</p><div role="status">${tr(states[request.state] || '')}</div>${planSummary(request)}`:request?`<p class="sub">${esc([tr(task || ''),target].filter(Boolean).join(' · '))}</p><h3>${tr('1. 요청 복사')}</h3>`+ui`<div class="ctl"><button class="btn ${request.copied?'quiet':'primary'}" id="cpAgent">복사</button><span id="cpDone">${request.copied?tr('복사됨'):''}</span></div>`+
-    `<h3>${tr('2. 작업하던 AI 채팅에 붙여 넣기')}</h3><h3>${tr('3. 결과 확인')}</h3><button class="btn ${request.copied?'primary':'quiet'}" id="checkAnalysisResults" ${request.state==='checking'?'disabled':''}>${tr('결과 확인')}</button>${helpText('결과만 읽습니다. 새로고침이 아니며 바뀐 것과 비교 시작점은 유지됩니다.','분석 도움말')}<div id="analysisResultState" role="status">${request.error?errorHtml(tr('결과를 읽지 못했습니다. 오류 내용을 확인하세요.'),request.error):tr(states[request.state] || states.prepared)}</div>${['partial','proposal_partial'].includes(request.state) && request.codes ? `<div class="s" data-codes>${[['saved','결과가 저장된 코드: '],['partial','일부 결과만 저장된 코드: '],['waiting','결과를 기다리는 코드: ']].filter(([k])=>request.codes[k].length).map(([k,label])=>`<div>${tr(label)}${esc(request.codes[k].map(connectionDisplayName).join(', '))}</div>`).join('')}</div>` : ''}${['saved','previous','proposal','proposal_previous','proposal_partial','partial'].includes(request.state)?`<button class="btn quiet" id="viewAnalysisResults">${tr(request.state.startsWith('proposal')?'AI 제안 보기':'결과 보기')}</button>`:''}${request.command==='analysis_plan'?planSummary(request):''}<details><summary>${tr('요청 내용 보기')}</summary><pre class="prompt mono">${esc(request.handoff ?? S.agentPrompt)}</pre></details>`:'';
+  const steps=request && ['up_to_date','blocked'].includes(request.state)?`<p class="sub">${esc(tr(task || ''))}</p><div role="status">${tr(states[request.state] || '')}</div>${planSummary(request)}`:request?`<p class="sub">${esc([tr(task || ''),target].filter(Boolean).join(' · '))}</p><ol class="request-steps"><li ${request.copied?'':'aria-current="step"'}><strong>${tr('1. 요청 복사')}</strong>`+ui`<div class="ctl"><button class="btn ${request.copied?'quiet':'primary'}" id="cpAgent">복사</button><span id="cpDone">${request.copied?tr('복사됨'):''}</span></div>`+
+    `</li><li><strong>${tr('2. 작업하던 AI 채팅에 붙여 넣기')}</strong></li><li ${request.copied?'aria-current="step"':''}><strong>${tr('3. 결과 확인')}</strong><button class="btn ${request.copied?'primary':'quiet'}" id="checkAnalysisResults" ${request.state==='checking'?'disabled':''}>${tr('결과 확인')}</button></li></ol><div id="analysisResultState" role="status">${request.error?errorHtml(tr('결과를 읽지 못했습니다. 오류 내용을 확인하세요.'),request.error):tr(states[request.state] || states.prepared)}</div>${['partial','proposal_partial'].includes(request.state) && request.codes ? `<div class="s" data-codes>${[['saved','결과가 저장된 코드: '],['partial','일부 결과만 저장된 코드: '],['waiting','결과를 기다리는 코드: ']].filter(([k])=>request.codes[k].length).map(([k,label])=>`<div>${tr(label)}${esc(request.codes[k].map(connectionDisplayName).join(', '))}</div>`).join('')}</div>` : ''}${['saved','previous','proposal','proposal_previous','proposal_partial','partial'].includes(request.state)?`<button class="btn quiet" id="viewAnalysisResults">${tr(request.state.startsWith('proposal')?'AI 제안 보기':'결과 보기')}</button>`:''}${request.command==='analysis_plan'?planSummary(request):''}<details><summary>${tr('요청 내용 보기')}</summary><pre class="prompt mono">${esc(request.handoff ?? S.agentPrompt)}</pre></details>`:'';
   // AI 사용량·요금 안내는 이 패널에 한 번만 보인다.
   $('insp').innerHTML=analysis?`<h2>${tr('AI에게 알아보기')}</h2><p class="s">${tr('연결한 AI가 분석하며, 사용하는 AI의 요금·사용 한도가 적용됩니다.')}</p>`+steps+analysisChooser():
     `<h2>${tr('AI 연결')}</h2><p>${tr('AI 연결을 설정하고 공통 지시 파일에 사용 규칙을 추가합니다. 변경 전 확인을 요청합니다.')}</p>`+(S.agentPromptError?`<div role="alert">${errorHtml(tr('안내를 만들지 못했습니다. 다시 시도하세요.'),S.agentPromptError)}</div>`:ui`<div class="ctl"><button class="btn primary" id="cpAgent">복사</button><span id="cpDone"></span></div>`)+`<button class="btn" id="openConnectionDiagnostic">${tr('연결 진단')}</button>${S.agentPromptError?'':helpDetails(`<pre class="prompt mono">${esc(S.agentPrompt)}</pre>`,'연결 안내 보기')}`;

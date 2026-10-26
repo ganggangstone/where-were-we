@@ -721,7 +721,7 @@ class Flows(unittest.TestCase):
  renderConnectionDiagnostic();
  assert(outside($('insp')).includes(connectionMessage('different_path')),'A different registered path is shown even when the live connection works');
  S.connectionDiagnostic.registration={state:'matches_app'};renderConnectionDiagnostic();
- assert(!outside($('insp')).includes(connectionMessage('matches_app')),'A matching registration adds no warning');
+ assert($('registeredConnectionState').getAttribute('role')==='status' && !$('insp').querySelector('[role=alert]'),'Matching registration is a status, not a warning');
 ''')
 
     def test_app_generated_text_is_localized_but_user_data_is_not(self):
@@ -884,14 +884,14 @@ class UxWriting(unittest.TestCase):
  const text=outside($('map')),summaries=[...$('map').querySelectorAll('summary')];
  assert(text.includes('Known problem') && text.includes('Known after'),'Problem and what changed are shown by default');
  assert(!text.includes('Unknown why') && !text.includes('Unknown remaining') && !text.includes('Known before'),'Other fields are folded');
- const unknown=summaries.find(s=>s.textContent.includes(tr('확인이 필요한 내용')));
- assert(unknown && unknown.textContent.includes('2') && unknown.parentElement.textContent.includes('Unknown remaining') && !unknown.parentElement.textContent.includes('Known before'),'Unknown fields have their own visible count');
- const more=summaries.find(s=>s.textContent.includes(tr('자세한 변경 내용')));
- assert(more && more.parentElement.textContent.includes('Known before') && !more.parentElement.textContent.includes('Unknown why'),'Known details are separate');
- assert(summaries.some(s=>s.textContent.includes(tr('용어 풀이')) && s.parentElement.textContent.includes('Fictional term')),'Terms are separate');
+ assert(text.includes(tr('확인이 필요한 내용')+' 2'),'Unknown fields have a visible count');
+ const more=$('map').querySelector('.change-details');
+ assert(more && more.textContent.includes('Known before') && more.textContent.includes('Unknown remaining') && more.textContent.includes('Fictional term'),'Details, unknown fields and terms retained together');
+ assert(!$('map').querySelector('details details'),'Details and evidence never require nested disclosures');
  assert(text.includes(tr('설명 구간')) && text.includes(when('2026-09-01T00:00:00Z')) && text.includes(when('2026-09-20T00:00:00Z')),'Explanation period is visible: '+text);
  assert(text.includes(tr('새로고침 기록 구간')) && text.includes(when('2026-09-24T00:00:00Z')),'Selected refresh history period is shown separately');
  assert(!text.includes('aaaa1111'),'Commit provenance stays folded');
+ S.changes.last_results=[{repository:'web',at:'2026-10-27T01:47:00Z',since:'2026-10-26T00:00:00Z',changed:false,scope:'basic'}];render();assert(outside($('map')).includes(when('2026-10-27T01:47:00Z')) && outside($('map')).includes(tr('선택한 기준 이후 달라진 것 없음')),'Latest no-change refresh remains visible beside historical records');
 ''')
 
     def test_connection_repair_copy_leads_until_copied_then_the_check_and_details_hold_tools(self):
@@ -901,7 +901,7 @@ class UxWriting(unittest.TestCase):
  renderConnectionDiagnostic();
  assert($('liveConnectionState').textContent===tr('AI 연결을 아직 확인하지 않았습니다.'),'Unchecked is not reported as disconnected');
  assert($('copyConnectionRequest').classList.contains('primary') && !$('checkCurrentConnection').classList.contains('primary'),'Copying the repair request comes first');
- assert($('connectionFeature').closest('details'),'The feature choice is an advanced detail');
+ assert(!$('connectionFeature').closest('details') && $('connectionFeature').closest('.section-heading'),'Scope choice stays alongside the diagnostic action');
  await $('copyConnectionRequest').onclick();
  assert(!$('copyConnectionRequest').classList.contains('primary') && $('checkCurrentConnection').classList.contains('primary'),'After copying, checking is the main action');
  assert($('checkCurrentConnection').textContent===tr('연결됐는지 확인'),'Check names what it does');
@@ -1010,7 +1010,7 @@ class UxWriting(unittest.TestCase):
  const shown=()=>{const n=$('baselineNotice');return !!n && !n.hidden;};
  assert(!shown(),'Fixed time hides the notice');
  const last=$('settings-dialog').querySelector('input[value=last_refresh]');last.checked=true;last.dispatchEvent(new Event('change'));
- assert(shown() && $('baselineNotice').textContent===notice,'Choosing previous refresh shows it');
+ assert(shown() && $('baselineNotice').textContent===tr('새로고침마다 시작점 이동') && $('baselineNotice').title===notice,'Moving baseline has a short visible label and full accessible title');
  assert($('settings-dialog').textContent.includes(tr('서비스를 열 때 새로고침')),'Automatic refresh names service switches too');
  $('settings-dialog').close();
  const save=async since=>{renderSettings();$('settings-dialog').showModal();const r=$('settings-dialog').querySelector('input[value='+since+']');r.checked=true;r.dispatchEvent(new Event('change'));$('sinceTime').value='2026-09-01T00:00';await $('saveSt').onclick();};
