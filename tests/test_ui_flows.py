@@ -49,7 +49,8 @@ window.__TAURI__={core:{invoke:async(command,args)=>{
  if(command==='read_settings' && new URLSearchParams(location.search).get('settingsFail'))throw Error('fictional settings read failure');
  if(command==='save_project'){if(window.failSave)throw Error('fictional save failure');(window.savedProjects??=[]).push(args.project);return args.configuration;}
  if(command==='list_projects')return new URLSearchParams(location.search).get('empty')?(window.savedProjects||[]):['First','Second'];
- if(command==='read_project'){const b=window.configuredBundle?.project.name===args.project?structuredClone(window.configuredBundle):fakeBundle(args.project);if(window.noMap){b.dev=null;b.main=null;}return JSON.stringify(b);}
+ if(command==='read_project' && window.failRead)throw Error('fictional read failure');
+ if(command==='read_project'){const b=window.configuredBundle?.project.name===args.project?structuredClone(window.configuredBundle):fakeBundle(args.project);if(window.noMap){b.dev=null;b.main=null;}if(window.mutateBundle)window.mutateBundle(b);return JSON.stringify(b);}
  if(command==='read_settings')return JSON.stringify({open_refresh:false,since:'last_refresh',since_time:''});
  if(command==='app_version')return '0.0.0';
  if(command==='save_settings')return args.json;
@@ -91,6 +92,17 @@ def page(checks,lang='ko',query=''):
             capture_output=True,text=True,timeout=40)
     error=re.findall(r'<pre id="flow-error">(.*?)</pre>',result.stdout,re.S)
     return 'data-flow="passed"' in result.stdout,(error or [result.stdout[-1500:]])[-1][-2000:]
+
+# Saved AI results as the stored project reports them; analyzeAll() makes the next read_project return them.
+ANALYZED=r"""
+ const saved=(r,lang,over={})=>({version:'v1',commit:r.commits.dev,language:lang,stale:false,configuration:'c',...over});
+ const analyzeAll=(lang=S.lang,over={},only=null,parts=['analysis','system'])=>{window.mutateBundle=b=>{for(const r of b.project.repositories){if(only&&!only.includes(r.id))continue;r.results={dev:Object.fromEntries(parts.map(k=>[k,saved(r,lang,over)])),main:{}};}};};
+ const reads=()=>window.calls.filter(c=>c.command==='read_project').length;
+ const analysisRail=()=>$('guide').querySelector('.guide-rail li:nth-child(4) .dot.ok');
+ const awaitRequest=()=>{G.copied=true;G.await={lang:S.lang,base:S.project,project:S.project,branch:S.branch};};
+ const finishReading=async()=>{await guideReadSaved(true);for(let i=0;i<50 && G.reading;i++)await wait();await wait(20);};
+ const openAnalysisStep=async()=>{await loadProject('First');$('guideOpen').click();G.step=3;renderGuide();};
+"""
 
 ESCAPE_DRIVER=r'''
 import {spawn} from 'node:child_process';import fs from 'node:fs';import os from 'node:os';import path from 'node:path';
@@ -192,7 +204,7 @@ class Guide(unittest.TestCase):
  assert($('guideProjectState')===null && G.step===0,'Starts at the first step');
  $('guideNext').click();$('guideLater').click();assert($('guideProjectState').textContent.includes('First'),'Shows the current project as saved');
  $('guideNext').click();
- assert($('guideMapState').textContent.includes(tr('지도가 준비됐습니다.')),'Existing map is ready');
+ assert($('guideMapState').textContent.includes(tr('기본 지도는 준비됐지만 첫 AI 분석은 아직 없습니다.')),'Existing basic map is ready but not analyzed');
  $('guideSkip').click();await wait();
  assert(JSON.stringify([S.project,S.repository,S.view,S.branch,S.chi,S.settings])===before,'Project, code, view, history and settings are preserved');
  assert(!window.calls.slice(calls).some(c=>['refresh','read_project','save_project','analysis_request'].includes(c.command)),'No implicit refresh or reload');
@@ -253,11 +265,234 @@ class Guide(unittest.TestCase):
  assert($('guideMapState').textContent.includes(tr('아직 지도를 가져오지 않았습니다.')),'Missing map is reported');
  assert(!window.calls.some(c=>c.command==='refresh'),'No refresh before the user asks');
  window.noMap=false;$('guideRefresh').click();for(let i=0;i<50 && !$('guideFinish');i++)await wait();
- assert(window.calls.filter(c=>c.command==='refresh').length===1 && $('guideFinish'),'One explicit refresh makes the map ready');
+ assert(window.calls.filter(c=>c.command==='refresh').length===1 && !$('guideRefresh') && $('guideAnalysis') && !$('guideFinish'),'One explicit refresh makes the basic map ready, not the first analysis');
  $('guideAnalysis').click();await wait();
  assert(!$('guide').open && !window.calls.some(c=>c.command==='analysis_request'),'Analysis opens the request panel without running');
- assert($('insp').textContent.includes(tr('AI에게 알아보기')),'The existing analysis panel is shown');
+ assert($('insp').textContent.includes(tr('AI로 자세한 지도 만들기')),'The existing analysis panel is shown');
 """)
+
+    def test_copy_step_explains_one_request_and_ai_cost_before_copying(self):
+        self.check(r"""
+ $('guideNext').click();
+ const step=$('guide').querySelector('.guide-step'),text=step.innerText;
+ const once=tr('같은 요청 하나로 연결·코드 확인·첫 지도·첫 AI 분석까지 이어집니다.'),cost=tr('첫 AI 분석은 연결한 AI의 요금과 사용 한도를 씁니다.'),button=tr('AI에게 보낼 요청 복사');
+ assert(text.includes(once),'Says one request does everything');
+ assert(text.includes(cost),'Says the AI cost before copying');
+ assert(text.indexOf(cost)<text.indexOf(button),'Cost is stated before the copy button');
+ if(S.lang==='en')assert(!/[가-힣]/.test(text),'English step has no Korean: '+text);
+ assert(!window.calls.some(c=>['refresh','analysis_plan','save_project'].includes(c.command)),'Reading the step runs nothing');
+""",query='&empty=1')
+
+    def test_last_stage_is_the_first_analysis_and_a_basic_map_alone_is_not_done(self):
+        self.check(ANALYZED+r"""
+ await openAnalysisStep();
+ assert($('guideTitle').textContent===tr('첫 분석') && $('guide').querySelector('.guide-rail li:nth-child(4)').textContent.includes(tr('첫 분석')),'Last stage is the first analysis');
+ assert(guideHasMap() && !$('guideFinish') && !analysisRail(),'A connected basic map is not a finished first run');
+ assert($('guideMapState').textContent.includes(tr('기본 지도는 준비됐지만 첫 AI 분석은 아직 없습니다.')),'Says the analysis is missing');
+ assert($('guideReadNow') && $('guideAnalysis'),'Recovery: read again, and the manual request stays reachable');
+ const before=reads();analyzeAll();$('guideReadNow').click();for(let i=0;i<50 && !$('guideFinish');i++)await wait();
+ assert(reads()===before+1 && $('guideFinish') && analysisRail(),'Saved current analysis for every code and no remaining plan finishes it');
+ const asked=window.calls.filter(c=>c.command==='analysis_plan');
+ assert(asked.length===1 && asked[0].args.project==='First' && asked[0].args.branch==='dev' && asked[0].args.lang===S.lang && !asked[0].args.repository,'The authoritative plan is read once for exactly this project, version and language');
+ assert($('guide').querySelectorAll('li[data-guide-code]').length===2,'Each code is listed');
+ if(S.lang==='en')assert(!/[가-힣]/.test($('guide').querySelector('.guide-step').innerText),'English step has no Korean');
+ $('guideFinish').click();await wait();
+ assert(!$('guide').open && S.view==='sys' && guideMarker()==='done','Result viewing opens the analyzed structure, not the basic map');
+ assert(!window.calls.some(c=>['refresh','analysis_request','make_system'].includes(c.command)),'Viewing does not run anything');
+""")
+
+    def test_partial_stale_wrong_language_and_missing_system_never_look_complete(self):
+        self.check(ANALYZED+r"""
+ const other=S.lang==='ko'?'en':'ko',cases=[
+  ['partial one code',()=>analyzeAll(S.lang,{},['web']),tr('일부 코드만 분석이 저장됐습니다.')],
+  ['other language',()=>analyzeAll(other),tr('다른 언어로 저장된 분석입니다.')],
+  ['stale',()=>analyzeAll(S.lang,{stale:true}),tr('코드가 바뀌어 최신이 아닌 분석입니다.')],
+  ['old commit',()=>analyzeAll(S.lang,{commit:'ffffffff9999'}),tr('코드가 바뀌어 최신이 아닌 분석입니다.')],
+  ['saved but plan unread',()=>analyzeAll(),tr('저장된 결과를 읽어 남은 분석이 있는지 확인하세요.')],
+  ['empty commit',()=>analyzeAll(S.lang,{commit:''}),tr('코드가 바뀌어 최신이 아닌 분석입니다.')]];
+ for(const [name,make,message] of cases){
+  make();await openAnalysisStep();
+  assert(!$('guideFinish') && !analysisRail(),name+': not finished');
+  assert($('guideMapState').textContent.includes(message),name+': says why ('+$('guideMapState').textContent+')');
+  assert($('guideAnalysis') && $('guideReadNow'),name+': recovery offered');
+  if(S.lang==='en')assert(!/[가-힣]/.test($('guide').querySelector('.guide-step').innerText),name+': English');
+  closeGuide();
+ }
+ window.mutateBundle=null;await loadProject('First');$('guideOpen').click();G.step=3;renderGuide();
+ S.branch='main';renderGuide();assert(!$('guideFinish'),'Results saved for another version do not count');S.branch='dev';
+""")
+
+    def test_saved_results_are_read_when_the_app_regains_focus_only_while_awaiting_the_request(self):
+        self.check(ANALYZED+r"""
+ await openAnalysisStep();let n=reads();
+ window.dispatchEvent(new Event('focus'));await wait(60);assert(reads()===n,'A guide that was never asked to wait reads nothing on focus');
+ awaitRequest();analyzeAll();window.dispatchEvent(new Event('focus'));for(let i=0;i<50 && !$('guideFinish');i++)await wait();
+ assert(reads()===n+1 && $('guideFinish'),'After the request was copied, focus reads the saved result');
+ window.dispatchEvent(new Event('focus'));await wait(60);assert(reads()===n+1,'Nothing more is read once it is done');
+ closeGuide();awaitRequest();window.mutateBundle=null;window.dispatchEvent(new Event('focus'));await wait(60);assert(reads()===n+1,'A closed guide reads nothing');
+ const sent=window.calls.map(c=>c.command);
+ assert(!sent.some(c=>['refresh','analysis_request','make_system','suggest_groups','briefing_request'].includes(c)),'Reading never starts a collection or analysis');
+ assert(sent.filter(c=>c==='analysis_plan').length===1,'Only the one read-only plan check ran');
+""")
+
+    def test_reading_saved_results_never_overlaps_and_failures_are_shown_and_recoverable(self):
+        self.check(ANALYZED+r"""
+ await openAnalysisStep();awaitRequest();let release;window.holdRead={repository:'',promise:new Promise(r=>release=r)};const n=reads();
+ for(let i=0;i<4;i++){window.dispatchEvent(new Event('focus'));guideReadSaved();}
+ await wait(30);assert(reads()===n+1,'One read in flight; the rest are dropped');
+ release();window.holdRead=null;await wait(60);
+ window.failRead=true;window.dispatchEvent(new Event('focus'));await wait(60);
+ assert($('guide').querySelector('[role=alert]') && !$('guideFinish') && !analysisRail(),'A failed read is shown, not treated as done');
+ assert($('guide').querySelector('[role=alert]').textContent.includes(tr('저장된 결과를 읽지 못했습니다.')),'Says the read failed');
+ window.failRead=false;analyzeAll();$('guideReadNow').click();for(let i=0;i<50 && !$('guideFinish');i++)await wait();
+ assert($('guideFinish') && !$('guide').querySelector('[role=alert]'),'Reading again recovers');
+""")
+
+    def test_a_reopened_guide_can_read_again_once_the_previous_run_settles(self):
+        self.check(ANALYZED+r"""
+ await openAnalysisStep();awaitRequest();let release;window.holdRead={repository:'',promise:new Promise(r=>release=r)};
+ window.dispatchEvent(new Event('focus'));await wait(30);closeGuide();openGuide();guideStep(3);
+ assert($('guideReadNow').disabled,'The old read still holds the one-in-flight guard');
+ release();window.holdRead=null;await wait(60);
+ assert($('guide').open && G.step===3 && !$('guideReadNow').disabled,'Once the old read settles the reopened guide can read again');
+ assert(!S.projectInfo.repositories[0].results,'The old read is still not applied');
+""")
+
+    def test_completion_needs_the_authoritative_plan_and_survives_no_failed_read(self):
+        self.check(ANALYZED+r"""
+ analyzeAll();await openAnalysisStep();awaitRequest();
+ assert(!$('guideFinish') && !window.calls.some(c=>c.command==='analysis_plan'),'Saved results alone are not done, and opening the step asks nothing');
+ window.planResult={tasks:[{repository:'web',task:'groups',target:'',commit:'aaaaaaaa1111'}],blocked:[],requirements:[],up_to_date:false};
+ await finishReading();
+ assert(!$('guideFinish') && !analysisRail() && $('guideMapState').textContent.includes(tr('첫 분석은 저장됐지만 남은 분석이 있습니다.')),'Remaining planned analysis is not complete');
+ assert($('guide').querySelector('[data-plan]') && $('guideAnalysis'),'The remaining work is named and can be requested');
+ window.planResult={tasks:[],blocked:[{repository:'api',task:'analysis',reason:'Refresh first'}],requirements:[],up_to_date:false};
+ await finishReading();assert(!$('guideFinish'),'A blocked analysis is not complete');
+ window.planResult=null;await finishReading();assert($('guideFinish') && analysisRail(),'No remaining and no blocked plan completes it');
+ window.failRead=true;await finishReading();
+ assert(!$('guideFinish') && !analysisRail() && $('guide').querySelector('[role=alert]'),'A failed current read withdraws completion');
+ window.failRead=false;window.failPlan=true;await finishReading();
+ assert(!$('guideFinish') && $('guide').querySelector('[role=alert]'),'A failed plan read is not completion');
+ closeGuide();
+""")
+
+    def test_awaiting_is_bound_to_the_context_that_copied_the_request(self):
+        self.check(ANALYZED+r"""
+ await openAnalysisStep();awaitRequest();analyzeAll();let n=reads();
+ const other=S.lang==='ko'?'en':'ko';setLanguage(other);window.dispatchEvent(new Event('focus'));await wait(60);
+ assert(reads()===n,'A language change ends the wait');setLanguage(other==='ko'?'en':'ko');
+ S.branch='main';window.dispatchEvent(new Event('focus'));await wait(60);assert(reads()===n,'Another version ends the wait');S.branch='dev';
+ closeGuide();openGuide();G.step=3;renderGuide();window.dispatchEvent(new Event('focus'));await wait(60);assert(reads()===n,'Closing and reopening ends the wait');
+ // a read still in flight when the guide closes or the language changes is dropped before it touches the app state
+ awaitRequest();let release;window.holdRead={repository:'',promise:new Promise(r=>release=r)};
+ window.dispatchEvent(new Event('focus'));await wait(30);closeGuide();release();window.holdRead=null;await wait(60);
+ assert(!S.projectInfo.repositories[0].results,'A late read from a closed guide is not applied');
+ openGuide();G.step=3;renderGuide();awaitRequest();window.holdRead={repository:'',promise:new Promise(r=>release=r)};
+ window.dispatchEvent(new Event('focus'));await wait(30);setLanguage(S.lang==='ko'?'en':'ko');release();window.holdRead=null;await wait(60);
+ assert(!S.projectInfo.repositories[0].results && !$('guide').querySelector('[role=alert]'),'A late read in another language is neither applied nor reported as a failure');
+""")
+
+    def test_copying_follows_the_request_to_the_first_analysis_without_clicking_through(self):
+        self.check(ANALYZED+r"""
+ $('guideNext').click();$('guideCopySetup').click();await wait();
+ assert(G.step===1 && G.copied,'Copying alone stays on the copy step while no service exists');
+ const configuration={repositories:[{id:'web',name:'Lumen Web',path:'/fictional/web',refs:{dev:'HEAD',main:null},layout:{},api_targets:[]}],shared_data:[]};
+ window.configuredBundle=fakeBundle('Lumen');window.configuredBundle.project.repositories=configuration.repositories.map(r=>({...r,collected:true,commits:{dev:'aaaaaaaa1111'}}));
+ const result=await applyAppCommand({action:'configure',arguments:{project:'Lumen',configuration}});await wait(60);
+ assert(result.ok && G.step===3 && $('guideTitle').textContent===tr('첫 분석'),'The service the AI connected moves the guide to the first analysis by itself');
+ assert($('guide').innerText.includes(tr('AI가 분석을 마치면 앱으로 돌아올 때 저장된 결과를 자동으로 읽습니다.')) && !$('guideFinish'),'It waits for the saved analysis; a connection is not the result');
+ guideStep(1);await wait();assert(G.step===1,'The user can still go back; it moves only once');
+ guideStep(3);const reads0=reads();
+ // the AI prepares the whole-project request, runs it, and the saved results arrive while the app is in the background
+ await applyAppCommand({action:'prepare_analysis',arguments:{project:'Lumen',repository:'',branch:'dev',task:'all'}});
+ analyzeAll();window.dispatchEvent(new Event('focus'));for(let i=0;i<60 && !$('guideFinish');i++)await wait();
+ assert($('guideFinish') && reads()>reads0 && S.project==='Lumen','Returning to the app reads the saved analysis and the result becomes viewable');
+ assert(!window.calls.some(c=>c.command==='refresh'),'Nothing was collected by the guide');
+""",query='&empty=1')
+
+    def test_result_view_opens_the_ai_proposal_and_the_manual_request_does_not_mark_the_guide_done(self):
+        self.check(ANALYZED+r"""
+ analyzeAll();const base=window.mutateBundle;
+ window.mutateBundle=b=>{base(b);b.branch_details.dev['system.ai']={...b.system,source:'ai',nodes:b.system.nodes.map(n=>({...n,name:'Proposed Worker'}))};};
+ await openAnalysisStep();await finishReading();$('guideFinish').click();await wait();
+ assert(S.view==='sys' && S.showProposal && $('map').innerText.includes('Proposed Worker'),'The new AI structure is shown, not the older written one');
+ openGuide();window.mutateBundle=null;await loadProject('First');G.step=3;renderGuide();localStorage.removeItem('where-were-we.onboarding');guideMemory=null;
+ $('guideAnalysis').click();await wait();
+ assert(!$('guide').open && guideMarker()===null,'Opening the manual request before any result does not record the guide as done');
+""")
+
+    def test_whole_project_decides_the_first_analysis_whatever_code_is_selected(self):
+        self.check(ANALYZED+r"""
+ analyzeAll(S.lang,{},['web']);await loadProject('First',false,'web');
+ assert(S.repository==='web','One code is selected');$('guideOpen').click();G.step=3;renderGuide();awaitRequest();
+ await finishReading();
+ assert(S.repository==='web' && !$('guideFinish') && !analysisRail(),'The selected code being analyzed does not finish the project');
+ const lines=[...$('guide').querySelectorAll('li[data-guide-code]')].map(li=>li.textContent);
+ assert(lines.length===2 && lines.some(t=>t.includes('API server') && t.includes(tr('아직 분석 없음'))),'The unanalyzed code is named: '+lines.join(' / '));
+ assert(window.calls.filter(c=>c.command==='analysis_plan').every(c=>!c.args.repository),'The plan is asked for the whole project');
+ // an uncollected code also keeps the map from being ready, even while another code is selected
+ const base=window.mutateBundle;window.mutateBundle=b=>{base(b);b.project.repositories[1].collected=false;b.project.repositories[1].commits={};};
+ await finishReading();assert(!guideHasMap() && !$('guideFinish'),'An uncollected code is not hidden by the selection');
+ analyzeAll();await finishReading();assert(S.repository==='web' && $('guideFinish') && analysisRail(),'All codes saved finishes it without changing the selection');
+ // a code without the shown version is not eligible and cannot block it
+ const all=window.mutateBundle;window.mutateBundle=b=>{all(b);const api=b.project.repositories[1];api.refs.dev=null;delete api.results;};
+ await finishReading();assert($('guideFinish'),'A code that has no such version is skipped');
+ closeGuide();
+""")
+
+    def test_reading_results_reports_the_actual_state_per_code_to_the_agent(self):
+        self.check(ANALYZED+r"""
+ const pin=(id,commit)=>({commit,configuration:'c'}),task=(repository,commit)=>({repository,task:'analysis',target:'',before:null,commit,configuration:'c'});
+ const tasks=[task('web','aaaaaaaa1111'),task('api','cccccccc3333')],pins={web:pin('web','aaaaaaaa1111'),api:pin('api','cccccccc3333')};
+ window.planResult={tasks,blocked:[],requirements:tasks,pins,up_to_date:false,handoff:'plan'};
+ const prepared=await applyAppCommand({action:'prepare_analysis',arguments:{project:'First',repository:'',branch:'dev',task:'all'}});
+ assert(prepared.output.prepared && !prepared.output.executed,'Preparing runs nothing');
+ // only the web code is saved; the plan still lists the api code
+ analyzeAll(S.lang,{},['web']);window.planResult={tasks:[tasks[1]],blocked:[],requirements:[],pins,up_to_date:false};
+ const part=await applyAppCommand({action:'read_results',arguments:{}});
+ assert(part.output.state==='partial' && part.output.scope.project==='First' && part.output.scope.repository==='' && part.output.scope.branch==='dev','Partial state and scope are returned');
+ assert(part.output.codes.saved.join()==='web' && part.output.codes.waiting.join()==='api','Per-code saved and waiting are returned');
+ assert(part.output.remaining.length===1 && part.output.remaining[0].repository==='api' && Array.isArray(part.output.blocked) && part.output.pins.web.commit==='aaaaaaaa1111','Remaining, blocked and pins are returned');
+ window.planResult={tasks:[],blocked:[],requirements:[],pins,up_to_date:true};analyzeAll();
+ const full=await applyAppCommand({action:'read_results',arguments:{}});
+ assert(full.output.state==='saved' && full.output.codes.waiting.length===0 && full.output.codes.saved.length===2 && full.output.remaining.length===0,'Everything saved is reported as saved');
+ window.failRead=true;let code=null;try{await applyAppCommand({action:'read_results',arguments:{}});}catch(e){code=e.code;}
+ assert(code==='result_read_failed','A failed read is an error, not a saved state');window.failRead=false;
+ S.analysisRequest=null;const none=await applyAppCommand({action:'read_results',arguments:{}});
+ assert(none.output.state==='no_request' && none.output.scope.project==='First','Without a prepared request nothing is claimed');
+""")
+
+    def test_a_service_connected_only_on_its_main_version_is_awaited_on_that_version(self):
+        self.check(ANALYZED+r"""
+ $('guideNext').click();$('guideCopySetup').click();await wait();
+ const repositories=[{id:'web',name:'Lumen Web',path:'/fictional/web',refs:{dev:null,main:'HEAD'},layout:{},api_targets:[]}];
+ const bundle=fakeBundle('Lumen');bundle.project.repositories=repositories.map(r=>({...r,collected:true,commits:{main:'bbbbbbbb2222'}}));
+ bundle.main=fakeMap('Lumen','bbbbbbbb2222',true);bundle.dev=null;window.configuredBundle=bundle;
+ await applyAppCommand({action:'configure',arguments:{project:'Lumen',configuration:{repositories,shared_data:[]}}});await wait(60);
+ assert(S.branch==='main' && G.step===3,'The guide follows the service to the version it was collected on');
+ window.mutateBundle=b=>{for(const r of b.project.repositories)r.results={dev:{},main:{analysis:saved({...r,commits:{dev:r.commits.main}},S.lang),system:saved({...r,commits:{dev:r.commits.main}},S.lang)}};};
+ const n=reads();window.dispatchEvent(new Event('focus'));for(let i=0;i<60 && !$('guideFinish');i++)await wait();
+ assert(reads()>n && $('guideFinish'),'Saved results on that version are read without a manual click');
+ S.branch='dev';n2=reads();window.dispatchEvent(new Event('focus'));await wait(60);
+""".replace("S.branch='dev';n2=reads();window.dispatchEvent(new Event('focus'));await wait(60);\n","")+r"""
+ closeGuide();
+""",query='&empty=1')
+
+    def test_a_finished_plan_is_not_reused_by_a_reopened_guide(self):
+        self.check(ANALYZED+r"""
+ analyzeAll();await openAnalysisStep();awaitRequest();await finishReading();
+ assert($('guideFinish'),'Finished after reading');
+ closeGuide();openGuide();G.step=3;renderGuide();
+ assert(!$('guideFinish') && $('guideReadNow'),'A reopened guide must read the plan again before it can finish');
+ window.failRead=true;awaitRequest();await finishReading();window.failRead=false;closeGuide();openGuide();G.step=3;renderGuide();
+ assert(!$('guide').querySelector('[role=alert]'),'A new session does not inherit an old read failure');
+""")
+
+    def test_a_poll_runs_only_the_guarded_read(self):
+        source=(ROOT/'ui/onboarding.js').read_text()
+        self.assertEqual(source.count('setInterval('),1)
+        self.assertIn('setInterval(guideReadSaved',source)
+        self.assertNotIn('doRefresh',source[source.index('async function guideReadSaved'):source.index('function guideSync')])
 
     def test_blocked_storage_keeps_the_skip_for_the_session(self):
         self.check(r"""
@@ -266,10 +501,10 @@ class Guide(unittest.TestCase):
  $('guideSkip').click();assert(!$('guide').open && guideMarker()==='skipped','Skip still holds without storage');
 """,query='&empty=1')
 
-    def test_finishing_reveals_the_map_and_agent_navigation_is_not_hidden_by_the_guide(self):
-        self.check(r"""
- $('guideOpen').click();G.step=3;renderGuide();$('guideFinish').click();await wait();
- assert(!$('guide').open && S.view==='map' && $('map').querySelector('[data-scr]'),'Open the map shows an actual screen map');
+    def test_finishing_reveals_the_analysis_and_agent_navigation_is_not_hidden_by_the_guide(self):
+        self.check(ANALYZED+r"""
+ analyzeAll();await openAnalysisStep();await finishReading();$('guideFinish').click();await wait();
+ assert(!$('guide').open && S.view==='sys' && $('map').innerText.includes('First Worker'),'Opening the result shows the analyzed structure');
  $('guideOpen').click();const r=await applyAppCommand({action:'navigate',arguments:{project:'First',repository:'',branch:'dev',view:'sys'}});
  assert(!$('guide').open && S.view==='sys','Agent navigation closes the covering guide');
  assert(guideMarker()==='done','Agent navigation does not overwrite the recorded choice');
@@ -383,10 +618,10 @@ class Flows(unittest.TestCase):
  assert(calls.filter(c=>c.command==='analysis_plan').at(-1).args.repository==='web','Check only the originally requested code');
  window.planResult.pins.web.commit='old';await checkAnalysisResults();
  assert(S.analysisRequest.state==='saved','Original pinned results can complete');
- const request=S.analysisRequest;window.holdPlan=new Promise(r=>window.releasePlan=r);
+ const request=S.analysisRequest;window.planResult.pins.web.commit='new';window.holdPlan=new Promise(r=>window.releasePlan=r);
  const checking=checkAnalysisResults();await wait();setLanguage(S.lang==='ko'?'en':'ko');
  window.releasePlan();await checking;
- assert(request.state!=='saved' && !activeAnalysis(),'A language change does not apply the old request');
+ assert(request.state==='saved' && !activeAnalysis(),'A language change does not apply the old request and does not leave it checking: '+request.state);
 ''')
 
     def test_failed_collection_does_not_prepare_or_overwrite_failure(self):
@@ -396,6 +631,96 @@ class Flows(unittest.TestCase):
  assert(!calls.some(c=>c.command==='analysis_plan'),'Failed collection does not prepare an analysis');
  assert($('status').textContent.includes(tr('최신 지도를 가져오지 못했습니다. 오류 내용을 확인하세요.')),'Keep the collection failure visible');
 ''')
+
+    def test_all_code_is_explained_and_one_code_keeps_its_configured_server_links(self):
+        self.check(r'''
+ const note=()=>$('repository-bar').querySelector('[data-code-scope]')?.textContent || '';
+ assert(note()===tr('모든 코드: 연결한 코드 전체를 한 지도로 봅니다.'),'All code is explained beside the selector: '+note());
+ $('repository').value='web';$('repository').dispatchEvent(new Event('change'));for(let i=0;i<50 && S.repository!=='web';i++)await wait();await wait();
+ assert(note()===tr('이 코드의 화면만 봅니다. 지정한 서버 연결은 그대로 이어집니다.'),'One code says what stays linked: '+note());
+ window.mutateBundle=b=>{b.project.repositories=b.project.repositories.slice(0,1);};await loadProject('Second',false,'');await wait();
+ assert(!$('repository-bar').querySelector('[data-code-scope]'),'One connected code needs no scope note');
+''')
+
+    def test_manual_connection_leads_into_the_analysis_request_and_later_refreshes_stay_quiet(self):
+        self.check(r'''
+ window.planResult={tasks:[{repository:'web',task:'analysis',commit:'aaaaaaaa1111'}],blocked:[],requirements:[{repository:'web',task:'analysis',before:null,commit:'aaaaaaaa1111'}],handoff:'First request',up_to_date:false};
+ // Outside the first-run guide (which has its own First analysis step), a GitHub address is collected on save and the prepared request opens by itself.
+ if($('guide').open)closeGuide('skipped');editProject(true);$('projectName').value='Lumen';document.querySelector('[data-field="path"]').value='https://github.com/example/web';
+ window.configuredBundle=null;$('saveProject').click();for(let i=0;i<80 && S.agentPurpose!=='analysis';i++)await wait();await wait();
+ assert(S.project==='Lumen' && window.calls.some(c=>c.command==='refresh'),'GitHub code was collected on save');
+ assert(S.agentPurpose==='analysis' && S.analysisRequest?.handoff==='First request' && pane().includes(tr('1. 요청 복사')),'The analysis request is shown right after connecting');
+ assert(window.copied===undefined,'Nothing is copied or run by itself');
+ // A local folder is not collected on save: the status names the next step, and that first refresh opens the request.
+ S.agentPrompt=null;S.agentPurpose=null;render();
+ window.mutateBundle=b=>{if(b.project.name==='Local'){b.project.repositories.forEach(r=>{r.collected=false;r.commits={};});b.dev=null;b.main=null;}};
+ editProject(true);$('projectName').value='Local';document.querySelector('[data-field="path"]').value='/fictional/local';
+ $('saveProject').click();for(let i=0;i<80 && S.project!=='Local';i++)await wait();await wait();
+ assert($('status').textContent===tr('연결을 저장했습니다. 새로고침으로 첫 지도를 가져오면 AI에게 보낼 분석 요청이 준비됩니다.'),'Status says how the first map leads to the request: '+$('status').textContent);
+ assert(S.agentPurpose!=='analysis','No request before the first map');
+ // The plan now lists the first tasks of the code that was just added, under the id the editor gave it.
+ window.planResult={...window.planResult,tasks:[{repository:S.openRequestFor.ids[0],task:'analysis',commit:'aaaaaaaa1111'}]};
+ window.mutateBundle=null;await doRefresh();await wait();
+ assert(S.agentPurpose==='analysis' && pane().includes(tr('1. 요청 복사')),'The first refresh of a new connection opens the request');
+ S.agentPrompt=null;S.agentPurpose=null;render();await doRefresh();await wait();
+ assert(S.agentPurpose!=='analysis' && S.analysisRequest?.handoff==='First request','Later refreshes prepare quietly as before');
+''',query='&empty=1')
+
+    def test_added_code_opens_the_request_only_when_its_own_first_tasks_appear(self):
+        self.check(r'''
+ if($('guide').open)closeGuide('skipped');
+ // First already has web and api collected; a third local folder is added and is not collected on save.
+ const extra={id:'extra',name:'Extra worker',refs:{dev:'HEAD',main:null},collected:false,commits:{},api_targets:[],layout:{}};
+ window.mutateBundle=b=>{if(b.project.name==='First')b.project.repositories.push(structuredClone(extra));};
+ editProject(false);$('addRepository').click();[...document.querySelectorAll('[data-field="path"]')].at(-1).value='/fictional/extra';
+ window.planResult={tasks:[],blocked:[],requirements:[],handoff:'',up_to_date:true};
+ $('saveProject').click();for(let i=0;i<80 && $('project-dialog').open;i++)await wait();await wait();
+ assert(S.projectInfo.repositories.some(r=>r.id==='extra') && S.openRequestFor?.ids?.includes('extra'),'The added code is remembered: '+JSON.stringify(S.openRequestFor));
+ assert($('status').textContent===tr('연결을 저장했습니다. 새로고침으로 첫 지도를 가져오면 AI에게 보낼 분석 요청이 준비됩니다.'),'The next step is named: '+$('status').textContent);
+ // Refreshing only the already collected web code (up to date) must not use up the handoff.
+ $('repository').value='web';$('repository').dispatchEvent(new Event('change'));for(let i=0;i<50 && S.repository!=='web';i++)await wait();await wait();
+ S.agentPrompt=null;S.agentPurpose=null;render();await doRefresh();await wait();
+ assert(S.agentPurpose!=='analysis' && S.openRequestFor?.ids?.includes('extra'),'An unrelated up-to-date refresh keeps the marker');
+ // The refresh that collects the new code lists its first tasks: the request opens once.
+ extra.collected=true;extra.commits={dev:'ffffffff6666'};
+ window.planResult={tasks:[{repository:'extra',task:'analysis',commit:'ffffffff6666'}],blocked:[],requirements:[{repository:'extra',task:'analysis',before:null,commit:'ffffffff6666'}],handoff:'Extra request',up_to_date:false};
+ $('repository').value='';$('repository').dispatchEvent(new Event('change'));for(let i=0;i<50 && S.repository!=='';i++)await wait();await wait();
+ await doRefresh();await wait();
+ assert(S.agentPurpose==='analysis' && S.analysisRequest?.handoff==='Extra request' && pane().includes(tr('1. 요청 복사')),'The new code\'s first tasks open the request');
+ assert(!S.openRequestFor,'The marker is consumed once');
+ S.agentPrompt=null;S.agentPurpose=null;render();await doRefresh();await wait();
+ assert(S.agentPurpose!=='analysis','The next refresh stays quiet');
+''')
+
+    def test_stale_button_names_are_not_shown(self):
+        self.check(r'''
+ window.mutateBundle=b=>{b.project.repositories=[];b.dev=null;b.main=null;};await loadProject('Second',false,'');await wait();
+ await doRefresh();assert($('status').textContent===tr('연결된 코드가 없습니다. 코드 추가·수정에서 GitHub 주소나 코드 폴더를 추가하세요.'),'No-code status names the real button: '+$('status').textContent);
+ window.mutateBundle=null;await loadProject('Second',false,'');await wait();
+ assert($('branch').querySelector('[data-b=main]').title===tr('비교할 버전을 코드 추가·수정에서 지정할 수 있습니다.'),'Version fallback names the real button: '+$('branch').querySelector('[data-b=main]').title);
+ const table=[...Object.keys(UI_EN),...Object.values(UI_EN)].join('\n');
+ assert(!/코드 연결에서|AI에게 알아보기에서|in Connect code|in Ask your AI/.test(table),'No stale button references remain in the dictionary');
+''')
+
+    def test_entry_actions_say_their_purpose_and_the_service_name_defaults_to_the_first_code(self):
+        self.check(r'''
+ if($('guide').open)closeGuide('skipped');
+ // One first entry: explore my code. Both ways are explained, and nothing runs AI by itself.
+ assert(main().includes(tr('내 코드 살펴보기')) && main().includes(tr('어떤 코드를 살펴볼까요?')),'The empty workspace asks which code to explore: '+main());
+ assert(main().includes(tr('앱이 AI를 직접 실행하지는 않습니다.')),'No automatic AI execution is stated');
+ assert($('startWithAI').textContent===tr('작업하던 AI에게 맡기기') && $('startProject').textContent===tr('코드 위치를 직접 입력'),'The two ways name what each one does');
+ assert($('newProject').title===tr('다른 서비스 추가'),'The header plus adds another service');
+ $('startProject').click();const d=$('project-dialog');assert(d.open && d.querySelector('h2').textContent===tr('살펴볼 코드 추가'),'The editor is about code to explore');
+ assert(d.textContent.includes(tr('서비스 이름은 함께 살펴볼 코드를 묶는 이름입니다.')) && d.textContent.includes(tr('비워 두면 첫 코드의 이름을 씁니다.')),'Service name is explained as a grouping name with a default');
+ assert($('saveProject').textContent===tr('저장'),'Saving is called saving');
+ document.querySelector('[data-field="path"]').value='/fictional/lumen-web';
+ $('saveProject').click();for(let i=0;i<80 && !S.project;i++)await wait();await wait();
+ assert(S.project==='lumen-web' && window.savedProjects.includes('lumen-web'),'An empty service name falls back to the first code name: '+S.project);
+ assert($('manageRepositories').textContent===tr('코드 추가·수정'),'The code bar button says add or edit code');
+ $('manageRepositories').click();assert(d.querySelector('h2').textContent===tr('살펴보는 코드') && !d.textContent.includes(tr('비워 두면 첫 코드의 이름을 씁니다.')),'Editing names the explored code without the default hint');d.close();
+ assert($('analyzeMap').textContent.startsWith(tr('AI로 자세한 지도 만들기')),'The AI button says what the AI makes: '+$('analyzeMap').textContent);
+ $('analyzeMap').click();assert(pane().includes(tr('AI로 자세한 지도 만들기')) && pane().includes(tr('AI에게 보낼 요청만 만듭니다. 앱에서 바로 분석하지 않습니다.')),'The panel keeps the explicit handoff');
+''',query='&empty=1')
 
     def test_dictionary_has_no_duplicate_interface_keys(self):
         source=(ROOT/'ui/index.html').read_text();table=source[source.index('const UI_EN = {'):source.index('const UI_PATTERN')]
@@ -633,7 +958,7 @@ class Flows(unittest.TestCase):
     def test_first_run_offers_the_next_step(self):
         self.check(r'''
  assert(!S.project,'No project exists');
- const start=$('startProject');assert(start && $('startWithAI') && main().includes(tr('직접 연결하기')),'Empty app offers AI handoff and a manual alternative');
+ const start=$('startProject');assert(start && $('startWithAI') && main().includes(tr('코드 위치를 직접 입력')),'Empty app offers AI handoff and a manual alternative');
  start.click();assert($('project-dialog').open,'Start opens project creation');
 ''',query='&empty=1')
 
@@ -863,6 +1188,144 @@ class Flows(unittest.TestCase):
  assert(labels.length===2 && labels[0].includes('HEAD') && labels[1].includes('v1.0'),'Version buttons keep their names: '+JSON.stringify(labels));
 ''')
 
+# Repeated analysis requests: returning to the app reads the copied request's saved results by itself. Reads are faked; no AI runs.
+AUTO=r"""
+ const reads=()=>window.calls.filter(c=>c.command==='read_project').length,plans=()=>window.calls.filter(c=>c.command==='analysis_plan').length;
+ const back=async(ms=80)=>{window.dispatchEvent(new Event('focus'));await wait(ms);};
+ const pins={web:{commit:'aaaaaaaa1111',configuration:'c'}},tasks=[{repository:'web',task:'analysis',before:null,commit:'aaaaaaaa1111'}];
+ const pending=()=>{window.planResult={tasks,blocked:[],requirements:tasks,pins,up_to_date:false,handoff:'plan'};};
+ const done=()=>{window.planResult={tasks:[],blocked:[],requirements:[],pins,up_to_date:true};};
+ const copied=async()=>{pending();await requestAgentAction('analysis_plan');await $('cpAgent').onclick();assert(S.analysisRequest.copied && S.analysisRequest.state==='prepared','A copied request is pending');};
+ RESULT_RETRY_MS=30;
+"""
+class AutoRead(unittest.TestCase):
+    def setUp(self):
+        if not CHROME.exists():self.skipTest('Chrome is required')
+    def check(self,checks):
+        for lang in ('ko','en'):
+            with self.subTest(lang=lang):
+                ok,error=page(AUTO+checks,lang);self.assertTrue(ok,error)
+
+    def test_returning_to_the_app_reads_the_copied_request_without_clicking(self):
+        self.check(r"""
+ await copied();const n=reads();done();
+ await back();
+ assert(S.analysisRequest.state==='saved' && reads()===n+1,'Focus read the saved result: '+S.analysisRequest.state);
+ assert(pane().includes(tr('새 결과가 저장된 것을 확인했습니다.')) && $('viewAnalysisResults'),'The panel shows the saved state and the result button');
+ assert($('checkAnalysisResults'),'The manual check stays as a recovery path');
+ await back();assert(reads()===n+1,'A saved request is not read again');
+ document.dispatchEvent(new Event('visibilitychange'));await wait(60);assert(reads()===n+1,'Nor on visibility');
+ assert(!window.calls.some(c=>['refresh','analysis_request','make_system','suggest_groups','briefing_request'].includes(c.command)),'Reading never collects or analyzes');
+""")
+
+    def test_manual_automatic_and_control_reads_of_one_request_do_not_overlap(self):
+        self.check(r"""
+ await copied();const n=reads();done();
+ window.holdRead={repository:S.repository,promise:new Promise(r=>window.releaseRead=r)};
+ const manual=checkAnalysisResults();await wait();
+ window.dispatchEvent(new Event('focus'));document.dispatchEvent(new Event('visibilitychange'));
+ const control=applyAppCommand({action:'read_results',arguments:{}});await wait(40);
+ assert(reads()===n+1 && S.analysisRequest.state==='checking','One read serves every caller while it runs');
+ window.releaseRead();window.holdRead=null;await manual;const report=await control;
+ assert(S.analysisRequest.state==='saved' && report.output.state==='saved' && reads()===n+1,'All callers see the one finished read');
+""")
+
+    def test_nothing_is_read_without_a_copied_pending_request_in_the_same_context(self):
+        self.check(r"""
+ pending();await requestAgentAction('analysis_plan');let n=reads();
+ await back();assert(reads()===n,'A request that was not copied is not read');
+ await $('cpAgent').onclick();done();
+ setLanguage(S.lang==='ko'?'en':'ko');await back();assert(reads()===n,'Another language is not this request');setLanguage(S.lang==='ko'?'en':'ko');
+ S.branch='main';await back();assert(reads()===n,'Another version is not this request');S.branch='dev';
+ S.analysisRequest.state='stale';await back();assert(reads()===n,'A stale request is never read');
+ S.analysisRequest.state='up_to_date';await back();assert(reads()===n,'Nothing to wait for');
+ S.analysisRequest.state='blocked';await back();assert(reads()===n,'A blocked request waits for a new one');
+ S.analysisRequest=null;await back();assert(reads()===n,'No request, no read');
+""")
+
+    def test_reading_on_return_keeps_the_view_the_user_moved_to(self):
+        self.check(r"""
+ await copied();done();
+ document.querySelector('#view [data-v="sys"]').click();assert(S.view==='sys' && !$('checkAnalysisResults'),'The user browsed elsewhere');
+ await back();
+ assert(S.analysisRequest.state==='saved','The result was still read');
+ assert(S.view==='sys' && !$('checkAnalysisResults') && !pane().includes(tr('1. 요청 복사')),'The right panel was not taken over');
+ assert($('analyzeMap').innerText.includes(tr('결과 저장됨')),'The header reports the saved result');
+""")
+
+    def test_a_late_read_after_a_context_change_is_dropped_and_does_not_leave_the_request_checking(self):
+        self.check(r"""
+ await copied();const request=S.analysisRequest;done();
+ window.holdPlan=new Promise(r=>window.releasePlan=r);
+ await back(30);assert(request.state==='checking','The second plan read is in flight');
+ const other=S.lang==='ko'?'en':'ko';setLanguage(other);window.releasePlan();window.holdPlan=null;await wait(60);
+ assert(request.state!=='saved' && request.state!=='checking','A read that outlived its context applies nothing and does not stay checking: '+request.state);
+ setLanguage(other==='ko'?'en':'ko');const n=reads();
+ await back();assert(S.analysisRequest===request && request.state==='saved' && reads()===n+1,'Back in its context the request can be read again');
+""")
+
+    def test_errors_partial_results_and_changed_code_keep_their_state_and_stop_retrying(self):
+        self.check(r"""
+ await copied();done();window.failRead=true;
+ await back();const n=reads();
+ assert(S.analysisRequest.state==='error' && pane().includes(tr('결과를 읽지 못했습니다. 오류 내용을 확인하세요.')) && $('checkAnalysisResults') && !$('checkAnalysisResults').disabled,'A failed read shows the error with the manual retry');
+ await wait(200);assert(reads()===n,'No timed retry after an error');
+ window.failRead=false;pending();
+ await back();const m=reads();
+ assert(S.analysisRequest.state==='missing','The AI has not saved yet');
+ await wait(300);assert(reads()>m && reads()<=m+RESULT_RETRIES,'A few timed retries while waiting, then they stop: '+(reads()-m));
+ const after=reads();await wait(150);assert(reads()===after,'Retries are bounded');
+ done();await back();assert(S.analysisRequest.state==='saved','The next return completes it');
+ await copied();window.planResult={tasks:[],blocked:[],requirements:[],pins:{web:{commit:'newer',configuration:'c'}},up_to_date:true};
+ await back();assert(S.analysisRequest.state==='stale','Changed code is stale, never saved');
+ const s=reads();await wait(150);assert(reads()===s,'A stale request is not retried');
+""")
+
+    def test_the_general_reader_stays_out_of_the_first_run_guide(self):
+        self.check(r"""
+ await copied();done();
+ $('guideOpen').click();assert($('guide').open,'The guide is open');const n=reads();
+ await back();await wait(100);
+ assert(reads()===n && S.analysisRequest.state==='prepared','While the guide is open only its own reader may read');
+ closeGuide();await back();assert(S.analysisRequest.state==='saved','After the guide closes the request is read');
+""")
+
+    def test_a_control_read_reports_only_the_request_of_the_current_language(self):
+        self.check(r"""
+ await copied();done();await back();assert(S.analysisRequest.state==='saved','Saved in the first language');
+ const other=S.lang==='ko'?'en':'ko';setLanguage(other);
+ const report=await applyAppCommand({action:'read_results',arguments:{}});
+ assert(report.output.state==='no_request' && report.output.scope.lang===other,'A saved request of another language is not reported as current: '+JSON.stringify(report.output));
+ setLanguage(other==='ko'?'en':'ko');await copied();window.holdPlan=new Promise(r=>window.releasePlan=r);
+ const control=applyAppCommand({action:'read_results',arguments:{}});await wait(30);
+ setLanguage(other);window.releasePlan();window.holdPlan=null;
+ let code=null;try{await control;}catch(e){code=e.code;}
+ assert(code==='context_changed' && S.analysisRequest.state==='prepared','A language switch during the read is a context change, not a saved state: '+code);
+ setLanguage(other==='ko'?'en':'ko');done();await back();assert(S.analysisRequest.state==='saved','Back in its language the request is still readable');
+""")
+
+    def test_a_control_read_that_outlives_a_project_reload_is_a_context_change(self):
+        self.check(r"""
+ await copied();done();window.holdPlan=new Promise(r=>window.releasePlan=r);
+ const control=applyAppCommand({action:'read_results',arguments:{}});await wait(30);
+ await loadProject('Second');await loadProject('First');
+ window.releasePlan();window.holdPlan=null;
+ let code=null;try{await control;}catch(e){code=e.code;}
+ assert(code==='context_changed' && S.analysisRequest.state!=='saved','A read started before reloading does not confirm a saved state: '+code+' '+S.analysisRequest.state);
+""")
+
+    def test_a_failed_automatic_read_updates_the_header_without_taking_over_the_view(self):
+        self.check(r"""
+ await copied();done();
+ document.querySelector('#view [data-v="sys"]').click();assert(S.view==='sys' && S.agentPrompt==null,'The user browsed elsewhere');
+ window.failRead=true;await back();const n=reads();
+ assert(S.analysisRequest.state==='error','The read failed');
+ assert($('analyzeMap').innerText.includes(tr('결과 읽기 실패')),'The header reports the failed read: '+$('analyzeMap').innerText);
+ assert(S.view==='sys' && S.agentPrompt==null && !$('checkAnalysisResults'),'The view and the right panel are kept');
+ await wait(200);assert(reads()===n,'No retry storm after the error');
+""")
+
+
 class UxWriting(unittest.TestCase):
     '''Regressions for the 2026-10-21 novice UX writing review: behaviour, not individual labels.'''
     def setUp(self):
@@ -1024,8 +1487,222 @@ class UxWriting(unittest.TestCase):
         prompts=''.join((ROOT/name).read_text() for name in ('ai_extract.py','briefing.py','connection.py'))
         for ko,en in (('결과 확인','Check results'),('연결됐는지 확인','Check the connection')):
             self.assertRegex(source,'["\']'+re.escape(ko)+'["\']\\s*:\\s*["\']'+re.escape(en)+'["\']')
-            self.assertIn(f'‘{ko}’',prompts);self.assertIn(en,prompts)
-        for old in ('저장된 결과 확인','Check saved results','‘현재 연결 확인’','Check current connection'):
+        # Connection repair still ends with the user pressing the app's own button.
+        self.assertIn('‘연결됐는지 확인’',prompts);self.assertIn('Check the connection',prompts)
+        # Saved analysis results are read when the user returns to the app; prompts no longer require a manual check.
+        self.assertIn('앱으로 돌아가라고 안내하세요',prompts);self.assertIn('return to the app',prompts)
+        for old in ('저장된 결과 확인','Check saved results','‘현재 연결 확인’','Check current connection','‘결과 확인’을 누르도록','select Check results'):
             self.assertNotIn(old,prompts)
+
+# Fictional feature fixture: two AI groups (Items with two screens, Orders with one) and work linked by
+# the collected status shapes (repository-tagged PRs, branches, worktrees, issues). Two PRs share #42 in different repositories.
+FEATURE=r'''
+ const items=['web::/items','web::/items/new'];
+ const featureBundle=b=>{
+  const add=(m,path,heading)=>{const s=structuredClone(m.screens[0]);s.path=path;s.heading=heading;s.source_path=path.split('::')[1];m.screens.push(s);};
+  add(b.dev,'web::/orders','First orders');
+  b.dev.backend_routes.push({...structuredClone(b.dev.backend_routes[0]),file:'api/app/orders.py',function:'list_orders',method:'GET',path:'/orders',line:5,tables:['api::orders'],tests:[]});
+  const groups={groups:[{name:'Items',description:'Item screens',screens:items},{name:'Orders',description:'Order screens',screens:['web::/orders']}],names:{},request_names:{}};
+  for(const k of ['dev','main'])b.branch_details[k].groups=groups;b.groups=groups;
+  const u='https://example.invalid/',t='2026-10-01T00:00:00Z';
+  b.status={open_prs:[{number:42,title:'Item form',url:u+'web/42',repository:'web',screens:['web::/items'],files:['web/src/x.tsx'],updated_at:t,author:'a'},
+    {number:42,title:'[API server] Item API',url:u+'api/42',repository:'api',screens:['web::/items/new'],files:[],updated_at:t,author:'b'},
+    {number:7,title:'Shared form',url:u+'web/7',repository:'web',screens:items,files:[],updated_at:t,author:'a'},
+    {number:100,title:'Order fix',url:u+'web/100',repository:'web',screens:['web::/orders'],files:[],updated_at:t,author:'c'}],
+   merged_prs:[{number:5,title:'Merged item',url:u+'web/5',repository:'web',screens:items,files:[],merged_at:t}],
+   branches:[{name:'feature/items',repository:'web',ahead_of_dev:2,stale:false,has_open_pr:false,author:'b',age_days:1,screens:['web::/items/new'],files:[]}],
+   worktrees:[{path:'/fictional/wt-items',repository:'web',branch:'feature/items',uncommitted:['a'],screens:items}],
+   issues:[{number:9,title:'Item bug',url:u+'web/issues/9',repository:'web',via:'pr',hits:['PR #7'],screens:['web::/items']}]};
+ };
+ window.mutateBundle=featureBundle;await loadProject('First');
+ const featureCard=name=>[...document.querySelectorAll('[data-feat]')].find(c=>c.innerText.includes(name));
+ const openFeature=async name=>{S.view='feat';render();featureCard(name).click();await wait();};
+ const itemsId=()=>targetID('feature',[...items].sort());
+ const hangul=text=>S.lang==='en' && /[가-힣]/.test(text);
+'''
+
+class FeatureContext(unittest.TestCase):
+    """A chosen feature stays visible across the full screen map and the existing screen/action detail."""
+    def setUp(self):
+        if not CHROME.exists():self.skipTest('Chrome is required')
+    def check(self,checks):
+        for lang in ('ko','en'):
+            with self.subTest(lang=lang):
+                ok,error=page(FEATURE+checks,lang);self.assertTrue(ok,error)
+
+    def test_full_map_stays_and_only_member_screens_are_highlighted_while_structure_is_unchanged(self):
+        self.check(r'''
+ S.view='sys';S.node=null;render();const sysBefore=$('map').innerHTML;
+ await openFeature('Items');
+ assert(S.feat===itemsId(),'Selection stores the stable feature ID, not an index: '+S.feat);
+ assert(featureCard('Items').classList.contains('sel') && !featureCard('Orders').classList.contains('sel'),'Features graph marks the chosen feature');
+ $('featMap').click();await wait();
+ assert(S.view==='map' && !S.sel && S.feat===itemsId(),'Opening the map keeps the feature without picking a screen');
+ const cards=[...$('map').querySelectorAll('.card[data-scr]')].map(c=>c.dataset.scr);
+ for(const p of [...items,'web::/orders','!orphans','!unres','!issues'])assert(cards.includes(p),'Full map keeps '+p);
+ assert(!$('map').querySelector('.card.dim'),'Nothing is filtered or dimmed');
+ const featured=[...$('map').querySelectorAll('.col.featured')];
+ assert(featured.length===1,'One highlighted feature column');
+ assert(JSON.stringify([...featured[0].querySelectorAll('.card[data-scr]')].map(c=>c.dataset.scr).sort())===JSON.stringify([...items].sort()),'Highlighted column holds exactly the member screens');
+ assert(featured[0].innerText.includes(tr('선택한 기능')),'The highlight is labelled');
+ assert($('insp').innerText.includes('Items') && $('featClear'),'Inspector shows the feature overview with a clear path');
+ assert(!hangul($('insp').innerText+featured[0].innerText),'English feature context: '+$('insp').innerText);
+ assert(S.repository==='' && S.branch==='dev','No implicit code or version change');
+ S.view='sys';render();assert($('map').innerHTML===sysBefore,'Structure diagram is unchanged by feature selection');
+ assert(!window.calls.some(c=>['refresh','save_project','analysis_plan'].includes(c.command)),'Highlighting never refreshes, saves or prepares analysis');
+''')
+
+    def test_member_action_keeps_the_feature_context_with_back_switch_and_clear(self):
+        self.check(r'''
+ await openFeature('Items');
+ const actions=$('insp').querySelectorAll('[data-goact]'),action=actions[0];
+ assert(actions.length===1 && action.innerText.includes('Save') && items.includes(action.dataset.goact),'Overview lists each action once with a member screen');
+ action.click();await wait();
+ assert(S.view==='map' && S.sel===action.dataset.goact && S.open===action.dataset.key && S.feat===itemsId(),'Action opens in the screen map with the feature kept');
+ const strip=()=>$('insp').querySelector('.feature-context');
+ assert(strip() && strip()===$('insp').firstElementChild && strip().innerText.includes('Items') && strip().innerText.includes(tr('이 기능에 속한 화면입니다.')),'Compact member context above the detail');
+ assert($('insp').querySelector('.detail') && $('insp').querySelector('[data-copy]') && $('copyS'),'Existing action detail, copy and code links stay reachable');
+ assert($('map').querySelector('.col.featured .card.sel[data-scr="'+action.dataset.goact+'"]'),'Selected member card sits inside the highlight');
+ assert(!hangul($('insp').innerText),'English strip and detail');
+ $('featBack').click();await wait();
+ assert(!S.sel && !S.open && S.view==='map' && $('insp').querySelector('[data-goact]') && $('map').querySelector('.col.featured'),'Back returns to the feature overview on the full map');
+ $('map').querySelector('[data-scr="web::/orders"]').click();await wait();
+ assert(S.sel==='web::/orders' && strip().innerText.includes(tr('선택한 기능 밖의 화면입니다.')) && !strip().innerText.includes(tr('이 기능에 속한 화면입니다.')),'An outside screen is never called a member');
+ assert(!$('map').querySelector('.col.featured [data-scr="web::/orders"]'),'Outside card stays outside the highlight');
+ $('featSwitch').click();await wait();
+ assert(S.feat===targetID('feature',['web::/orders']) && $('map').querySelector('.col.featured [data-scr="web::/orders"]') && strip().innerText.includes(tr('이 기능에 속한 화면입니다.')),'Switch anchors the screen own feature');
+ $('map').querySelector('[data-scr="!orphans"]').click();await wait();
+ assert(strip().innerText.includes(tr('선택한 기능 밖의 화면입니다.')) && !$('featSwitch'),'Items outside every feature only offer back and clear');
+ $('featClear').click();await wait();
+ assert(S.feat===null && !$('map').querySelector('.col.featured') && !strip() && S.sel==='!orphans','Clear removes only the feature context');
+''')
+
+    def test_feature_work_is_the_deduplicated_union_of_member_screens_and_unknown_is_not_none(self):
+        self.check(r'''
+ await openFeature('Items');const text=$('insp').innerText,count=s=>text.split(s).length-1;
+ assert(count('#7 ')===1,'A PR linked to two member screens is counted once: '+count('#7 '));
+ assert(count('#42 ')===2,'The same number in two repositories stays distinct');
+ assert(count('wt-items')===1 && text.includes('feature/items') && count('#5 ')===1 && count('#9 ')===1,'Branch, folder, merged PR and issue are shown once');
+ assert(!text.includes('Order fix'),'Work of screens outside the feature is excluded');
+ assert(text.includes(tr('이 기능과 이어진 작업 ')+'6'),'Heading counts open PRs, branches, folders and issues once');
+ $('insp').querySelector('[data-goscr="web::/items"]').click();await wait();
+ const screen=$('insp').innerText;assert(screen.split('#42 ').length-1===1 && screen.split('#7 ').length-1===1,'A member screen keeps its own work list');
+ window.mutateBundle=b=>{featureBundle(b);b.status=null;};await loadProject('First',false,'');S.view='feat';render();
+ assert(S.feat===itemsId() && $('insp').innerText.includes(tr('작업 정보를 아직 수집하지 않았습니다.')) && !$('insp').innerText.includes(tr('수집된 작업 중 이 기능의 화면과 이어진 것이 없습니다.')),'Uncollected work is not reported as none');
+ window.mutateBundle=b=>{featureBundle(b);b.status.open_prs=b.status.open_prs.filter(p=>p.number===100);for(const k of ['merged_prs','branches','worktrees','issues'])b.status[k]=[];};await loadProject('First',false,'');render();
+ assert($('insp').innerText.includes(tr('수집된 작업 중 이 기능의 화면과 이어진 것이 없습니다.')),'Collected but unlinked work says so');
+''')
+
+    def test_copy_holds_only_the_feature_context_and_screen_copy_is_unchanged(self):
+        self.check(r'''
+ await openFeature('Items');$('copyF').click();await wait();const c=window.copied;
+ assert(c.includes(itemsId()),'Copy names the feature target ID: '+c);
+ for(const p of items)assert(c.includes(p),'Copy lists member screen '+p);
+ assert(c.includes('POST /items') && c.includes('api/app/items.py:3'),'Copy keeps the action and server code pointers');
+ assert(c.split('#7 ').length-1===1 && c.includes('web#42') && c.includes('api#42'),'Linked work is deduplicated with its repository');
+ assert(!c.includes('web::/orders') && !c.includes('Order fix') && !c.includes('First orders'),'No unrelated feature data');
+ assert(c.includes(tr('기준: ')) && c.includes(tr('AI가 붙인 이름')),'Version and the AI-name indicator are kept');
+ assert(!hangul(c),'English copy');
+ $('insp').querySelector('[data-goscr="web::/items"]').click();await wait();$('copyS').click();await wait();
+ assert(window.copied.startsWith(tr('화면: ')) && !window.copied.includes('feature:'),'Screen copy stays screen-only');
+ assert(!window.calls.some(x=>['analysis_plan','analysis_request','suggest_groups','make_system'].includes(x.command)),'Copy never calls AI');
+''')
+
+    def test_app_control_selects_the_same_feature_and_reports_drilldown_honestly(self):
+        self.check(r'''
+ const feature=(await applyAppCommand({action:'targets',arguments:{}})).output.targets.find(t=>t.kind==='feature' && t.name==='Items');
+ assert(feature && feature.id===itemsId(),'Feature target ID is the selection ID');
+ await applyAppCommand({action:'select',arguments:{project:'First',repository:'',branch:'dev',target:feature.id,revision:(await controlState()).revision}});
+ assert(S.view==='feat' && S.feat===feature.id && featureCard('Items').classList.contains('sel'),'Agent selection shows the same feature');
+ assert(JSON.stringify((await controlState()).selection)===JSON.stringify([feature.id]),'State reports the feature');
+ $('featMap').click();await wait();
+ assert((await controlState()).selection[0]===feature.id,'Feature overview on the map still reports the feature');
+ $('map').querySelector('[data-scr="web::/items"]').click();await wait();let st=await controlState();
+ assert(st.selection[0]==='screen:web::/items' && st.feature_context?.id===feature.id && st.feature_context.member===true,'Drilldown reports the screen with the feature as context: '+JSON.stringify(st.feature_context));
+ $('map').querySelector('[data-scr="web::/orders"]').click();await wait();st=await controlState();
+ assert(st.selection[0]==='screen:web::/orders' && st.feature_context.member===false,'Outside screen is not reported as a member');
+ await applyAppCommand({action:'clear',arguments:{}});st=await controlState();
+ assert(S.feat===null && !st.feature_context && !st.selection.length,'Clear removes the feature context');
+ S.q='Item screens';render();const hit=[...document.querySelectorAll('[data-search-result]')].find(b=>S._search[+b.dataset.searchResult].kind==='feature');
+ hit.click();await wait();assert(S.view==='feat' && S.feat===feature.id,'Search opens the same feature');
+''')
+
+    def test_context_is_revalidated_by_identity_and_cleared_on_scope_change(self):
+        self.check(r'''
+ await openFeature('Items');const id=S.feat,lang=S.lang;
+ setLanguage(lang==='ko'?'en':'ko');assert(S.feat===id && featureCard('Items').classList.contains('sel'),'Language change keeps the same feature');setLanguage(lang);
+ await loadProject('First',false,'');assert(S.feat===id,'Reloading the same service keeps a feature whose screens are unchanged');
+ window.mutateBundle=b=>{featureBundle(b);const g={groups:[{name:'Orders',description:'',screens:['web::/orders','web::/items/new']},{name:'Items',description:'',screens:['web::/items']}],names:{},request_names:{}};for(const k of ['dev','main'])b.branch_details[k].groups=g;};
+ await loadProject('First',false,'');render();
+ assert(S.feat===null && !document.querySelector('[data-feat].sel'),'Changed membership clears instead of reusing the array index');
+ S.view='map';render();assert(!$('map').querySelector('.col.featured'),'No highlight after the membership change');
+ window.mutateBundle=featureBundle;await loadProject('First',false,'');await openFeature('Items');
+ await loadProject('First',false,'web');assert(S.feat===null,'Another code connection clears the feature');
+ await loadProject('First',false,'');await openFeature('Items');
+ document.querySelector('#branch [data-b=main]').click();await wait();
+ assert(S.feat===null && !document.querySelector('[data-feat].sel'),'Another version without the same screens clears the feature');
+ document.querySelector('#branch [data-b=dev]').click();await wait();await openFeature('Items');
+ await applyAppCommand({action:'targets',arguments:{branch:'main'}});assert(S.feat===null,'Agent version change clears');
+ await applyAppCommand({action:'navigate',arguments:{branch:'dev',view:'feat'}});await openFeature('Items');
+ await loadProject('Second');assert(S.feat===null,'Another service clears');
+''')
+
+    def test_choosing_a_feature_replaces_an_open_request_panel_but_keeps_the_request(self):
+        self.check(r"""
+ window.planResult={tasks:[{repository:'web',task:'groups',commit:'old',configuration:'layout-a'}],requirements:[],pins:{web:{commit:'old',configuration:'layout-a'}},blocked:[],handoff:'one request'};
+ S.view='feat';render();await requestAgentAction('analysis_plan');await wait();
+ const request=S.analysisRequest;assert(S.agentPrompt && request && $('insp').querySelector('.request-steps'),'The request panel is open');
+ featureCard('Items').click();await wait();
+ assert($('copyF') && $('featMap') && !$('insp').querySelector('.request-steps'),'Choosing a feature shows its overview instead of the old request');
+ assert(S.analysisRequest===request && JSON.stringify(controlSelection())===JSON.stringify([itemsId()]),'The prepared request is kept and the feature is the selection');
+ S.sel='web::/orders';render();assert((await controlState()).feature_context.member===null,'A screen left from another view is not the Features view target');
+""")
+
+    def test_feature_context_continues_into_connections_with_honest_relations(self):
+        self.check(r"""
+ S.view='sys';S.node=null;render();const sysBefore=$('map').innerHTML;
+ const strip=()=>$('insp').querySelector('.feature-context'),said=t=>strip()?.innerText.includes(tr(t));
+ await openFeature('Items');$('insp').querySelector('[data-goact]').click();await wait();
+ $('insp').querySelector('.detail [data-f^="route|"]').click();await wait();
+ let st=await controlState();
+ assert(S.view==='focus' && S.focus.t==='route' && strip() && said('선택한 기능의 화면이 쓰는 대상입니다.') && !said('이 기능에 속한 화면입니다.'),'A route used by member screens keeps the feature with neutral wording');
+ assert(st.feature_context?.id===itemsId() && st.feature_context.member===null && st.feature_context.relation==='used','State does not claim a member screen for a route: '+JSON.stringify(st.feature_context));
+ $('insp').querySelector('[data-f^="table|"]').click();await wait();st=await controlState();
+ assert(S.focus.t==='table' && said('선택한 기능의 화면이 쓰는 대상입니다.') && st.feature_context.relation==='used','Data reached from member screens keeps the anchor');
+ setFocus('route|api/app/orders.py::list_orders');st=await controlState();
+ assert(said('선택한 기능의 화면에서 이어진 것을 찾지 못했습니다.') && st.feature_context.member===null && st.feature_context.relation==='unlinked','A route no member screen calls is not linked to the feature');
+ setFocus('screen|web::/orders');st=await controlState();
+ assert(said('선택한 기능 밖의 화면입니다.') && $('featSwitch') && st.feature_context.member===false,'An outside screen in Connections is outside');
+ assert(!hangul($('insp').innerText),'English focus strip');
+ $('featBack').click();await wait();
+ assert(S.view==='map' && !S.sel && S.feat===itemsId() && $('copyF') && $('map').querySelectorAll('.col.featured').length===1 && $('map').querySelector('[data-scr="web::/orders"]'),'Back returns to the same feature on the full map');
+ S.view='sys';render();assert($('map').innerHTML===sysBefore,'Structure is unchanged');
+""")
+
+    def test_actions_beyond_the_first_eight_can_be_opened_from_the_overview(self):
+        self.check(r"""
+ window.mutateBundle=b=>{featureBundle(b);const s=b.dev.screens.find(x=>x.path==='web::/items/new');s.api_functions=[...s.api_functions];
+  for(let k=0;k<9;k++){const r={...structuredClone(b.dev.backend_routes[0]),file:'api/app/extra.py',function:'extra_'+k,path:'/extra/'+k,line:10+k};b.dev.backend_routes.push(r);
+   b.dev.api_functions.push({name:'extra'+k,file:'web/src/api.ts',calls:[{method:'POST',path:'/extra/'+k,line:20+k,backend:[{file:r.file,line:r.line}]}]});s.api_functions.push({name:'extra'+k,file:'web/src/api.ts'});}};
+ await loadProject('First',false,'');await openFeature('Items');
+ const rows=[...$('insp').querySelectorAll('[data-goact]')];
+ assert(rows.length===10,'All ten actions are reachable from the overview: '+rows.length);
+ const more=$('insp').querySelector('details.more-actions');
+ assert(more && !more.open && more.querySelectorAll('[data-goact]').length===2 && more.querySelector('summary').innerText.includes('2'),'The first eight show and the rest sit behind one disclosure');
+ more.open=true;const last=more.querySelectorAll('[data-goact]')[1];last.click();await wait();
+ assert(S.view==='map' && S.sel===last.dataset.goact && S.open===last.dataset.key && $('insp').querySelector('.feature-context') && $('insp').querySelector('.detail'),'A hidden action opens directly in its detail');
+""")
+
+    def test_merged_prs_beyond_the_first_five_stay_openable_in_the_feature_and_screen(self):
+        self.check(r"""
+ window.mutateBundle=b=>{featureBundle(b);for(let k=0;k<6;k++)b.status.merged_prs.push({number:60+k,title:'Merged extra '+k,url:'https://example.invalid/web/'+(60+k),repository:'web',screens:items,files:[],merged_at:'2026-10-01T00:00:00Z'});};
+ await loadProject('First',false,'');await openFeature('Items');
+ const more=$('insp').querySelector('details.more-merged');
+ assert(more && !more.open && more.querySelectorAll('.row[data-url]').length===2 && more.querySelector('summary').innerText.includes('2'),'Merged PRs past five sit behind one disclosure');
+ more.open=true;more.querySelectorAll('.row[data-url]')[1].click();await wait();
+ assert(window.calls.some(c=>c.command==='open_url' && c.args.url==='https://example.invalid/web/65') && S.feat===itemsId(),'A hidden merged PR opens and the feature stays');
+ $('insp').querySelector('[data-goscr="web::/items"]').click();await wait();
+ assert($('insp').querySelector('details.more-merged .row[data-url]'),'The screen work list uses the same disclosure');
+""")
 
 if __name__=='__main__':unittest.main()

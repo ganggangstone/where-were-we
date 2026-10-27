@@ -27,9 +27,11 @@ FEATURES={
  'detail':('analyze','analysis_source','record_analysis','request_ai_task','record_ai_task','analysis_plan'),
  'briefing':('request_briefing','briefing_source','record_briefing','change_briefing'),
  'app':('app_state','app_targets','app_control','app_command_result'),
- # The first-run request registers the service through projects and app_control (see mapcore.setup_prompt onboarding).
+ # The first-run request registers and collects through projects, refresh and app_control (see mapcore.setup_prompt onboarding).
  'onboarding':('projects','refresh','app_state','app_control','app_command_result'),
 }
+# The first-run request also runs the planned first analysis, so it needs the analysis and briefing tools too.
+FEATURES['onboarding']+=FEATURES['detail']+FEATURES['briefing']
 
 def required(feature):
  if feature not in FEATURES:raise ValueError('Choose a supported feature')

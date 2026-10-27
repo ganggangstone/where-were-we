@@ -109,9 +109,9 @@ def request(name,repository='',branch='dev',lang='ko'):
         scope={'project':name,'repository':repository,'branch':branch,'lang':lang}
         handoff=(f'Call where-were-we request_briefing with {json.dumps(scope)}. Use your current agent/model and the returned input and schema. '
                  'Read supplied evidence using briefing_source and source_arguments. Submit result_json to record_briefing with record_arguments. '
-                 'Do not launch another AI CLI. Do not call refresh to display the result. Tell the user to select Check results in the app.')
+                 'Do not launch another AI CLI. Do not call refresh to display the result. Tell the user to return to the app, which reads the saved result.')
         if lang=='ko':handoff=(f'where-were-we의 request_briefing을 {json.dumps(scope,ensure_ascii=False)} 인자로 호출하세요. 반환된 입력·schema와 briefing_source의 근거를 읽어 현재 에이전트의 모델로 설명하세요. '
-                  'record_arguments와 결과 JSON을 record_briefing으로 저장하세요. 다른 AI CLI나 refresh를 실행하지 마세요. 저장 뒤 앱의 ‘결과 확인’을 누르도록 안내하세요. 결과를 보여 주려고 refresh를 실행하지 마세요.')
+                  'record_arguments와 결과 JSON을 record_briefing으로 저장하세요. 다른 AI CLI나 refresh를 실행하지 마세요. 저장 뒤 앱으로 돌아가라고 안내하세요. 앱이 저장된 결과를 읽습니다. 결과를 보여 주려고 refresh를 실행하지 마세요.')
         handoff+=' '+mapcore.reply_language(lang,saved_results=True)
         prompt=('Explain changes as problem-based cards. Combine PRs solving the same problem; split a PR only when it solves distinct problems. '
                 'Cover every supplied PR at least once; total PR count is independent of card count. Order by impact, combining copy/style work. '

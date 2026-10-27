@@ -232,7 +232,7 @@ def request(name,branch='dev',lang='ko',repository=''):
                     f' After saving the map, call request_ai_task with {system_scope} to analyze architecture and the jobs of every program together. '
                     'Include source evidence in each program’s jobs using the returned schema; record unknowns explicitly. '
                     'Submit the result and returned record_arguments to record_ai_task to finish this analysis without another user request.')
-        handoff += (' 저장 후 앱의 ‘결과 확인’을 누르도록 안내하세요. 결과 확인을 위해 refresh 도구를 실행하지 마세요.' if lang=='ko' else ' Tell the user to select Check results in the app. Do not call refresh to display the result.')
+        handoff += (' 저장 후 앱으로 돌아가라고 안내하세요. 앱이 저장된 결과를 읽습니다. 결과 확인을 위해 refresh 도구를 실행하지 마세요.' if lang=='ko' else ' Tell the user to return to the app, which reads the saved result. Do not call refresh to display the result.')
         handoff += ' '+mapcore.reply_language(lang,saved_results=True)
         results=project.analysis_results(raw,branch)
         return {'commit':commit,'record_arguments':arguments,'repository_path':repo['path'],
@@ -352,10 +352,10 @@ def task_request(name,task,branch='dev',lang='ko',repository='',target=''):
                 'Return a JSON object using schema. Preserve unknown facts explicitly. '+mapcore.reply_language(lang,'en',saved_results=True))
         handoff=(f'where-were-we MCP의 request_ai_task를 {json.dumps(scope,ensure_ascii=False)} 인자로 호출하세요. '
                  '반환된 input·prompt·schema를 기준으로 현재 에이전트의 모델로 작업하세요. 필요한 코드는 source_arguments를 넣어 analysis_source로 읽으세요. '
-                 '다른 AI CLI를 실행하지 마세요. 결과 JSON을 record_arguments와 함께 record_ai_task의 result_json으로 제출하세요. 저장 후 앱의 ‘결과 확인’을 누르도록 안내하세요. 결과 확인을 위해 refresh 도구를 실행하지 마세요.') if lang=='ko' else (
+                 '다른 AI CLI를 실행하지 마세요. 결과 JSON을 record_arguments와 함께 record_ai_task의 result_json으로 제출하세요. 저장 후 앱으로 돌아가라고 안내하세요. 앱이 저장된 결과를 읽습니다. 결과 확인을 위해 refresh 도구를 실행하지 마세요.') if lang=='ko' else (
                  f'Call where-were-we MCP request_ai_task with {json.dumps(scope)}. Use your current agent/model with the returned input, prompt and schema. '
                  'Read pinned source with analysis_source and source_arguments as needed. Do not launch another AI CLI. '
-                 'Submit result_json to record_ai_task with record_arguments. Tell the user to select Check results in the app. Do not call refresh to display the result.')
+                 'Submit result_json to record_ai_task with record_arguments. Tell the user to return to the app, which reads the saved result. Do not call refresh to display the result.')
         handoff+=' '+mapcore.reply_language(lang,saved_results=True)
         results=project.analysis_results(raw,branch)
         before=([{'task':task,'key':key,'before':results[task].get(key)} for key in (inputs['routes'] if task=='steps' else [target])]
@@ -536,9 +536,10 @@ PLAN_TEXT={
        'how':'작업별 방법: analysis는 analyze를 호출하고 source_arguments로 analysis_source를 읽어 record_analysis로 저장합니다. '
              'system·groups·steps는 그때 request_ai_task를 task와 target 그대로 호출해 받은 input·schema·record_arguments로 record_ai_task에 저장합니다. '
              'briefing은 request_briefing을 호출하고 briefing_source로 근거를 읽어 record_briefing으로 저장합니다. '
+             '소스 구조(화면·서버·데이터 코드가 어디 있는지)는 프레임워크 이름이 아니라 고정된 커밋의 실제 파일을 읽어 찾습니다. '
              '원문 근거를 붙이고, 코드로 확인되지 않는 것은 지어내지 말고 schema의 unknown으로 남기세요.',
        'pins':'매번 작업 전에 반환된 pins 전체를 이 기준과 대조하세요. 저장소가 추가·제거되거나 값이 달라지면 작업을 멈추고 새 요청이 필요하다고 알려 주세요. 기준 pins: ',
-       'now':'지금 필요한 작업과 기준값:','tail':'한 작업이 실패해도 이미 저장된 결과는 남습니다. 실패한 작업과 이유를 알려 주세요. 모두 끝나면 앱의 ‘결과 확인’을 누르도록 안내하세요. 결과 확인을 위해 refresh 도구를 실행하지 마세요.'},
+       'now':'지금 필요한 작업과 기준값:','tail':'한 작업이 실패해도 이미 저장된 결과는 남습니다. 실패한 작업과 이유를 알려 주세요. 모두 끝나면 앱으로 돌아가라고 안내하세요. 앱이 저장된 결과를 읽습니다. 결과 확인을 위해 refresh 도구를 실행하지 마세요.'},
  'en':{'head':'Complete all the analysis this project needs with the where-were-we MCP tools. Use your current agent/model and do not launch another AI CLI. '
               'First call analysis_plan with {scope}, save only the first returned task as described below, then call analysis_plan again. Repeat until tasks is empty. '
               'Current saved results are never listed; do not reanalyze them. Follow this method instead of the handoff text a tool returns. '
@@ -546,9 +547,10 @@ PLAN_TEXT={
        'how':'Per task: analysis calls analyze, reads source with analysis_source and source_arguments, and saves with record_analysis. '
              'system, groups and steps call request_ai_task then, with the task and target unchanged, and save to record_ai_task with the returned input, schema and record_arguments. '
              'briefing calls request_briefing, reads evidence with briefing_source and saves with record_briefing. '
+             'Find the source structure (where screen, server and data code live) by reading the tracked files at the pinned commit, not from a framework name. '
              'Include literal evidence; record what the code does not establish as unknown in the schema instead of inventing it.',
        'pins':'Before every task, compare the entire returned pins object with this reference. If a repository is added or removed, or a value changes, stop and report that a new request is needed. Reference pins: ',
-       'now':'Tasks needed now and reference values:','tail':'A failed task leaves saved results intact; report which task failed and why. When all are done, tell the user to select Check results in the app. Do not call refresh to display the result.'}}
+       'now':'Tasks needed now and reference values:','tail':'A failed task leaves saved results intact; report which task failed and why. When all are done, tell the user to return to the app, which reads the saved results. Do not call refresh to display the result.'}}
 READ_ERRORS=(ValueError,subprocess.CalledProcessError,OSError)
 
 def plan(name,branch='dev',lang='ko',repository=''):

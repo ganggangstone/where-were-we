@@ -104,7 +104,8 @@ class RefreshSettings(TemporaryProject):
 const fs=require('fs'),vm=require('vm'),assert=require('assert');
 const html=fs.readFileSync('ui/index.html','utf8');
 const js=html.slice(html.indexOf('<script>')+8,html.lastIndexOf('</script>'));
-global.window={__TAURI__:{core:{invoke:()=>{throw Error('Viewing details must not invoke analysis');}}}};
+global.window={__TAURI__:{core:{invoke:()=>{throw Error('Viewing details must not invoke analysis');}}},addEventListener(type,fn){(this.listeners??={})[type]=fn;}};
+global.document={addEventListener(type,fn){(this.listeners??={})[type]=fn;}};
 global.localStorage={getItem:()=>null};
 vm.runInThisContext(js.slice(0,js.indexOf("$('q').oninput"))+`
 S.system={nodes:[{id:'service::backend',name:'API server',kind:'program',code:['service/server'],uses:[]}],links:[],externals:[]};
@@ -231,8 +232,8 @@ const js=html.slice(html.indexOf('<script>')+8,html.lastIndexOf('</script>'));
 const elements={}, calls=[];let chosen='last_refresh',rejectSave=false;
 const element=id=>elements[id] ||= {innerHTML:'',value:'',checked:false,disabled:false,
   querySelector:()=>({value:chosen}),querySelectorAll:()=>[],close(){this.open=false;}};
-global.document={getElementById:element,querySelectorAll:()=>[]};
-global.window={__TAURI__:{core:{invoke:async(name,args)=>{
+global.document={getElementById:element,querySelectorAll:()=>[],addEventListener(type,fn){(this.listeners??={})[type]=fn;}};
+global.window={addEventListener(type,fn){(this.listeners??={})[type]=fn;},__TAURI__:{core:{invoke:async(name,args)=>{
   calls.push([name,args]);
   if(name==='read_project')return JSON.stringify({dev:{repo:'/demo',screens:[]},main:null});
   if(name==='save_settings'){if(rejectSave)throw Error('disk full');return args.json;}
@@ -395,9 +396,12 @@ window.__TAURI__={core:{invoke:async(command,args)=>{
   assert($('analysisResultState').textContent.includes('different code version'),'A stale saved result must be distinct from a new result');
   const mapBefore=S.maps.dev;resultReadFailure=true;await $('checkAnalysisResults').onclick();
   assert(S.maps.dev===mapBefore && S.changes===changes,'A failed result read must preserve the displayed map and changes');
+  // A request belongs to the language it was prepared in; after switching, the Korean request is prepared the same way and shows the same path.
   resultReadFailure=false;S.lang='ko';renderAgentPrompt();
-  assert($('insp').textContent.includes('3. 결과 확인'),'Korean shows the same result-only path');
-  S.lang='en';
+  assert(!$('insp').textContent.includes('3. 결과 확인') && !$('insp').textContent.includes('3. Check results'),'An English request is not shown as the Korean one');
+  await requestAgentAction('make_system');
+  assert($('insp').textContent.includes('1. 요청 복사') && $('insp').textContent.includes('3. 결과 확인'),'Korean shows the same result-only path');
+  S.lang='en';await requestAgentAction('make_system'); // back to an English request for the English checks below
   assert(tr('AI에게 보낼 요청만 만듭니다. 앱에서 바로 분석하지 않습니다.').includes('Nothing is analyzed in the app'),'Step requests must not retain old automatic-analysis wording');
   analysisBundle.project.repositories[0].results.dev.system={version:'proposal',commit:'abc',stale:false,proposal:true};
   await $('checkAnalysisResults').onclick();
@@ -447,7 +451,7 @@ window.__TAURI__={core:{invoke:async(command,args)=>{
 const fs=require('fs'),vm=require('vm'),assert=require('assert');
 const html=fs.readFileSync('ui/index.html','utf8');
 const js=html.slice(html.indexOf('<script>')+8,html.lastIndexOf('</script>'));
-global.window={__TAURI__:{core:{invoke:async()=>[]}}};global.localStorage={getItem:()=>null};
+global.window={__TAURI__:{core:{invoke:async()=>[]}},addEventListener(type,fn){(this.listeners??={})[type]=fn;}};global.document={addEventListener(type,fn){(this.listeners??={})[type]=fn;}};global.localStorage={getItem:()=>null};
 vm.runInThisContext(js.slice(0,js.indexOf("$('q').oninput"))+`
 assert.equal(newRepositoryId('Web app','/demo/web',[]),'web-app');
 assert.equal(newRepositoryId('웹 화면','/demo/frontend/',[]),'frontend');

@@ -75,7 +75,7 @@ window.__TAURI__={core:{invoke:async(command,args)=>{
  assert(targets.output.targets.filter(t=>t.kind==='program').length===2,'Duplicate names remain disambiguated');
  const select=async(kind,predicate=()=>true)=>{const t=(await applyAppCommand({action:'targets',arguments:{}})).output.targets.find(t=>t.kind===kind && predicate(t));assert(t,'Missing '+kind);return applyAppCommand({action:'select',arguments:{project:'demo',repository:'',branch:'dev',target:t.id,revision:(await controlState()).revision}});};
  await select('screen',t=>t.key==='web::/upload');assert(S.sel==='web::/upload' && S.view==='focus','Screen selection and relations');
- await select('feature');assert(S.view==='feat' && S.feat===0,'Actual visible feature groups use stable IDs');
+ await select('feature');assert(S.view==='feat' && selectedFeature(M())?.i===0 && S.feat===controlSelection()[0],'Actual visible feature groups use stable IDs');
  await select('program',t=>t.key==='api::worker');assert(S.node==='api::worker' && S.view==='sys','Program selection');
  await select('job');assert(document.querySelector('[data-control-detail]')?.textContent.includes('Retry upload'),'Job details are visible');
  await select('connection');assert(document.querySelector('[data-control-detail]')?.textContent.includes('Queues uploads'),'Connection details are visible');

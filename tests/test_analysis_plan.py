@@ -41,6 +41,10 @@ class Plan(unittest.TestCase):
                 ai_extract.task_record(**request['record_arguments'],result_json=json.dumps(results.get(task['task'],default)))
         self.fail('Plan did not settle')
 
+    def test_handoff_explains_that_source_structure_is_read_from_the_pinned_commit(self):
+        for lang,token in (('ko','실제 파일을 읽어'),('en','reading the tracked files')):
+            handoff=ai_extract.plan('demo','dev',lang)['handoff']
+            self.assertIn(token,handoff,lang);self.assertIn('framework' if lang=='en' else '프레임워크',handoff,lang)
     def test_first_request_queues_map_then_dependents_in_one_handoff(self):
         for lang in ('ko','en'):
             plan=ai_extract.plan('demo','dev',lang)

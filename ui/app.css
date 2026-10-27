@@ -101,6 +101,9 @@ button.pill, .pill.click { font:var(--font-secondary); letter-spacing:var(--trac
 .card.in, .card.out { background:var(--color-bg-related) }
 .pill.relation { background:var(--color-bg-card); color:var(--color-accent) }
 .card.dim { opacity:var(--opacity-dim) }
+/* 고른 기능: 지도는 그대로 두고 그 기능의 화면 줄만 옅은 강조색으로 감싼다. 바깥 테두리도 같은 색이라 자리가 밀리지 않는다. */
+.col.featured { background:var(--color-accent-tint); outline:var(--space-3) solid var(--color-accent-tint); border-radius:var(--radius-card) }
+.feature-context { display:flex; flex-wrap:wrap; align-items:center; gap:var(--space-3); padding:var(--space-3) var(--space-4); margin-bottom:var(--space-5); background:var(--color-accent-tint); border-radius:var(--radius-card) }
 .card .nm { font:var(--font-heading) }
 .card .meta { color:var(--color-text-secondary); font:var(--font-secondary); letter-spacing:var(--tracking-secondary); margin-top:var(--space-2); display:flex; gap:var(--space-2); align-items:center; flex-wrap:wrap }
 

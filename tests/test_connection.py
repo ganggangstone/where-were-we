@@ -21,6 +21,38 @@ class Connection(unittest.TestCase):
     from tests.reply_language import assert_reply_language
     assert_reply_language(self,prompt,lang)
 
+ def test_onboarding_prompt_is_one_request_that_ends_at_the_first_analysis_result(self):
+  # One copied request: connect, confirm, collect, then analyze only after explicit consent, and finish by reading the saved results.
+  with patch.object(mapcore,'projects',return_value=[]):
+   for lang in ('ko','en'):
+    prompt=mapcore.setup_prompt(lang,onboarding=True)
+    for token in ('prepare_analysis','task=all','analysis_plan','pins','read_results','app_command_result'):
+     self.assertIn(token,prompt,(lang,token))
+    for token in (('pricing','limits','permission','second') if lang=='en' else ('요금','한도','허락','다시 복사')):
+     self.assertIn(token,prompt,(lang,token))
+    # Consent for the paid analysis is part of the same confirmation as the repositories and first collection.
+    confirm=prompt.index('Ask me to confirm' if lang=='en' else '내 확인을 받아')
+    self.assertLess(confirm,prompt.index('prepare_analysis'))
+    consent=prompt[confirm:prompt.index('prepare_analysis')]
+    self.assertTrue(('pricing' in consent) if lang=='en' else ('요금' in consent))
+    self.assertIn('read_results',prompt[prompt.index('prepare_analysis'):])
+    # The result is read from the app command, never by refreshing to display it.
+    self.assertIn('Do not call refresh' if lang=='en' else 'refresh를 실행하지',prompt)
+ def test_onboarding_prompt_explains_source_structure_discovery_without_a_framework_choice(self):
+  # The request says how screens and server code are found: by reading the code, not by asking me for a framework or source roots.
+  with patch.object(mapcore,'projects',return_value=[]):
+   en=mapcore.setup_prompt('en',onboarding=True);ko=mapcore.setup_prompt('ko',onboarding=True)
+  for token in ('framework','layout','reading the code'):self.assertIn(token,en)
+  for token in ('프레임워크','layout','코드를 읽어'):self.assertIn(token,ko)
+ def test_onboarding_prompt_states_the_cost_without_unmeasured_warnings(self):
+  with patch.object(mapcore,'projects',return_value=[]):
+   self.assertNotIn('long time',mapcore.setup_prompt('en',onboarding=True))
+   self.assertNotIn('오래 걸리',mapcore.setup_prompt('ko',onboarding=True))
+ def test_onboarding_prompt_stops_honestly_and_keeps_saved_work(self):
+  with patch.object(mapcore,'projects',return_value=[]):
+   en=mapcore.setup_prompt('en',onboarding=True);ko=mapcore.setup_prompt('ko',onboarding=True)
+  for token in ('new session','stop','saved','Do not claim'):self.assertIn(token,en)
+  for token in ('새 세션','멈춰','저장된','말하지 마'):self.assertIn(token,ko)
  def test_onboarding_check_requires_the_tools_the_onboarding_request_uses(self):
   import connection
   needed=connection.required('onboarding')
@@ -28,6 +60,10 @@ class Connection(unittest.TestCase):
   challenge=connection.begin(self.identity(),'onboarding')
   self.assertEqual(connection.confirm(challenge,self.identity(),list(connection.required('detail')))['state'],'missing_tools')
   self.assertEqual(connection.confirm(challenge,self.identity(),needed)['state'],'verified')
+  # The first-run request also runs the planned analysis, so a connection missing those tools is not ready.
+  for tool in ('analysis_plan','analyze','analysis_source','record_analysis','request_ai_task','record_ai_task','request_briefing','briefing_source','record_briefing'):self.assertIn(tool,needed)
+  without=[t for t in needed if t!='analysis_plan']
+  self.assertEqual(connection.confirm(connection.begin(self.identity(),'onboarding'),self.identity(),without)['state'],'missing_tools')
  def test_detail_check_requires_the_unified_plan_tool(self):
   import connection
   older=[t for t in connection.required('detail') if t!='analysis_plan']+['request_briefing','briefing_source','record_briefing']

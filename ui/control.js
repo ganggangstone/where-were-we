@@ -19,7 +19,7 @@ function controlTargets() {
   for(const t of new Set([...Object.values(m.models || {}),...Object.keys(tableUse(m)),...(S.system?.nodes || []).flatMap(n=>n.tables || [])]))add('data',t,tableName(t),t,{},t.split('::')[0]);
   for(const [node,value] of Object.entries(S.jobs?.nodes || {}))for(const job of value.jobs || [])add('job',{node,job},job.name,job.what,job,(S.system?.nodes || []).find(n=>n.id===node)?.repository);
   for(const link of S.system?.links || [])add('connection',link,linkLabel(link),[(S.system.nodes.find(n=>n.id===link.from)?.name || link.from),(S.system.nodes.find(n=>n.id===link.to)?.name || link.to)].join(' → '),link);
-  for(const group of groupsOf(m))add('feature',group.list.map(s=>s.path).sort(),group.name,group.description,{screens:group.list.map(s=>s.path)});
+  for(const group of groupsOf(m))add('feature',featureKey(group),group.name,group.description,{screens:group.list.map(s=>s.path)});
   return [...items.values()];
 }
 // Agent selection and the search box open targets the same way.
@@ -31,7 +31,7 @@ function openTarget(target,relations=true) {
   else if(target.kind==='program')selectProgram(target.key,false);
   else if(target.kind==='job')selectProgram(target.key.node,false);
   else if(target.kind==='connection')selectProgram(target.key.from,false);
-  else if(target.kind==='feature'){S.view='feat';S.feat=groupsOf(M()).findIndex(g=>targetID('feature',g.list.map(s=>s.path).sort())===target.id);render();}
+  else if(target.kind==='feature'){S.view='feat';S.feat=target.id;render();}
 }
 async function controlRevision() {
   const bytes=new TextEncoder().encode(JSON.stringify(controlCanonical({project:S.project,repository:S.repository,branch:S.branch,map:M(),system:S.system,jobs:S.jobs,groups:S.groups,flows:S.flows,config:S.projectInfo})));
@@ -41,14 +41,19 @@ function controlSelection() {
   if(S.controlTarget && S.controlAnchor===JSON.stringify([S.view,S.sel,S.open,S.node,S.focus,S.feat]))return [S.controlTarget];
   if(S.view==='sys' && S.node)return [targetID('program',S.node)];
   if(S.view==='focus' && S.focus)return [targetID({screen:'screen',route:'request',table:'data'}[S.focus.t],S.focus.id)];
-  if(S.view==='feat' && S.feat!=null){const group=groupsOf(M())[S.feat];return group?[targetID('feature',group.list.map(s=>s.path).sort())]:[];}
+  const feature=selectedFeature(M());
+  if(S.view==='feat' && S.feat!=null)return feature?[feature.id]:[];
+  // The feature overview on the map has no screen yet; the feature itself is the selection.
+  if(S.view==='map' && !S.sel && feature)return [feature.id];
   return [...(S.sel?[targetID('screen',S.sel)]:[]),...(S.open?[targetID('request',S.open)]:[])];
 }
 async function controlState() {
-  const selected=controlSelection(),targets=controlTargets();
+  const selected=controlSelection(),targets=controlTargets(),feature=selectedFeature(M());
   return {project:S.project,repository:S.repository,branch:S.branch,view:S.view,revision:await controlRevision(),selection:selected,
     selected:targets.filter(t=>selected.includes(t.id)),query:S.q,step:S.step,language:S.lang,settings:S.settings,
-    dialogs:[...document.querySelectorAll('dialog[open]')].map(d=>d.id),structure:S.showProposal && S.proposal?'ai_proposal':'written',analysis:S.analysisRequest?{state:S.analysisRequest.state,scope:S.analysisRequest.scope,prepared:true}:null};
+    dialogs:[...document.querySelectorAll('dialog[open]')].map(d=>d.id),structure:S.showProposal && S.proposal?'ai_proposal':'written',
+    // The chosen feature stays as context; member is true/false only for a screen target, relation also covers requests and data.
+    feature_context:feature?(r=>({id:feature.id,name:feature.g.name,member:r==='member'?true:r==='outside'?false:null,relation:r}))(featureRelation(M(),feature)):null,analysis:S.analysisRequest?{state:S.analysisRequest.state,scope:S.analysisRequest.scope,prepared:true}:null};
 }
 function controlDecoration() {
   // Detailed job/connection selection complements the existing program inspector.
@@ -80,6 +85,12 @@ async function controlContext(args) {
 }
 // A shown target must be visible: an explicit navigate/select closes the first-run guide without recording it as skipped or done.
 function closeCoveringGuide(){if($('guide')?.open)closeGuide();}
+// What a result read tells the agent: the prepared request's own computed state (per code, remaining, blocked, pins); nothing is claimed without one.
+function resultReport() {
+  const r=activeAnalysis(),scope={project:S.project,repository:S.repository,branch:S.branch,lang:S.lang};
+  if(!r)return {scope,state:'no_request'};
+  return {scope,command:r.command,state:r.state,codes:r.codes || null,remaining:r.remaining || [],blocked:r.blocked || [],pins:r.pins || null};
+}
 async function applyAppCommand(command) {
   const a=command.arguments || {};let output=null;
   const contextActions=['targets','navigate','select','refresh','prepare_analysis','github_accounts','github_account'];
@@ -143,7 +154,9 @@ async function applyAppCommand(command) {
       output=await requestAgentAction(tasks[a.task],a.task==='jobs'?{node:a.target}:a.task==='steps'?{screen:a.target}:{});
       if(!output)controlError('analysis_request_failed');output={prepared:true,executed:false,request:output};break;
     }
-    case 'read_results':if(S.analysisRequest && ['project','repository','branch'].every(k=>S.analysisRequest.scope[k]===S[k])){await checkAnalysisResults();if(S.analysisRequest.state==='error')controlError('result_read_failed',S.analysisRequest.error);if(S.analysisRequest.state==='checking')controlError('context_changed');}else await reloadAnalysisOnly();break;
+    case 'read_results':{const request=activeAnalysis(),token=S.loadToken;
+      if(request){await checkAnalysisResults();if(request!==activeAnalysis() || token!==S.loadToken || request.state==='checking')controlError('context_changed');if(request.state==='error')controlError('result_read_failed',request.error);}
+      else await reloadAnalysisOnly();output=resultReport();break;}
     case 'update_state':output=await invoke('app_update_status');break;
     case 'check_update':if(U.busy)controlError('update_check_busy');await checkUpdates(true);if(U.failed)controlError('update_check_failed');output={failed:U.failed,latest:U.latest,current:U.current};break;
     case 'start_update':if(U.installing)controlError('update_already_running');if(!U.latest?.newer)controlError('no_update_available');await startUpdate();if(U.job?.stage==='failed')controlError('update_failed',U.job.error);output={started:true,completed:false,update:await invoke('app_update_status')};break;
