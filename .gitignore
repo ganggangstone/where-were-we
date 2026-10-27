@@ -13,3 +13,7 @@ __pycache__/
 
 # Generated runtime-only UI assets
 src-tauri/frontend/
+
+# 로컬 설계 기록과 데모 제작 자료. 공개하지 않는다.
+/PRD.md
+/demo/
