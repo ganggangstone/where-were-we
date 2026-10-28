@@ -137,10 +137,6 @@ button.pill, .pill.click { font:var(--font-secondary); letter-spacing:var(--trac
 .claim p { margin:var(--space-0) }
 .change-details > .claim-grid { padding:var(--space-4) var(--space-0); border:none }
 .change-details .evidence-list { border-top:var(--border-hairline); padding-top:var(--space-3) }
-.request-steps { list-style:none; padding:var(--space-0); display:flex; flex-wrap:wrap; gap:var(--space-3); margin:var(--space-5) var(--space-0) }
-.request-steps > li { flex:1 1 var(--size-node); padding:var(--space-4); border:var(--border-hairline); border-radius:var(--radius-control); min-width:var(--space-0) }
-.request-steps strong { display:block; font:var(--font-secondary); font-weight:var(--weight-strong); margin-bottom:var(--space-3) }
-.request-steps [aria-current=step] { background:var(--color-accent-tint); border-color:var(--color-accent) }
 .setting-options { display:flex; flex-wrap:wrap; gap:var(--space-3); margin:var(--space-4) var(--space-0) }
 .setting-options > div { flex:1 1 var(--size-node); padding:var(--space-3); border:var(--border-hairline); border-radius:var(--radius-control); min-width:var(--space-0) }
 .setting-options label { margin:var(--space-0) }

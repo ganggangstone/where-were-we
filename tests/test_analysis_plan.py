@@ -32,7 +32,7 @@ class Plan(unittest.TestCase):
             if task['task']=='analysis':
                 request=ai_extract.request('demo',plan['branch'],plan['lang'],rid)
                 self.assertEqual(request['commit'],task['commit'])
-                ai_extract.record(**request['record_arguments'],result_json=json.dumps(results.get('analysis',self.data)))
+                ai_extract.record(**request['record_arguments'],result_json=json.dumps(test_ai_extract.agent_answer(request,results.get('analysis',self.data))))
             else:
                 request=ai_extract.task_request('demo',task['task'],plan['branch'],plan['lang'],rid,task.get('target',''))
                 self.assertEqual(request['commit'],task['commit'])

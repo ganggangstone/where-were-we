@@ -13,6 +13,20 @@ import mapcore
 import project
 import ai_extract
 
+def agent_answer(request,data):
+    """Fake agent: answer a full analysis in the contract of the returned mode, using only what the request returns."""
+    if request.get('mode')=='review':return {'keep':'all',**data}
+    if request.get('mode')!='patch':return data
+    def match(item,r):return all(item.get(k)==r[k] for k in ('file','method','path','function') if r.get(k) is not None) if r['kind']=='route' else item.get('path')==r['path']
+    out={'screens':[],'backend_routes':[],'removed':[],'accounted':[]}
+    for key,kind in (('screens','screen'),('backend_routes','route')):
+        for item in data.get(key,[]):
+            if item.get('file') in request['inspect'] or any(r['kind']==kind and match(item,r) for r in request['recheck']):out[key].append(item)
+    out['removed']=[r['id'] for r in request['recheck'] if not any(match(i,r) for i in out['screens' if r['kind']=='screen' else 'backend_routes'])]
+    cited=lambda f:any(f==x.get('file') or f in json.dumps(x) for x in out['screens']+out['backend_routes'])
+    out['accounted']=[{'file':f,'kind':'items' if cited(f) else 'none'} for f in request['inspect']]
+    return {**out,'unknown':data.get('unknown',[])}
+
 class Analysis(unittest.TestCase):
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)

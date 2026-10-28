@@ -57,9 +57,10 @@ for b in ("dev", "main"):
     now = git("rev-parse", "--short", ref)
     if (cur.get('analysis') or {}).get('source')=='ai':
         # A normal refresh must not spend the user's AI quota or erase an AI map.
+        import ai_extract
+        if ai_extract.carry_unchanged(cur,REPO,ref):have=ref  # identical tree: every saved input is proven unchanged
         cur['analysis']['observed_commit']=ref
         cur['analysis']['stale']=have not in (now,ref)
-        import ai_extract
         ai_extract.refresh_test_links(cur,mapcore.tests_conf(HOME))
         import project as project_store
         project_store.atomic(Path(path),cur)

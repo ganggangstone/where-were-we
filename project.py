@@ -315,7 +315,8 @@ def analysis_scope(snapshot,layout):
     result={'source':'ai' if ai else 'basic','unknown':list(analysis.get('unknown',[]))}
     for area,key in (('frontend','screens'),('backend','backend_routes')):
         if area in layout and layout[area] is None:status='disabled'
-        elif ai:status='ai' if snapshot.get(key) else 'not_established'
+        # AI analysis that kept deterministic collector items is reported as mixed, never as wholly AI-analyzed.
+        elif ai:status=('mixed' if any(x.get('source')=='basic' for x in snapshot[key]) else 'ai') if snapshot.get(key) else 'not_established'
         elif (snapshot.get('coverage') or {}).get(area) is False:status='needs_analysis'
         elif snapshot.get(key):status='basic'
         elif (snapshot.get('coverage') or {}).get(area) is True:status='needs_analysis'
@@ -334,8 +335,9 @@ def qualify_map(source,repo,table_ids):
     for s in m['screens']:
         s.update(repository=rid,source_path=s['path'],source_file=s.get('file'))
         s['path']=screen(s['path']);s['file']=file(s.get('file'))
-        for ev in s.get('evidence') or []:
+        for ev in [*(s.get('evidence') or []),*(s.get('dependencies') or [])]:
             if isinstance(ev,dict):ev['file']=file(ev.get('file'))
+        if s.get('dependency_files'):s['dependency_files']=[file(f) for f in s['dependency_files']]
         for ref in s.get('api_functions',[]):
             ref['file']=file(ref['file']);ref['via']=file(ref.get('via'))
         for a in s.get('actions',[]):
@@ -350,7 +352,7 @@ def qualify_map(source,repo,table_ids):
     for r in m['backend_routes']:
         r.update(repository=rid,source_file=r['file']);r['file']=file(r['file'])
         r['services']=[file(x) for x in r.get('services',[])]
-        for ev in [*(r.get('evidence') or []),*(r.get('table_evidence') or [])]:
+        for ev in [e for k in ('evidence','table_evidence','service_evidence','external_evidence','dependencies') for e in r.get(k) or []]:
             if isinstance(ev,dict):ev['file']=file(ev.get('file'))
         if r.get('flow'):
             r['flow']['file']=file(r['flow'].get('file'))

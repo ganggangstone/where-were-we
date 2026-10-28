@@ -51,7 +51,7 @@ For a closer look, choose **Detail the map with AI → Request all needed analys
 2. Paste it into your coding AI chat and let it analyze the code and save its results.
 3. Return to the app when your AI is done: it reads the saved results by itself (**Check results** reads them on demand). After browsing elsewhere, **Detail the map with AI · waiting for result check** reopens the same request.
 
-Reading saved results preserves **Changes** and its comparison baseline. Your connected AI runs the analysis and its pricing and usage limits apply; ordinary refresh does not run AI analysis.
+Reading saved results preserves **Changes** and its comparison baseline. Your connected AI runs the analysis and its pricing and usage limits apply; ordinary refresh does not run AI analysis. The first analysis keeps what the basic collection already found instead of having your AI write it again, and the app labels those parts as basic collection. After the code changes, the next request lists only the changed files and the saved items that cite them; your AI answers those, and the rest of the saved analysis stays as it was. If the AI cannot classify a changed file, nothing is saved and the next request reviews the whole code again without rewriting what is saved. A commit with identical files needs no new analysis.
 
 If tools are missing after an update, open **Connection diagnostics**, copy the repair request to your AI, and click **Check the connection** after it reconnects. You may need a new agent session.
 
@@ -148,24 +148,24 @@ Report bugs or suggest improvements in [Issues](https://github.com/ganggangstone
 
 The [license](LICENSE) permits personal use, internal business use, and free redistribution under its conditions. Paid products and external paid services are restricted. This is a custom source-available license; third-party components retain their own licenses.
 
-**v0.7.0 release notes**
+**v0.8.0 release notes**
 
 <!-- release-notes:start -->
 ### 한국어
 
-- 요청 하나로 연결, 서비스 코드 확인, 첫 지도, 첫 AI 분석까지 이어지고, 시작 안내의 마지막 단계는 모든 코드의 첫 분석 저장입니다.
-- AI가 끝난 뒤 앱으로 돌아오면 저장된 결과를 스스로 읽고, 일부만 저장됐으면 남은 분석 요청을 이어서 만듭니다.
-- 기능을 고르면 지도 전체는 그대로 두고 그 기능의 화면만 강조하며, 고른 화면과 서버 기능의 상세에 그 기능과의 관계를 보여 줍니다.
-- 코드가 둘 이상이면 **모든 코드**로 전체를 한 지도에서 보고, 코드 하나를 고르면 그 화면만 보면서 서버 연결은 유지합니다.
-- 화면 이름을 **AI로 자세한 지도 만들기**, **코드 추가·수정**처럼 하는 일에 맞게 바꿨습니다.
+- 첫 분석에서 기본 수집이 이미 찾은 화면과 서버 기능은 AI가 다시 쓰지 않고 그대로 두며, 앱은 그 부분을 기본 수집으로 표시합니다.
+- 코드가 바뀐 뒤의 분석 요청에는 바뀐 파일과 그 파일을 근거로 삼은 저장 항목만 들어가고, 나머지 저장된 분석은 그대로 남습니다. 파일이 똑같은 커밋은 새 분석을 요청하지 않습니다.
+- 이전 버전에서 저장한 AI 분석도 AI가 다시 쓰지 않고 이어서 확인합니다.
+- 바뀐 부분만 답하는 분석에서 AI가 바뀐 파일을 분류하지 못하거나 근거가 하나라도 원문과 맞지 않으면, 아무것도 저장하지 않고 이전 지도를 그대로 둡니다.
+- **AI로 자세한 지도 만들기**는 요청 복사, 결과가 오면 결과 보기 하나만 보여 주고, 다시 확인·요청 내용·다른 분석은 접어 둡니다.
 
 ### English
 
-- One request now carries a connection through the service's code, the first map and the first AI analysis; the last start step is saving the first analysis for every code.
-- When your AI is done, returning to the app reads the saved results by itself, and a partly saved analysis continues with a request for the remaining part.
-- Choosing a feature keeps the whole map and highlights that feature's screens, and a picked screen or request shows how it relates to the feature.
-- With several codes, **All code** shows everything on one map; choosing one code shows only its screens while server links stay.
-- Screens are renamed to match what they do, such as **Detail the map with AI** and **Add or edit code**.
+- The first analysis keeps the screens and server requests the basic collection already found instead of having your AI write them again, and the app labels those parts as basic collection.
+- After the code changes, the analysis request lists only the changed files and the saved items that cite them; the rest of the saved analysis stays. A commit with identical files does not ask for a new analysis.
+- AI analyses saved by earlier versions are reviewed and kept without your AI writing them again.
+- When your AI answers only the changes, a changed file it cannot classify or any evidence that does not match the source saves nothing and keeps the previous map.
+- **Detail the map with AI** shows one action, copying the request and then viewing the results; recheck, request text and other analyses are folded away.
 <!-- release-notes:end -->
 
 

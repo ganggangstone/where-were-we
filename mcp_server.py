@@ -307,7 +307,7 @@ def record_test(route: str, file: str, line: int, quote: str, project: str = "",
     return f"저장했다({len(c['records'])}건). refresh 를 부르면 지도에 반영된다."
 
 
-@app.tool(description="상세 지도 분석 요청과 JSON schema를 받는다. AI를 실행하지 않는다. 지금 연결된 MCP 에이전트가 자신의 모델로 analysis_source의 코드를 읽고 record_analysis로 결과를 제출한다. 멀티레포는 repository를 지정한다.")
+@app.tool(description="상세 지도 분석 요청과 JSON schema를 받는다. AI를 실행하지 않는다. mode가 full이면 전체 schema, review면 저장된 목록(known)을 다시 쓰지 않고 keep·drop과 고친 항목만, patch면 바뀐 파일(inspect)과 다시 확인할 항목(recheck)만 낸다. 지금 연결된 MCP 에이전트가 자신의 모델로 analysis_source의 코드를 읽고 record_analysis로 결과를 제출한다. 멀티레포는 repository를 지정한다.")
 def analyze(project: str = "", repository: str = "", branch: str = "dev", lang: str = "ko") -> str:
     import ai_extract
     return json.dumps(ai_extract.request(need(project),branch,lang,repository),ensure_ascii=False)
@@ -319,10 +319,10 @@ def analysis_source(project: str, repository: str, commit: str, file: str = "", 
     return json.dumps(ai_extract.source(need(project),repository,commit,file,start,limit,branch),ensure_ascii=False)
 
 
-@app.tool(description="연결된 에이전트가 만든 상세 지도 JSON을 저장. analyze의 record_arguments를 그대로 전달하고 result_json에 분석 JSON 문자열을 넣는다. 커밋/설정 변경 또는 근거 불일치 시 이전 지도를 보존한다. 특정 AI 제공자나 CLI가 필요하지 않다.")
-def record_analysis(project: str, repository: str, branch: str, lang: str, commit: str, configuration: str, result_json: str) -> str:
+@app.tool(description="연결된 에이전트가 만든 상세 지도 JSON을 저장. analyze의 record_arguments(base 포함)를 그대로 전달하고 result_json에 분석 JSON 문자열을 넣는다. 커밋/설정/저장 지도 변경, 근거 불일치, 처분이 빠진 항목이나 분류하지 않은 바뀐 파일이 있으면 아무것도 바꾸지 않고 이전 지도를 보존한다. 특정 AI 제공자나 CLI가 필요하지 않다.")
+def record_analysis(project: str, repository: str, branch: str, lang: str, commit: str, configuration: str, result_json: str, base: str = "") -> str:
     import ai_extract
-    return ai_extract.record(need(project),repository,branch,lang,commit,configuration,result_json)
+    return ai_extract.record(need(project),repository,branch,lang,commit,configuration,result_json,base)
 
 
 @app.tool(description="지금 코드 기준으로 아직 없거나 오래된 분석 목록(상세 지도·구성과 프로그램별 일·화면 묶음·요청 단계·변경 설명)과 기준값을 받는다. 읽기만 하고 AI·새로고침을 실행하지 않는다. 작업 하나를 저장할 때마다 다시 호출해 다음 작업과 새 대상을 받는다. repository를 비우거나 *이면 연결한 코드 전체.")

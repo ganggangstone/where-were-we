@@ -649,7 +649,7 @@ class Flows(unittest.TestCase):
  if($('guide').open)closeGuide('skipped');editProject(true);$('projectName').value='Lumen';document.querySelector('[data-field="path"]').value='https://github.com/example/web';
  window.configuredBundle=null;$('saveProject').click();for(let i=0;i<80 && S.agentPurpose!=='analysis';i++)await wait();await wait();
  assert(S.project==='Lumen' && window.calls.some(c=>c.command==='refresh'),'GitHub code was collected on save');
- assert(S.agentPurpose==='analysis' && S.analysisRequest?.handoff==='First request' && pane().includes(tr('1. 요청 복사')),'The analysis request is shown right after connecting');
+ assert(S.agentPurpose==='analysis' && S.analysisRequest?.handoff==='First request' && pane().includes(tr('요청 복사')),'The analysis request is shown right after connecting');
  assert(window.copied===undefined,'Nothing is copied or run by itself');
  // A local folder is not collected on save: the status names the next step, and that first refresh opens the request.
  S.agentPrompt=null;S.agentPurpose=null;render();
@@ -661,7 +661,7 @@ class Flows(unittest.TestCase):
  // The plan now lists the first tasks of the code that was just added, under the id the editor gave it.
  window.planResult={...window.planResult,tasks:[{repository:S.openRequestFor.ids[0],task:'analysis',commit:'aaaaaaaa1111'}]};
  window.mutateBundle=null;await doRefresh();await wait();
- assert(S.agentPurpose==='analysis' && pane().includes(tr('1. 요청 복사')),'The first refresh of a new connection opens the request');
+ assert(S.agentPurpose==='analysis' && pane().includes(tr('요청 복사')),'The first refresh of a new connection opens the request');
  S.agentPrompt=null;S.agentPurpose=null;render();await doRefresh();await wait();
  assert(S.agentPurpose!=='analysis' && S.analysisRequest?.handoff==='First request','Later refreshes prepare quietly as before');
 ''',query='&empty=1')
@@ -686,7 +686,7 @@ class Flows(unittest.TestCase):
  window.planResult={tasks:[{repository:'extra',task:'analysis',commit:'ffffffff6666'}],blocked:[],requirements:[{repository:'extra',task:'analysis',before:null,commit:'ffffffff6666'}],handoff:'Extra request',up_to_date:false};
  $('repository').value='';$('repository').dispatchEvent(new Event('change'));for(let i=0;i<50 && S.repository!=='';i++)await wait();await wait();
  await doRefresh();await wait();
- assert(S.agentPurpose==='analysis' && S.analysisRequest?.handoff==='Extra request' && pane().includes(tr('1. 요청 복사')),'The new code\'s first tasks open the request');
+ assert(S.agentPurpose==='analysis' && S.analysisRequest?.handoff==='Extra request' && pane().includes(tr('요청 복사')),'The new code\'s first tasks open the request');
  assert(!S.openRequestFor,'The marker is consumed once');
  S.agentPrompt=null;S.agentPurpose=null;render();await doRefresh();await wait();
  assert(S.agentPurpose!=='analysis','The next refresh stays quiet');
@@ -789,7 +789,7 @@ class Flows(unittest.TestCase):
  target.value='web';target.dispatchEvent(new Event('change'));
  document.querySelector('[data-analysis-task="analysis_request"]').click();await new Promise(r=>setTimeout(r,20));
  assert(calls.some(c=>c.command==='analysis_request' && c.args.repository==='web'),'Request goes to the chosen code');
- assert(pane().includes(tr('1. 요청 복사')),'The prepared request is shown');
+ assert(pane().includes(tr('요청 복사')),'The prepared request is shown');
  S.view='sys';S.system=null;S.branchDetails=null;render();$('remakeSys').click();await new Promise(r=>setTimeout(r,20));
  assert(!$('status').textContent && calls.some(c=>c.command==='analysis_plan' && c.args.repository===''),'Contextual buttons request all connected code without forcing a code choice');
  $('analysisTarget').value='*';$('analysisTarget').dispatchEvent(new Event('change'));
@@ -805,7 +805,7 @@ class Flows(unittest.TestCase):
  window.planResult=plan;
  S.view='feat';render();$('regroup').click();await wait();
  assert(calls.filter(c=>c.command==='analysis_plan').length===1 && !calls.some(c=>c.command==='suggest_groups'),'Grouping uses the unified request');
- assert(pane().includes(tr('1. 요청 복사')) && S.analysisRequest.handoff==='Unified handoff','One handoff is shown');
+ assert(pane().includes(tr('요청 복사')) && S.analysisRequest.handoff==='Unified handoff','One handoff is shown');
  assert(pane().includes(tr('요청할 분석: ')) && pane().includes(tr('요청하지 못한 분석: ')) && pane().includes(tr('설정이 바뀌었거나 코드가 바뀌었습니다. 먼저 새로고침하세요.')),'Queued, blocked and refresh-needed work is listed');
  assert($('insp').textContent.includes('Refresh after configuration changes first'),'The raw reason stays available');
  await $('cpAgent').onclick();assert(window.copied==='Unified handoff','Only an explicit copy writes the clipboard');
@@ -869,7 +869,7 @@ class Flows(unittest.TestCase):
  assert(!$('checkAnalysisResults'),'Browsing replaced the panel');
  assert($('analyzeMap').innerText.includes(tr('결과 확인 대기')),'The waiting request stays visible');
  $('analyzeMap').click();
- assert($('checkAnalysisResults') && pane().includes(tr('1. 요청 복사')),'The same request reopens with the result check');
+ assert($('checkAnalysisResults') && pane().includes(tr('요청 복사')),'The same request reopens with the result check');
 ''')
 
     def test_versions_show_the_configured_refs_instead_of_production_or_development(self):
@@ -1249,7 +1249,7 @@ class AutoRead(unittest.TestCase):
  document.querySelector('#view [data-v="sys"]').click();assert(S.view==='sys' && !$('checkAnalysisResults'),'The user browsed elsewhere');
  await back();
  assert(S.analysisRequest.state==='saved','The result was still read');
- assert(S.view==='sys' && !$('checkAnalysisResults') && !pane().includes(tr('1. 요청 복사')),'The right panel was not taken over');
+ assert(S.view==='sys' && !$('checkAnalysisResults') && !pane().includes(tr('요청 복사')),'The right panel was not taken over');
  assert($('analyzeMap').innerText.includes(tr('결과 저장됨')),'The header reports the saved result');
 """)
 
@@ -1651,9 +1651,9 @@ class FeatureContext(unittest.TestCase):
         self.check(r"""
  window.planResult={tasks:[{repository:'web',task:'groups',commit:'old',configuration:'layout-a'}],requirements:[],pins:{web:{commit:'old',configuration:'layout-a'}},blocked:[],handoff:'one request'};
  S.view='feat';render();await requestAgentAction('analysis_plan');await wait();
- const request=S.analysisRequest;assert(S.agentPrompt && request && $('insp').querySelector('.request-steps'),'The request panel is open');
+ const request=S.analysisRequest;assert(S.agentPrompt && request && $('insp').querySelector('#cpAgent'),'The request panel is open');
  featureCard('Items').click();await wait();
- assert($('copyF') && $('featMap') && !$('insp').querySelector('.request-steps'),'Choosing a feature shows its overview instead of the old request');
+ assert($('copyF') && $('featMap') && !$('insp').querySelector('#cpAgent'),'Choosing a feature shows its overview instead of the old request');
  assert(S.analysisRequest===request && JSON.stringify(controlSelection())===JSON.stringify([itemsId()]),'The prepared request is kept and the feature is the selection');
  S.sel='web::/orders';render();assert((await controlState()).feature_context.member===null,'A screen left from another view is not the Features view target');
 """)

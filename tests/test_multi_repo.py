@@ -379,7 +379,7 @@ window.__TAURI__={core:{invoke:async(command,args)=>{
   render=()=>{if(S.agentPrompt)renderAgentPrompt();};
   Object.defineProperty(navigator,'clipboard',{value:{writeText:async()=>{}},configurable:true});
   await requestAgentAction('make_system');
-  assert($('insp').textContent.includes('1. Copy the request') && $('insp').textContent.includes('3. Check results'),'Use the chosen existing-pane sequence');
+  assert($('cpAgent').textContent==='Copy request' && $('checkAnalysisResults'),'Use the chosen existing-pane sequence');
   await $('cpAgent').onclick();
   assert(!$('analysisResultState').textContent.includes('saved a new result'),'Copying must not imply saved or running analysis');
   analysisBundle={project:{repositories:[{id:'web',results:{dev:{system:null}}}]},dev:{repo:'/demo/web',screens:[]},main:null,changes:{last_refresh:'must-not-replace'},branch_details:{}};
@@ -398,9 +398,9 @@ window.__TAURI__={core:{invoke:async(command,args)=>{
   assert(S.maps.dev===mapBefore && S.changes===changes,'A failed result read must preserve the displayed map and changes');
   // A request belongs to the language it was prepared in; after switching, the Korean request is prepared the same way and shows the same path.
   resultReadFailure=false;S.lang='ko';renderAgentPrompt();
-  assert(!$('insp').textContent.includes('3. 결과 확인') && !$('insp').textContent.includes('3. Check results'),'An English request is not shown as the Korean one');
+  assert(!$('cpAgent') || !$('checkAnalysisResults'),'An English request is not shown as the Korean one');
   await requestAgentAction('make_system');
-  assert($('insp').textContent.includes('1. 요청 복사') && $('insp').textContent.includes('3. 결과 확인'),'Korean shows the same result-only path');
+  assert($('insp').textContent.includes('요청 복사') && $('checkAnalysisResults'),'Korean shows the same result-only path');
   S.lang='en';await requestAgentAction('make_system'); // back to an English request for the English checks below
   assert(tr('AI에게 보낼 요청만 만듭니다. 앱에서 바로 분석하지 않습니다.').includes('Nothing is analyzed in the app'),'Step requests must not retain old automatic-analysis wording');
   analysisBundle.project.repositories[0].results.dev.system={version:'proposal',commit:'abc',stale:false,proposal:true};

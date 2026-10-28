@@ -85,9 +85,9 @@ const UI_EN = {
   "연결된 이슈를 읽지 못했습니다.":"A linked issue could not be read.",
   "같은 문제의 PR은 묶고, 다른 문제를 푼 PR은 나눠 설명합니다.":"PRs solving the same problem are grouped; distinct problems are explained separately.",
 
-  "1. 요청 복사":"1. Copy the request",
-  "2. 작업하던 AI 채팅에 붙여 넣기":"2. Paste into your coding AI chat",
-  "3. 결과 확인":"3. Check results",
+  "요청 복사":"Copy request",
+  "복사했습니다. 작업하던 AI 채팅에 붙여 넣고, AI가 끝나면 앱으로 돌아오세요.":"Copied. Paste it into your coding AI chat and come back when your AI finishes.",
+  "다시 확인·요청 내용·다른 분석":"Recheck, request text and other analyses",
   "작업하던 AI 채팅에 요청을 붙여 넣으세요.":"Paste the request into your coding AI chat.",
   "에이전트가 결과를 저장했다고 알려 주면 아래 버튼을 누르세요.":"When your agent confirms it saved the result, use the button below.",
   "결과 확인":"Check results",
@@ -342,7 +342,7 @@ Object.assign(UI_EN, {
   "화면·서버 코드 위치는 연결한 폴더 안의 상대 위치로 입력해 주세요.": "Enter web and server code locations relative to the connected folder.",
   "연결을 저장하지 못했습니다. 입력과 연결 상태를 확인하세요.": "Could not save the connection. Check the input and connection status."
 });
-Object.assign(UI_EN, {"분석 대상에서 제외": "Excluded from analysis", "기본 수집으로 일부 확인": "Partially identified by basic collection", "AI 분석으로 확인": "Identified by AI analysis", "기본 수집에서 확인 못 함 · 화면과 서버 코드 자세히 보기 필요": "Not identified by basic collection · Explore screens and server code needed", "AI가 확인하지 못함": "Not established by your AI", "분석 범위 미확인": "Analysis scope not verified"});
+Object.assign(UI_EN, {"분석 대상에서 제외": "Excluded from analysis", "기본 수집으로 일부 확인": "Partially identified by basic collection", "AI 분석으로 확인": "Identified by AI analysis", "AI 분석과 기본 수집으로 확인": "Identified by AI analysis and basic collection", "기본 수집에서 확인 못 함 · 화면과 서버 코드 자세히 보기 필요": "Not identified by basic collection · Explore screens and server code needed", "AI가 확인하지 못함": "Not established by your AI", "분석 범위 미확인": "Analysis scope not verified"});
 Object.assign(UI_EN, {"앱이 보관하는 코드":"Code stored by the app"});
 Object.assign(UI_EN, {"계정 선택":"Choose an account"});
 Object.assign(UI_EN, {"코드 연결을 확인하는 중…":"Checking code connections\u2026"});
@@ -647,7 +647,7 @@ function openAnalysisPanel(task=null,target=analysisTarget()) {
   S.agentPurpose='analysis';S.analysisChoice={target,task};
   S.agentPrompt=activeAnalysis()?.handoff ?? '';renderAgentPrompt();$('insp').scrollTop=0;
 }
-function analysisChooser() {
+function analysisChooser(collapsed=false) {
   const repos=S.projectInfo?.repositories || [],choice={task:S.analysisChoice?.task ?? null,target:analysisTarget()},needsCode=repos.length>1 && !S.repository;
   const briefing=S.briefings?.[S.branch]?.[S.lang],briefingReady=briefing && !['needs_collection','no_changes'].includes(briefing.state);
   const target=needsCode ? `<label class="kv">${tr('분석할 코드')} <select id="analysisTarget"><option value="">${tr('코드 선택')}</option>${repos.map(r=>`<option value="${esc(r.id)}" ${choice.target===r.id?'selected':''}>${esc(r.name || r.id)}</option>`).join('')}<option value="*" ${choice.target==='*'?'selected':''}>${tr('연결한 코드 전체')}</option></select></label>${choice.task && !choice.target ? `<p role="status">${tr('어느 코드를 분석할지 고르세요.')}</p>` : ''}`
@@ -658,6 +658,7 @@ function analysisChooser() {
     return `<div class="row"><div class="grow"><div class="t">${tr(name)}</div><div class="s">${tr(what)}</div></div><button class="btn ${primary?'primary':'quiet'}" data-analysis-task="${key}" ${disabled || pendingActions.has(key)?'disabled':''}>${tr('AI에게 보낼 요청 만들기')}</button></div>`;};
   // The whole-project request is the normal path; single tasks stay available for explicit re-analysis.
   const advanced=choice.task && choice.task!=='analysis_plan';
+  if(collapsed)return `<h3>${tr('다른 분석 요청')}</h3>${target}<div class="group">${ANALYSIS_TASKS.map(row).join('')}</div>`;
   return `<section class="sect"><h3>${tr(activeAnalysis() ? '다른 분석 요청' : '새 분석 요청')}</h3><p class="s">${tr('AI에게 보낼 요청만 만듭니다. 앱에서 바로 분석하지 않습니다.')}</p><div class="group">${row(ANALYSIS_TASKS[0])}</div><details ${advanced?'open':''}><summary>${tr('하나씩 다시 분석하기')}</summary>${target}<div class="group">${ANALYSIS_TASKS.slice(1).map(row).join('')}</div><p class="s">${tr('이 동작의 과정은 화면 지도에서 화면을 고른 뒤 요청합니다.')}</p></details></section>`;
 }
 function savedAnalysisState(info,request,briefings) {
@@ -967,7 +968,7 @@ async function editGitHubAccount(repository) {
 }
 function githubLoginHelp() { return `${esc(tr('GitHub 로그인이 필요합니다. 작업하던 AI에게 로그인 방법을 물어본 뒤 이 창을 다시 여세요.'))}${helpDetails(`<p class="s">${esc(tr('터미널에서 다음 명령으로 로그인할 수 있습니다.'))}</p><pre class="prompt mono">gh auth login</pre>`,'로그인 방법')}`; }
 function analysisScopeText(scope) {
-  const labels={disabled:'분석 대상에서 제외',basic:'기본 수집으로 일부 확인',ai:'AI 분석으로 확인',
+  const labels={disabled:'분석 대상에서 제외',basic:'기본 수집으로 일부 확인',ai:'AI 분석으로 확인',mixed:'AI 분석과 기본 수집으로 확인',
     needs_analysis:'기본 수집에서 확인 못 함 · 화면과 서버 코드 자세히 보기 필요',not_established:'AI가 확인하지 못함',unknown:'분석 범위 미확인'};
   return [['frontend','화면'],['backend','서버']].map(([key,label])=>tr(label)+': '+tr(labels[scope[key]] || labels.unknown)).join(' · ');
 }
@@ -1760,11 +1761,13 @@ function renderAgentPrompt() {
   const states={up_to_date:'모든 분석 결과가 최신입니다. 새로 요청할 것이 없습니다.',blocked:'요청하지 못한 분석: ',proposal_previous:'이전에 저장된 AI 제안입니다.',proposal_partial:'일부 분석만 저장됐고 AI 제안은 따로 보관했습니다.',prepared:'작업하던 AI 채팅에 요청을 붙여 넣으세요.',checking:'저장된 결과를 확인하는 중…',missing:'새 결과가 아직 없습니다. AI가 저장을 마치면 앱으로 돌아왔을 때 읽습니다.',saved:'새 결과가 저장된 것을 확인했습니다.',proposal:'새 분석 결과가 저장됐고 AI 제안은 따로 저장했습니다.',partial:'일부 결과만 새로 저장됐습니다. 나머지 작업도 저장된 뒤 다시 확인하세요.',previous:'이전에 저장된 결과입니다. 이번 요청의 새 결과는 아직 확인되지 않았습니다.',stale:'다른 코드 버전의 결과입니다. 현재 코드로 다시 분석을 요청하세요.'};
   const task=request && (ANALYSIS_TASKS.find(t=>t[0]===request.command)?.[1] || (request.command==='make_steps'?'동작 과정':''));
   const target=request?.target==='*' ? tr('연결한 코드 전체') : request?.target ? connectionDisplayName(request.target) : '';
-  // 복사 → AI에 붙여 넣기 → 결과 확인 순서의 정본은 이 세 단계다. 단계마다 같은 설명을 되풀이하지 않는다.
-  const steps=request && ['up_to_date','blocked'].includes(request.state)?`<p class="sub">${esc(tr(task || ''))}</p><div role="status">${tr(states[request.state] || '')}</div>${planSummary(request)}`:request?`<p class="sub">${esc([tr(task || ''),target].filter(Boolean).join(' · '))}</p><ol class="request-steps"><li ${request.copied?'':'aria-current="step"'}><strong>${tr('1. 요청 복사')}</strong>`+ui`<div class="ctl"><button class="btn ${request.copied?'quiet':'primary'}" id="cpAgent">복사</button><span id="cpDone">${request.copied?tr('복사됨'):''}</span></div>`+
-    `</li><li><strong>${tr('2. 작업하던 AI 채팅에 붙여 넣기')}</strong></li><li ${request.copied?'aria-current="step"':''}><strong>${tr('3. 결과 확인')}</strong><span class="s">${tr('AI가 끝나면 앱으로 돌아오세요. 저장된 결과를 앱이 스스로 읽습니다.')}</span><button class="btn quiet" id="checkAnalysisResults" ${request.state==='checking'?'disabled':''}>${tr('결과 확인')}</button></li></ol><div id="analysisResultState" role="status">${request.error?errorHtml(tr('결과를 읽지 못했습니다. 오류 내용을 확인하세요.'),request.error):tr(states[request.state] || states.prepared)}</div>${['partial','proposal_partial'].includes(request.state) && request.codes ? `<div class="s" data-codes>${[['saved','결과가 저장된 코드: '],['partial','일부 결과만 저장된 코드: '],['waiting','결과를 기다리는 코드: ']].filter(([k])=>request.codes[k].length).map(([k,label])=>`<div>${tr(label)}${esc(request.codes[k].map(connectionDisplayName).join(', '))}</div>`).join('')}</div>` : ''}${['saved','previous','proposal','proposal_previous','proposal_partial','partial'].includes(request.state)?`<button class="btn quiet" id="viewAnalysisResults">${tr(request.state.startsWith('proposal')?'AI 제안 보기':'결과 보기')}</button>`:''}${request.command==='analysis_plan'?planSummary(request):''}<details><summary>${tr('요청 내용 보기')}</summary><pre class="prompt mono">${esc(request.handoff ?? S.agentPrompt)}</pre></details>`:'';
+  // 주 동작은 하나다: 결과가 오기 전에는 요청 복사, 결과가 오면 결과 보기. 앱으로 돌아오면 결과는 스스로 읽으므로 수동 확인·요청 원문·다른 분석은 접어 둔다.
+  const ready=request && ['saved','previous','proposal','proposal_previous','proposal_partial','partial'].includes(request.state);
+  const status=request?.error?errorHtml(tr('결과를 읽지 못했습니다. 오류 내용을 확인하세요.'),request.error):tr(request?.state==='prepared' && request.copied?'복사했습니다. 작업하던 AI 채팅에 붙여 넣고, AI가 끝나면 앱으로 돌아오세요.':states[request?.state] || states.prepared);
+  const steps=request && ['up_to_date','blocked'].includes(request.state)?`<p class="sub">${esc(tr(task || ''))}</p><div role="status">${tr(states[request.state] || '')}</div>${planSummary(request)}`:request?`<p class="sub">${esc([tr(task || ''),target].filter(Boolean).join(' · '))}</p><div id="analysisResultState" role="status">${status}</div>${['partial','proposal_partial'].includes(request.state) && request.codes ? `<div class="s" data-codes>${[['saved','결과가 저장된 코드: '],['partial','일부 결과만 저장된 코드: '],['waiting','결과를 기다리는 코드: ']].filter(([k])=>request.codes[k].length).map(([k,label])=>`<div>${tr(label)}${esc(request.codes[k].map(connectionDisplayName).join(', '))}</div>`).join('')}</div>` : ''}<div class="ctl">${request.state==='error'?`<button class="btn primary" id="checkAnalysisResults">${tr('결과 확인')}</button>`:''}${ready?`<button class="btn primary" id="viewAnalysisResults">${tr(request.state.startsWith('proposal')?'AI 제안 보기':'결과 보기')}</button>`:''}<button class="btn ${ready || request.state==='error'?'quiet':'primary'}" id="cpAgent">${tr('요청 복사')}</button><span id="cpDone">${request.copied && ready?tr('복사됨'):''}</span></div>${request.command==='analysis_plan'?planSummary(request):''}`:'';
+  const more=request && !['up_to_date','blocked'].includes(request.state)?`<details class="sect"><summary>${tr('다시 확인·요청 내용·다른 분석')}</summary>${request.state==='error'?'':`<button class="btn quiet" id="checkAnalysisResults" ${request.state==='checking'?'disabled':''}>${tr('결과 확인')}</button>`}<pre class="prompt mono">${esc(request.handoff ?? S.agentPrompt)}</pre>${analysisChooser(true)}</details>`:analysisChooser();
   // AI 사용량·요금 안내는 이 패널에 한 번만 보인다.
-  $('insp').innerHTML=analysis?`<h2>${tr('AI로 자세한 지도 만들기')}</h2><p class="s">${tr('연결한 AI가 분석하며, 사용하는 AI의 요금·사용 한도가 적용됩니다.')}</p>`+steps+analysisChooser():
+  $('insp').innerHTML=analysis?`<h2>${tr('AI로 자세한 지도 만들기')}</h2><p class="s">${tr('연결한 AI가 분석하며, 사용하는 AI의 요금·사용 한도가 적용됩니다.')}</p>`+steps+more:
     `<h2>${tr('AI 연결')}</h2><p>${tr('AI 연결을 설정하고 공통 지시 파일에 사용 규칙을 추가합니다. 변경 전 확인을 요청합니다.')}</p>`+(S.agentPromptError?`<div role="alert">${errorHtml(tr('안내를 만들지 못했습니다. 다시 시도하세요.'),S.agentPromptError)}</div>`:ui`<div class="ctl"><button class="btn primary" id="cpAgent">복사</button><span id="cpDone"></span></div>`)+`<button class="btn" id="openConnectionDiagnostic">${tr('연결 진단')}</button>${S.agentPromptError?'':helpDetails(`<pre class="prompt mono">${esc(S.agentPrompt)}</pre>`,'연결 안내 보기')}`;
   if($('cpAgent'))$('cpAgent').onclick=async()=>{
     const prompt=analysis?request.handoff ?? S.agentPrompt:S.agentPrompt,copyRequest=S.analysisRequest;
