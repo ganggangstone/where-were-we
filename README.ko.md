@@ -51,7 +51,7 @@ GitHub 연결은 원격 기본 브랜치를, 기존 폴더는 커밋된 코드�
 2. 작업하던 AI 채팅에 붙여 넣고, AI가 코드를 분석해 결과를 저장할 때까지 기다리세요.
 3. AI가 끝나면 앱으로 돌아오세요. 저장된 결과를 앱이 스스로 읽습니다(**결과 확인**으로 바로 읽을 수도 있습니다). 다른 화면을 보다가 돌아올 때는 **AI로 자세한 지도 만들기 · 결과 확인 대기** 버튼으로 같은 요청을 다시 엽니다.
 
-저장된 결과를 읽어도 **바뀐 것**과 비교 기준은 유지됩니다. 분석은 연결한 AI가 하며, 사용하는 AI의 요금·사용 한도가 적용됩니다. 일반 새로고침은 AI 분석을 실행하지 않습니다. 첫 분석은 기본 수집이 이미 찾은 것을 AI가 다시 쓰지 않고 그대로 두며, 앱은 그 부분을 기본 수집으로 표시합니다. 코드가 바뀐 뒤의 요청에는 바뀐 파일과 그 파일을 근거로 삼은 저장 항목만 들어가고, AI가 그것만 답하면 나머지 저장된 분석은 그대로 남습니다. AI가 바뀐 파일을 분류하지 못하면 아무것도 저장하지 않고, 다음 요청은 저장된 것을 다시 쓰게 하지 않은 채 코드 전체를 다시 확인합니다. 파일이 똑같은 커밋은 새 분석이 필요 없습니다.
+저장된 결과를 읽어도 **바뀐 것**과 비교 기준은 유지됩니다. 분석은 연결한 AI가 하며, 사용하는 AI의 요금·사용 한도가 적용됩니다. 일반 새로고침은 AI 분석을 실행하지 않습니다. 첫 분석은 기본 수집이 이미 찾은 것을 AI가 다시 쓰지 않고 그대로 두며, 앱은 그 부분을 기본 수집으로 표시합니다. 일반적인 부분 변경이면 코드가 바뀐 뒤의 요청에 바뀐 파일과 그 파일을 근거로 삼은 저장 항목만 들어가고, AI가 그것만 답하면 나머지 저장된 분석은 그대로 남습니다. AI가 바뀐 파일을 분류하지 못하면 아무것도 저장하지 않고, 다음 요청은 저장된 것을 다시 쓰게 하지 않은 채 코드 전체를 다시 확인합니다. 파일이 똑같은 커밋은 새 분석이 필요 없습니다.
 
 업데이트 뒤 도구가 보이지 않으면 **연결 진단**에서 수정 요청을 복사해 AI에게 보내세요. 다시 연결한 뒤 **연결됐는지 확인**을 누르세요. 에이전트의 새 세션이 필요할 수도 있습니다.
 
@@ -153,7 +153,7 @@ open -a TextEdit ~/.where-were-we/.app-update.log
 ### 한국어
 
 - 첫 분석에서 기본 수집이 이미 찾은 화면과 서버 기능은 AI가 다시 쓰지 않고 그대로 두며, 앱은 그 부분을 기본 수집으로 표시합니다.
-- 코드가 바뀐 뒤의 분석 요청에는 바뀐 파일과 그 파일을 근거로 삼은 저장 항목만 들어가고, 나머지 저장된 분석은 그대로 남습니다. 파일이 똑같은 커밋은 새 분석을 요청하지 않습니다.
+- 일반적인 부분 변경이면 분석 요청에 바뀐 파일과 그 파일을 근거로 삼은 저장 항목만 들어가고, 나머지 저장된 분석은 그대로 남습니다. 설정이나 분석 범위가 달라졌거나 바뀐 파일의 영향을 판단하지 못하면 저장된 것을 다시 쓰게 하지 않은 채 전체 코드를 다시 검토하고, 분석 언어를 바꾸면 전체를 다시 분석합니다. 파일이 똑같은 커밋은 새 분석을 요청하지 않습니다.
 - 이전 버전에서 저장한 AI 분석도 AI가 다시 쓰지 않고 이어서 확인합니다.
 - 바뀐 부분만 답하는 분석에서 AI가 바뀐 파일을 분류하지 못하거나 근거가 하나라도 원문과 맞지 않으면, 아무것도 저장하지 않고 이전 지도를 그대로 둡니다.
 - **AI로 자세한 지도 만들기**는 요청 복사, 결과가 오면 결과 보기 하나만 보여 주고, 다시 확인·요청 내용·다른 분석은 접어 둡니다.
@@ -161,7 +161,7 @@ open -a TextEdit ~/.where-were-we/.app-update.log
 ### English
 
 - The first analysis keeps the screens and server requests the basic collection already found instead of having your AI write them again, and the app labels those parts as basic collection.
-- After the code changes, the analysis request lists only the changed files and the saved items that cite them; the rest of the saved analysis stays. A commit with identical files does not ask for a new analysis.
+- For an ordinary partial change, the analysis request lists only the changed files and the saved items that cite them, and the rest of the saved analysis stays. When the configuration or analysis scope changes, or the effect of a changed file cannot be determined, the whole code is reviewed again without rewriting what is saved; changing the analysis language analyzes everything again. A commit with identical files does not ask for a new analysis.
 - AI analyses saved by earlier versions are reviewed and kept without your AI writing them again.
 - When your AI answers only the changes, a changed file it cannot classify or any evidence that does not match the source saves nothing and keeps the previous map.
 - **Detail the map with AI** shows one action, copying the request and then viewing the results; recheck, request text and other analyses are folded away.
