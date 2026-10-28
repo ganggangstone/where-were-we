@@ -391,7 +391,7 @@ class FrontendDistribution(unittest.TestCase):
     def test_only_runtime_ui_assets_are_packaged_even_with_local_python_caches(self):
         with tempfile.TemporaryDirectory() as tmp:
             base=Path(tmp);source=base/'ui';output=base/'frontend';source.mkdir()
-            for name in ('index.html','app.css','tokens.css','tokens.generated.css','connection.js','onboarding.js','control.js','vendor/dagre.min.js'):
+            for name in ('index.html','app.css','tokens.css','tokens.generated.css','connection.js','onboarding.js','control.js','analysis-run.js','vendor/dagre.min.js'):
                 p=source/name;p.parent.mkdir(parents=True,exist_ok=True);p.write_text('synthetic '+name)
             (source/'__pycache__').mkdir();(source/'__pycache__/build_tokens.pyc').write_bytes(b'private build path')
             (source/'build_tokens.py').write_text('build helper only')

@@ -38,7 +38,7 @@ from connection import BACKEND_FILES
 
 # Frontend sources also contain build helpers and their local Python caches.
 # Copy only runtime assets before Tauri compresses them into the executable.
-FRONTEND_FILES=('index.html','app.css','tokens.css','tokens.generated.css','connection.js','onboarding.js','control.js','vendor/dagre.min.js')
+FRONTEND_FILES=('index.html','app.css','tokens.css','tokens.generated.css','connection.js','onboarding.js','control.js','analysis-run.js','vendor/dagre.min.js')
 def prepare_frontend(source, output):
     source=Path(source);output=Path(output);marker='.where-were-we-frontend'
     if output.exists() and not (output/marker).is_file():

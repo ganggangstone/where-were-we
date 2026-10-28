@@ -20,6 +20,10 @@ VERSION=2
 METHODS={'GET','POST','PUT','PATCH','DELETE','HEAD','OPTIONS'}
 EVIDENCE_LISTS=('evidence','table_evidence','service_evidence','external_evidence','dependencies','actions')
 
+def validate_provider(provider):
+    if provider not in ('mcp-agent','claude-cli'):raise ValueError('Choose mcp-agent or claude-cli as analysis provider')
+    return provider
+
 def git(repo,*args):
     return subprocess.run(['git','-C',repo,*args],capture_output=True,text=True,check=True).stdout
 
@@ -238,7 +242,8 @@ def mode_text(commit,sc):
     return 'Mode full: return the complete schema. '+base
 
 
-def apply_result(raw,repo,refs,branch,lang,response,commit,layout,configuration=None):
+def apply_result(raw,repo,refs,branch,lang,response,commit,layout,configuration=None,provider='mcp-agent'):
+    provider=validate_provider(provider)
     current=raw.get(branch) or {}
     text=response.strip()
     if len(text)>8_000_000:raise ValueError('AI output was too large')
@@ -246,7 +251,7 @@ def apply_result(raw,repo,refs,branch,lang,response,commit,layout,configuration=
     try:data=json.loads(text)
     except (ValueError,TypeError) as error:raise ValueError('AI output was not valid JSON; previous map was preserved') from error
     m,flows=normalize(layout_filter(data,layout),repo,commit,refs[branch]);m['analysis'].update(language=lang,configuration=configuration)
-    meta={'source':'ai','provider':'mcp-agent','commit':commit,'branch':branch,'language':lang,'configuration':configuration,'generated_at':m['analysis']['generated_at']}
+    meta={'source':'ai','provider':provider,'commit':commit,'branch':branch,'language':lang,'configuration':configuration,'generated_at':m['analysis']['generated_at']}
     for flow in flows['routes'].values():flow.update(meta)
     if flows['routes']:m['task_outputs']={'flows':flows}
     conf={**mapcore.TESTS_DEFAULT,'records':[],**(raw.get('tests') or {})}
@@ -471,7 +476,8 @@ def carry(raw,branch,prev,m,flows,repo,head):
                                         for nid,v in jobs.get('nodes',{}).items()}}
     return outputs
 
-def merge(raw,repo,branch,lang,data,head,configuration,sc,catalog):
+def merge(raw,repo,branch,lang,data,head,configuration,sc,catalog,provider='mcp-agent'):
+    provider=validate_provider(provider)
     path=repo['path'];layout=repo['layout'];prev=raw.get(branch) or {};mode=sc['mode']
     full=mode=='full'
     if 'full_required' in data:
@@ -539,7 +545,7 @@ def merge(raw,repo,branch,lang,data,head,configuration,sc,catalog):
     models.update({t:t for r in all_routes if r.get('source')=='ai' for t in r.get('tables',[])})
     m=assemble(path,head,repo['refs'].get(branch) or prev.get('ref'),all_screens,kept_functions+got['api_functions']+basic_functions,all_routes,models,analysis)
     m['basic_drop']=sorted((set(prev.get('basic_drop') or []) if (prev.get('analysis') or {}).get('source')=='ai' else set())|(drop&{x['id'] for x in basic['backend_routes']+basic['screens']}))
-    meta={'source':'ai','provider':'mcp-agent','commit':head,'branch':branch,'language':lang,'configuration':configuration,'generated_at':analysis['generated_at']}
+    meta={'source':'ai','provider':provider,'commit':head,'branch':branch,'language':lang,'configuration':configuration,'generated_at':analysis['generated_at']}
     flows={key:{**flow,**meta,'hash':hashlib.sha1('\n'.join(cache[flow['file']]).encode()).hexdigest()[:12]} for key,flow in got['flows'].items()}
     outputs=carry(raw,branch,prev,m,flows,path,head)
     if outputs:m['task_outputs']=outputs
@@ -613,8 +619,9 @@ def source(name,repository,commit,file='',start=1,limit=200,branch='dev'):
         return {'file':file,'commit':commit,'lines':[{'line':i+1,'text':text} for i,text in enumerate(lines[start-1:start-1+limit],start-1)],
                 'total':len(lines),'next':start+limit if start-1+limit<len(lines) else None}
 
-def record(project,repository,branch,lang,commit,configuration,result_json,base=''):
+def record(project,repository,branch,lang,commit,configuration,result_json,base='',provider='mcp-agent'):
     import project as store
+    provider=validate_provider(provider)
     if lang not in ('ko','en'):raise ValueError('Choose ko or en')
     with store.locked(project):
         repo,raw,rid,head=context(project,repository,branch)
@@ -638,15 +645,15 @@ def record(project,repository,branch,lang,commit,configuration,result_json,base=
             # Pre-v2 compatibility: an explicit full JSON may replace a basic or v1 map, never a pinned v2 map.
             if any(k in data for k in SPARSE):raise ValueError('Sparse results need the base returned by analyze; request the analysis again')
             if previous.get('source')=='ai' and previous.get('version',1)>=VERSION:raise ValueError('This map was saved from a pinned request; put the base returned by analyze in result_json')
-            updated,message=apply_result(raw,repo['path'],repo['refs'],branch,lang,text,commit,repo['layout'],configuration)
+            updated,message=apply_result(raw,repo['path'],repo['refs'],branch,lang,text,commit,repo['layout'],configuration,provider)
         else:
             sc,catalog=scope(repo,raw,branch,lang,head,configuration,review_flag(project,rid,branch,raw.get(branch) or {}))
             if data['base']!=sc['base']:raise ValueError('The saved map, commit or request scope changed; request the analysis again')
-            try:updated,message=merge(raw,repo,branch,lang,data,head,configuration,sc,catalog)
+            try:updated,message=merge(raw,repo,branch,lang,data,head,configuration,sc,catalog,provider)
             except ReviewRequired as error:
                 set_review_flag(project,rid,branch,raw.get(branch) or {},error.reason)  # the map bundle stays byte-identical
                 raise ValueError(str(error)) from None
-        updated[branch]['analysis']['provider']='mcp-agent'
+        updated[branch]['analysis']['provider']=provider
         save(updated)
         return message
 
@@ -756,7 +763,8 @@ def task_request(name,task,branch='dev',lang='ko',repository='',target=''):
                 'result_before':before,
                 'record_arguments':args,'source_arguments':{'project':name,'repository':rid,'branch':branch,'commit':commit}}
 
-def task_result(raw,task,branch,target,data,repo,commit,lang,configuration=None):
+def task_result(raw,task,branch,target,data,repo,commit,lang,configuration=None,provider='mcp-agent'):
+    provider=validate_provider(provider)
     original=raw;raw=project.branch_bundle(raw,branch)
     inputs=task_input(raw,task,branch,target,repo,commit)
     evidence,cache,rejected=evidence_reader(repo,commit)
@@ -775,7 +783,7 @@ def task_result(raw,task,branch,target,data,repo,commit,lang,configuration=None)
                 result.append({'text':item['text'],'needs':item.get('needs') if item.get('needs') in ('ops','read') else 'read'})
             else:raise ValueError('Use text and needs for unknown facts')
         return result
-    meta={'source':'ai','provider':'mcp-agent','commit':commit,'branch':branch,'language':lang,'configuration':configuration,'generated_at':project.now()}
+    meta={'source':'ai','provider':provider,'commit':commit,'branch':branch,'language':lang,'configuration':configuration,'generated_at':project.now()}
     updated=copy.deepcopy(raw)
     def program_jobs(node,payload):
         code=node['code'];jobs=[]
@@ -834,7 +842,8 @@ def task_result(raw,task,branch,target,data,repo,commit,lang,configuration=None)
         if not isinstance(entries,list) or sorted(files)!=inputs['changed_files'] or any(e.get('kind')!='none' for e in entries):
             raise ValueError('Account every changed file once with kind none, or submit the full system schema')
         if any(not evidence(ev) for ev in cited(previous)):raise ValueError('Saved structure evidence changed; submit the full system schema')
-        updated[dest]={**previous,**meta,'verified_commit':previous.get('verified_commit') or previous.get('commit'),'checked':commit,
+        updated[dest]={**previous,**meta,'provider':previous.get('provider','mcp-agent'),
+                       'verified_commit':previous.get('verified_commit') or previous.get('commit'),'checked':commit,
                        'kept_after_review':True,'accounted':{'none':len(files),'source':'ai'}}
     elif task=='system':
         def items(key):
@@ -873,7 +882,7 @@ def task_result(raw,task,branch,target,data,repo,commit,lang,configuration=None)
         for item in others:
             if not text(item,'name'):raise ValueError('Name each other program')
             item['what']=text(item,'what')
-        result={**meta,'written':'MCP agent · source text checked','checked':commit,'nodes':nodes,'ev':verified(data.get('ev',[])) if empty else [],'links':links,
+        result={**meta,'written':('Claude Code' if provider=='claude-cli' else 'MCP agent')+' · source text checked','checked':commit,'nodes':nodes,'ev':verified(data.get('ev',[])) if empty else [],'links':links,
                 'externals':externals,'others':others,'unknown':unknown(data.get('unknown',[]))}
         dest='system.ai' if raw.get('system') and raw['system'].get('source')!='ai' else 'system'
         updated[dest]=result
@@ -928,8 +937,9 @@ def task_result(raw,task,branch,target,data,repo,commit,lang,configuration=None)
         if updated.get(key)!=raw.get(key):outputs[key]=updated[key]
     return result
 
-def task_record(project,repository,task,branch,lang,target,commit,configuration,snapshot,result_json):
+def task_record(project,repository,task,branch,lang,target,commit,configuration,snapshot,result_json,provider='mcp-agent'):
     import project as store
+    provider=validate_provider(provider)
     if lang not in ('ko','en'):raise ValueError('Choose ko or en')
     if not isinstance(result_json,str) or len(result_json)>8_000_000:raise ValueError('Invalid task JSON')
     data=json.loads(result_json)
@@ -938,12 +948,12 @@ def task_record(project,repository,task,branch,lang,target,commit,configuration,
         repo,raw,rid,head=task_context(project,task,branch,repository)
         if configuration!=store.fingerprint(repo) or commit!=head or snapshot!=task_snapshot(raw,task,branch):
             raise ValueError('Task source or stored input changed; request it again')
-        updated=task_result(raw,task,branch,target,data,repo['path'],commit,lang,configuration)
+        updated=task_result(raw,task,branch,target,data,repo['path'],commit,lang,configuration,provider)
         if rid:store._publish(project,rid,updated,{},collection=False)
         else:
             for key,value in updated.items():
                 if value!=raw.get(key):store.atomic(store.home(project)/(key+'.json'),value)
-        return 'Saved '+task+' from connected MCP agent'
+        return 'Saved '+task+' from '+('Claude Code' if provider=='claude-cli' else 'connected MCP agent')
 
 PLAN_TEXT={
  'ko':{'head':'where-were-we MCP로 이 프로젝트에 필요한 분석을 모두 마치세요. 지금 사용하는 에이전트의 모델로 분석하고 다른 AI CLI를 실행하지 마세요. '

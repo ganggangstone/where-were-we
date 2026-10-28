@@ -639,13 +639,15 @@ const ANALYSIS_TASKS = [['analysis_plan','필요한 분석 모두 요청','아�
 const activeAnalysis = () => { const r=S.analysisRequest; return r && (!r.scope || ['project','repository','branch'].every(k=>r.scope[k]===S[k]) && (!r.scope.lang || r.scope.lang===S.lang)) ? r : null; };
 function analysisButtonText() {
   const state=activeAnalysis()?.state,short={up_to_date:'결과 저장됨',blocked:'요청하지 못한 분석',saved:'결과 저장됨',proposal:'결과 저장됨',stale:'다른 버전의 결과',checking:'확인 중…',error:'결과 읽기 실패'};
-  return tr('AI로 자세한 지도 만들기')+(state ? ' · '+tr(short[state] || '결과 확인 대기') : '');
+  const appState=typeof AnalysisRun!=='undefined'?AnalysisRun.stateLabel():'';
+  return tr('AI로 자세한 지도 만들기')+(appState ? ' · '+appState : state ? ' · '+tr(short[state] || '결과 확인 대기') : '');
 }
 // 고른 코드가 지금 연결된 코드가 아니면(연결을 바꿨을 때) 고르지 않은 것으로 본다.
 const analysisTarget = () => { const t=S.analysisChoice?.target || ''; return t==='*' || S.projectInfo?.repositories?.some(r=>r.id===t) ? t : ''; };
 function openAnalysisPanel(task=null,target=analysisTarget()) {
   S.agentPurpose='analysis';S.analysisChoice={target,task};
   S.agentPrompt=activeAnalysis()?.handoff ?? '';renderAgentPrompt();$('insp').scrollTop=0;
+  if(typeof AnalysisRun!=='undefined')AnalysisRun.open();
 }
 function analysisChooser(collapsed=false) {
   const repos=S.projectInfo?.repositories || [],choice={task:S.analysisChoice?.task ?? null,target:analysisTarget()},needsCode=repos.length>1 && !S.repository;
@@ -1646,6 +1648,7 @@ function applyBranchDetails() {
   S.proposal=named(details?.['system.ai']) || null;S.system=named(S.showProposal && S.proposal || S.system);
 }
 function render() {
+  if(typeof AnalysisRun!=='undefined')AnalysisRun.syncScope();
   queueMicrotask(() => typeof guideSync === 'function' && guideSync());
   applyBranchDetails();
   renderHeader();
@@ -1676,8 +1679,8 @@ function render() {
   if ($('unfocus')) $('unfocus').onclick = () => { S.focus = null; render(); };
   $('map').scrollTop = top; $('map').scrollLeft = left; $('insp').scrollTop = itop;
   document.querySelectorAll('[data-proposal]').forEach(b => b.onclick = () => { S.showProposal = b.dataset.proposal === '1'; S.node = null; render(); });
-  if ($('remakeSys')) $('remakeSys').onclick=()=>requestAgentAction('analysis_plan');
-  if ($('requestBriefing')) $('requestBriefing').onclick=()=>requestAgentAction('analysis_plan');
+  if ($('remakeSys')) $('remakeSys').onclick=()=>openAnalysisPanel('make_system');
+  if ($('requestBriefing')) $('requestBriefing').onclick=()=>openAnalysisPanel('briefing_request');
   if (sys && S.system) { S._wires = sysLinks(S.system).map((l, i) => ({ ...l, n: i + 1, dim: !!S.node && l.from !== S.node && l.to !== S.node })); drawWires(); document.querySelectorAll('.card[data-node], .row[data-node]').forEach(el => el.onclick = () => { selectProgram(el.dataset.node); });
     if ($('toMap')) $('toMap').onclick = () => { S.view = 'map'; render(); } }
   const pick=p=>selectScreen(p,view==='focus');
@@ -1711,9 +1714,9 @@ function render() {
     catch { $('tpDone').innerHTML = ' ' + esc(tr('복사하지 못했습니다. 다시 시도하거나 안내를 열어 직접 복사하세요.')) + helpDetails(`<pre class="prompt mono">${esc(text)}</pre>`, '요청 내용 보기'); } });
   document.querySelectorAll('[data-copy]').forEach(b => b.onclick = () => copy(copyText(m, s, rows.find(x => x.key === b.dataset.copy)), b));
   document.querySelectorAll('[data-confirm-link]').forEach(b => b.onclick = () => editProject(false, { link: b.dataset.confirmLink.split('|') }));
-  if ($('mk')) $('mk').onclick=()=>requestAgentAction('analysis_plan');
-  document.querySelectorAll('[data-mk]').forEach(b => b.onclick = () => requestAgentAction('analysis_plan'));
-  if ($('regroup')) $('regroup').onclick=()=>requestAgentAction('analysis_plan');
+  if ($('mk')) $('mk').onclick=()=>openAnalysisPanel();
+  document.querySelectorAll('[data-mk]').forEach(b => b.onclick = () => openAnalysisPanel());
+  if ($('regroup')) $('regroup').onclick=()=>openAnalysisPanel('suggest_groups');
   renderPendingActions();
   if (S.agentPrompt != null) renderAgentPrompt();
   keyboardTargets(); if (refocus) document.querySelector(refocus)?.focus();
@@ -1767,7 +1770,7 @@ function renderAgentPrompt() {
   const steps=request && ['up_to_date','blocked'].includes(request.state)?`<p class="sub">${esc(tr(task || ''))}</p><div role="status">${tr(states[request.state] || '')}</div>${planSummary(request)}`:request?`<p class="sub">${esc([tr(task || ''),target].filter(Boolean).join(' · '))}</p><div id="analysisResultState" role="status">${status}</div>${['partial','proposal_partial'].includes(request.state) && request.codes ? `<div class="s" data-codes>${[['saved','결과가 저장된 코드: '],['partial','일부 결과만 저장된 코드: '],['waiting','결과를 기다리는 코드: ']].filter(([k])=>request.codes[k].length).map(([k,label])=>`<div>${tr(label)}${esc(request.codes[k].map(connectionDisplayName).join(', '))}</div>`).join('')}</div>` : ''}<div class="ctl">${request.state==='error'?`<button class="btn primary" id="checkAnalysisResults">${tr('결과 확인')}</button>`:''}${ready?`<button class="btn primary" id="viewAnalysisResults">${tr(request.state.startsWith('proposal')?'AI 제안 보기':'결과 보기')}</button>`:''}<button class="btn ${ready || request.state==='error'?'quiet':'primary'}" id="cpAgent">${tr('요청 복사')}</button><span id="cpDone">${request.copied && ready?tr('복사됨'):''}</span></div>${request.command==='analysis_plan'?planSummary(request):''}`:'';
   const more=request && !['up_to_date','blocked'].includes(request.state)?`<details class="sect"><summary>${tr('다시 확인·요청 내용·다른 분석')}</summary>${request.state==='error'?'':`<button class="btn quiet" id="checkAnalysisResults" ${request.state==='checking'?'disabled':''}>${tr('결과 확인')}</button>`}<pre class="prompt mono">${esc(request.handoff ?? S.agentPrompt)}</pre>${analysisChooser(true)}</details>`:analysisChooser();
   // AI 사용량·요금 안내는 이 패널에 한 번만 보인다.
-  $('insp').innerHTML=analysis?`<h2>${tr('AI로 자세한 지도 만들기')}</h2><p class="s">${tr('연결한 AI가 분석하며, 사용하는 AI의 요금·사용 한도가 적용됩니다.')}</p>`+steps+more:
+  $('insp').innerHTML=analysis?`<h2>${tr('AI로 자세한 지도 만들기')}</h2>`+(typeof AnalysisRun!=='undefined'?AnalysisRun.html():'')+`<h3>${S.lang==='en'?'Copy a request for your existing AI':'기존 AI에게 요청 복사'}</h3><p class="s">${tr('연결한 AI가 분석하며, 사용하는 AI의 요금·사용 한도가 적용됩니다.')}</p>`+steps+more:
     `<h2>${tr('AI 연결')}</h2><p>${tr('AI 연결을 설정하고 공통 지시 파일에 사용 규칙을 추가합니다. 변경 전 확인을 요청합니다.')}</p>`+(S.agentPromptError?`<div role="alert">${errorHtml(tr('안내를 만들지 못했습니다. 다시 시도하세요.'),S.agentPromptError)}</div>`:ui`<div class="ctl"><button class="btn primary" id="cpAgent">복사</button><span id="cpDone"></span></div>`)+`<button class="btn" id="openConnectionDiagnostic">${tr('연결 진단')}</button>${S.agentPromptError?'':helpDetails(`<pre class="prompt mono">${esc(S.agentPrompt)}</pre>`,'연결 안내 보기')}`;
   if($('cpAgent'))$('cpAgent').onclick=async()=>{
     const prompt=analysis?request.handoff ?? S.agentPrompt:S.agentPrompt,copyRequest=S.analysisRequest;
@@ -1776,6 +1779,7 @@ function renderAgentPrompt() {
   };
   if($('openConnectionDiagnostic'))$('openConnectionDiagnostic').onclick=()=>startConnectionDiagnostic();
   if(!analysis)return;
+  if(typeof AnalysisRun!=='undefined')AnalysisRun.bind();
   if($('checkAnalysisResults'))$('checkAnalysisResults').onclick=checkAnalysisResults;
   if($('viewAnalysisProposal'))$('viewAnalysisProposal').onclick=()=>{S.agentPrompt=null;S.showProposal=true;S.view='sys';render();};
   if($('viewAnalysisResults'))$('viewAnalysisResults').onclick=()=>{S.agentPrompt=null;S.showProposal=request.state.startsWith('proposal');S.view=request.command==='analysis_plan'?(request.requirements.some(r=>['analysis','system'].includes(r.task))?'sys':request.requirements.some(r=>r.task==='groups')?'feat':'changes'):request.command==='briefing_request'?'changes':request.command==='make_system' || request.command==='analysis_request'?'sys':request.command==='suggest_groups'?'feat':S.view;render();};
@@ -1809,6 +1813,7 @@ $('updates').onclick = () => { renderUpdates(); $('release-dialog').showModal();
 </script>
 <script src="connection.js"></script>
 <script src="onboarding.js"></script>
+<script src="analysis-run.js"></script>
 <script src="control.js"></script>
 </body>
 </html>

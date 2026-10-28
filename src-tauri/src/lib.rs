@@ -232,6 +232,56 @@ async fn analysis_plan(app: tauri::AppHandle, project: String, branch: String, l
     run_py(&app,"ai_extract.py",&[&project,&branch,&lang,"--plan","--repository",repository.as_deref().unwrap_or("")])
 }
 
+#[derive(serde::Deserialize)]
+struct AnalysisScope {
+    project: String,
+    repository: String,
+    branch: String,
+    lang: String,
+}
+
+// Availability and run control can wait on a CLI or filesystem lock. Keep that
+// work off the async runtime; only the explicit start/retry commands run AI.
+async fn analysis_command(app: tauri::AppHandle, args: Vec<String>) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+        run_py(&app, "analysis_run.py", &refs)
+    }).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn analysis_providers(app: tauri::AppHandle) -> Result<String, String> {
+    analysis_command(app, vec!["providers".into()]).await
+}
+
+#[tauri::command]
+async fn analysis_run_start(app: tauri::AppHandle, scope: AnalysisScope, expected_account: serde_json::Value) -> Result<String, String> {
+    analysis_command(app, vec!["start".into(), scope.project, "--repository".into(), scope.repository,
+        "--branch".into(), scope.branch, "--lang".into(), scope.lang, "--executor".into(), "claude".into(),
+        "--expected-account".into(), expected_account.to_string()]).await
+}
+
+#[tauri::command]
+async fn analysis_run_status(app: tauri::AppHandle, scope: Option<AnalysisScope>, run_id: Option<String>) -> Result<String, String> {
+    let mut args = vec!["status".into()];
+    if let Some(id) = run_id { args.extend(["--run-id".into(), id]); }
+    else if let Some(scope) = scope {
+        args.extend(["--project".into(), scope.project, "--repository".into(), scope.repository,
+            "--branch".into(), scope.branch, "--lang".into(), scope.lang]);
+    } else { return Err("Choose code or an analysis run".into()); }
+    analysis_command(app, args).await
+}
+
+#[tauri::command]
+async fn analysis_run_cancel(app: tauri::AppHandle, run_id: String) -> Result<String, String> {
+    analysis_command(app, vec!["cancel".into(), run_id]).await
+}
+
+#[tauri::command]
+async fn analysis_run_retry(app: tauri::AppHandle, run_id: String, expected_account: serde_json::Value) -> Result<String, String> {
+    analysis_command(app, vec!["retry".into(), run_id, "--expected-account".into(), expected_account.to_string()]).await
+}
+
 #[tauri::command]
 async fn briefing_request(app: tauri::AppHandle, project: String, branch: String, lang: String, repository: Option<String>) -> Result<String, String> {
     run_py(&app,"briefing.py",&["request",&project,"--branch",&branch,"--lang",&lang,"--repository",repository.as_deref().unwrap_or("")])
@@ -540,6 +590,16 @@ async fn start_app_update(app: tauri::AppHandle, version: String) -> Result<(), 
     if !wanted.pre.is_empty() || !wanted.cmp_precedence(&current).is_gt() { return Err("No newer stable version was requested".into()); }
     reserve_update_work()?;
     let result = tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
+        // start/retry hold BackendWork until the detached worker is registered.
+        // Reserving first prevents a new worker racing this read-only check.
+        let active = backend(&app)?.command("analysis_run.py", &["active"]).output()
+            .map_err(|_| "Could not check active analysis before updating")?;
+        let status: serde_json::Value = serde_json::from_slice(&active.stdout)
+            .map_err(|_| "Could not check active analysis before updating")?;
+        if !active.status.success() || status["active"].as_bool().is_none() {
+            return Err("Could not check active analysis before updating".into());
+        }
+        if status["active"] == true { return Err("Wait for AI analysis to finish or cancel it before updating".into()); }
         fs::create_dir_all(root()).map_err(|e| e.to_string())?;
         let lock = fs::OpenOptions::new().create(true).truncate(false).read(true).write(true).open(root().join(".app-update.lock")).map_err(|e| e.to_string())?;
         lock.try_lock().map_err(|_| "Another app update is already running")?;
@@ -666,7 +726,7 @@ pub fn run() {
             if control::listen(app.state::<std::sync::Arc<control::Hub>>().inner().clone(), &root()).is_err() {eprintln!("App control unavailable; the app remains usable.");}
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![control_poll, control_ack, control_focus, list_projects, read_map, read_project, save_project, github_logins, github_accounts, use_github_account, read_settings, save_settings, open_url, refresh, suggest_groups, make_steps, make_system, make_jobs, analysis_request, analysis_plan, briefing_request, setup_prompt, connection_diagnose, connection_status, tests_prompt, app_version, check_release, app_update_status, start_app_update])
+        .invoke_handler(tauri::generate_handler![control_poll, control_ack, control_focus, list_projects, read_map, read_project, save_project, github_logins, github_accounts, use_github_account, read_settings, save_settings, open_url, refresh, suggest_groups, make_steps, make_system, make_jobs, analysis_request, analysis_plan, analysis_providers, analysis_run_start, analysis_run_status, analysis_run_cancel, analysis_run_retry, briefing_request, setup_prompt, connection_diagnose, connection_status, tests_prompt, app_version, check_release, app_update_status, start_app_update])
         .build(tauri::generate_context!()).expect("error while building tauri application");
     app.run(|app, event| {
         if matches!(event, tauri::RunEvent::Ready) {

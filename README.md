@@ -41,6 +41,16 @@ The app starts in Korean. Choose **English** in the **Menu** to save your langua
 
 ## Use your AI agent
 
+### Run analysis from the app
+
+Open **Detail the map with AI**, review the installed Claude Code account and usage notice, then choose **Start analysis with Claude Code**. This first automatic path requires a Claude subscription login and a CLI supporting the app's isolation options. API-key and other-provider authentication are not supported by this adapter. Codex and other MCP agents can still use the manual request workflow below.
+
+The app reports preparation, analysis, saving and the current task, then reads validated saved results. Cancellation or failure retains work already saved; **Retry with current code** pins the current code and requests the remaining analysis. Reopening the app recovers run status. Opening the panel or using ordinary refresh never starts a model run.
+
+Automatic execution supplies text from pinned commits and collected evidence to Claude. Oversized inputs fail explicitly; select one repository or use the manual MCP workflow for larger sources. Changed source, configuration or evidence rejects a stale result. Reading results neither recollects PRs nor moves the comparison baseline. App updates wait for active analysis. Organization-managed CLI policy still applies.
+
+### Send a request to an MCP agent
+
 Click **Menu → Connect your AI** and copy the instructions into Claude Code, Codex or another MCP-compatible agent. It sets up the connection and adds usage rules to its global instructions, asking before it changes anything.
 
 With the app open, try: **“Show me the upload retry feature in where-were-we.”** Your agent can find and highlight it, and read what you select in the app. Ask it to consult the map before planning or editing to find affected areas and overlapping work.
