@@ -158,24 +158,24 @@ Report bugs or suggest improvements in [Issues](https://github.com/ganggangstone
 
 The [license](LICENSE) permits personal use, internal business use, and free redistribution under its conditions. Paid products and external paid services are restricted. This is a custom source-available license; third-party components retain their own licenses.
 
-**v0.8.0 release notes**
+**v0.9.0 release notes**
 
 <!-- release-notes:start -->
 ### 한국어
 
-- 첫 분석에서 기본 수집이 이미 찾은 화면과 서버 기능은 AI가 다시 쓰지 않고 그대로 두며, 앱은 그 부분을 기본 수집으로 표시합니다.
-- 일반적인 부분 변경이면 분석 요청에 바뀐 파일과 그 파일을 근거로 삼은 저장 항목만 들어가고, 나머지 저장된 분석은 그대로 남습니다. 설정이나 분석 범위가 달라졌거나 바뀐 파일의 영향을 판단하지 못하면 저장된 것을 다시 쓰게 하지 않은 채 전체 코드를 다시 검토하고, 분석 언어를 바꾸면 전체를 다시 분석합니다. 파일이 똑같은 커밋은 새 분석을 요청하지 않습니다.
-- 이전 버전에서 저장한 AI 분석도 AI가 다시 쓰지 않고 이어서 확인합니다.
-- 바뀐 부분만 답하는 분석에서 AI가 바뀐 파일을 분류하지 못하거나 근거가 하나라도 원문과 맞지 않으면, 아무것도 저장하지 않고 이전 지도를 그대로 둡니다.
-- **AI로 자세한 지도 만들기**는 요청 복사, 결과가 오면 결과 보기 하나만 보여 주고, 다시 확인·요청 내용·다른 분석은 접어 둡니다.
+- **AI로 자세한 지도 만들기**에서 **Claude Code로 분석 시작**을 누르면 설치된 Claude Code로 분석을 실행하고, 끝나면 저장된 결과를 화면에 보여 줍니다. 실행 전에 어느 Claude 계정의 사용량을 쓰는지 표시합니다. Claude 구독 로그인이 필요하며 API 키 로그인은 지원하지 않습니다.
+- 실행 중에는 준비·분석·저장 상태와 지금 하는 작업이 보이고 취소할 수 있습니다. 취소하거나 실패해도 앞서 저장한 결과는 남고, **현재 코드로 다시 시도**로 남은 분석을 요청합니다. 실행 중 코드나 설정이 바뀌면 그 결과는 저장하지 않습니다.
+- 분석을 요청하는 버튼은 이제 바로 요청을 만들지 않고 분석 화면을 엽니다. 요청을 복사해 Codex 등 다른 MCP 에이전트에 전달하는 방식은 그 화면에서 계속 쓸 수 있습니다.
+- 버전·업데이트 화면에서 릴리즈 노트의 제목·목록·굵은 글씨가 서식대로 보이고, 업데이트를 마친 뒤에는 "업데이트가 완료되었습니다"만 표시합니다.
+- 붙어 있던 버튼 사이에 간격을 두고, 업데이트·AI 연결·연결 진단·프로젝트 화면에서 설명을 버튼보다 먼저 보여 줍니다.
 
 ### English
 
-- The first analysis keeps the screens and server requests the basic collection already found instead of having your AI write them again, and the app labels those parts as basic collection.
-- For an ordinary partial change, the analysis request lists only the changed files and the saved items that cite them, and the rest of the saved analysis stays. When the configuration or analysis scope changes, or the effect of a changed file cannot be determined, the whole code is reviewed again without rewriting what is saved; changing the analysis language analyzes everything again. A commit with identical files does not ask for a new analysis.
-- AI analyses saved by earlier versions are reviewed and kept without your AI writing them again.
-- When your AI answers only the changes, a changed file it cannot classify or any evidence that does not match the source saves nothing and keeps the previous map.
-- **Detail the map with AI** shows one action, copying the request and then viewing the results; recheck, request text and other analyses are folded away.
+- In **Detail the map with AI**, choose **Start analysis with Claude Code** to run the analysis with your installed Claude Code; the saved result shows when it finishes. Before it runs, the app shows whose Claude account and usage are used. It needs a Claude subscription login; API-key sign-in is not supported.
+- While it runs you see preparing, analyzing and saving, plus the current task, and you can cancel. Results saved before a cancel or failure stay; **Retry with current code** asks for the remaining analysis. If the code or settings change during a run, its result is not saved.
+- Buttons that request analysis now open the analysis panel instead of preparing a request right away. Copying the request to Codex or another MCP agent still works from that panel.
+- In Version & updates, release-note headings, lists and bold text are formatted, and after an update only "Update completed." is shown.
+- Buttons that touched now have space between them, and the update, AI connection, connection check and project screens put the explanation before the buttons.
 <!-- release-notes:end -->
 
 
