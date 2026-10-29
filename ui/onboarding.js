@@ -86,8 +86,8 @@ function guideAnalysisBody(m){
     :`<button class="btn primary" id="guideReadNow" ${G.reading?'disabled':''}>${tr('저장된 결과 읽기')}</button><button class="btn quiet" id="guideAnalysis">${tr(['missing','language','stale'].includes(a.state)?'직접 분석 요청 만들기':'남은 분석 요청 만들기')}</button>`;
   return `<h2 id="guideTitle" tabindex="-1">${tr('첫 분석')}</h2>
     <p role="status" id="guideMapState">${status}</p>${codes}${plan}${error}${waiting}
-    <div class="ctl">${buttons}</div>
-    ${m && !done?`<p class="s">${tr('분석은 연결한 AI가 하며, 그 AI의 요금·사용 한도가 적용됩니다. 기본 지도는 AI 없이 만듭니다.')}</p>`:''}`;
+    ${m && !done?`<p class="s">${tr('분석은 연결한 AI가 하며, 그 AI의 요금·사용 한도가 적용됩니다. 기본 지도는 AI 없이 만듭니다.')}</p>`:''}
+    <div class="ctl">${buttons}</div>`;
 }
 // A service that is already shown is edited in place; only an empty workspace starts a new one.
 function guideManual(){return `<button class="btn quiet" id="guideCreate">${tr(S.project?'연결한 코드 수정':'직접 연결하기')}</button>`;}

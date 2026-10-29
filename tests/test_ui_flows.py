@@ -791,6 +791,8 @@ class Flows(unittest.TestCase):
  assert(calls.some(c=>c.command==='analysis_request' && c.args.repository==='web'),'Request goes to the chosen code');
  assert(pane().includes(tr('요청 복사')),'The prepared request is shown');
  S.view='sys';S.system=null;S.branchDetails=null;render();$('remakeSys').click();await new Promise(r=>setTimeout(r,20));
+ assert(!$('status').textContent && !calls.some(c=>c.command==='analysis_plan'),'Contextual buttons open the panel without preparing a request');
+ document.querySelector('[data-analysis-task="analysis_plan"]').click();await new Promise(r=>setTimeout(r,20));
  assert(!$('status').textContent && calls.some(c=>c.command==='analysis_plan' && c.args.repository===''),'Contextual buttons request all connected code without forcing a code choice');
  $('analysisTarget').value='*';$('analysisTarget').dispatchEvent(new Event('change'));
  document.querySelector('[data-analysis-task="make_system"]').click();await new Promise(r=>setTimeout(r,20));
@@ -804,6 +806,8 @@ class Flows(unittest.TestCase):
   requirements:[{repository:'web',task:'analysis',before:null,commit:'aaaaaaaa1111'},{repository:'web',task:'groups',before:null,commit:'aaaaaaaa1111'},{repository:'',task:'briefing',before:null,commit:'h'}],handoff:'Unified handoff',up_to_date:false};
  window.planResult=plan;
  S.view='feat';render();$('regroup').click();await wait();
+ assert(S.agentPurpose==='analysis' && !calls.some(c=>['analysis_plan','suggest_groups','analysis_run_start'].includes(c.command)),'Grouping opens the panel without preparing or starting analysis');
+ document.querySelector('[data-analysis-task="analysis_plan"]').click();await wait();
  assert(calls.filter(c=>c.command==='analysis_plan').length===1 && !calls.some(c=>c.command==='suggest_groups'),'Grouping uses the unified request');
  assert(pane().includes(tr('요청 복사')) && S.analysisRequest.handoff==='Unified handoff','One handoff is shown');
  assert(pane().includes(tr('요청할 분석: ')) && pane().includes(tr('요청하지 못한 분석: ')) && pane().includes(tr('설정이 바뀌었거나 코드가 바뀌었습니다. 먼저 새로고침하세요.')),'Queued, blocked and refresh-needed work is listed');
@@ -820,6 +824,7 @@ class Flows(unittest.TestCase):
  assert(S.analysisRequest.state==='saved','Only nothing left completes it');
  assert(!calls.some(c=>c.command==='refresh'),'Checking results never refreshes');
  S.view='sys';render();$('remakeSys').click();await wait();
+ document.querySelector('[data-analysis-task="analysis_plan"]').click();await wait();
  assert(pane().includes(tr('모든 분석 결과가 최신입니다. 새로 요청할 것이 없습니다.')) && !$('cpAgent'),'Nothing to do reports up to date without a copy step');
  $('analysisTarget').value='*';$('analysisTarget').dispatchEvent(new Event('change'));
  document.querySelector('[data-analysis-task="analysis_plan"]').click();await wait();
@@ -832,6 +837,8 @@ class Flows(unittest.TestCase):
  S.view='screen';S.sel='web::/items';render();
  const mk=$('mk') || document.querySelector('[data-mk]');assert(mk,'A steps request is offered while steps are missing');
  mk.click();await wait();
+ assert(S.agentPurpose==='analysis' && !calls.some(c=>['analysis_plan','make_steps'].includes(c.command)),'Steps open the panel without preparing a request');
+ document.querySelector('[data-analysis-task="analysis_plan"]').click();await wait();
  assert(calls.some(c=>c.command==='analysis_plan') && !calls.some(c=>c.command==='make_steps'),'Steps use the unified request');
  S.agentPrompt=null;S.agentPurpose=null;S.maps.dev.backend_routes[0].flow={steps:[],unknown:'Fictional handler is generated'};render();
  assert(!$('mk'),'An explicit unknown is a finished analysis');
@@ -998,6 +1005,14 @@ class Flows(unittest.TestCase):
  U.latest={version:'9.9.9',newer:true,notes:'',url:''};renderUpdates();
  assert(!$('startBannerUpdate'),'The banner never starts an update directly');
  $('viewRelease').click();assert($('release-dialog').open && $('installUpdate'),'The update starts from the dialog that explains the restart');$('release-dialog').close();
+ U.latest={version:'9.9.9',newer:true,notes:'### 한국어\n\n- **굵게** 첫째 <img data-injected src=x onerror="document.body.dataset.injected=1">\n- 둘째\n\n이어진\n문단',url:''};renderUpdates();
+ const notes=$('release-dialog').querySelector('.notes');
+ assert(notes && notes.querySelector('h4')?.textContent==='한국어' && notes.querySelectorAll('li').length===2 && notes.querySelector('li b')?.textContent==='굵게' && notes.querySelector('p')?.textContent==='이어진 문단','Release notes show headings, lists and bold instead of Markdown text');
+ assert(!notes.textContent.includes('###') && !notes.textContent.includes('**') && !notes.querySelector('img') && notes.textContent.includes('<img'),'Release notes stay escaped text');
+ U.current='9.9.9';U.checked=true;U.failed=false;U.latest={version:'9.9.9',newer:false,notes:'',url:''};U.job={stage:'completed'};renderUpdates();
+ const dialogText=$('release-dialog').textContent;
+ assert(dialogText.includes(tr('업데이트가 완료되었습니다.')) && !dialogText.includes(tr('새 업데이트가 없습니다.')),'A finished update is not also reported as no update');
+ U.job=null;renderUpdates();assert($('release-dialog').textContent.includes(tr('새 업데이트가 없습니다.')),'Without a finished update the check result stays');
  S.agentPurpose='connection';S.agentPrompt='connection';S.connectionDiagnostic={feature:'detail',challenge:'x',fresh_server:{state:'ready'},registration:{state:'matches_app'},connection:{state:'verified'},handoff:'repair'};
  renderConnectionDiagnostic();assert($('backToMap') && $('copyConnectionRequest').className.includes('quiet'),'A verified connection leads back to the map');
  $('backToMap').click();assert(!$('backToMap') && S.agentPrompt===null,'Back to the map');

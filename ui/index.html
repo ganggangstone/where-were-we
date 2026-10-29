@@ -463,6 +463,20 @@ function setUpdateChecks(value) {
   U.auto=value;try{localStorage.setItem(RELEASE_AUTO,String(U.auto));}catch{/* Session preference remains available. */}
   if(U.auto)checkUpdates(false);
 }
+// Release notes use only headings, "- " lists, **bold** and paragraphs; anything else stays escaped text.
+// ponytail: subset renderer, switch to a Markdown library if notes start using links or code.
+function releaseNotesHtml(text) {
+  const inline=s=>esc(s).replace(/\*\*(.+?)\*\*/g,'<b>$1</b>');
+  let html='',items=[],para=[];
+  const flush=()=>{if(para.length)html+=`<p>${para.map(inline).join(' ')}</p>`;if(items.length)html+=`<ul>${items.map(i=>`<li>${inline(i)}</li>`).join('')}</ul>`;para=[];items=[];};
+  for(const line of String(text).split('\n')){
+    const t=line.trim(),heading=t.match(/^#{1,6}\s+(.*)$/),item=t.match(/^[-*]\s+(.*)$/);
+    if(heading || !t){flush();if(heading)html+=`<h4>${inline(heading[1])}</h4>`;}
+    else if(item){if(para.length)flush();items.push(item[1]);}
+    else{if(items.length)flush();para.push(t);}
+  }
+  flush();return html;
+}
 function renderUpdates() {
   $('updates').textContent = tr('버전·업데이트') + (U.latest?.newer ? ' ●' : ''); $('menuButton').textContent = tr('메뉴') + (U.latest?.newer ? ' ●' : '');
   const release = U.latest;
@@ -474,15 +488,17 @@ function renderUpdates() {
     !U.checked ? tr('아직 새 버전을 확인하지 않았습니다.') :
     !release ? tr('공개된 정식 릴리즈가 아직 없습니다.') :
     release.newer ? tr('새 버전 알림') : tr('새 업데이트가 없습니다.');
+  // After a finished update, "no update" would sit beside "update finished"; the finished message says it.
+  const finished = U.job?.stage==='completed' && U.checked && !U.failed && release && !release.newer;
   $('release-dialog').innerHTML = ui`<div class="ctl"><h2 id="releaseTitle">버전·업데이트</h2><span class="spacer"></span><button class="btn" id="closeRelease">닫기</button></div>
     ${metaList([['현재 버전',esc(U.current || '…')],...(release?[['최신 공개 버전',esc(release.version)]]:[])])}
-    <p role="status">${esc(message)}${U.failed && release ? ui` ${tr('이전 확인에서 받은 정보입니다.')}` : ''}</p>
+    ${finished ? '' : `<p role="status">${esc(message)}${U.failed && release ? ui` ${tr('이전 확인에서 받은 정보입니다.')}` : ''}</p>`}
+    ${release?.newer ? ui`<div class="sect"><p>앱을 닫고 새 버전을 설치한 뒤 다시 엽니다.</p><div class="ctl"><button class="btn" id="installUpdate" ${U.installing ? 'disabled' : ''}>지금 업데이트</button></div><details><summary>직접 업데이트하기</summary><pre class="mono release-notes" id="upgradeCommand">${UPGRADE_COMMAND}</pre><div class="ctl"><button class="btn" id="copyUpgrade">업데이트 명령 복사</button><span id="upgradeCopied"></span></div></details></div>` : ''}
+    <p role="status" id="updateStatus">${esc(updateMessage())}</p>${U.job?.stage==='failed' ? errorDetails(U.job.error || '') : ''}
+    ${U.job?.stage==='completed' ? `<p role="status">${tr('업데이트 뒤 AI 연결을 다시 확인하세요.')}</p><div class="ctl"><button class="btn primary" id="updateConnectionDiagnostic">${tr('연결 진단')}</button></div>` : ''}
     <div class="ctl"><button class="btn" id="checkRelease" ${U.busy ? 'disabled' : ''}>${tr(U.busy ? '확인 중…' : '지금 확인')}</button></div>
     <p><label><input type="checkbox" id="autoRelease" ${U.auto ? 'checked' : ''}> ${tr('앱을 열 때 새 버전 확인')}</label></p>${metaList([['자동 확인',esc(tr('하루 한 번'))]])}
-    ${U.job?.stage==='completed' ? `<p role="status">${tr('업데이트 뒤 AI 연결을 다시 확인하세요.')}</p><button class="btn primary" id="updateConnectionDiagnostic">${tr('연결 진단')}</button>` : ''}
-    <p role="status" id="updateStatus">${esc(updateMessage())}</p>${U.job?.stage==='failed' ? errorDetails(U.job.error || '') : ''}
-    ${release?.newer ? ui`<div class="sect"><button class="btn" id="installUpdate" ${U.installing ? 'disabled' : ''}>지금 업데이트</button><p>앱을 닫고 새 버전을 설치한 뒤 다시 엽니다.</p><details><summary>직접 업데이트하기</summary><pre class="mono release-notes" id="upgradeCommand">${UPGRADE_COMMAND}</pre><button class="btn" id="copyUpgrade">업데이트 명령 복사</button><span id="upgradeCopied"></span></details></div>` : ''}
-    ${release ? ui`<div class="sect"><h3>릴리즈 노트</h3><pre class="release-notes">${esc(release.notes || tr('아직 변경 내용이 없습니다.'))}</pre><button class="btn" id="releasePage">릴리즈 페이지 열기</button></div>` : ''}`;
+    ${release ? ui`<div class="sect"><h3>릴리즈 노트</h3><div class="notes">${releaseNotesHtml(release.notes || tr('아직 변경 내용이 없습니다.'))}</div><div class="ctl"><button class="btn" id="releasePage">릴리즈 페이지 열기</button></div></div>` : ''}`;
   if ($('updateConnectionDiagnostic')) $('updateConnectionDiagnostic').onclick=()=>{$('release-dialog').close();startConnectionDiagnostic();};
   $('closeRelease').onclick = () => $('release-dialog').close();
   $('checkRelease').onclick = () => checkUpdates(true);
@@ -1107,7 +1123,7 @@ function editProject(create, focus=null) {
       <details><summary>${tr('지도에 표시할 버전')}</summary><div class="repository-fields">${[['dev','분석할 버전',r.refs.dev || ''],['main','비교할 기준 버전',r.refs.main || '']].map(([key,label,value])=>`<label>${tr(label)}<input data-field="${key}" value="${esc(value)}" placeholder="${key==='dev'?'HEAD':'origin/main'}"></label>`).join('')}</div><p class="s">${tr('브랜치·태그·커밋 중 하나를 입력하세요. 비교할 기준 버전은 비워 두어도 됩니다.')}</p></details>
       <details><summary>${tr('코드 위치 직접 지정')}</summary>
       <div class="repository-fields">${[['frontend','화면 코드 위치',r.layout.frontend || ''],['backend','서버 코드 위치',r.layout.backend || '']].map(([key,label,value])=>`<label>${tr(label)}<input data-field="${key}" value="${esc(value)}" placeholder="${tr('자동으로 찾기')}"></label>`).join('')}</div><p class="s">${tr('자동으로 찾지 못할 때만 입력하세요. 예: frontend/src, backend/app.')}</p></details>
-      ${repos.length>1 ? `<button class="btn quiet" data-remove="${i}">${tr('이 코드 연결 해제')}</button><span class="s">${tr('코드와 지도는 남습니다.')}</span>` : ''}</fieldset>`).join('');
+      ${repos.length>1 ? `<div class="ctl"><button class="btn quiet" data-remove="${i}">${tr('이 코드 연결 해제')}</button><span class="s">${tr('코드와 지도는 남습니다.')}</span></div>` : ''}</fieldset>`).join('');
     document.querySelectorAll('[data-remove]').forEach(b=>b.onclick=()=>{collectShared();repos.splice(+b.dataset.remove,1);rows();sharedRows();});
     document.querySelectorAll('[data-field="path"], [data-field="name"]').forEach(input=>input.onchange=()=>{
       collectShared();updateTargets();
@@ -1147,7 +1163,7 @@ function editProject(create, focus=null) {
     for(const group of shared) if(!group.id)group.id=newRepositoryId('shared-data','',shared.map(g=>g.id));
     $('sharedRows').innerHTML=shared.map((g,i)=>`<fieldset data-shared-group="${i}"><legend>${tr('함께 쓰는 데이터')} ${i+1}</legend>
       ${g.members.map((m,j)=>`<div class="repository-fields" data-shared-member="${j}"><label>${tr('연결한 코드 선택')}<select data-member-repo>${repositoryOptions(m.repository)}</select></label><label>${tr('데이터 테이블 이름')}<input data-member-table value="${esc(m.table)}" list="shared-tables-${i}-${j}"></label><datalist id="shared-tables-${i}-${j}">${(known.find(r=>r.id===m.repository)?.tables || []).map(t=>`<option value="${esc(t)}"></option>`).join('')}</datalist><button class="btn quiet" data-remove-member="${i}:${j}">${tr('제거')}</button></div>`).join('')}
-      <button class="btn quiet" data-add-member="${i}">${tr('연결 추가')}</button><button class="btn quiet" data-remove-shared="${i}">${tr('제거')}</button></fieldset>`).join('');
+      <div class="ctl"><button class="btn quiet" data-add-member="${i}">${tr('연결 추가')}</button><button class="btn quiet" data-remove-shared="${i}">${tr('제거')}</button></div></fieldset>`).join('');
     document.querySelectorAll('[data-add-member]').forEach(b=>b.onclick=()=>{collectShared();shared[+b.dataset.addMember].members.push({repository:'',table:''});sharedRows();});
     document.querySelectorAll('[data-remove-member]').forEach(b=>b.onclick=()=>{collectShared();const [i,j]=b.dataset.removeMember.split(':').map(Number);shared[i].members.splice(j,1);sharedRows();});
     document.querySelectorAll('[data-remove-shared]').forEach(b=>b.onclick=()=>{collectShared();shared.splice(+b.dataset.removeShared,1);sharedRows();});
@@ -1659,7 +1675,7 @@ function render() {
   document.querySelectorAll('#view button').forEach(b => press(b, b.dataset.v === view || (b.dataset.v === 'work' && work)));
   $('subview').hidden = !work; document.querySelectorAll('#subview button').forEach(b => press(b, b.dataset.v === view));
   if (!S.project) { $('map').innerHTML = ui`<div class="hint start"><h2>내 코드 살펴보기</h2><p>어떤 코드를 살펴볼까요? 작업하던 AI 채팅에 요청 하나를 붙여 넣으면 AI가 코드를 찾아 연결하고 첫 지도와 첫 AI 분석까지 이어 줍니다. 앱이 AI를 직접 실행하지는 않습니다.</p><div class="ctl"><button class="btn primary" id="startWithAI">작업하던 AI에게 맡기기</button><button class="btn quiet" id="startProject">코드 위치를 직접 입력</button></div><p class="s">GitHub 주소나 이 컴퓨터의 코드 폴더를 알고 있다면 직접 입력할 수 있습니다.</p></div>`; $('insp').innerHTML = ''; $('startWithAI').onclick = () => { openGuide(); guideStep(1); }; $('startProject').onclick = () => editProject(true); return; }
-  if (!m) { $('map').innerHTML = ui`<div class="hint start"><h2>아직 지도를 가져오지 않았습니다.</h2><p>연결한 코드를 읽어 첫 지도를 만듭니다.</p><button class="btn primary" id="firstRefresh">↻ 지금 지도 가져오기</button> <button class="btn quiet" id="openConnections">코드 추가·수정</button></div>`; $('insp').innerHTML = ''; $('firstRefresh').onclick = doRefresh; $('openConnections').onclick = () => editProject(false); return; }
+  if (!m) { $('map').innerHTML = ui`<div class="hint start"><h2>아직 지도를 가져오지 않았습니다.</h2><p>연결한 코드를 읽어 첫 지도를 만듭니다.</p><div class="ctl"><button class="btn primary" id="firstRefresh">↻ 지금 지도 가져오기</button><button class="btn quiet" id="openConnections">코드 추가·수정</button></div></div>`; $('insp').innerHTML = ''; $('firstRefresh').onclick = doRefresh; $('openConnections').onclick = () => editProject(false); return; }
   // 다시 읽은 지도에 같은 화면 묶음이 없으면 고른 기능을 지운다. 같은 자리의 다른 기능으로 넘어가지 않는다.
   if (S.feat && !selectedFeature(m)) S.feat = null;
   const top = $('map').scrollTop, left = $('map').scrollLeft, itop = $('insp').scrollTop, refocus = focusKey(document.activeElement);
@@ -1767,11 +1783,11 @@ function renderAgentPrompt() {
   // 주 동작은 하나다: 결과가 오기 전에는 요청 복사, 결과가 오면 결과 보기. 앱으로 돌아오면 결과는 스스로 읽으므로 수동 확인·요청 원문·다른 분석은 접어 둔다.
   const ready=request && ['saved','previous','proposal','proposal_previous','proposal_partial','partial'].includes(request.state);
   const status=request?.error?errorHtml(tr('결과를 읽지 못했습니다. 오류 내용을 확인하세요.'),request.error):tr(request?.state==='prepared' && request.copied?'복사했습니다. 작업하던 AI 채팅에 붙여 넣고, AI가 끝나면 앱으로 돌아오세요.':states[request?.state] || states.prepared);
-  const steps=request && ['up_to_date','blocked'].includes(request.state)?`<p class="sub">${esc(tr(task || ''))}</p><div role="status">${tr(states[request.state] || '')}</div>${planSummary(request)}`:request?`<p class="sub">${esc([tr(task || ''),target].filter(Boolean).join(' · '))}</p><div id="analysisResultState" role="status">${status}</div>${['partial','proposal_partial'].includes(request.state) && request.codes ? `<div class="s" data-codes>${[['saved','결과가 저장된 코드: '],['partial','일부 결과만 저장된 코드: '],['waiting','결과를 기다리는 코드: ']].filter(([k])=>request.codes[k].length).map(([k,label])=>`<div>${tr(label)}${esc(request.codes[k].map(connectionDisplayName).join(', '))}</div>`).join('')}</div>` : ''}<div class="ctl">${request.state==='error'?`<button class="btn primary" id="checkAnalysisResults">${tr('결과 확인')}</button>`:''}${ready?`<button class="btn primary" id="viewAnalysisResults">${tr(request.state.startsWith('proposal')?'AI 제안 보기':'결과 보기')}</button>`:''}<button class="btn ${ready || request.state==='error'?'quiet':'primary'}" id="cpAgent">${tr('요청 복사')}</button><span id="cpDone">${request.copied && ready?tr('복사됨'):''}</span></div>${request.command==='analysis_plan'?planSummary(request):''}`:'';
+  const steps=request && ['up_to_date','blocked'].includes(request.state)?`<p class="sub">${esc(tr(task || ''))}</p><div role="status">${tr(states[request.state] || '')}</div>${planSummary(request)}`:request?`<p class="sub">${esc([tr(task || ''),target].filter(Boolean).join(' · '))}</p><div id="analysisResultState" role="status">${status}</div>${['partial','proposal_partial'].includes(request.state) && request.codes ? `<div class="s" data-codes>${[['saved','결과가 저장된 코드: '],['partial','일부 결과만 저장된 코드: '],['waiting','결과를 기다리는 코드: ']].filter(([k])=>request.codes[k].length).map(([k,label])=>`<div>${tr(label)}${esc(request.codes[k].map(connectionDisplayName).join(', '))}</div>`).join('')}</div>` : ''}${request.command==='analysis_plan'?planSummary(request):''}<div class="ctl">${request.state==='error'?`<button class="btn primary" id="checkAnalysisResults">${tr('결과 확인')}</button>`:''}${ready?`<button class="btn primary" id="viewAnalysisResults">${tr(request.state.startsWith('proposal')?'AI 제안 보기':'결과 보기')}</button>`:''}<button class="btn ${ready || request.state==='error'?'quiet':'primary'}" id="cpAgent">${tr('요청 복사')}</button><span id="cpDone">${request.copied && ready?tr('복사됨'):''}</span></div>`:'';
   const more=request && !['up_to_date','blocked'].includes(request.state)?`<details class="sect"><summary>${tr('다시 확인·요청 내용·다른 분석')}</summary>${request.state==='error'?'':`<button class="btn quiet" id="checkAnalysisResults" ${request.state==='checking'?'disabled':''}>${tr('결과 확인')}</button>`}<pre class="prompt mono">${esc(request.handoff ?? S.agentPrompt)}</pre>${analysisChooser(true)}</details>`:analysisChooser();
   // AI 사용량·요금 안내는 이 패널에 한 번만 보인다.
   $('insp').innerHTML=analysis?`<h2>${tr('AI로 자세한 지도 만들기')}</h2>`+(typeof AnalysisRun!=='undefined'?AnalysisRun.html():'')+`<h3>${S.lang==='en'?'Copy a request for your existing AI':'기존 AI에게 요청 복사'}</h3><p class="s">${tr('연결한 AI가 분석하며, 사용하는 AI의 요금·사용 한도가 적용됩니다.')}</p>`+steps+more:
-    `<h2>${tr('AI 연결')}</h2><p>${tr('AI 연결을 설정하고 공통 지시 파일에 사용 규칙을 추가합니다. 변경 전 확인을 요청합니다.')}</p>`+(S.agentPromptError?`<div role="alert">${errorHtml(tr('안내를 만들지 못했습니다. 다시 시도하세요.'),S.agentPromptError)}</div>`:ui`<div class="ctl"><button class="btn primary" id="cpAgent">복사</button><span id="cpDone"></span></div>`)+`<button class="btn" id="openConnectionDiagnostic">${tr('연결 진단')}</button>${S.agentPromptError?'':helpDetails(`<pre class="prompt mono">${esc(S.agentPrompt)}</pre>`,'연결 안내 보기')}`;
+    `<h2>${tr('AI 연결')}</h2><p>${tr('AI 연결을 설정하고 공통 지시 파일에 사용 규칙을 추가합니다. 변경 전 확인을 요청합니다.')}</p>`+(S.agentPromptError?`<div role="alert">${errorHtml(tr('안내를 만들지 못했습니다. 다시 시도하세요.'),S.agentPromptError)}</div>`:helpDetails(`<pre class="prompt mono">${esc(S.agentPrompt)}</pre>`,'연결 안내 보기'))+`<div class="ctl">${S.agentPromptError?'':ui`<button class="btn primary" id="cpAgent">복사</button><span id="cpDone"></span>`}<button class="btn" id="openConnectionDiagnostic">${tr('연결 진단')}</button></div>`;
   if($('cpAgent'))$('cpAgent').onclick=async()=>{
     const prompt=analysis?request.handoff ?? S.agentPrompt:S.agentPrompt,copyRequest=S.analysisRequest;
     try {await navigator.clipboard.writeText(prompt);if(analysis?copyRequest!==S.analysisRequest:S.agentPrompt!==prompt)return;if(analysis){copyRequest.copied=true;renderAgentPrompt();}else $('cpDone').textContent=tr('복사됨');}

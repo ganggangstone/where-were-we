@@ -246,7 +246,9 @@ window.__TAURI__={core:{invoke:async(command,args)=>{
  assert($('requestBriefing') && !$('requestBriefing').disabled,'A collected project can request a briefing for all repositories');
  assert(tr('같은 문제의 PR은 묶고, 다른 문제를 푼 PR은 나눠 설명합니다.').includes('distinct problems'),'New copy must not be overridden by an old translation key');
  Object.defineProperty(navigator,'clipboard',{value:{writeText:async()=>{}},configurable:true});
- await $('requestBriefing').onclick();
+ $('requestBriefing').onclick();
+ assert(S.agentPurpose==='analysis' && !calls.includes('analysis_plan'),'The briefing button opens the analysis panel without preparing a request');
+ document.querySelector('[data-analysis-task="analysis_plan"]').click();await new Promise(r=>setTimeout(r,20));
  assert(S.analysisRequest.command==='analysis_plan' && S.analysisRequest.scope.repository==='','Keep project-wide scope');
  await $('cpAgent').onclick();
  assert(S.analysisRequest.state==='prepared','Copying is not analysis completion');
