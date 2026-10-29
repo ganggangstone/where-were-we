@@ -402,7 +402,7 @@ window.__TAURI__={core:{invoke:async(command,args)=>{
   await requestAgentAction('make_system');
   assert($('insp').textContent.includes('요청 복사') && $('checkAnalysisResults'),'Korean shows the same result-only path');
   S.lang='en';await requestAgentAction('make_system'); // back to an English request for the English checks below
-  assert(tr('AI에게 보낼 요청만 만듭니다. 앱에서 바로 분석하지 않습니다.').includes('Nothing is analyzed in the app'),'Step requests must not retain old automatic-analysis wording');
+  assert(tr('이 요청은 복사해 AI 채팅에 전달합니다. 요청을 만들기만 해서는 분석되지 않습니다.').includes('does not run any analysis') && tr('분석 화면에서 Claude Code로 바로 분석하거나 AI에게 보낼 요청을 만듭니다.').includes('analysis panel'),'Request wording separates preparing a request from analyzing in the app');
   analysisBundle.project.repositories[0].results.dev.system={version:'proposal',commit:'abc',stale:false,proposal:true};
   await $('checkAnalysisResults').onclick();
   assert($('analysisResultState').textContent.includes('saved separately') && $('viewAnalysisResults').textContent==='View AI proposal','A saved AI proposal is offered as the proposal, not as the old manual map');

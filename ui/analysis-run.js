@@ -34,7 +34,7 @@ const AnalysisRun = (() => {
       CLI_AUTH:['Claude Code 로그인이 만료됐거나 거부됐습니다. 터미널에서 다시 로그인한 뒤 계정·상태를 확인하세요.','Claude Code sign-in expired or was rejected. Sign in again in your terminal, then check account and status.'],
       CANCELLED:['분석이 취소됐습니다. 저장된 결과는 유지됩니다.','Analysis was cancelled. Saved results are retained.'],
       CLI_TIMEOUT:['Claude Code 응답 시간이 초과됐습니다. 연결과 사용 한도를 확인한 뒤 다시 시도하세요.','Claude Code timed out. Check your connection and usage limits, then retry.'],
-      CLI_OUTPUT_LIMIT:['Claude 응답이 너무 큽니다. 코드 범위를 줄인 뒤 다시 시도하세요.','The Claude response was too large. Select a smaller repository and retry.'],
+      CLI_OUTPUT_LIMIT:['Claude 응답이 너무 큽니다. 코드 범위를 줄인 뒤 다시 시도하세요.','The Claude response was too large. Narrow the code scope and retry.'],
       CLI_INVALID_OUTPUT:['Claude 결과를 검증하지 못했습니다. 저장된 결과는 유지됩니다. 다시 시도하세요.','Could not validate the Claude result. Saved results are retained. Retry the analysis.'],
       CLI_INPUT_INVALID:['분석할 코드 범위가 너무 크거나 비어 있습니다. 코드 연결과 범위를 확인하세요.','The analysis input is too large or empty. Check the code connection and scope.'],
       CLI_UNAVAILABLE:['Claude Code를 실행하지 못했습니다. 설치와 실행 권한을 확인하세요.','Could not start Claude Code. Check its installation and permissions.'],
@@ -46,14 +46,14 @@ const AnalysisRun = (() => {
       already_running:['이 코드의 분석이 이미 준비되거나 실행 중입니다. 상태를 다시 확인하세요.','Analysis is already prepared or running for this code. Check its status again.'],
       invalid_output:['AI 결과의 형식이나 근거를 검증하지 못했습니다. 저장된 결과는 유지됩니다. 다시 시도하세요.','The AI result format or evidence could not be validated. Saved results are retained. Retry the analysis.'],
       invalid_result:['AI 결과를 검증하지 못했습니다. 저장된 결과는 유지됩니다. 다시 시도하세요.','Could not validate the AI result. Saved results are retained. Retry the analysis.'],
-      analysis_failed:['분석 결과를 저장하지 못했습니다. 저장된 결과는 유지됩니다. 다시 시도하세요.','Analysis could not finish. Saved results are retained. Retry the analysis.'],
+      analysis_failed:['분석을 마치지 못했습니다. 저장된 결과는 유지됩니다. 다시 시도하세요.','Analysis could not finish. Saved results are retained. Retry the analysis.'],
       analysis_blocked:['먼저 확인할 분석이 있습니다. 기존 AI 요청의 안내에서 수집 상태·코드 설정·AI 제안을 확인하세요.','Some analysis needs attention. Check collection, code settings, and AI proposals in the existing request instructions.'],
       timeout:['분석 제한 시간에 도달했습니다. 저장된 결과는 유지됩니다. 다시 시도하면 남은 분석을 실행합니다.','Analysis reached its time limit. Saved results are retained. Retry to finish the remaining analysis.'],
       task_limit:['분석 작업 한도에 도달했습니다. 다시 시도하면 남은 분석을 실행합니다.','Analysis reached its task limit. Retry to finish the remaining analysis.'],
-      result_read_failed:['저장된 결과를 읽지 못했습니다. 계정·상태를 다시 확인하거나 저장된 결과 보기를 누르세요.','Could not read saved results. Check account and status or click View saved results.'],
+      result_read_failed:['저장된 결과를 읽지 못했습니다. 계정·상태 다시 확인을 누르세요.','Could not read saved results. Click Check account and status.'],
       worker_start_failed:['분석을 시작하지 못했습니다. 다시 시도하세요.','Could not start the analysis worker. Retry the analysis.']
     };
-    return messages[code] ? text(...messages[code]) : text('분석 상태를 확인하지 못했습니다. 다시 확인하거나 기존 AI 요청 복사를 이용하세요.','Could not complete the analysis request. Check again or use the existing request copy workflow.');
+    return messages[code] ? text(...messages[code]) : text('분석을 진행하지 못했습니다. 다시 확인하거나 AI에게 보낼 요청 복사를 이용하세요.','The analysis could not proceed. Check again or copy a request for your AI instead.');
   }
   const stateLabel = () => run?.cancel_requested && active() ? text('취소 중…','Cancelling…') : ({
     preparing:text('준비 중…','Preparing…'), running:text('분석 중…','Running…'), saving:text('저장 중…','Saving…'),
@@ -121,7 +121,7 @@ const AnalysisRun = (() => {
     const canStart = usable() && !providerBusy && !busy && !active();
     const runScope = run ? [run.repository ? connectionDisplayName(run.repository) : text('연결한 코드 전체','All connected repositories'),run.branch,run.lang].join(' · ') : '';
     const runAccount = run?.account?.email || run?.account?.id;
-    return `<section class="sect" aria-labelledby="appAnalysisHeading"><h3 id="appAnalysisHeading">${text('앱에서 자동 분석','Analyze in the app')}</h3>
+    return `<section class="sect" aria-labelledby="appAnalysisHeading"><h3 id="appAnalysisHeading">${text('앱에서 분석','Analyze in the app')}</h3>
       <p class="s">${text('필요한 분석만 Claude Code로 실행하고 검증한 결과를 저장합니다.','Runs the missing analysis with Claude Code and saves validated results.')}</p>
       <p><strong>Claude Code</strong> · ${text('계정','Account')}: ${esc(identity || text('확인되지 않음','Not verified'))}${account?.subscription_type ? ' · '+esc(account.subscription_type) : ''}</p>
       <p class="s">${text('이 컴퓨터에 로그인된 Claude 구독 계정을 사용합니다. 선택한 코드가 Claude에 전송되며 구독 사용량·한도가 적용됩니다. 시작·다시 시도를 누를 때만 AI를 실행합니다.','Uses the Claude subscription signed in on this computer. Selected source is sent to Claude; subscription usage and limits apply. AI runs only when you click Start or Retry.')}</p>

@@ -82,7 +82,7 @@ def page(checks,lang='ko',query=''):
     """Return the passed/failed marker and error text after the real index.html, connection.js and control.js run."""
     source=(ROOT/'ui/index.html').read_text()
     html=source.replace('<script>','<script>'+BOOTSTRAP,1)
-    for name in ('tokens.css','app.css','vendor/dagre.min.js','connection.js','onboarding.js','control.js'):
+    for name in ('tokens.css','app.css','vendor/dagre.min.js','connection.js','onboarding.js','control.js','analysis-run.js'):
         html=html.replace(f'"{name}"','"'+(ROOT/'ui'/name).as_uri()+'"')
     html=html.replace('</body>','<script>'+PRELUDE+checks+POSTLUDE+'</script></body>')
     with tempfile.TemporaryDirectory() as tmp:
@@ -447,6 +447,7 @@ class Guide(unittest.TestCase):
  window.planResult={tasks,blocked:[],requirements:tasks,pins,up_to_date:false,handoff:'plan'};
  const prepared=await applyAppCommand({action:'prepare_analysis',arguments:{project:'First',repository:'',branch:'dev',task:'all'}});
  assert(prepared.output.prepared && !prepared.output.executed,'Preparing runs nothing');
+ await wait();assert(window.calls.some(c=>c.command==='analysis_providers'),'A panel the AI opens also checks the Claude Code account');
  // only the web code is saved; the plan still lists the api code
  analyzeAll(S.lang,{},['web']);window.planResult={tasks:[tasks[1]],blocked:[],requirements:[],pins,up_to_date:false};
  const part=await applyAppCommand({action:'read_results',arguments:{}});
@@ -707,7 +708,7 @@ class Flows(unittest.TestCase):
  if($('guide').open)closeGuide('skipped');
  // One first entry: explore my code. Both ways are explained, and nothing runs AI by itself.
  assert(main().includes(tr('내 코드 살펴보기')) && main().includes(tr('어떤 코드를 살펴볼까요?')),'The empty workspace asks which code to explore: '+main());
- assert(main().includes(tr('앱이 AI를 직접 실행하지는 않습니다.')),'No automatic AI execution is stated');
+ assert(main().includes(tr('AI 분석은 앱에서 시작을 누르거나 AI에게 요청할 때만 실행됩니다.')),'No automatic AI execution is stated');
  assert($('startWithAI').textContent===tr('작업하던 AI에게 맡기기') && $('startProject').textContent===tr('코드 위치를 직접 입력'),'The two ways name what each one does');
  assert($('newProject').title===tr('다른 서비스 추가'),'The header plus adds another service');
  $('startProject').click();const d=$('project-dialog');assert(d.open && d.querySelector('h2').textContent===tr('살펴볼 코드 추가'),'The editor is about code to explore');
@@ -719,7 +720,7 @@ class Flows(unittest.TestCase):
  assert($('manageRepositories').textContent===tr('코드 추가·수정'),'The code bar button says add or edit code');
  $('manageRepositories').click();assert(d.querySelector('h2').textContent===tr('살펴보는 코드') && !d.textContent.includes(tr('비워 두면 첫 코드의 이름을 씁니다.')),'Editing names the explored code without the default hint');d.close();
  assert($('analyzeMap').textContent.startsWith(tr('AI로 자세한 지도 만들기')),'The AI button says what the AI makes: '+$('analyzeMap').textContent);
- $('analyzeMap').click();assert(pane().includes(tr('AI로 자세한 지도 만들기')) && pane().includes(tr('AI에게 보낼 요청만 만듭니다. 앱에서 바로 분석하지 않습니다.')),'The panel keeps the explicit handoff');
+ $('analyzeMap').click();assert(pane().includes(tr('AI로 자세한 지도 만들기')) && pane().includes(tr('이 요청은 복사해 AI 채팅에 전달합니다. 요청을 만들기만 해서는 분석되지 않습니다.')),'The panel keeps the explicit handoff');
 ''',query='&empty=1')
 
     def test_dictionary_has_no_duplicate_interface_keys(self):
