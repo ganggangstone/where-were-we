@@ -71,6 +71,20 @@ Promise.resolve(vm.runInContext({json.dumps('(async()=>{'+checks+'})()')},contex
         result = subprocess.run([NODE], input=runner, text=True, capture_output=True, timeout=15)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_saved_task_and_input_progress_are_distinct_and_intent_is_not_reused(self):
+        self.check_js(r'''
+await flush();status=runRecord('running',{intent:{task:'all',targets:[]},completed_tasks:[{task:'analysis'}],input_stats:{calls:4,bytes:12000},batch_progress:{task:'system',completed:2,total:7}});
+await open();await AnalysisRun.check();await flush();
+assert($('insp').innerHTML.includes('1/2 tasks saved'),'Saved task count');
+assert($('insp').innerHTML.includes('Input calls: 4') && $('insp').innerHTML.includes('Current task input units: 2/7'),'Input units are not saved tasks');
+status=runRecord('failed',{intent:{task:'all',targets:[]}});
+S.analysisChoice={task:'suggest_groups'};AnalysisRun.open();await flush();
+assert($('startAppAnalysis') && !$('retryAppAnalysis'),'Another intent is not offered as this request’s retry');
+await $('startAppAnalysis').onclick();await flush();
+const args=calls.filter(c=>c.command==='analysis_run_start').at(-1).args;
+assert(args.scope.intent.task==='groups' && args.scope.intent.targets.length===0,'Explicit grouping intent reaches native bridge');
+''')
+
     def test_provider_account_and_charge_before_explicit_start(self):
         self.check_js(r'''
 await flush();assert(count('analysis_run_status')===1,'Startup recovers status');

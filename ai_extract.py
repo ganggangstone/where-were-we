@@ -205,11 +205,16 @@ SCHEMA={
                     'text':'Store item','uncertain':False}]}], 'unknown':['Anything not established from code'],
  'inspected':[{'file':'path/in/repository','line':1,'quote':'literal source text; required only when no screens or routes exist'}]}
 
-def analysis_prompt(commit,lang,layout,sc=None):
+def analysis_schema(overview=False):
+    schema=copy.deepcopy(SCHEMA)
+    if overview:schema['backend_routes'][0].pop('steps',None)
+    return schema
+
+def analysis_prompt(commit,lang,layout,sc=None,overview=False):
     return f'''Analyze the tracked source at commit {commit} of this repository, regardless of programming language or framework.
 Read only this immutable commit using git ls-tree -r --name-only {commit}, git show {commit}:<path>, and git grep -n <pattern> {commit}.
 Do not read working-tree files, credentials, or environment files. Do not modify any files or execute application code.
-Find screens, navigation actions, client HTTP calls, mounted backend endpoints, tables, external services, and request steps.
+Find screens, navigation actions, client HTTP calls, mounted backend endpoints, tables, external services{'' if overview else ', and request steps'}.
 Configured source roots: {json.dumps(layout)}. A null frontend/backend disables that area; other roots restrict that area to the configured directory.
 Trace actual registration and imports; do not assume a convention or identify two databases by table name alone.
 For each item and relationship provide a tracked file, exact one-based line and literal single-line quote (at least 6 characters).
@@ -217,11 +222,11 @@ Use repository-relative file paths. Normalize dynamic URL segments to {{}}. HTTP
 Only include items and relations supported by code; list unresolved or omitted areas in unknown. An empty list is valid for an absent area.
 Labels, descriptions and unknown entries must be in {'English' if lang=='en' else 'Korean'}. Keep identifiers and paths unchanged.
 {mapcore.reply_language(lang,'en',saved_results=True)}
-Each step uses lane 서버, 저장소, 외부 or 화면. Tables, services and externals require their own evidence.
+{'Omit request steps; those are analyzed only when explicitly requested.' if overview else 'Each step uses lane 서버, 저장소, 외부 or 화면.'} Tables, services and externals require their own evidence.
 For a route whose path or mount comes from other lines (router include, prefix, base path), cite those lines in dependencies.
 {mode_text(commit,sc)}
 Return exactly one JSON object with this schema (examples are illustrative, do not copy them):
-{json.dumps(SCHEMA,ensure_ascii=False)}'''
+{json.dumps(analysis_schema(overview),ensure_ascii=False)}'''
 
 def mode_text(commit,sc):
     sc=sc or {'mode':'full','base':''};base=f'Always put "base": "{sc["base"]}" in the result.'
@@ -392,11 +397,11 @@ def scope(repo,raw,branch,lang,head,configuration,flag=None):
         if mode=='patch':
             changed,deleted,inspect=changes(path,prev['commit'],head)
             # Existing collector knowledge widens the cited files; it never narrows them.
-            for r in basic['backend_routes']:collected.setdefault((r['method'],r['path']),set()).update([r['file'],*r.get('services',[])])
+            for r in basic['backend_routes']:collected.setdefault((r['method'],r['path'],r['file'],r.get('function')),set()).update([r['file'],*r.get('services',[])])
             for s in basic['screens']:collected.setdefault(s['path'],set()).update([s.get('file'),*s['dependency_files']])
         for kind,items in (('route',routes),('screen',screens)):
             for item in items:
-                files=item_files(item,functions)|collected.get((item.get('method'),item.get('path')) if kind=='route' else item.get('path'),set())
+                files=item_files(item,functions)|collected.get((item.get('method'),item.get('path'),item.get('file'),item.get('function')) if kind=='route' else item.get('path'),set())
                 why='dependency_changed' if files&changed else None if literal_ok(item,evidence,functions) else 'evidence_changed'
                 if why:recheck.append({'id':item['id'],'kind':kind,'file':item.get('file'),'method':item.get('method'),'path':item.get('path'),'function':item.get('function'),'reason':why})
     public={'mode':mode,'reason':reason,'recheck':recheck,'inspect':inspect,'deleted':deleted,'base_commit':prev.get('commit') if mode=='patch' else None}
@@ -575,7 +580,7 @@ def carry_unchanged(m,repo,head):
     for route in m.get('backend_routes',[]):stamp(route.get('flow'))
     return True
 
-def request(name,branch='dev',lang='ko',repository=''):
+def request(name,branch='dev',lang='ko',repository='',overview=False):
     if lang not in ('ko','en'):raise ValueError('Choose ko or en')
     with project.locked(name):
         repo,raw,rid,commit=context(name,repository,branch)
@@ -604,7 +609,7 @@ def request(name,branch='dev',lang='ko',repository=''):
         return {'commit':commit,'record_arguments':arguments,'repository_path':repo['path'],
                 'result_before':[{'task':task,'before':results[task]} for task in ('analysis','system')],
                 'source_arguments':{'project':name,'repository':rid,'branch':branch,'commit':commit},**sc,
-                'prompt':analysis_prompt(commit,lang,repo['layout'],sc),'schema':SCHEMA,'handoff':handoff}
+                'prompt':analysis_prompt(commit,lang,repo['layout'],sc,overview),'schema':analysis_schema(overview),'handoff':handoff}
 
 def source(name,repository,commit,file='',start=1,limit=200,branch='dev'):
     if not re.fullmatch(r'[0-9a-f]{40}|[0-9a-f]{64}',commit):raise ValueError('Use the full commit from analyze')
@@ -732,7 +737,7 @@ def task_context(name,task,branch,repository):
         raise ValueError('Map commit changed; refresh or analyze the map first')
     return repo,raw,rid,commit
 
-def task_request(name,task,branch='dev',lang='ko',repository='',target=''):
+def task_request(name,task,branch='dev',lang='ko',repository='',target='',overview=False):
     if lang not in ('ko','en'):raise ValueError('Choose ko or en')
     with project.locked(name):
         repo,raw,rid,commit=task_context(name,task,branch,repository)
@@ -745,6 +750,12 @@ def task_request(name,task,branch='dev',lang='ko',repository='',target=''):
             'system':'Describe separately running programs, users, stores and copied code, their connections and external services. Each node, link, external and other item needs ev evidence. Give repository-relative code directories for each program. Include jobs for every program with repository code, including the API server and frontend: explain its purpose, trigger and steps with evidence within its code directories. made_by evidence may link supplied route keys only when supported by source. Keep existing node IDs for the same program. Use jobs:[] only when no jobs can be established and explain missing knowledge in unknown. Keep unknown operational facts in unknown. Do not invent nodes, jobs or connections. When changed_files is a list, read those changes first: if none adds, removes or changes a program, connection, store or external service, return only {"keep":"all","accounted":[{"file":path,"kind":"none"} for every changed file]}; otherwise return the full schema.',
             'jobs':'Describe jobs of the selected node. When the code establishes none, return jobs:[] with unknown explaining why. Trigger and step evidence must be within its code directories. made_by evidence identifies server code that creates the trigger; attach existing route keys only when the relation is supported. Unresolved producers stay unknown; never infer a relation from a shared table name alone.',
             'steps':'Describe ordered request steps for the supplied route keys only. Each step needs its own file, exact line and quote. Include service calls and return values, mark uncertain interpretation. Keep route keys unchanged.'}[task]
+        schema=copy.deepcopy(TASK_SCHEMAS[task])
+        if overview and task=='system':
+            schema['nodes'][0].pop('jobs',None)
+            start=rules.index('Include jobs for every program')
+            end=rules.index('Keep unknown operational facts')
+            rules=rules[:start]+'Keep existing node IDs for the same program. Omit program jobs; these require an explicit request. '+rules[end:]
         prompt=(f'Produce {task} for commit {commit}. {rules}\nUse analysis_source with source_arguments for immutable source reads; never launch another AI CLI, execute application code or edit files. '
                 f'Use {"English" if lang=="en" else "Korean"} for names and explanations; keep identifiers unchanged. '
                 'Evidence must use tracked relative file paths, exact one-based lines and literal single-line quotes of at least 6 characters. Text matching does not establish semantic correctness. '
@@ -759,7 +770,7 @@ def task_request(name,task,branch='dev',lang='ko',repository='',target=''):
         results=project.analysis_results(raw,branch)
         before=([{'task':task,'key':key,'before':results[task].get(key)} for key in (inputs['routes'] if task=='steps' else [target])]
                 if task in ('steps','jobs') else [{'task':task,'before':results[task]}])
-        return {'commit':commit,'input':inputs,'prompt':prompt,'schema':TASK_SCHEMAS[task],'handoff':handoff,
+        return {'commit':commit,'input':inputs,'prompt':prompt,'schema':schema,'handoff':handoff,
                 'result_before':before,
                 'record_arguments':args,'source_arguments':{'project':name,'repository':rid,'branch':branch,'commit':commit}}
 
@@ -982,7 +993,7 @@ PLAN_TEXT={
        'now':'Tasks needed now and reference values:','tail':'A failed task leaves saved results intact; report which task failed and why. When all are done, tell the user to return to the app, which reads the saved results. Do not call refresh to display the result.'}}
 READ_ERRORS=(ValueError,subprocess.CalledProcessError,OSError)
 
-def plan(name,branch='dev',lang='ko',repository=''):
+def plan(name,branch='dev',lang='ko',repository='',overview=False):
     """Only missing or outdated analysis, for the connected agent to repeat after each save. Reads only."""
     import briefing
     if lang not in ('ko','en'):raise ValueError('Choose ko or en')
@@ -1010,6 +1021,10 @@ def plan(name,branch='dev',lang='ko',repository=''):
             # Dependents are known only after the new map is saved; the agent re-plans then.
             add('analysis',res['analysis']);tasks[-1].update(mode=req['mode'],reason=req['reason'],recheck_count=len(req['recheck']),inspect_count=len(req['inspect']))
             add('system',res['system']);add('groups',res['groups']);continue
+        if overview:
+            if not fresh(res['system']):add('system',res['system'])
+            if any(not s.get('redirect') for s in m.get('screens',[])) and not fresh(res['groups']):add('groups',res['groups'])
+            continue
         proposal=(sel.get('system.ai') or {}).get('source')=='ai'
         nodes=(sel.get('system.ai') if proposal else sel.get('system') or {}).get('nodes',[])
         human={n.get('id'):n.get('code') for n in (sel.get('system') or {}).get('nodes',[])} if proposal else None
@@ -1029,15 +1044,16 @@ def plan(name,branch='dev',lang='ko',repository=''):
         keys=[r['file']+'::'+r['function'] for r in m.get('backend_routes',[]) if r.get('mounted') and r.get('function')]
         keys=[k for k in dict.fromkeys(keys) if not fresh(res['steps'].get(k))]
         if keys:add('steps',{k:res['steps'].get(k) for k in keys},'@routes:'+json.dumps(keys,ensure_ascii=False))
-    try:
-        view=briefing.view(name,repository,branch,lang)
-        if view.get('input_hash'):pins['@briefing']={'input_hash':view['input_hash']}
-        # A new window without collected changes is not a reason to explain again.
-        if view['state'] in ('not_analyzed','stale') and (view.get('input') or {}).get('has_changes'):
-            b=briefing.request(name,repository,branch,lang)
-            tasks.append({'repository':repository,'task':'briefing','target':'','before':b['result_before'][0]['before'],'commit':b['commit'],'input_hash':b['record_arguments']['input_hash']})
-        elif view['state']=='needs_collection':skipped.append({'repository':repository,'task':'briefing','reason':'needs_collection'})
-    except READ_ERRORS as error:blocked.append({'repository':repository,'task':'briefing','reason':str(error)})
+    if not overview:
+        try:
+            view=briefing.view(name,repository,branch,lang)
+            if view.get('input_hash'):pins['@briefing']={'input_hash':view['input_hash']}
+            # A new window without collected changes is not a reason to explain again.
+            if view['state'] in ('not_analyzed','stale') and (view.get('input') or {}).get('has_changes'):
+                b=briefing.request(name,repository,branch,lang)
+                tasks.append({'repository':repository,'task':'briefing','target':'','before':b['result_before'][0]['before'],'commit':b['commit'],'input_hash':b['record_arguments']['input_hash']})
+            elif view['state']=='needs_collection':skipped.append({'repository':repository,'task':'briefing','reason':'needs_collection'})
+        except READ_ERRORS as error:blocked.append({'repository':repository,'task':'briefing','reason':str(error)})
     text=PLAN_TEXT[lang];scope=json.dumps({'project':name,'repository':repository,'branch':branch,'lang':lang},ensure_ascii=False)
     lines=[f"- {t['repository'] or name} · {t['task']}"+(f" · target {t['target']}" if t['target'] else '')+
            (f" · input_hash {t['input_hash']}" if t['task']=='briefing' else f" · commit {t['commit']} · configuration {t['configuration']}") for t in tasks]

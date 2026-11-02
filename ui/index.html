@@ -296,6 +296,9 @@ Object.assign(UI_EN, {
   '설정에서 고른 기준 시각 뒤에 달라진 것이 여기에 쌓입니다.':'Changes since your selected baseline appear here.',
   '설정에서 고른 기준으로 변경 내역을 기록합니다. 마지막 새로고침 ':'Changes use your selected baseline. Last refresh: ',
   '이후':'onward', '선택한 기준 이후 달라진 것 없음':'No changes since the selected baseline',
+  '선택한 서버 요청의 과정만 분석합니다.':'Analyze only the selected server requests.',
+  '선택한 프로그램의 하는 일만 분석합니다.':'Analyze only the selected program’s jobs.',
+  '이 프로그램이 하는 일 알아보기':'Analyze this program’s jobs',
   '아직 하는 일이 분석되지 않았습니다.':'Program jobs have not been analyzed yet.',
   '코드에서 확인된 하는 일이 없습니다.':'No jobs were established from the code.',
   '지정한 시각은 새로고침해도 유지됩니다. 시작점을 옮기려면 이 설정에서 날짜·시각을 바꾸세요.':'The selected time stays fixed when you refresh. Change the date and time here to move the comparison start.',
@@ -595,12 +598,12 @@ function renderPendingActions() {
     if (pendingActions.has(command)) show(text); else if ($(log).textContent === text && !Object.keys(ACTION_UI).some(c => pendingActions.has(c) && ACTION_UI[c][1] === log)) show('');
   }
 }
-async function invokeAction(command, args) {
+function analysisCalls(command, args) {
   let calls = [args];
   if (S.projectInfo?.repositories?.length && !['briefing_request','analysis_plan'].includes(command)) {
     if (command === 'make_steps') {
       const by = new Map();
-      for (const row of requests(M(),args.screen)) {
+      for (const row of (args.screen.startsWith('@routes:') ? M().backend_routes.filter(r=>JSON.parse(args.screen.slice(8)).includes(r.file+'::'+r.function)).map(route=>({route})) : requests(M(),args.screen))) {
         const rid=row.route.repository; if (!by.has(rid)) by.set(rid,[]);
         by.get(rid).push(row.route.file.slice(rid.length+1)+'::'+row.route.function);
       }
@@ -615,6 +618,10 @@ async function invokeAction(command, args) {
       if (args.node) calls[0].node=args.node.slice(rid.length+2);
     }
   }
+  return calls;
+}
+async function invokeAction(command,args) {
+  const calls=analysisCalls(command,args);
   if (pendingActions.has(command)) return;
   pendingActions.add(command); renderPendingActions();
   try { if(command==='analysis_plan')return await invoke(command,{...args,repository:args.repository==='*'?'':args.repository});const responses=[];for(const call of calls){const result=JSON.parse(await invoke(command,call));responses.push({...result,repository:result.record_arguments?.repository || call.repository || ''});}return JSON.stringify({handoff:responses.map(r=>r.handoff).join('\n\n'),requirements:responses.flatMap(r=>(r.result_before || []).map(item=>({...item,repository:r.repository,commit:r.commit})))}); }
@@ -630,11 +637,13 @@ function analysisRequestError(error) {
 }
 // silent: prepared after refresh without opening the panel or touching the clipboard.
 async function requestAgentAction(command,extra={},silent=false) {
+  if(!silent)S.analysisChoice={...S.analysisChoice,task:command,detailTarget:extra.screen || extra.node || '',targets:null,target:extra.repository ?? analysisTarget()};
   const scope={project:S.project,repository:S.repository,branch:S.branch,lang:S.lang}, token=S.loadToken;
   const current=()=>token===S.loadToken && Object.keys(scope).every(key=>scope[key]===S[key]);
   try {
     const request=JSON.parse(await invokeAction(command,{...scope,...extra}));
     if(!current())return;
+    if(!silent && ['make_steps','make_jobs'].includes(command))S.analysisChoice.targets=analysisCalls(command,{...scope,...extra}).map(a=>({repository:a.repository || '',target:a.screen || a.node}));
     // A request already pasted into the AI chat keeps its result check.
     const old=S.analysisRequest;
     if(silent && old?.copied && Object.keys(scope).every(key=>old.scope?.[key]===scope[key]) && !['saved','proposal','up_to_date'].includes(old.state))return request;
@@ -661,24 +670,26 @@ function analysisButtonText() {
 }
 // 고른 코드가 지금 연결된 코드가 아니면(연결을 바꿨을 때) 고르지 않은 것으로 본다.
 const analysisTarget = () => { const t=S.analysisChoice?.target || ''; return t==='*' || S.projectInfo?.repositories?.some(r=>r.id===t) ? t : ''; };
-function openAnalysisPanel(task=null,target=analysisTarget()) {
-  S.agentPurpose='analysis';S.analysisChoice={target,task};
+function openAnalysisPanel(task=null,detailTarget='',target=analysisTarget()) {
+  S.agentPurpose='analysis';S.analysisChoice={target,task,detailTarget,resultContext:{view:S.view,sel:S.sel,open:S.open,focus:S.focus,node:S.node}};
+  if(['make_steps','make_jobs'].includes(task))S.analysisChoice.targets=analysisCalls(task,{repository:S.repository,...(task==='make_steps'?{screen:detailTarget}:{node:detailTarget})}).map(a=>({repository:a.repository || '',target:a.screen || a.node}));
   S.agentPrompt=activeAnalysis()?.handoff ?? '';renderAgentPrompt();$('insp').scrollTop=0;
   if(typeof AnalysisRun!=='undefined')AnalysisRun.open();
 }
 function analysisChooser(collapsed=false) {
   const repos=S.projectInfo?.repositories || [],choice={task:S.analysisChoice?.task ?? null,target:analysisTarget()},needsCode=repos.length>1 && !S.repository;
   const briefing=S.briefings?.[S.branch]?.[S.lang],briefingReady=briefing && !['needs_collection','no_changes'].includes(briefing.state);
-  const target=needsCode ? `<label class="kv">${tr('분석할 코드')} <select id="analysisTarget"><option value="">${tr('코드 선택')}</option>${repos.map(r=>`<option value="${esc(r.id)}" ${choice.target===r.id?'selected':''}>${esc(r.name || r.id)}</option>`).join('')}<option value="*" ${choice.target==='*'?'selected':''}>${tr('연결한 코드 전체')}</option></select></label>${choice.task && !choice.target ? `<p role="status">${tr('어느 코드를 분석할지 고르세요.')}</p>` : ''}`
+  const target=needsCode ? `<label class="kv">${tr('분석할 코드')} <select id="analysisTarget"><option value="">${tr('코드 선택')}</option>${repos.map(r=>`<option value="${esc(r.id)}" ${choice.target===r.id?'selected':''}>${esc(r.name || r.id)}</option>`).join('')}<option value="*" ${choice.target==='*'?'selected':''}>${tr('연결한 코드 전체')}</option></select></label>${choice.task && !choice.target && !['make_steps','make_jobs'].includes(choice.task) ? `<p role="status">${tr('어느 코드를 분석할지 고르세요.')}</p>` : ''}`
     : repos.length ? `<p class="s">${tr('분석할 코드')}: ${esc(connectionDisplayName(S.repository || repos[0].id))}</p>` : '';
+  const detail=choice.task==='make_steps' ? ['make_steps','이 동작의 과정 알아보기','선택한 서버 요청의 과정만 분석합니다.'] : choice.task==='make_jobs' ? ['make_jobs','이 프로그램이 하는 일 알아보기','선택한 프로그램의 하는 일만 분석합니다.'] : null;
   const row=([key,name,what])=>{
-    const disabled=key==='analysis_plan' ? false : key==='briefing_request' ? !briefingReady : needsCode && !choice.target;
+    const disabled=key==='analysis_plan' ? false : key==='briefing_request' ? !briefingReady : needsCode && !choice.target && !['make_steps','make_jobs'].includes(key);
     const primary=choice.task===key || key==='analysis_plan' && !choice.task;
     return `<div class="row"><div class="grow"><div class="t">${tr(name)}</div><div class="s">${tr(what)}</div></div><button class="btn ${primary?'primary':'quiet'}" data-analysis-task="${key}" ${disabled || pendingActions.has(key)?'disabled':''}>${tr('AI에게 보낼 요청 만들기')}</button></div>`;};
   // The whole-project request is the normal path; single tasks stay available for explicit re-analysis.
   const advanced=choice.task && choice.task!=='analysis_plan';
   if(collapsed)return `<h3>${tr('다른 분석 요청')}</h3>${target}<div class="group">${ANALYSIS_TASKS.map(row).join('')}</div>`;
-  return `<section class="sect"><h3>${tr(activeAnalysis() ? '다른 분석 요청' : '새 분석 요청')}</h3><p class="s">${tr('이 요청은 복사해 AI 채팅에 전달합니다. 요청을 만들기만 해서는 분석되지 않습니다.')}</p><div class="group">${row(ANALYSIS_TASKS[0])}</div><details ${advanced?'open':''}><summary>${tr('하나씩 다시 분석하기')}</summary>${target}<div class="group">${ANALYSIS_TASKS.slice(1).map(row).join('')}</div><p class="s">${tr('이 동작의 과정은 화면 지도에서 화면을 고른 뒤 요청합니다.')}</p></details></section>`;
+  return `<section class="sect"><h3>${tr(activeAnalysis() ? '다른 분석 요청' : '새 분석 요청')}</h3><p class="s">${tr('이 요청은 복사해 AI 채팅에 전달합니다. 요청을 만들기만 해서는 분석되지 않습니다.')}</p><div class="group">${row(ANALYSIS_TASKS[0])}</div><details ${advanced?'open':''}><summary>${tr('하나씩 다시 분석하기')}</summary>${target}<div class="group">${detail ? row(detail) : ''}${ANALYSIS_TASKS.slice(1).map(row).join('')}</div><p class="s">${tr('이 동작의 과정은 화면 지도에서 화면을 고른 뒤 요청합니다.')}</p></details></section>`;
 }
 function savedAnalysisState(info,request,briefings) {
   const values=(request.requirements || []).map(item=>{
@@ -1023,7 +1034,7 @@ function renderRepositories() {
   $('manageRepositories').onclick = () => editProject(false);
   bar.querySelectorAll('[data-github-repair]').forEach(button=>button.onclick=()=>editGitHubAccount(button.dataset.githubRepair));
   $('analyzeMap').onclick=()=>openAnalysisPanel();
-  bar.querySelectorAll('[data-reanalyze]').forEach(button=>button.onclick=()=>openAnalysisPanel('analysis_request',button.dataset.reanalyze));
+  bar.querySelectorAll('[data-reanalyze]').forEach(button=>button.onclick=()=>openAnalysisPanel('analysis_request','',button.dataset.reanalyze));
   if ($('analyzeMap')) $('analyzeMap').disabled=pendingActions.has('analysis_request');
   // The version buttons live in this bar, so every rebuild (including a failed refresh) labels them again.
   document.querySelectorAll('#branch button').forEach(b => { const on = b.dataset.b === S.branch, bm = S.maps[b.dataset.b]; b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on)); b.disabled = !bm;
@@ -1320,7 +1331,7 @@ function detail(m, s, r) {
       return `<div class="step l${LANE[st.lane] ?? 1} ${cur ? 'cur' : ''} ${off ? 'off' : ''} ${st.uncertain ? 'unsure' : ''}" data-step="${i}"><span class="n">${i || '▶'}</span><div class="grow"><div class="tx">${esc(st.text)}${st.uncertain ? tr(' (코드만으로는 확신 못 함)') : ''}</div>${S.ev === i && !st.start ? `<div class="ev mono">${esc(st.quote)}<br>${zed(m, st.file || rt.file, st.line)}</div>` : ''}</div></div>`; }).join('') +
       ui`<div class="ctl"><button class="btn quiet" id="prev">◀</button><button class="btn quiet" id="next">다음 ▶</button><span>${S.step >= 0 ? `${S.step}/${steps.length - 1}` : tr('한 단계씩 보기')}</span><span class="spacer"></span><span class="ai">AI 설명</span><span>· 인용 코드 일치</span></div>`;
   } else if (f?.unknown) h += `<div class="empty">${tr('코드에서 이 동작의 순서를 확인하지 못했습니다: ')}${esc(f.unknown)}</div>`;
-  else h += ui`<div class="empty">누르면 생기는 일의 순서는 아직 분석하지 않았습니다.</div>${s.path ? ui`<div class="ctl"><button class="btn quiet" data-mk>이 동작의 과정 알아보기</button></div>` : ''}`;
+  else h += ui`<div class="empty">누르면 생기는 일의 순서는 아직 분석하지 않았습니다.</div>${r.key ? ui`<div class="ctl"><button class="btn quiet" data-mk="${esc(r.key)}">이 동작의 과정 알아보기</button></div>` : ''}`;
   for (const { node, job, exact } of jobsOf(r.key)) h += ui`<div class="sect"><h4>이 요청 뒤에 ${esc(node.name)}이 이어서 하는 일${exact ? '' : tr(' (연결 관계는 추정)')}</h4><div class="tw"><b class="strong">${esc(job.name)}</b> ${esc(job.what)}</div><div class="s">시작: ${esc(job.starts_when)}</div>${job.steps.map((st, i) => `<div class="step l${st.lane === '저장소' ? 2 : st.lane === '외부' ? 3 : 1}"><span class="n">${i + 1}</span><div class="grow"><div class="tx">${esc(st.text)}</div><div class="s">${zed(m, st.file, st.line)}</div></div></div>`).join('')}</div>`;
   h += ui`<details><summary>연결된 코드</summary><div class="kv mono">${esc(rt.method)} ${esc(rt.path)}</div><div class="kv">화면 쪽 ${zed(m, r.fn.file, r.call.line)} · 서버 쪽 ${zed(m, rt.file, rt.line)} <span class="mono">${esc(rt.function)}</span></div>
     <div class="kv">${(rt.tests || []).length ? ui`테스트 연결 ${rt.tests.length}개: <span class="mono">${rt.tests.map(t => esc(t.split('/').pop())).join(', ')}</span>` : ui`<b>테스트 코드가 안 보인다면?</b> 지도는 정해 둔 규칙으로만 테스트를 잇습니다. 요청을 AI에게 보내면 테스트를 찾아 규칙을 고치거나 하나씩 기록하고, 확인하려고 새로고침할 수 있습니다. <button class="btn quiet" data-repository="${esc(rt.repository || '')}" data-tp="${esc(rt.method + ' ' + rt.path + ' (' + rt.file + '::' + rt.function + ')')}">AI에게 테스트 찾기 요청</button><span id="tpDone"></span>`}</div></details>
@@ -1372,6 +1383,7 @@ function sysInspector(m) {
   if ((n.uses || []).length) h += ui`<div class="sect"><h4>쓰는 바깥 서비스</h4><div class="flowline">${n.uses.map(u => `<span class="pill">${esc(y.externals.find(x => x.id === u).name)}</span>`).join('')}</div></div>`;
   const jn = S.jobs && S.jobs.nodes[n.id];
   if (n.kind === 'program') h += ui`<div class="sect"><h4>하는 일 ${jn ? jn.jobs.length : ''}</h4>${jn?.jobs.length ? `<div class="group">${jn.jobs.map(j => ui`<div class="row"><div class="grow"><div class="tw"><b class="strong">${esc(j.name)}</b> ${esc(j.what)}</div><div class="s">시작: ${esc(j.starts_when)}${j.routes.length ? ui` · 이 일을 시작하게 하는 서버 기능 ${j.routes.length}` : ''}</div></div></div>`).join('')}</div>` : `<p class="empty">${tr(jn ? '코드에서 확인된 하는 일이 없습니다.' : '아직 하는 일이 분석되지 않았습니다.')}</p>`}</div>`;
+  if(n.kind==='program' && n.code?.length && !S.showProposal)h+=`<div class="ctl"><button class="btn quiet" id="makeProgramJobs">${tr('이 프로그램이 하는 일 알아보기')}</button></div>`;
   const prs = n.code ? [...((S.status || {}).open_prs || []).map(p => ({ ...p, o: 1 })), ...((S.status || {}).merged_prs || [])].filter(p => p.files.some(f => ownerOf(f) === n)) : [];
   if (prs.length) h += ui`<div class="sect"><h4>이 프로그램의 코드를 건드린 PR ${prs.length} (열린 것과 최근 7일 병합)</h4><div class="group">${prs.slice(0, 8).map(p => `<div class="row click" data-url="${esc(p.url)}"><div class="grow"><div class="t">#${p.number} ${esc(p.title)}</div><div class="s">${p.o ? tr('열린 PR') : tr('병합 ') + ago(p.merged_at)}</div></div><span class="chev">↗</span></div>`).join('')}${prs.length > 8 ? ui`<div class="row"><div class="grow empty">${prs.length - 8}개 더</div></div>` : ''}</div></div>`;
   if ((n.copies || []).length) h += ui`<div class="sect"><h4>사본 ${n.copies.length}</h4><div class="group">${n.copies.map(c => { const d = c.files.filter(f => !f.same); return ui`<div class="row"><div class="grow"><div class="tw mono">${esc(c.branch)}</div><div class="s">이 코드의 파일 ${c.files.length}개가 들어 있고 ${d.length}개가 ${esc(c.against)}의 판과 다릅니다</div>${d.map(f => `<div class="s mono">${esc(f.path)}</div>`).join('')}</div></div>`; }).join('')}</div></div>`;
@@ -1731,8 +1743,9 @@ function render() {
     catch { $('tpDone').innerHTML = ' ' + esc(tr('복사하지 못했습니다. 다시 시도하거나 안내를 열어 직접 복사하세요.')) + helpDetails(`<pre class="prompt mono">${esc(text)}</pre>`, '요청 내용 보기'); } });
   document.querySelectorAll('[data-copy]').forEach(b => b.onclick = () => copy(copyText(m, s, rows.find(x => x.key === b.dataset.copy)), b));
   document.querySelectorAll('[data-confirm-link]').forEach(b => b.onclick = () => editProject(false, { link: b.dataset.confirmLink.split('|') }));
-  if ($('mk')) $('mk').onclick=()=>openAnalysisPanel();
-  document.querySelectorAll('[data-mk]').forEach(b => b.onclick = () => openAnalysisPanel());
+  if ($('mk')) $('mk').onclick=()=>openAnalysisPanel('make_steps',S.sel);
+  document.querySelectorAll('[data-mk]').forEach(b => b.onclick = () => openAnalysisPanel('make_steps','@routes:'+JSON.stringify([b.dataset.mk])));
+  if ($('makeProgramJobs')) $('makeProgramJobs').onclick=()=>openAnalysisPanel('make_jobs',S.node);
   if ($('regroup')) $('regroup').onclick=()=>openAnalysisPanel('suggest_groups');
   renderPendingActions();
   if (S.agentPrompt != null) renderAgentPrompt();
@@ -1801,7 +1814,7 @@ function renderAgentPrompt() {
   if($('viewAnalysisProposal'))$('viewAnalysisProposal').onclick=()=>{S.agentPrompt=null;S.showProposal=true;S.view='sys';render();};
   if($('viewAnalysisResults'))$('viewAnalysisResults').onclick=()=>{S.agentPrompt=null;S.showProposal=request.state.startsWith('proposal');S.view=request.command==='analysis_plan'?(request.requirements.some(r=>['analysis','system'].includes(r.task))?'sys':request.requirements.some(r=>r.task==='groups')?'feat':'changes'):request.command==='briefing_request'?'changes':request.command==='make_system' || request.command==='analysis_request'?'sys':request.command==='suggest_groups'?'feat':S.view;render();};
   if($('analysisTarget'))$('analysisTarget').onchange=e=>{S.analysisChoice={...S.analysisChoice,target:e.target.value};renderAgentPrompt();};
-  document.querySelectorAll('[data-analysis-task]').forEach(b=>b.onclick=()=>{const key=b.dataset.analysisTask;S.analysisChoice={...S.analysisChoice,task:key};requestAgentAction(key,!['briefing_request','analysis_plan'].includes(key) && $('analysisTarget')?{repository:analysisTarget()}:{});});
+  document.querySelectorAll('[data-analysis-task]').forEach(b=>b.onclick=()=>{const key=b.dataset.analysisTask;S.analysisChoice={...S.analysisChoice,task:key};requestAgentAction(key,{...(!['briefing_request','analysis_plan'].includes(key) && $('analysisTarget')?{repository:analysisTarget()}:{}),...(key==='make_steps'?{screen:S.analysisChoice.detailTarget}:key==='make_jobs'?{node:S.analysisChoice.detailTarget}:{})});});
   if($('analyzeMap'))$('analyzeMap').textContent=analysisButtonText();
 }
 $('agent').onclick = async () => { S.agentPurpose='setup';S.agentPromptError=null;try { S.agentPrompt = await invoke('setup_prompt', {lang: S.lang}); } catch (e) { S.agentPrompt = '';S.agentPromptError=String(e); } renderAgentPrompt(); };

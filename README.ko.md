@@ -45,9 +45,9 @@ GitHub 연결은 원격 기본 브랜치를, 기존 폴더는 커밋된 코드�
 
 **AI로 자세한 지도 만들기**에서 설치된 Claude Code의 로그인 계정과 사용량 안내를 확인한 뒤 **Claude Code로 분석 시작**을 누를 수 있습니다. 이 첫 자동 실행 경로는 Claude 구독 로그인과 앱이 요구하는 실행 옵션을 지원하는 최신 CLI가 필요합니다. API 키·다른 제공자 인증은 이 경로에서 지원하지 않습니다. Codex 등 다른 MCP 에이전트는 아래의 요청 복사 방식으로 계속 사용할 수 있습니다.
 
-앱이 준비·분석·저장 상태와 현재 작업을 표시하고, 검증된 결과를 저장한 뒤 화면에 읽습니다. 취소하거나 실패해도 앞서 저장한 결과는 유지되며 **현재 코드로 다시 시도**는 새 코드 기준으로 남은 분석을 요청합니다. 앱을 다시 열면 실행 상태를 확인할 수 있습니다. 일반 새로고침이나 이 화면을 여는 것만으로 AI를 실행하지 않습니다.
+첫 자동 분석은 전체 지도·서비스 구성·화면 묶음을 만듭니다. 동작 과정과 프로그램이 하는 일은 각각의 상세 버튼을 누를 때만 분석하며, 변경 설명도 따로 요청합니다. 저장한 작업 수와 입력 호출·조각 처리 수는 구분해 표시합니다. 취소하거나 실패해도 앞서 저장한 결과는 유지되며 **현재 코드로 다시 시도**는 선택한 작업·대상을 유지하고 새 코드 기준으로 남은 분석을 요청합니다. 앱을 다시 열면 실행 상태를 확인할 수 있습니다. 일반 새로고침이나 이 화면을 여는 것만으로 AI를 실행하지 않습니다.
 
-자동 실행은 고정 커밋의 텍스트와 수집 근거를 Claude에 전달합니다. 크기 제한을 넘으면 오류를 표시하므로 코드 하나를 선택하거나 기존 MCP 요청 방식을 사용하세요. 실행 중 코드·설정·근거가 바뀌면 저장을 거부합니다. 결과를 읽을 때 변경 비교 기준을 옮기거나 PR을 다시 수집하지 않습니다. 실행 중에는 앱 업데이트를 기다려야 합니다. CLI의 조직 관리 정책은 계속 적용됩니다.
+자동 실행은 고정 커밋의 코드와 분석 자료를 나눠 전달하며, 한 번의 입력은 JSON 등을 포함해 131,072바이트 이하입니다. 부분 변경에는 영향받은 코드를 전달하고, 첫 서비스 구성 분석은 검증된 지도와 수집 자료를 재사용하며 부족한 코드만 추가로 읽습니다. 바뀌지 않은 결과는 AI를 다시 호출하지 않습니다. 작업 하나의 입력 조각과 결과를 모두 검증한 뒤 한 번 저장하며, 한도에 맞출 수 없는 입력은 오류로 알립니다. 실행 중 코드·설정·근거가 바뀌면 저장을 거부합니다. 결과를 읽을 때 변경 비교 기준을 옮기거나 PR을 다시 수집하지 않습니다. 실행 중에는 앱 업데이트를 기다려야 합니다. CLI의 조직 관리 정책은 계속 적용됩니다.
 
 ### MCP 에이전트에 요청 전달
 
@@ -158,22 +158,18 @@ open -a TextEdit ~/.where-were-we/.app-update.log
 
 [라이선스](LICENSE)는 조건에 따라 개인·회사 내부 사용과 무료 재배포를 허용하며, 유료 제품·외부 유료 서비스를 제한합니다. 별도의 소스 공개 라이선스이며, 제삼자 구성 요소에는 각각의 라이선스가 적용됩니다.
 
-**v0.9.0 릴리즈 노트**
+**v0.10.0 릴리즈 노트**
 
 ### 한국어
 
-- **AI로 자세한 지도 만들기**에서 **Claude Code로 분석 시작**을 누르면 설치된 Claude Code로 분석을 실행하고, 끝나면 저장된 결과를 화면에 보여 줍니다. 실행 전에 어느 Claude 계정의 사용량을 쓰는지 표시합니다. Claude 구독 로그인이 필요하며 API 키 로그인은 지원하지 않습니다.
-- 실행 중에는 준비·분석·저장 상태와 지금 하는 작업이 보이고 취소할 수 있습니다. 취소하거나 실패해도 앞서 저장한 결과는 남고, **현재 코드로 다시 시도**로 남은 분석을 요청합니다. 실행 중 코드나 설정이 바뀌면 그 결과는 저장하지 않습니다.
-- 분석을 요청하는 버튼은 이제 바로 요청을 만들지 않고 분석 화면을 엽니다. 요청을 복사해 Codex 등 다른 MCP 에이전트에 전달하는 방식은 그 화면에서 계속 쓸 수 있습니다.
-- 버전·업데이트 화면에서 릴리즈 노트의 제목·목록·굵은 글씨가 서식대로 보이고, 업데이트를 마친 뒤에는 "업데이트가 완료되었습니다"만 표시합니다.
-- 붙어 있던 버튼 사이에 간격을 두고, 업데이트·AI 연결·연결 진단·프로젝트 화면에서 설명을 버튼보다 먼저 보여 줍니다.
+- 큰 파일과 저장소의 앱 분석 입력을 나누어 처리해, 전체 소스 크기 때문에 `source_too_large`로 중단되던 경로를 고쳤습니다. 각 요청의 입력 크기를 제한하고 필요한 소스만 추가로 읽습니다.
+- 첫 분석은 전체 지도·서비스 개요·화면 그룹을 만듭니다. 동작 단계와 프로그램 작업은 해당 상세 버튼에서 선택한 대상만 분석하며, 변경 설명도 별도로 요청합니다.
+- 진행 화면은 저장한 작업과 입력 호출·처리한 입력 단위를 구분합니다. 다시 시도할 때 선택한 작업과 대상을 유지하고, 저장한 결과를 해당 화면에서 엽니다.
 
 ### English
 
-- In **Detail the map with AI**, choose **Start analysis with Claude Code** to run the analysis with your installed Claude Code; the saved result shows when it finishes. Before it runs, the app shows whose Claude account and usage are used. It needs a Claude subscription login; API-key sign-in is not supported.
-- While it runs you see preparing, analyzing and saving, plus the current task, and you can cancel. Results saved before a cancel or failure stay; **Retry with current code** asks for the remaining analysis. If the code or settings change during a run, its result is not saved.
-- Buttons that request analysis now open the analysis panel instead of preparing a request right away. Copying the request to Codex or another MCP agent still works from that panel.
-- In Version & updates, release-note headings, lists and bold text are formatted, and after an update only "Update completed." is shown.
-- Buttons that touched now have space between them, and the update, AI connection, connection check and project screens put the explanation before the buttons.
+- App analysis now splits large files and repositories into bounded inputs, fixing the path that stopped with `source_too_large` because of total source size. Each request has an input limit and reads additional source only when needed.
+- The first analysis builds the whole map, service overview, and screen groups. Action steps and program jobs analyze only the targets selected from their detail buttons; change explanations are also requested separately.
+- Progress distinguishes saved tasks from input calls and covered input units. Retrying preserves the chosen task and targets, and saved results open in their corresponding view.
 
 [전체 릴리즈](https://github.com/ganggangstone/where-were-we/releases) · [설정과 구현 상세](docs/MULTI_REPO_SPEC.md)

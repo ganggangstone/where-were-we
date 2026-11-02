@@ -234,6 +234,8 @@ async fn analysis_plan(app: tauri::AppHandle, project: String, branch: String, l
 
 #[derive(serde::Deserialize)]
 struct AnalysisScope {
+    #[serde(default)]
+    intent: Option<serde_json::Value>,
     project: String,
     repository: String,
     branch: String,
@@ -258,7 +260,8 @@ async fn analysis_providers(app: tauri::AppHandle) -> Result<String, String> {
 async fn analysis_run_start(app: tauri::AppHandle, scope: AnalysisScope, expected_account: serde_json::Value) -> Result<String, String> {
     analysis_command(app, vec!["start".into(), scope.project, "--repository".into(), scope.repository,
         "--branch".into(), scope.branch, "--lang".into(), scope.lang, "--executor".into(), "claude".into(),
-        "--expected-account".into(), expected_account.to_string()]).await
+        "--expected-account".into(), expected_account.to_string(), "--intent".into(),
+        scope.intent.unwrap_or_else(|| serde_json::json!({"task":"all","targets":[]})).to_string()]).await
 }
 
 #[tauri::command]

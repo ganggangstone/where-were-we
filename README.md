@@ -45,9 +45,9 @@ The app starts in Korean. Choose **English** in the **Menu** to save your langua
 
 Open **Detail the map with AI**, review the installed Claude Code account and usage notice, then choose **Start analysis with Claude Code**. This first automatic path requires a Claude subscription login and a CLI supporting the app's isolation options. API-key and other-provider authentication are not supported by this adapter. Codex and other MCP agents can still use the manual request workflow below.
 
-The app reports preparation, analysis, saving and the current task, then reads validated saved results. Cancellation or failure retains work already saved; **Retry with current code** pins the current code and requests the remaining analysis. Reopening the app recovers run status. Opening the panel or using ordinary refresh never starts a model run.
+The first app analysis builds the whole map, service overview, and screen groups. Action steps and program jobs run only from their respective detail buttons; change explanations are also explicit requests. The app reports saved tasks separately from input calls and input units. Cancellation or failure retains work already saved; **Retry with current code** pins the current code and preserves the chosen task and targets. Reopening the app recovers run status. Opening the panel or using ordinary refresh never starts a model run.
 
-Automatic execution supplies text from pinned commits and collected evidence to Claude. Oversized inputs fail explicitly; select one repository or use the manual MCP workflow for larger sources. Changed source, configuration or evidence rejects a stale result. Reading results neither recollects PRs nor moves the comparison baseline. App updates wait for active analysis. Organization-managed CLI policy still applies.
+Automatic execution splits pinned source and metadata into bounded inputs, each at most 131,072 encoded bytes. A partial change sends affected source rather than the whole repository again. The first service overview reuses the validated map and collected structure, requesting additional pinned source only when needed. Unchanged results require no model calls. Each task is saved only after all its input units and claims pass validation; an input that cannot fit fails explicitly. Changed source, configuration or evidence rejects a stale result. Reading results neither recollects PRs nor moves the comparison baseline. App updates wait for active analysis. Organization-managed CLI policy still applies.
 
 ### Send a request to an MCP agent
 
@@ -158,24 +158,20 @@ Report bugs or suggest improvements in [Issues](https://github.com/ganggangstone
 
 The [license](LICENSE) permits personal use, internal business use, and free redistribution under its conditions. Paid products and external paid services are restricted. This is a custom source-available license; third-party components retain their own licenses.
 
-**v0.9.0 release notes**
+**v0.10.0 release notes**
 
 <!-- release-notes:start -->
 ### 한국어
 
-- **AI로 자세한 지도 만들기**에서 **Claude Code로 분석 시작**을 누르면 설치된 Claude Code로 분석을 실행하고, 끝나면 저장된 결과를 화면에 보여 줍니다. 실행 전에 어느 Claude 계정의 사용량을 쓰는지 표시합니다. Claude 구독 로그인이 필요하며 API 키 로그인은 지원하지 않습니다.
-- 실행 중에는 준비·분석·저장 상태와 지금 하는 작업이 보이고 취소할 수 있습니다. 취소하거나 실패해도 앞서 저장한 결과는 남고, **현재 코드로 다시 시도**로 남은 분석을 요청합니다. 실행 중 코드나 설정이 바뀌면 그 결과는 저장하지 않습니다.
-- 분석을 요청하는 버튼은 이제 바로 요청을 만들지 않고 분석 화면을 엽니다. 요청을 복사해 Codex 등 다른 MCP 에이전트에 전달하는 방식은 그 화면에서 계속 쓸 수 있습니다.
-- 버전·업데이트 화면에서 릴리즈 노트의 제목·목록·굵은 글씨가 서식대로 보이고, 업데이트를 마친 뒤에는 "업데이트가 완료되었습니다"만 표시합니다.
-- 붙어 있던 버튼 사이에 간격을 두고, 업데이트·AI 연결·연결 진단·프로젝트 화면에서 설명을 버튼보다 먼저 보여 줍니다.
+- 큰 파일과 저장소의 앱 분석 입력을 나누어 처리해, 전체 소스 크기 때문에 `source_too_large`로 중단되던 경로를 고쳤습니다. 각 요청의 입력 크기를 제한하고 필요한 소스만 추가로 읽습니다.
+- 첫 분석은 전체 지도·서비스 개요·화면 그룹을 만듭니다. 동작 단계와 프로그램 작업은 해당 상세 버튼에서 선택한 대상만 분석하며, 변경 설명도 별도로 요청합니다.
+- 진행 화면은 저장한 작업과 입력 호출·처리한 입력 단위를 구분합니다. 다시 시도할 때 선택한 작업과 대상을 유지하고, 저장한 결과를 해당 화면에서 엽니다.
 
 ### English
 
-- In **Detail the map with AI**, choose **Start analysis with Claude Code** to run the analysis with your installed Claude Code; the saved result shows when it finishes. Before it runs, the app shows whose Claude account and usage are used. It needs a Claude subscription login; API-key sign-in is not supported.
-- While it runs you see preparing, analyzing and saving, plus the current task, and you can cancel. Results saved before a cancel or failure stay; **Retry with current code** asks for the remaining analysis. If the code or settings change during a run, its result is not saved.
-- Buttons that request analysis now open the analysis panel instead of preparing a request right away. Copying the request to Codex or another MCP agent still works from that panel.
-- In Version & updates, release-note headings, lists and bold text are formatted, and after an update only "Update completed." is shown.
-- Buttons that touched now have space between them, and the update, AI connection, connection check and project screens put the explanation before the buttons.
+- App analysis now splits large files and repositories into bounded inputs, fixing the path that stopped with `source_too_large` because of total source size. Each request has an input limit and reads additional source only when needed.
+- The first analysis builds the whole map, service overview, and screen groups. Action steps and program jobs analyze only the targets selected from their detail buttons; change explanations are also requested separately.
+- Progress distinguishes saved tasks from input calls and covered input units. Retrying preserves the chosen task and targets, and saved results open in their corresponding view.
 <!-- release-notes:end -->
 
 

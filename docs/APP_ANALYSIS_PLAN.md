@@ -31,16 +31,22 @@ Official references checked 2026-10-29:
 ## Work breakdown
 
 1. **Run coordinator:** persist run identity and project/repository/branch/language
-   scope; pin commit, configuration and briefing input; select the first required
-   task from the existing analysis plan, generate it, validate and save it, then
-   re-plan. Include architecture and program jobs. Keep completed work on failure.
+   scope and explicit task/targets; pin commit, configuration and (only for a
+   requested briefing) collected evidence. The first automatic analysis builds
+   analysis, system overview and screen groups. It omits embedded route steps and
+   program jobs as well as their task queue entries. Detail buttons run only the
+   chosen targets and necessary prerequisites; the public manual MCP plan stays
+   compatible. Re-plan after each save and retain completed work on failure.
 2. **CLI adapter:** discover the executable, check supported options and login,
    supply bounded pinned source and request data via stdin, parse structured
    output, handle authentication/usage limits, timeout and cancellation. Never run
    application code or give the model write access to the map store.
 3. **Native/UI integration:** display provider/account and explicit Start, progress,
    Cancel and Retry; poll scoped run status; read stored results on completion;
-   recover state after reopening. Package both Python modules and the UI script.
+   recover state after reopening without confusing a different task with the
+   selected request. Keep repository-local target IDs when a combined map spans
+   repositories. Show saved tasks separately from input calls, encoded bytes and
+   processed input units. Package both Python modules and the UI script.
 4. **Integration review:** fake executors and temporary repositories cover success,
    invalid evidence, stale sources/configuration, partial progress, cancellation,
    retry and interrupted workers. Check frontend stale-response handling, preserved
@@ -50,15 +56,22 @@ Official references checked 2026-10-29:
 
 Runs use preparing, running, saving, completed, failed and cancelled states. An
 interrupted worker becomes an actionable failed run; retry creates a new pinned
-run. One active run per project prevents overlapping scopes from competing for
+run with the same task and targets. One active run per project prevents overlapping scopes from competing for
 saved snapshots. Cancellation affects only a process launched for that run.
 
 The coordinator checks pins before each task and before recording. Existing
 analysis, task and briefing recorders remain the authority for evidence and stale
 result validation. No refresh is performed to display results. Source prompts,
 credentials and raw provider diagnostic output are not persisted in run metadata.
-Oversized input fails explicitly rather than pretending a truncated source is
-complete. App updates must wait for active analysis workers.
+Source and metadata are split into server-identified units with a hard 131,072-byte
+cap on each complete encoded prompt. Partial changes send affected source and
+necessary prior blobs. The first system overview uses validated map and collected
+structure metadata; missing context uses bounded, pinned source or metadata reads.
+All units and final relationships must validate before one recorder call per task.
+Unrequested details stay absent or retain their existing provenance and freshness;
+empty details are not invented to complete the overview. An unchanged overview
+requires zero model calls, even when details have never been requested. Inputs
+that cannot fit still fail explicitly. App updates wait for active workers.
 
 ## Release verification
 

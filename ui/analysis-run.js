@@ -5,13 +5,20 @@ const AnalysisRun = (() => {
   let run = null, provider = null, providerBusy = false, busy = false, error = null;
   const loaded = new Set();
   const text = (ko, en) => S.lang === 'en' ? en : ko;
-  const scope = () => ({project:S.project, repository:S.repository || '', branch:S.branch, lang:S.lang});
-  const key = () => JSON.stringify([scope(), S.loadToken]);
+  const scope = () => ({project:S.project, repository:['make_steps','make_jobs'].includes(S.analysisChoice?.task) ? '' : (S.analysisChoice?.target || S.repository || '').replace(/^\*$/, ''), branch:S.branch, lang:S.lang});
+  function intent() {
+    const choice=S.analysisChoice || {}, command=choice.task || 'analysis_plan';
+    const task=({analysis_plan:'all',analysis_request:'analysis',make_system:'system',suggest_groups:'groups',make_steps:'steps',make_jobs:'jobs',briefing_request:'briefing'})[command] || 'all';
+    const args={...scope(),...(task==='steps'?{screen:choice.detailTarget}:task==='jobs'?{node:choice.detailTarget}:{})};
+    const targets=['steps','jobs'].includes(task) ? (choice.targets || analysisCalls(command,args).map(a=>({repository:a.repository || '',target:a.screen || a.node}))) : [];
+    return {task,targets};
+  }
+  const key = () => JSON.stringify([scope(), S.analysisChoice, S.loadToken]);
   const decode = value => typeof value === 'string' ? JSON.parse(value) : value;
   const shown = () => S.agentPurpose === 'analysis' && S.agentPrompt != null;
   const current = token => token === epoch && scopeKey === key();
   const active = () => !!run && activeStates.has(run.state);
-  const sameScope = () => !!run && Object.entries(scope()).every(([name,value]) => run[name] === value);
+  const sameScope = () => !!run && Object.entries(scope()).every(([name,value]) => run[name] === value) && JSON.stringify(run.intent || {task:'all',targets:[]})===JSON.stringify(intent());
   const usable = () => provider?.available === true && provider?.authenticated === true && provider?.account && typeof provider.account === 'object';
   function paint() {
     if (shown()) renderAgentPrompt();
@@ -42,7 +49,7 @@ const AnalysisRun = (() => {
       interrupted:['분석이 중단됐습니다. 저장된 결과는 유지됩니다. 다시 시도하면 필요한 분석을 새 코드 기준으로 이어갑니다.','Analysis was interrupted. Saved results are retained. Retry to run the remaining analysis against the current code.'],
       pins_changed:['코드나 설정이 바뀌었습니다. 필요한 경우 새로고침한 뒤 새 분석을 시작하세요.','Code or settings changed. Refresh if needed, then start a new analysis.'],
       source_unavailable:['분석할 코드를 읽지 못했습니다. 코드 연결을 확인한 뒤 새 분석을 시작하세요.','Could not read the selected source. Check the code connection and start a new analysis.'],
-      source_too_large:['분석할 코드가 너무 큽니다. 코드 하나를 선택하거나 범위를 줄인 뒤 다시 시도하세요.','The source is too large. Select one repository or narrow its scope and retry.'],
+      source_too_large:['추가 분석 자료를 한 번의 입력 한도에 맞추지 못했습니다. 저장된 결과는 유지됩니다.','Additional analysis context could not fit one bounded input. Saved results are retained.'],
       already_running:['이 코드의 분석이 이미 준비되거나 실행 중입니다. 상태를 다시 확인하세요.','Analysis is already prepared or running for this code. Check its status again.'],
       invalid_output:['AI 결과의 형식이나 근거를 검증하지 못했습니다. 저장된 결과는 유지됩니다. 다시 시도하세요.','The AI result format or evidence could not be validated. Saved results are retained. Retry the analysis.'],
       invalid_result:['AI 결과를 검증하지 못했습니다. 저장된 결과는 유지됩니다. 다시 시도하세요.','Could not validate the AI result. Saved results are retained. Retry the analysis.'],
@@ -104,7 +111,7 @@ const AnalysisRun = (() => {
     if (command === 'analysis_run_start' && active()) return;
     if (command === 'analysis_run_retry' && (!sameScope() || !['failed','cancelled'].includes(run?.state))) return;
     if (command === 'analysis_run_cancel' && (!active() || run.cancel_requested)) return;
-    const token = epoch, args = command === 'analysis_run_start' ? {scope:scope(), expectedAccount:provider.account} : {runId:run.id};
+    const token = epoch, args = command === 'analysis_run_start' ? {scope:{...scope(),intent:intent()}, expectedAccount:provider.account} : {runId:run.id};
     if (command === 'analysis_run_retry') args.expectedAccount = provider.account;
     revision++; busy = true; error = null; clearTimeout(timer); paint();
     try { await accept(decode(await invoke(command, args)), token); }
@@ -116,18 +123,22 @@ const AnalysisRun = (() => {
     const done = Array.isArray(run?.completed_tasks) ? run.completed_tasks.length : Number(run?.completed_tasks || 0);
     const total = done + (run?.tasks?.length || 0);
     const task = run?.current_task;
+    const batches=run?.batch_progress,stats=run?.input_stats;
+    const names={all:text('지도·서비스 구성·화면 묶음','Map, service overview, screen groups'),analysis:text('지도','Map'),system:text('서비스 구성','Service overview'),groups:text('화면 묶음','Screen groups'),steps:text('동작 과정','Action steps'),jobs:text('프로그램이 하는 일','Program jobs'),briefing:text('변경 설명','Change explanation')};
     const taskName = typeof task === 'string' ? task : task ? [task.repository, text(PLAN_NAMES[task.task] || task.task, ({analysis:'Detailed map',system:'Architecture',groups:'Screen groups',jobs:'Program jobs',steps:'Action steps',briefing:'Change explanation'})[task.task] || task.task)].filter(Boolean).join(' · ') : '';
     const issue = error || run?.error;
     const canStart = usable() && !providerBusy && !busy && !active();
     const runScope = run ? [run.repository ? connectionDisplayName(run.repository) : text('연결한 코드 전체','All connected repositories'),run.branch,run.lang].join(' · ') : '';
     const runAccount = run?.account?.email || run?.account?.id;
     return `<section class="sect" aria-labelledby="appAnalysisHeading"><h3 id="appAnalysisHeading">${text('앱에서 분석','Analyze in the app')}</h3>
-      <p class="s">${text('필요한 분석만 Claude Code로 실행하고 검증한 결과를 저장합니다.','Runs the missing analysis with Claude Code and saves validated results.')}</p>
+      <p class="s">${text('첫 분석은 지도·서비스 구성·화면 묶음을 만듭니다. 동작 과정과 프로그램이 하는 일은 해당 버튼을 누를 때 분석합니다.','First analysis builds the map, service overview, and screen groups. Action steps and program jobs run only when requested from their buttons.')}</p>
+      <p class="s">${text('선택한 분석','Selected analysis')}: ${esc(names[intent().task])}${intent().targets.map(t=>' · '+esc(t.repository)+' · '+esc(t.target)).join('')}</p>
       <p><strong>Claude Code</strong> · ${text('계정','Account')}: ${esc(identity || text('확인되지 않음','Not verified'))}${account?.subscription_type ? ' · '+esc(account.subscription_type) : ''}</p>
       <p class="s">${text('이 컴퓨터에 로그인된 Claude 구독 계정을 사용합니다. 선택한 코드가 Claude에 전송되며 구독 사용량·한도가 적용됩니다. 시작·다시 시도를 누를 때만 AI를 실행합니다.','Uses the Claude subscription signed in on this computer. Selected source is sent to Claude; subscription usage and limits apply. AI runs only when you click Start or Retry.')}</p>
-      <p class="s">${text('분석할 코드','Code to analyze')}: ${esc(S.repository ? connectionDisplayName(S.repository) : text('연결한 코드 전체','All connected repositories'))} · ${esc(S.branch)}</p>
+      <p class="s">${text('분석할 코드','Code to analyze')}: ${esc(scope().repository ? connectionDisplayName(scope().repository) : text('연결한 코드 전체','All connected repositories'))} · ${esc(S.branch)}</p>
       ${providerBusy ? `<p role="status">${text('Claude Code 계정 확인 중…','Checking the Claude Code account…')}</p>` : provider && !usable() ? `<p role="alert">${esc(message(provider))}</p>` : ''}
-      ${run ? `<p class="s">${text('이 분석의 코드','This run analyzes')}: ${esc(runScope)}${runAccount ? ' · '+esc(runAccount) : ''}</p>${!sameScope() ? `<p class="s">${text('이 서비스의 다른 코드·버전·언어에서 시작한 분석입니다. 완료하거나 취소한 뒤 선택한 코드를 분석할 수 있습니다.','This project has analysis started for another code selection, version, or language. Finish or cancel it before analyzing the selected code.')}</p>` : ''}<div role="status" aria-live="polite"><strong>${esc(stateLabel())}</strong> · ${done}/${total} ${text('작업 저장됨','tasks saved')}${taskName ? '<div>'+esc(taskName)+'</div>' : ''}</div><progress max="${Math.max(total, 1)}" value="${done}" aria-label="${text('분석 진행률','Analysis progress')}"></progress>${run.blocked?.length ? `<p class="s">${text('먼저 확인할 분석','Analysis requiring attention')}: ${run.blocked.length}</p>` : ''}` : ''}
+      ${run ? `<p class="s">${text('이 분석의 코드','This run analyzes')}: ${esc(runScope)} · ${esc(names[run.intent?.task || 'all'])}${(run.intent?.targets || []).map(t=>' · '+esc(t.repository)+' · '+esc(t.target)).join('')}${runAccount ? ' · '+esc(runAccount) : ''}</p>${!sameScope() ? `<p class="s">${text('다른 작업·대상·코드·버전·언어로 시작한 분석입니다. 진행 중이면 완료하거나 취소한 뒤 선택한 분석을 시작하세요.','This run has a different task, target, code selection, version, or language. If active, finish or cancel it before starting the selected analysis.')}</p>` : ''}<div role="status" aria-live="polite"><strong>${esc(stateLabel())}</strong> · ${done}/${total} ${text('작업 저장됨','tasks saved')}${taskName ? '<div>'+esc(taskName)+'</div>' : ''}</div><progress max="${Math.max(total, 1)}" value="${done}" aria-label="${text('분석 진행률','Analysis progress')}"></progress>${run.blocked?.length ? `<p class="s">${text('먼저 확인할 분석','Analysis requiring attention')}: ${run.blocked.length}</p>` : ''}` : ''}
+      ${stats ? `<p class="s">${text('입력 호출','Input calls')}: ${stats.calls} · ${text('전송한 입력 바이트','Encoded input bytes')}: ${stats.bytes}${batches && active() ? ` · ${text('현재 작업 입력 조각','Current task input units')}: ${batches.completed}/${batches.total}` : ''}</p>` : ''}
       ${issue ? `<p role="alert">${esc(message(issue))}</p>` : ''}
       <div class="ctl">${active() ? `<button class="btn" id="cancelAppAnalysis" ${busy || run.cancel_requested ? 'disabled' : ''}>${text('분석 취소','Cancel analysis')}</button>` : sameScope() && ['failed','cancelled'].includes(run?.state) ? `<button class="btn primary" id="retryAppAnalysis" ${canStart ? '' : 'disabled'}>${text('현재 코드로 다시 시도','Retry with current code')}</button>` : `<button class="btn primary" id="startAppAnalysis" ${canStart ? '' : 'disabled'}>${text('Claude Code로 분석 시작','Start analysis with Claude Code')}</button>`}
       <button class="btn quiet" id="checkAppAnalysis" ${busy || providerBusy ? 'disabled' : ''}>${text('계정·상태 다시 확인','Check account and status')}</button>
@@ -140,7 +151,10 @@ const AnalysisRun = (() => {
     if ($('checkAppAnalysis')) $('checkAppAnalysis').onclick = () => { void providers(); void check(); };
     if ($('viewAppAnalysis')) $('viewAppAnalysis').onclick = async () => {
       const token = epoch;
-      try { await reloadAnalysisOnly(() => current(token)); if (current(token)) { S.agentPrompt = null; S.view = 'sys'; render(); } }
+      try { await reloadAnalysisOnly(() => current(token)); if (current(token)) { S.agentPrompt = null; const task=run.intent?.task || 'all';
+        if(task==='steps')Object.assign(S,S.analysisChoice?.resultContext || {});
+        else S.view=({groups:'feat',briefing:'changes'})[task] || 'sys';
+        render(); } }
       catch { if (current(token)) { error = {code:'result_read_failed'}; paint(); } }
     };
   }

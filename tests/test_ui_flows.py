@@ -57,6 +57,9 @@ window.__TAURI__={core:{invoke:async(command,args)=>{
  if(command==='app_update_status')return null;
  if(command==='control_poll')return null;
  if(command==='control_focus')return null;
+ if(command==='analysis_run_status')return 'null';
+ if(command==='analysis_providers' && window.appAnalysisFixture)return JSON.stringify({providers:[{id:'claude',available:true,authenticated:true,account:{email:'fictional@example.invalid'}}]});
+ if(command==='analysis_run_start' && window.appAnalysisFixture)return window.completeAppAnalysis ? JSON.stringify({...args.scope,id:'fixture-'+calls.length,state:'completed',completed_tasks:[{task:args.scope.intent.task}],tasks:[]}) : 'null';
  if(command==='analysis_plan'){if(window.holdPlan)await window.holdPlan;if(window.failPlan)throw Error('fictional plan failure');return JSON.stringify(window.planResult||{tasks:[],blocked:[],requirements:[],handoff:'',up_to_date:true});}
  if(['analysis_request','make_system','suggest_groups'].includes(command))return JSON.stringify({handoff:'Analyze '+args.repository,commit:'aaaaaaaa1111',record_arguments:{repository:args.repository},result_before:command==='analysis_request'?[{task:'analysis',before:null},{task:'system',before:null}]:[{task:'analysis',before:null}]});
  throw Error('Unexpected native action '+command);
@@ -778,6 +781,57 @@ class Flows(unittest.TestCase):
  assert(S.view==='sys' && S.node==='api::worker','Choosing a result opens it');
  $('q').value='#42';$('q').dispatchEvent(new Event('input'));
  assert([...document.querySelectorAll('[data-search-result]')].some(x=>x.innerText.includes('First list')),'PR numbers find linked screens');
+''')
+
+    def test_reanalysis_server_only_detail_and_result_destinations(self):
+        self.check(r'''
+ window.appAnalysisFixture=true;window.completeAppAnalysis=true;
+ S.projectInfo.repositories.find(r=>r.id==='api').analysis={dev:{stale:true}};renderRepositories();
+ document.querySelector('[data-reanalyze="api"]').click();await wait();
+ await $('startAppAnalysis').onclick();await wait();
+ let sent=calls.filter(c=>c.command==='analysis_run_start').at(-1).args.scope;
+ assert(sent.repository==='api' && sent.intent.task==='analysis','Stale repository button preserves repository');
+ S.agentPrompt=null;S.analysisChoice=null;
+ const route={...M().backend_routes[0],file:'api/app/alone.py',function:'standalone',path:'/alone'};
+ window.mutateBundle=b=>b.dev.backend_routes.push(route);
+ M().backend_routes.push(route);delete M()._ru;
+ setFocus('route|api/app/alone.py::standalone');
+ const detailButton=document.querySelector('[data-mk]');assert(detailButton,'Server-only route has a details control');
+ detailButton.click();await wait();await $('startAppAnalysis').onclick();await wait();
+ sent=calls.filter(c=>c.command==='analysis_run_start').at(-1).args.scope;
+ assert(sent.intent.targets[0].target==='@routes:["app/alone.py::standalone"]','Server-only route stays selected');
+ await $('viewAppAnalysis').onclick();await wait();
+ assert(S.view==='focus' && S.focus.id==='api/app/alone.py::standalone','Saved steps return to selected server context');
+ openAnalysisPanel('suggest_groups');await wait();await $('startAppAnalysis').onclick();await wait();
+ await $('viewAppAnalysis').onclick();await wait();assert(S.view==='feat','Saved groups open features');
+ openAnalysisPanel('briefing_request');await wait();await $('startAppAnalysis').onclick();await wait();
+ await $('viewAppAnalysis').onclick();await wait();assert(S.view==='changes','Saved briefing opens changes');
+''')
+
+    def test_on_demand_app_controls_keep_real_targets_and_translations(self):
+        self.check(r'''
+ // invoke is captured by the real UI, so update its test provider response through a fixture flag.
+ window.appAnalysisFixture=true;
+ S.sel='web::/items';S.view='map';render();
+ $('mk').click();await wait();
+ assert(S.analysisChoice.task==='make_steps' && S.analysisChoice.detailTarget==='web::/items','Screen action keeps target');
+ assert(!calls.some(c=>c.command==='analysis_run_start'),'Opening detail control does not execute');
+ await $('startAppAnalysis').onclick();await wait();
+ let sent=calls.filter(c=>c.command==='analysis_run_start').at(-1).args.scope;
+ assert(sent.intent.task==='steps' && sent.intent.targets.length===1,'One explicit detail task');
+ assert(sent.intent.targets[0].repository==='api' && sent.intent.targets[0].target==='@routes:["app/items.py::save_item"]','Cross-repository server identity remains local');
+ S.agentPrompt=null;S.view='sys';S.node='api::worker';render();
+ assert($('makeProgramJobs').textContent===tr('이 프로그램이 하는 일 알아보기'),'Actual localized jobs control');
+ if(S.lang==='en')assert($('makeProgramJobs').textContent==='Analyze this program’s jobs','English is registered before UI_PATTERN');
+ $('makeProgramJobs').click();await wait();await $('startAppAnalysis').onclick();await wait();
+ sent=calls.filter(c=>c.command==='analysis_run_start').at(-1).args.scope;
+ assert(sent.intent.task==='jobs' && sent.intent.targets[0].repository==='api' && sent.intent.targets[0].target==='worker','Program ID is stripped exactly once');
+ S.agentPrompt=null;openAnalysisPanel();await wait();
+ $('analysisTarget').value='*';$('analysisTarget').dispatchEvent(new Event('change'));
+ await $('startAppAnalysis').onclick();await wait();
+ sent=calls.filter(c=>c.command==='analysis_run_start').at(-1).args.scope;
+ assert(sent.repository==='' && sent.intent.task==='all','All selector is not a repository');
+ assert(S.node==='api::worker','Opening requests preserves selected program');
 ''')
 
     def test_all_code_analysis_asks_which_code_instead_of_failing(self):
