@@ -292,9 +292,22 @@ def _prefix(repo,oid,cancelled=None,deadline=None):
         try:process.wait(timeout=2)
         except subprocess.TimeoutExpired:process.kill();process.wait()
 
-def export_source(repo, commit, commits=None, cancelled=None, deadline=None, selected=None):
-    """Export immutable regular text blobs only. Never inspect the checkout or follow symlinks."""
-    snapshots=[]
+def _blob_lines(repo,oid,cancelled=None,deadline=None):
+    """Numbered lines of a text blob, or the reason it is not text."""
+    if int(_git(repo,'cat-file','-s',oid,text=True))>MAX_FILE_BYTES:
+        prefix=_prefix(repo,oid,cancelled,deadline)
+        try:codecs.getincrementaldecoder('utf-8')().decode(prefix,final=False)
+        except UnicodeDecodeError:return 'binary'
+        if b'\x00' in prefix:return 'binary'
+    try:text=_git(repo,'cat-file','blob',oid).decode('utf-8')
+    except UnicodeDecodeError:return 'binary'
+    if '\x00' in text:return 'binary'
+    return [{'line':i,'text':line} for i,line in enumerate(text.splitlines(),1)]
+
+def export_source(repo, commit, commits=None, cancelled=None, deadline=None, selected=None, blobs=None):
+    """Export immutable regular text blobs only. Never inspect the checkout or follow symlinks.
+    blobs keeps content by object ID for one run; each commit's tree and path rules still decide what is exported."""
+    snapshots=[];blobs={} if blobs is None else blobs
     for pinned in dict.fromkeys([commit,*(commits or [])]):
         _checkpoint(cancelled,deadline)
         entries=_git(repo,'ls-tree','-rz','--full-tree',pinned).split(b'\0')
@@ -311,19 +324,10 @@ def export_source(repo, commit, commits=None, cancelled=None, deadline=None, sel
                 omitted.append({'file':file,'reason':'not_regular_source'});continue
             if PurePosixPath(file).suffix.lower() in BINARY_SUFFIXES:
                 omitted.append({'file':file,'reason':'binary_asset'});continue
-            size=int(_git(repo,'cat-file','-s',oid.decode(),text=True))
-            if size>MAX_FILE_BYTES:
-                prefix=_prefix(repo,oid.decode(),cancelled,deadline)
-                try:codecs.getincrementaldecoder('utf-8')().decode(prefix,final=False)
-                except UnicodeDecodeError:
-                    omitted.append({'file':file,'reason':'binary'});continue
-                if b'\x00' in prefix:
-                    omitted.append({'file':file,'reason':'binary'});continue
-            raw=_git(repo,'cat-file','blob',oid.decode())
-            try: text=raw.decode('utf-8')
-            except UnicodeDecodeError: omitted.append({'file':file,'reason':'binary'});continue
-            if '\x00' in text: omitted.append({'file':file,'reason':'binary'});continue
-            files.append({'file':file,'lines':[{'line':i,'text':line} for i,line in enumerate(text.splitlines(),1)]})
+            lines=blobs.get(oid)
+            if lines is None:lines=blobs[oid]=_blob_lines(repo,oid.decode(),cancelled,deadline)
+            if isinstance(lines,str):omitted.append({'file':file,'reason':lines});continue
+            files.append({'file':file,'lines':lines})
         snapshots.append({'commit':pinned,'files':files,'omitted':omitted})
     return snapshots
 
@@ -333,7 +337,7 @@ def _request(value,task):
     if task['task']=='briefing': return briefing.request(value['project'],task['repository'],value['branch'],value['lang'])
     return ai_extract.task_request(value['project'],task['task'],value['branch'],value['lang'],task['repository'],task.get('target',''),overview=True)
 
-def _payload(value,task,request,cancelled=None,deadline=None):
+def _payload(value,task,request,cancelled=None,deadline=None,blobs=None):
     _checkpoint(cancelled,deadline)
     # Handoff text contains MCP write instructions and is deliberately excluded.
     payload={k:request[k] for k in ('prompt','schema','input','mode','reason','base','inspect','deleted','recheck','known','base_commit') if k in request}
@@ -382,7 +386,7 @@ def _payload(value,task,request,cancelled=None,deadline=None):
         if selected is not None and previous and previous!=head:
             before=ai_extract.tree_blobs(repo['path'],previous);after=ai_extract.tree_blobs(repo['path'],head)
             selected[previous]={f for f in files|set(request.get('deleted',[])) if f in before and before[f]!=after.get(f)}
-        payload['snapshots']=export_source(repo['path'],head,[previous] if previous else [],cancelled,deadline,selected)
+        payload['snapshots']=export_source(repo['path'],head,[previous] if previous else [],cancelled,deadline,selected,blobs)
     return payload
 
 PREAMBLE=('You are an analysis-only JSON producer. Return exactly one JSON object matching the supplied schema and mode. '
@@ -601,7 +605,7 @@ def _batch_payload(header,units,batch_id,prior=None):
         else:payload['batch']['prior_note']='Earlier validated fragments are retained by the server. Return additions from the original units and this requested context; never repeat unrelated earlier output.'
     return payload
 
-def _needed(repo,commit,needs,cancelled,deadline,payload):
+def _needed(repo,commit,needs,cancelled,deadline,payload,blobs=None):
     """Only immutable, eligible blobs; model read requests do not grant path access."""
     if not isinstance(needs,list) or len(needs)>16:raise RunError('invalid_result','Invalid analysis read requests')
     out=[]
@@ -631,7 +635,7 @@ def _needed(repo,commit,needs,cancelled,deadline,payload):
         elif 'file' in need:
             file=need['file']
             if not isinstance(file,str) or not file or PurePosixPath(file).is_absolute() or '..' in PurePosixPath(file).parts or _secret(file):raise RunError('invalid_result','Read request is not eligible source')
-            snaps=export_source(repo,commit,cancelled=cancelled,deadline=deadline,selected={commit:{file}})
+            snaps=export_source(repo,commit,cancelled=cancelled,deadline=deadline,selected={commit:{file}},blobs=blobs)
             if not snaps[0]['files']:raise RunError('invalid_result','Read request is not eligible source')
             snaps[0]['files'][0]['lines']=snaps[0]['files'][0]['lines'][start-1:start-1+limit]
             _,units=_units({'snapshots':snaps});out.extend(units)
@@ -639,8 +643,9 @@ def _needed(repo,commit,needs,cancelled,deadline,payload):
             query=need['query']
             if not isinstance(query,str) or not 1<=len(query)<=200 or '\n' in query:raise RunError('invalid_result','Invalid literal source search')
             hits=[]
-            for snap in export_source(repo,commit,cancelled=cancelled,deadline=deadline):
+            for snap in export_source(repo,commit,cancelled=cancelled,deadline=deadline,blobs=blobs):
                 for file in snap['files']:
+                    _checkpoint(cancelled,deadline)
                     for line in file['lines']:
                         if query in line['text']:hits.append({'commit':commit,'file':file['file'],'lines':[line]})
             _,units=_units({'snapshots':[{'commit':commit,'files':[{'file':h['file'],'lines':h['lines']} for h in hits[start-1:start-1+limit]],'omitted':[]}],
@@ -649,8 +654,8 @@ def _needed(repo,commit,needs,cancelled,deadline,payload):
             out.extend(units)
     return out
 
-def generate(value,task,request,executor,cancelled,deadline,check):
-    payload=_payload(value,task,request,cancelled,deadline)
+def generate(value,task,request,executor,cancelled,deadline,check,blobs=None):
+    payload=_payload(value,task,request,cancelled,deadline,blobs)
     repo=None;raw=None
     if task['task']!='briefing':
         conf,bundle,_,_=ai_extract.context(value['project'],task['repository'],value['branch'])
@@ -683,7 +688,7 @@ def generate(value,task,request,executor,cancelled,deadline,check):
         validate(result,final=not bool(needs))
         if not needs:return result
         if not repo and any('metadata' not in need for need in needs):raise RunError('invalid_result','This task cannot request source reads')
-        extra=_needed(repo,request['commit'],needs,cancelled,deadline,payload)
+        extra=_needed(repo,request['commit'],needs,cancelled,deadline,payload,blobs)
         # A direct reply asking for context is provisional. Promote it to the
         # same bounded protocol rather than publishing or ignoring its needs.
         payload['provisional_result']=result
@@ -713,7 +718,7 @@ def generate(value,task,request,executor,cancelled,deadline,check):
             if not isinstance(needs,list):raise RunError('invalid_result','Invalid analysis read requests')
             if needs:
                 if not repo and any('metadata' not in need for need in needs):raise RunError('invalid_result','This task cannot request source reads')
-                for unit in _needed(repo,request['commit'],needs,cancelled,deadline,payload):
+                for unit in _needed(repo,request['commit'],needs,cancelled,deadline,payload,blobs):
                     if unit['id'] not in read_seen:reads.append(unit);read_seen.add(unit['id'])
                 if not reads:raise RunError('invalid_result','Analysis repeated a source read without making progress')
             if not reads:
@@ -758,7 +763,7 @@ def run(run_id, executor=None):
             value=read(run_id)
             if value['state'] in TERMINAL: return value
             value.update(state='running',started_at=store.now(),launch_epoch=time.time());write(value)
-        started=time.monotonic()
+        started=time.monotonic();blobs={}
         def cancelled():
             current=read(run_id)
             return current['cancel_requested'] or current['state']=='cancelled'
@@ -796,7 +801,7 @@ def run(run_id, executor=None):
                     _check_pins(value,_plan(value))
                     current=_request(value,task)['record_arguments']
                     if current!=request['record_arguments']:raise RunError('pins_changed','The analysis input or saved base changed')
-                result=generate(value,task,request,executor,cancelled,started+MAX_SECONDS,check)
+                result=generate(value,task,request,executor,cancelled,started+MAX_SECONDS,check,blobs)
                 if time.monotonic()-started>MAX_SECONDS: raise RunError('timeout','Analysis reached its time limit; late output was not saved')
                 if isinstance(result,dict): result=json.dumps(result,ensure_ascii=False)
                 if not isinstance(result,str) or len(result)>8_000_000: raise RunError('invalid_result','The analysis executor returned invalid output; saved results were retained')

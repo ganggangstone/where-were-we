@@ -67,6 +67,10 @@ Source and metadata are split into server-identified units with a hard 131,072-b
 cap on each complete encoded prompt. Partial changes send affected source and
 necessary prior blobs. The first system overview uses validated map and collected
 structure metadata; missing context uses bounded, pinned source or metadata reads.
+Within one run, immutable file contents are reused by Git object ID, so repeated
+source searches do not read the same blob from Git again. Every export still applies
+that commit's tree and path eligibility rules. The first read of each blob and the
+in-memory search remain, and the reused contents are released when the run ends.
 All units and final relationships must validate before one recorder call per task.
 Unrequested details stay absent or retain their existing provenance and freshness;
 empty details are not invented to complete the overview. An unchanged overview

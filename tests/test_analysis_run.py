@@ -415,6 +415,131 @@ class AnalysisRun(unittest.TestCase):
         self.assertEqual(done['state'],'completed',done.get('error'))
         self.assertTrue(any(page['value'].get('query')=='db.Table' and page['value']['total']==1 for p in calls for page in p.get('context_pages',[]) if isinstance(page['value'],dict)))
 
+    def test_literal_searches_in_one_analysis_do_not_reread_pinned_blobs(self):
+        import subprocess
+        # The padding fills the first batch, so its rounds carry only search hits from the other files.
+        padding='a-padding.source';(self.repo/padding).write_text('ordinary unrelated source line\n'*9000)
+        self.git('add','.');self.git('commit','-qm','Padding that splits the input')
+        files=[padding,'pages/items.vue','server/items.go']
+        names={self.git('rev-parse','HEAD:'+f).strip():f for f in files}
+        needs=[{'query':'"/items"','start':1,'limit':1},{'query':'"/items"','start':2,'limit':1},{'query':'db.Table','start':1,'limit':1}]
+        expected=[({'query':'"/items"','start':1,'total':2,'next':2},[('pages/items.vue',2,'fetch("/items", {method:"POST"})')]),
+                  ({'query':'"/items"','start':2,'total':2,'next':None},[('server/items.go',4,'router.POST("/items", SaveItem)')]),
+                  ({'query':'db.Table','start':1,'total':1,'next':None},[('server/items.go',2,' db.Table("items").Create(item)')])]
+        answers=[];seen=set();first=None
+        def executor(prompt,**kwargs):
+            nonlocal first
+            p=json.loads(prompt.split('\n',1)[1])
+            if 'screens' not in p['schema']:return self.fake(prompt,**kwargs)
+            first=first or p['batch']['id']
+            pages=[page for page in p.get('context_pages',[]) if page.get('path')==['read_page']]
+            if p['batch']['id']==first and len(pages)==1:
+                hits=[(f['file'],line['line'],line['text']) for s in p.get('snapshots',[]) for f in s['files'] if f['file']!=padding for line in f['lines']]
+                answers.append((pages[0]['value'],[hit for hit in hits if hit not in seen]));seen.update(hits)
+            answer={'batch':p['batch']['id'],'covered':p['batch']['units'],'result':{}}
+            if p['batch']['id']==first:
+                if needs:answer['needs']=[needs.pop(0)]
+                else:answer['result']=self.data
+            return answer
+        value=self.prepare();blob_reads=[];real_popen=subprocess.Popen
+        def observed(command,*args,**kwargs):
+            # cat-file -s reads only the size; a future reader that hides object IDs from argv fails the exact count.
+            if '-s' not in command:blob_reads.extend(names[arg] for arg in command if arg in names)
+            return real_popen(command,*args,**kwargs)
+        with patch('subprocess.Popen',observed):done=analysis_run.run(value['id'],executor)
+        self.assertEqual(done['state'],'completed',done.get('error'))
+        self.assertEqual(answers,expected)
+        self.assertEqual({f:blob_reads.count(f) for f in files},{f:1 for f in files})
+
+    def read_source(self,commit,need,blobs,cancelled=None):
+        units=analysis_run._needed(str(self.repo),commit,[need],cancelled,None,{},blobs)
+        return [(u['value']['file'],line['line'],line['text']) for u in units if u['kind']=='source' for line in u['value']['lines']]
+
+    def test_reused_source_keeps_full_lines_after_partial_reads_and_pages(self):
+        (self.repo/'pages.txt').write_text('needle one\nplain\nneedle two\n')
+        self.git('add','.');self.git('commit','-qm','Lines to page')
+        commit=self.git('rev-parse','HEAD').strip();blobs={}
+        self.assertEqual(self.read_source(commit,{'file':'pages.txt','start':2,'limit':1},blobs),[('pages.txt',2,'plain')])
+        self.assertEqual(self.read_source(commit,{'query':'needle','start':2,'limit':1},blobs),[('pages.txt',3,'needle two')])
+        self.assertEqual(self.read_source(commit,{'file':'pages.txt'},blobs),[('pages.txt',1,'needle one'),('pages.txt',2,'plain'),('pages.txt',3,'needle two')])
+        self.assertEqual(self.read_source(commit,{'query':'needle'},blobs),[('pages.txt',1,'needle one'),('pages.txt',3,'needle two')])
+
+    def test_selected_initial_source_does_not_limit_a_later_full_search(self):
+        (self.repo/'chosen.txt').write_text('needle chosen\n');(self.repo/'other.txt').write_text('needle other\n')
+        self.git('add','.');self.git('commit','-qm','Chosen and unchosen files')
+        commit=self.git('rev-parse','HEAD').strip();blobs={}
+        exported=analysis_run.export_source(str(self.repo),commit,selected={commit:{'chosen.txt'}},blobs=blobs)
+        self.assertEqual([f['file'] for f in exported[0]['files']],['chosen.txt'])
+        self.assertEqual(self.read_source(commit,{'query':'needle'},blobs),[('chosen.txt',1,'needle chosen'),('other.txt',1,'needle other')])
+
+    def test_reused_source_stays_separate_between_commits(self):
+        (self.repo/'state.txt').write_text('needle old\n');(self.repo/'removed.txt').write_text('needle removed\n')
+        self.git('add','.');self.git('commit','-qm','Old state');old=self.git('rev-parse','HEAD').strip()
+        (self.repo/'state.txt').write_text('needle new\n');(self.repo/'removed.txt').unlink()
+        self.git('add','.');self.git('commit','-qm','New state');new=self.git('rev-parse','HEAD').strip()
+        blobs={}
+        exported=analysis_run.export_source(str(self.repo),new,[old],blobs=blobs)
+        lines={s['commit']:{f['file']:[l['text'] for l in f['lines']] for f in s['files'] if f['file'] in ('state.txt','removed.txt')} for s in exported}
+        self.assertEqual(lines,{new:{'state.txt':['needle new']},old:{'state.txt':['needle old'],'removed.txt':['needle removed']}})
+        self.assertEqual(self.read_source(new,{'query':'needle'},blobs),[('state.txt',1,'needle new')])
+        self.assertEqual(self.read_source(old,{'query':'needle'},blobs),[('removed.txt',1,'needle removed'),('state.txt',1,'needle old')])
+
+    def test_reused_content_does_not_make_an_excluded_path_eligible(self):
+        # One object ID at four paths: only the path and mode decide eligibility.
+        text='needle shared'
+        for name in ('plain.txt','.env','photo.png'):(self.repo/name).write_text(text)
+        os.symlink(text,self.repo/'link.txt')
+        self.git('add','-f','.');self.git('commit','-qm','One blob at excluded paths')
+        commit=self.git('rev-parse','HEAD').strip();blobs={}
+        self.assertEqual(self.read_source(commit,{'file':'plain.txt'},blobs),[('plain.txt',1,text)])
+        self.assertEqual(self.read_source(commit,{'query':'needle'},blobs),[('plain.txt',1,text)])
+        omitted={x['file']:x['reason'] for x in analysis_run.export_source(str(self.repo),commit,blobs=blobs)[0]['omitted']}
+        self.assertEqual({k:omitted[k] for k in ('.env','photo.png','link.txt')},{'.env':'credential_file','photo.png':'binary_asset','link.txt':'not_regular_source'})
+        for name in ('.env','photo.png','link.txt'):
+            with self.assertRaisesRegex(analysis_run.RunError,'not eligible'):self.read_source(commit,{'file':name},blobs)
+
+    def test_reused_binary_blob_stays_omitted_without_rereading(self):
+        (self.repo/'data.bin').write_bytes(b'needle\x00')
+        self.git('add','.');self.git('commit','-qm','Binary without a known suffix')
+        commit=self.git('rev-parse','HEAD').strip();blobs={}
+        for _ in range(2):
+            omitted=analysis_run.export_source(str(self.repo),commit,blobs=blobs)[0]['omitted']
+            self.assertIn({'file':'data.bin','reason':'binary'},omitted)
+            with patch.object(analysis_run,'_git',wraps=analysis_run._git) as git:self.assertEqual(self.read_source(commit,{'query':'needle'},blobs),[])
+            self.assertFalse([c for c in git.call_args_list if c.args[1]=='cat-file'])
+
+    def test_cancellation_and_deadline_stop_a_search_over_reused_source(self):
+        commit=self.git('rev-parse','HEAD').strip();blobs={}
+        self.read_source(commit,{'query':'needle'},blobs)
+        checks=[]
+        self.read_source(commit,{'query':'needle'},blobs,lambda:checks.append(1) or False)
+        # Every checkpoint of a fully reused search must still stop it, including the last one.
+        for stop in range(1,len(checks)+1):
+            seen=[]
+            with self.assertRaises(analysis_run.Cancelled):
+                self.read_source(commit,{'query':'needle'},blobs,lambda:seen.append(1) or len(seen)>=stop)
+        tree=len(self.git('ls-tree','-r','--name-only',commit).splitlines())
+        # The commit, each ls-tree entry and its trailing empty entry are checked before any search begins.
+        self.assertGreater(len(checks),2+tree,'the search over reused lines needs its own checkpoints')
+        with self.assertRaises(analysis_run.RunError) as caught:
+            analysis_run._needed(str(self.repo),commit,[{'query':'needle'}],None,time.monotonic()-1,{},blobs)
+        self.assertEqual(caught.exception.code,'timeout')
+
+    def test_source_reuse_spans_tasks_in_a_run_but_not_separate_runs(self):
+        seen=[];real=analysis_run.generate
+        def observed(*args,**kwargs):
+            seen.append(args[7]);return real(*args,**kwargs)
+        with patch.object(analysis_run,'generate',observed):
+            done=analysis_run.run(self.prepare()['id'],self.fake);self.assertEqual(done['state'],'completed',done.get('error'))
+            first=list(seen);seen.clear()
+            self.assertGreater(len(first),1)
+            self.assertTrue(all(x is first[0] for x in first))
+            (self.repo/'server/items.go').write_text((self.repo/'server/items.go').read_text()+'// Second run source.\n')
+            self.git('add','.');self.git('commit','-qm','Change for a second run')
+            done=analysis_run.run(self.prepare()['id'],self.fake);self.assertEqual(done['state'],'completed',done.get('error'))
+        self.assertTrue(seen)
+        self.assertFalse([x for x in seen if x is first[0]])
+
     def test_split_patch_retrieves_old_ids_only_from_actual_metadata_context(self):
         mount='server/mount.source';file='server/routes.source';new=[];text=[]
         for i in range(600):
