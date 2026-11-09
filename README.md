@@ -158,16 +158,16 @@ Report bugs or suggest improvements in [Issues](https://github.com/ganggangstone
 
 The [license](LICENSE) permits personal use, internal business use, and free redistribution under its conditions. Paid products and external paid services are restricted. This is a custom source-available license; third-party components retain their own licenses.
 
-**v0.10.1 release notes**
+**v0.10.2 release notes**
 
 <!-- release-notes:start -->
 ### 한국어
 
-- 앱 분석의 소스 검색이 같은 내용의 파일을 Git에서 반복해서 읽던 동작을 고쳤습니다. 한 번의 분석 안에서 읽은 파일 내용을 다시 사용합니다. 검색 대상 파일 규칙, 고정한 커밋, 검색 결과 페이지는 그대로입니다.
+- 읽을 수 없는 작업 폴더가 있으면 새로고침 전체가 중단되던 문제를 고쳤습니다. 해당 폴더의 경로를 로그에 남기고 나머지 작업 폴더의 변경 내역을 계속 수집합니다.
 
 ### English
 
-- Source searches during app analysis no longer read the same file contents from Git repeatedly. File contents are reused within one analysis run. Source eligibility, the pinned commit, and search result pages are unchanged.
+- Fixed refresh stopping when a registered worktree cannot be read. Refresh now logs the skipped folder path and continues collecting changes from the remaining worktrees.
 <!-- release-notes:end -->
 
 

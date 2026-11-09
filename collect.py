@@ -115,8 +115,15 @@ cur = {}
 for line in ([] if os.environ.get("WHERE_WERE_WE_MANAGED_CODE")=="1" else git("worktree", "list", "--porcelain").splitlines()) + [""]:
     if not line:
         if cur.get("path") and not cur.get("bare"):
-            files = [l[3:] for l in git("status", "--porcelain", cwd=cur["path"]).splitlines()]
-            worktrees.append({"path": cur["path"], "branch": cur.get("branch", "").replace("refs/heads/", ""), "uncommitted": files, "screens": screens_of(files)})
+            try:
+                status = subprocess.run(["git", "-c", "core.quotepath=off", "status", "--porcelain"], cwd=cur["path"], capture_output=True, text=True)
+            except OSError:
+                status = None
+            if status is None or status.returncode:
+                print(f"Skipped unreadable worktree: {cur['path']}")
+            else:
+                files = [l[3:] for l in status.stdout.splitlines()]
+                worktrees.append({"path": cur["path"], "branch": cur.get("branch", "").replace("refs/heads/", ""), "uncommitted": files, "screens": screens_of(files)})
         cur = {}
     elif line.startswith("worktree "):
         cur["path"] = line[9:]

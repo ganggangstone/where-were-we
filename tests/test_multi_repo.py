@@ -831,6 +831,34 @@ class Collection(TemporaryProject):
         self.assertEqual(work[0]['uncommitted'],['src/Settings.tsx'])
         self.assertNotIn('sessions',work[0]);self.assertNotIn('session_count',work[0])
 
+    def test_collection_continues_when_a_worktree_is_not_a_git_repository(self):
+        import contextlib,io,runpy,subprocess
+        folder=self.root/'collection';folder.mkdir()
+        repo=self.root/'code';repo.mkdir()
+        broken=self.root/'old-worktree';broken.mkdir()
+        (folder/'dev.json').write_text(json.dumps(sample(str(repo))))
+        def command(argv,**kwargs):
+            if argv[0]=='gh':output='[]'
+            elif 'worktree' in argv:
+                output=f'worktree {broken}\nbranch refs/heads/old\n\nworktree {repo}\nbranch refs/heads/feature\n\n'
+            elif 'status' in argv:
+                if str(kwargs.get('cwd'))==str(broken):
+                    if isinstance(failure,OSError):raise failure
+                    return subprocess.CompletedProcess(argv,128,'','fatal: not a git repository')
+                output=' M src/Settings.tsx\n'
+            elif 'ls-tree' in argv:output='src/Settings.tsx\n'
+            else:output=''
+            return subprocess.CompletedProcess(argv,0,output,'')
+        for failure in ('not a git repository',FileNotFoundError('folder removed'),PermissionError('access denied')):
+            with self.subTest(failure=str(failure)):
+                log=io.StringIO()
+                with patch.object(sys,'argv',['collect.py',str(repo),'collection']),patch.dict(os.environ,{'WHERE_WERE_WE_REFS':json.dumps({'dev':'origin/dev','main':None}),'WHERE_WERE_WE_MANAGED_CODE':'0'}),patch('subprocess.run',side_effect=command),contextlib.redirect_stdout(log):
+                    runpy.run_path(str(Path(project.__file__).parent/'collect.py'),run_name='__main__')
+                work=json.loads((folder/'status.json').read_text())['worktrees']
+                self.assertEqual([w['path'] for w in work],[str(repo)])
+                self.assertEqual(work[0]['uncommitted'],['src/Settings.tsx'])
+                self.assertIn(str(broken),log.getvalue())
+
     def test_custom_non_python_roots_can_be_collected_before_ai_analysis(self):
         env=self.environment()
         sources=json.loads(Path(env['FAKE_SOURCES']).read_text())

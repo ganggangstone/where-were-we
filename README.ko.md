@@ -158,14 +158,14 @@ open -a TextEdit ~/.where-were-we/.app-update.log
 
 [라이선스](LICENSE)는 조건에 따라 개인·회사 내부 사용과 무료 재배포를 허용하며, 유료 제품·외부 유료 서비스를 제한합니다. 별도의 소스 공개 라이선스이며, 제삼자 구성 요소에는 각각의 라이선스가 적용됩니다.
 
-**v0.10.1 릴리즈 노트**
+**v0.10.2 릴리즈 노트**
 
 ### 한국어
 
-- 앱 분석의 소스 검색이 같은 내용의 파일을 Git에서 반복해서 읽던 동작을 고쳤습니다. 한 번의 분석 안에서 읽은 파일 내용을 다시 사용합니다. 검색 대상 파일 규칙, 고정한 커밋, 검색 결과 페이지는 그대로입니다.
+- 읽을 수 없는 작업 폴더가 있으면 새로고침 전체가 중단되던 문제를 고쳤습니다. 해당 폴더의 경로를 로그에 남기고 나머지 작업 폴더의 변경 내역을 계속 수집합니다.
 
 ### English
 
-- Source searches during app analysis no longer read the same file contents from Git repeatedly. File contents are reused within one analysis run. Source eligibility, the pinned commit, and search result pages are unchanged.
+- Fixed refresh stopping when a registered worktree cannot be read. Refresh now logs the skipped folder path and continues collecting changes from the remaining worktrees.
 
 [전체 릴리즈](https://github.com/ganggangstone/where-were-we/releases) · [설정과 구현 상세](docs/MULTI_REPO_SPEC.md)
