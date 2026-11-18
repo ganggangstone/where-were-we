@@ -77,6 +77,12 @@ await flush();status=runRecord('running',{intent:{task:'all',targets:[]},complet
 await open();await AnalysisRun.check();await flush();
 assert($('insp').innerHTML.includes('1/2 tasks saved'),'Saved task count');
 assert($('insp').innerHTML.includes('Input calls: 4') && $('insp').innerHTML.includes('Current task input units: 2/7'),'Input units are not saved tasks');
+status.batch_progress={task:'analysis',completed:4,total:4,discovering:true};
+await AnalysisRun.check();await flush();
+assert($('insp').innerHTML.includes('Initial input units reviewed: 4 · Total not yet known') && !$('insp').innerHTML.includes('4/4'),'Initial batch is not a whole-run denominator');
+S.lang='ko';
+assert(AnalysisRun.html().includes('먼저 살펴본 입력 조각 4개 · 전체 개수 집계 전'),'Korean initial progress');
+S.lang='en';
 status=runRecord('failed',{intent:{task:'all',targets:[]}});
 S.analysisChoice={task:'suggest_groups'};AnalysisRun.open();await flush();
 assert($('startAppAnalysis') && !$('retryAppAnalysis'),'Another intent is not offered as this request’s retry');

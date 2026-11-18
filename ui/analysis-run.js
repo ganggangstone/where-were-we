@@ -157,6 +157,13 @@ const AnalysisRun = (() => {
     const total = done + (run?.tasks?.length || 0);
     const task = run?.current_task;
     const batches=run?.batch_progress,stats=run?.input_stats;
+    let inputProgress='';
+    if (batches && active()) {
+      inputProgress=batches.discovering
+        ? text('먼저 살펴본 입력 조각 '+batches.completed+'개 · 전체 개수 집계 전',
+               'Initial input units reviewed: '+batches.completed+' · Total not yet known')
+        : text('현재 작업 입력 조각','Current task input units')+': '+batches.completed+'/'+batches.total;
+    }
     const names={all:text('지도·서비스 구성·화면 묶음','Map, service overview, screen groups'),analysis:text('지도','Map'),system:text('서비스 구성','Service overview'),groups:text('화면 묶음','Screen groups'),steps:text('동작 과정','Action steps'),jobs:text('프로그램이 하는 일','Program jobs'),briefing:text('변경 설명','Change explanation')};
     const taskName = typeof task === 'string' ? task : task ? [task.repository, text(PLAN_NAMES[task.task] || task.task, ({analysis:'Detailed map',system:'Architecture',groups:'Screen groups',jobs:'Program jobs',steps:'Action steps',briefing:'Change explanation'})[task.task] || task.task)].filter(Boolean).join(' · ') : '';
     const issue = error || run?.error;
@@ -171,7 +178,7 @@ const AnalysisRun = (() => {
       <p class="s">${text('분석할 코드','Code to analyze')}: ${esc(scope().repository ? connectionDisplayName(scope().repository) : text('연결한 코드 전체','All connected repositories'))} · ${esc(S.branch)}</p>
       ${providerBusy ? `<p role="status">${text('Claude Code 계정 확인 중…','Checking the Claude Code account…')}</p>` : provider && !usable() ? `<p role="alert">${esc(message(provider))}</p>` : ''}
       ${run ? `<p class="s">${text('이 분석의 코드','This run analyzes')}: ${esc(runScope)} · ${esc(names[run.intent?.task || 'all'])}${(run.intent?.targets || []).map(t=>' · '+esc(t.repository)+' · '+esc(t.target)).join('')}${runAccount ? ' · '+esc(runAccount) : ''}</p>${!sameScope() ? `<p class="s">${text('다른 작업·대상·코드·버전·언어로 시작한 분석입니다. 진행 중이면 완료하거나 취소한 뒤 선택한 분석을 시작하세요.','This run has a different task, target, code selection, version, or language. If active, finish or cancel it before starting the selected analysis.')}</p>` : ''}<div role="status" aria-live="polite"><strong>${esc(stateLabel())}</strong> · ${done}/${total} ${text('작업 저장됨','tasks saved')}${taskName ? '<div>'+esc(taskName)+'</div>' : ''}</div><progress max="${Math.max(total, 1)}" value="${done}" aria-label="${text('분석 진행률','Analysis progress')}"></progress>${run.blocked?.length ? `<p class="s">${text('먼저 확인할 분석','Analysis requiring attention')}: ${run.blocked.length}</p>` : ''}` : ''}
-      ${stats ? `<p class="s">${text('입력 호출','Input calls')}: ${stats.calls} · ${text('전송한 입력 바이트','Encoded input bytes')}: ${stats.bytes}${batches && active() ? ` · ${text('현재 작업 입력 조각','Current task input units')}: ${batches.completed}/${batches.total}` : ''}</p>` : ''}
+      ${stats ? `<p class="s">${text('입력 호출','Input calls')}: ${stats.calls} · ${text('전송한 입력 바이트','Encoded input bytes')}: ${stats.bytes}${inputProgress ? ' · '+esc(inputProgress) : ''}</p>` : ''}
       ${previewHtml()}
       ${issue ? `<p role="alert">${esc(message(issue))}</p>` : ''}
       <div class="ctl">${active() ? `<button class="btn" id="cancelAppAnalysis" ${busy || run.cancel_requested ? 'disabled' : ''}>${text('분석 취소','Cancel analysis')}</button>` : sameScope() && ['failed','cancelled'].includes(run?.state) ? `<button class="btn primary" id="retryAppAnalysis" ${canStart ? '' : 'disabled'}>${text('현재 코드로 다시 시도','Retry with current code')}</button>` : `<button class="btn primary" id="startAppAnalysis" ${canStart ? '' : 'disabled'}>${text('Claude Code로 분석 시작','Start analysis with Claude Code')}</button>`}
