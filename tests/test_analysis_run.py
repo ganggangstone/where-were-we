@@ -258,7 +258,7 @@ class AnalysisRun(unittest.TestCase):
                 before=self.raw();value=self.prepare();calls=[]
                 def executor(prompt,**kwargs):
                     answer=self.source_fake(prompt,**kwargs);calls.append(prompt)
-                    if len(calls)==2:
+                    if len(calls)==2 or (len(calls)==3 and fault in ('quote','method')):
                         if fault=='missing':answer['covered']=[]
                         if fault=='duplicate':answer['covered']*=2
                         if fault=='quote':answer['result']['inspected']=[{'file':'changed.source','line':1,'quote':'invented content'}]
@@ -492,6 +492,46 @@ class AnalysisRun(unittest.TestCase):
                     self.assertEqual(done['state'],'failed')
                     self.assertEqual(done['error']['code'],'invalid_result')
                     self.assertEqual(self.raw(),baseline)
+
+    def test_evidence_accepts_literal_unicode_and_tab_in_tracked_path(self):
+        path='작업\t명령.py'
+        (self.repo/path).write_text('run_command()\n')
+        self.git('add','.');self.git('commit','-qm','Add named command')
+        commit=self.git('rev-parse','HEAD').strip()
+        evidence={'file':path,'line':1,'quote':'run_command()'}
+        analysis_run._strict_result('analysis',{'inspected':[evidence]},str(self.repo),commit)
+
+    def test_batched_invalid_citation_can_be_corrected_once(self):
+        (self.repo/'noise.source').write_text('ordinary line\n'*6000)
+        self.git('add','.');self.git('commit','-qm','Require batched analysis')
+        for correct in (False,True):
+            with self.subTest(correct=correct):
+                before=self.raw()
+                first=None
+                attempts=[]
+                def executor(prompt,**kwargs):
+                    nonlocal first
+                    packet=json.loads(prompt.split('\n',1)[1])
+                    batch=packet['batch']
+                    first=first or batch['id']
+                    fragment={}
+                    if batch['id']==first:
+                        attempts.append(batch['rules'])
+                        if correct and len(attempts)==2:
+                            fragment=self.data
+                        else:
+                            fragment={'inspected':[dict(self.EV,quote='unsupported citation')]}
+                    return {'batch':batch['id'],'covered':batch['units'],'result':fragment}
+                run=self.prepare(intent={'task':'analysis','targets':[]})
+                done=analysis_run.run(run['id'],executor)
+                self.assertEqual(len(attempts),2)
+                self.assertIn('exact source line',attempts[1])
+                self.assertNotIn('unsupported citation',attempts[1])
+                if correct:
+                    self.assertEqual(done['state'],'completed',done.get('error'))
+                else:
+                    self.assertEqual(done['error']['code'],'invalid_result')
+                    self.assertEqual(self.raw(),before)
 
     def test_same_read_notice_allows_current_packet_to_settle(self):
         (self.repo/'noise.source').write_text('unrelated line\n'*6000)

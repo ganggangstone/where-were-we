@@ -36,6 +36,10 @@ class RunError(ValueError):
         super().__init__(message)
         self.code = code
 
+class InvalidClaim(RunError):
+    def __init__(self, reason):
+        super().__init__('invalid_result', reason + '; saved results were retained')
+
 class Cancelled(RunError):
     def __init__(self): super().__init__('cancelled', 'Analysis cancelled; saved results were retained')
 
@@ -456,7 +460,7 @@ def _result(value):
 
 def _strict_result(task,data,repo,commit,request=None,raw=None,final=True):
     """App replies cannot silently lose raw claims in the compatibility parsers."""
-    def fail():raise RunError('invalid_result','An analysis claim was invalid; saved results were retained')
+    def fail(reason='An analysis claim did not match the task schema'):raise InvalidClaim(reason)
     evidence,cache,rejected=ai_extract.evidence_reader(repo,commit)
     regular=set()
     for entry in _git(repo,'ls-tree','-rz','--full-tree',commit).split(b'\0'):
@@ -464,7 +468,8 @@ def _strict_result(task,data,repo,commit,request=None,raw=None,final=True):
         meta,raw_file=entry.split(b'\t',1);mode,kind,_=meta.split();file=raw_file.decode('utf-8')
         if mode in (b'100644',b'100755') and kind==b'blob' and not _secret(file) and PurePosixPath(file).suffix.lower() not in BINARY_SUFFIXES:regular.add(file)
     for ev in ai_extract.cited(data):
-        if not isinstance(ev['file'],str) or ev['file'] not in regular or not evidence(ev):fail()
+        if not isinstance(ev['file'],str) or ev['file'] not in regular:fail('A citation did not name an eligible tracked file')
+        if not evidence(ev):fail('A citation did not match the exact source line and literal quote of at least six characters')
         # A valid quote in a symlink's blob still is not eligible source.
         if any('\x00' in line for line in cache.get(ev['file'],[])):fail()
     def rows(value,key):
@@ -473,7 +478,8 @@ def _strict_result(task,data,repo,commit,request=None,raw=None,final=True):
         return out
     if task=='analysis':
         parsed=ai_extract.parse(data,evidence,commit)
-        if parsed['dropped'] or rejected():fail()
+        if parsed['dropped']:fail('A screen or route lacked a valid path, HTTP method, handler or citation')
+        if rejected():fail('An item lacked a valid source citation')
         for item in rows(data,'screens'):
             if item.get('heading') is not None and not isinstance(item['heading'],str):fail()
             for action in rows(item,'actions'):
@@ -815,7 +821,7 @@ def generate(value,task,request,executor,cancelled,deadline,check,blobs=None):
         if repo:
             try:_strict_result(task['task'],result,repo,request['commit'],request,raw,final)
             except RunError:raise
-            except (KeyError,TypeError,ValueError):raise RunError('invalid_result','An analysis claim was invalid; saved results were retained') from None
+            except (KeyError,TypeError,ValueError):raise InvalidClaim('An analysis claim did not match the task schema') from None
     def invoke(payload):
         check();prompt=_encoded(payload)
         if len(prompt.encode())>MAX_PROMPT_BYTES:raise RunError('source_too_large','An analysis context could not fit a bounded input')
@@ -893,6 +899,8 @@ def generate(value,task,request,executor,cancelled,deadline,check,blobs=None):
             batch.append(pending.pop(0))
         ids=[u['id'] for u in batch];context=list(batch);prior={};reads=[]
         read_transitions=set()
+        claim_retry_used=False
+        claim_feedback=None
         explained_read=False
         satisfied_needs=None
         for round in range(MAX_READ_ROUNDS):
@@ -910,11 +918,23 @@ def generate(value,task,request,executor,cancelled,deadline,check,blobs=None):
                 if len(_encoded(packet).encode())>MAX_PROMPT_BYTES:
                     packet['batch'].pop('prior',None)
                 satisfied_needs=None
+            if claim_feedback is not None:
+                packet['batch']['rules']=claim_feedback
+                claim_feedback=None
             answer=invoke(packet)
             if answer.get('batch')!=batch_id or answer.get('covered')!=[u['id'] for u in context]:raise RunError('invalid_result','Analysis batch coverage did not match')
             fragment=_result(answer.get('result'))
             programs=answer.get('preview_programs',fragment.pop('preview_programs',None))
-            validate(fragment,False)
+            try:
+                validate(fragment,False)
+            except InvalidClaim as error:
+                if claim_retry_used or task['task']!='analysis':raise
+                claim_retry_used=True
+                claim_feedback=(f'Your previous fragment failed validation: {error}. '
+                                'Resubmit this batch with covered equal to units and only supported schema entries. '
+                                'Copy file, one-based line and a literal substring from a single supplied line. '
+                                'Use unknown for unsupported facts. Return {batch,covered,result,needs}.')
+                continue
             accumulated=_combine(prior,fragment)
             needs=answer.get('needs',[])
             if not isinstance(needs,list):raise RunError('invalid_result','Invalid analysis read requests')

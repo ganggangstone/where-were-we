@@ -36,7 +36,7 @@ def screen_id(s):return 's:'+digest(s.get('path'))[:16]
 def handler(r):return str(r.get('file'))+'::'+str(r.get('function'))
 
 def evidence_reader(repo,commit):
-    files=set(git(repo,'ls-tree','-r','--name-only',commit).splitlines());cache={};rejected=0
+    files=set(git(repo,'ls-tree','-rz','--name-only',commit).rstrip('\0').split('\0'));cache={};rejected=0
     def evidence(item):
         nonlocal rejected
         if not isinstance(item,dict):rejected+=1;return None
