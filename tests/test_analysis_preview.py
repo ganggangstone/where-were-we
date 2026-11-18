@@ -1,5 +1,6 @@
 """Exercise the live preview through the worker with a synthetic Git repository."""
 import json
+import time
 import unittest
 
 from test_analysis_run import AnalysisRun as _Fixture
@@ -63,6 +64,51 @@ class Preview(unittest.TestCase):
                 mapped = self.raw()['dev']
                 self.assertEqual([s['path'] for s in mapped['screens']], ['/items'])
                 self.assertEqual([r['path'] for r in mapped['backend_routes']], ['/items'])
+
+    def test_first_batch_only_sends_source_and_defers_review_metadata(self):
+        for i in range(64):
+            (self.repo/f'part{i}.odd').write_text(f'ordinary module {i}\n')
+        self.git('add', '.')
+        self.git('commit', '-qm', 'Large file inventory')
+        run = self.prepare(intent={'task': 'analysis', 'targets': []})
+        task = run['tasks'][0]
+        request = analysis_run._request(run, task)
+        known = [[f'id{i}', 'GET', f'/item/{i}', 'example', 'server/items.go', 'basic'] for i in range(600)]
+        request.update(mode='review', known=known, recheck=[{'id': 'existing'}])
+        first_id = None
+        seen_pages = set()
+        extra_read = False
+        final_sources = set()
+
+        def executor(prompt, **kwargs):
+            nonlocal first_id, extra_read
+            packet = json.loads(prompt.split('\n', 1)[1])
+            batch = packet['batch']
+            reply = {'batch': batch['id'], 'covered': batch['units'], 'result': {}}
+            pages = packet.get('context_pages', [])
+            sources = {f['file'] for snap in packet.get('snapshots', []) for f in snap['files']}
+            final_sources.update(sources)
+            if first_id is None:
+                first_id = batch['id']
+                self.assertTrue(sources)
+                self.assertFalse(pages)
+                self.assertNotIn('known', packet)
+                self.assertNotIn('recheck', packet)
+                self.assertLessEqual(len(batch['units']), 8)
+                reply['needs'] = [{'metadata': ['known'], 'start': 5, 'limit': 1}]
+            elif batch['id'] == first_id:
+                self.assertTrue(any(p['path'] == ['known'] and p['value'] == [known[4]] for p in pages))
+                extra_read = True
+            else:
+                self.assertEqual(packet['recheck'], request['recheck'])
+                seen_pages.update(p['path'][1] for p in pages if p['path'][:1] == ['known'])
+            return reply
+
+        analysis_run.generate(run, task, request, executor, lambda: False,
+                              time.monotonic()+60, lambda: None, {})
+        self.assertTrue(extra_read)
+        self.assertEqual(seen_pages, set(range(len(known))))
+        self.assertEqual(final_sources, set(self.git('ls-files').splitlines()))
 
     def test_web_free_command_with_unknown_extension_has_early_local_evidence(self):
         self.git('rm', '-q', 'pages/items.vue', 'server/items.go')

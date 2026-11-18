@@ -868,21 +868,32 @@ def generate(value,task,request,executor,cancelled,deadline,check,blobs=None):
             progress()
             if not pending:break
         check();batch=[];index+=1;batch_id=ai_extract.digest([request['record_arguments'],index])
+        # Keep the opening review bounded by its few source files. Historical
+        # catalog pages have their own pending units, and explicit needs can
+        # still retrieve them in this round from the original payload.
+        seed_only = wide_batches and index == 1 and pending[0]['kind'] == 'source'
+        batch_header = header
+        if seed_only:
+            batch_header = {k: v for k, v in header.items()
+                            if k not in ('known', 'inspect', 'deleted', 'recheck')}
+            batch_header['prompt'] = (batch_header.get('prompt', '') +
+                                      ' This is an opening source sample. Report directly supported findings. '
+                                      'Catalog review and remaining files follow in later batches.')
         # Leave room for at least one additional source unit and prior claims.
         budget=MAX_PROMPT_BYTES-2*UNIT_BYTES-4096 if wide_batches and index>1 else MAX_PROMPT_BYTES//2
-        while pending:
+        while pending and (not seed_only or pending[0]['kind'] == 'source'):
             candidate=batch+[pending[0]]
-            if len(_encoded(_batch_payload(header,candidate,batch_id)).encode())>budget:
+            if len(_encoded(_batch_payload(batch_header,candidate,batch_id)).encode())>budget:
                 if not batch:raise RunError('source_too_large','Analysis metadata could not fit a bounded input')
                 break
             batch.append(pending.pop(0))
         ids=[u['id'] for u in batch];context=list(batch);prior={};reads=[];read_seen=set(ids)
         for round in range(MAX_READ_ROUNDS):
-            packet=_batch_payload(header,context,batch_id,prior)
+            packet=_batch_payload(batch_header,context,batch_id,prior)
             if task['task']=='analysis':
                 packet['batch']['rules']+=' Optionally return top-level preview_programs: [{name,file,line,quote}] for entry points directly evidenced in this context, including CLI commands and workers.'
                 if len(_encoded(packet).encode())>MAX_PROMPT_BYTES:
-                    packet=_batch_payload(header,context,batch_id,prior)
+                    packet=_batch_payload(batch_header,context,batch_id,prior)
             answer=invoke(packet)
             if answer.get('batch')!=batch_id or answer.get('covered')!=[u['id'] for u in context]:raise RunError('invalid_result','Analysis batch coverage did not match')
             fragment=_result(answer.get('result'))
@@ -904,9 +915,9 @@ def generate(value,task,request,executor,cancelled,deadline,check,blobs=None):
             sticky=[u for u in context if u['kind']=='source' and u['id'] not in ids]
             context=list(batch)
             for unit in sticky:
-                if len(_encoded(_batch_payload(header,context+[unit],batch_id,prior)).encode())<=MAX_PROMPT_BYTES*3//4:context.append(unit)
+                if len(_encoded(_batch_payload(batch_header,context+[unit],batch_id,prior)).encode())<=MAX_PROMPT_BYTES*3//4:context.append(unit)
             before_reads=len(context)
-            while reads and len(_encoded(_batch_payload(header,context+[reads[0]],batch_id,prior)).encode())<=MAX_PROMPT_BYTES:
+            while reads and len(_encoded(_batch_payload(batch_header,context+[reads[0]],batch_id,prior)).encode())<=MAX_PROMPT_BYTES:
                 context.append(reads.pop(0))
             if len(context)==before_reads:raise RunError('source_too_large','Analysis continuation metadata could not fit a bounded input')
         else:raise RunError('invalid_result','Analysis source reads did not settle')
