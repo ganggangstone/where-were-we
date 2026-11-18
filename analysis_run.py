@@ -62,6 +62,8 @@ def read(run_id):
     return value
 
 def write(value):
+    if value['state'] in TERMINAL or value.get('cancel_requested') or not value.get('current_task'):
+        value.pop('preview',None)
     value['updated_at'] = store.now()
     store.atomic(path(value['id']), value)
     return value
@@ -304,7 +306,7 @@ def _blob_lines(repo,oid,cancelled=None,deadline=None):
     if '\x00' in text:return 'binary'
     return [{'line':i,'text':line} for i,line in enumerate(text.splitlines(),1)]
 
-def export_source(repo, commit, commits=None, cancelled=None, deadline=None, selected=None, blobs=None):
+def export_source(repo, commit, commits=None, cancelled=None, deadline=None, selected=None, blobs=None, excluded=None):
     """Export immutable regular text blobs only. Never inspect the checkout or follow symlinks.
     blobs keeps content by object ID for one run; each commit's tree and path rules still decide what is exported."""
     snapshots=[];blobs={} if blobs is None else blobs
@@ -318,6 +320,7 @@ def export_source(repo, commit, commits=None, cancelled=None, deadline=None, sel
             meta,raw_file=entry.split(b'\t',1)
             mode,kind,oid=meta.split()
             file=raw_file.decode('utf-8',errors='strict')
+            if excluded and file in excluded.get(pinned,()):continue
             if selected is not None and file not in selected.get(pinned,set()):continue
             if _secret(file): omitted.append({'file':file,'reason':'credential_file'});continue
             if mode not in (b'100644',b'100755') or kind!=b'blob':
@@ -337,7 +340,35 @@ def _request(value,task):
     if task['task']=='briefing': return briefing.request(value['project'],task['repository'],value['branch'],value['lang'])
     return ai_extract.task_request(value['project'],task['task'],value['branch'],value['lang'],task['repository'],task.get('target',''),overview=True)
 
-def _payload(value,task,request,cancelled=None,deadline=None,blobs=None):
+def _first_files(repo,head,request):
+    """Choose inexpensive evidence across directories. Every other file stays queued."""
+    files={}
+    total=0
+    for entry in _git(repo,'ls-tree','-rlz','--full-tree',head).split(b'\0'):
+        if not entry:continue
+        meta,path=entry.split(b'\t',1)
+        mode,kind,_,size=meta.split()
+        path=path.decode('utf-8')
+        if mode not in (b'100644',b'100755') or kind!=b'blob' or _secret(path) or PurePosixPath(path).suffix.lower() in BINARY_SUFFIXES:continue
+        files[path]=int(size)
+        total+=int(size)
+    # For small inputs keep the existing single request. Bound the seed read
+    # itself so a giant generated file cannot delay the first request.
+    if len(files)<64 and total<4*1024*1024:return set()
+    recheck=ai_extract.files_in(request.get('recheck',[]))
+    # Review catalog rows are [id, method/type, path, function, file, source].
+    known={row[4] for row in request.get('known',[]) if isinstance(row,list) and len(row)>4}
+    chosen=set();parents=set()
+    paths=sorted((f for f,n in files.items() if 6<=n<=UNIT_BYTES//2),
+                 key=lambda f:(f not in recheck,f not in known,abs(files[f]-1024),f))
+    for file in paths:
+        parent=PurePosixPath(file).parent
+        if parent in parents and file not in recheck:continue
+        chosen.add(file);parents.add(parent)
+        if len(chosen)>=4:break
+    return chosen
+
+def _payload(value,task,request,cancelled=None,deadline=None,blobs=None,deferred=None):
     _checkpoint(cancelled,deadline)
     # Handoff text contains MCP write instructions and is deliberately excluded.
     payload={k:request[k] for k in ('prompt','schema','input','mode','reason','base','inspect','deleted','recheck','known','base_commit') if k in request}
@@ -383,6 +414,15 @@ def _payload(value,task,request,cancelled=None,deadline=None,blobs=None):
             payload['input']={**request['input'],'map':{k:m.get(k,[]) for k in ('screens','backend_routes','api_functions')},
                               'files':sorted(ai_extract.tree_blobs(repo['path'],head))}
             selected={head:set()}
+        if deferred is not None and task['task']=='analysis' and request.get('mode') in ('full','review'):
+            first=_first_files(repo['path'],head,request)
+            if first:
+                # Source ordering is a scheduling choice, never a filter. The
+                # remaining files will be checked before the map is published.
+                deferred.append((repo['path'],head,previous,first))
+                payload['snapshots']=export_source(repo['path'],head,cancelled=cancelled,deadline=deadline,
+                                                   selected={head:first},blobs=blobs)
+                return payload
         if selected is not None and previous and previous!=head:
             before=ai_extract.tree_blobs(repo['path'],previous);after=ai_extract.tree_blobs(repo['path'],head)
             selected[previous]={f for f in files|set(request.get('deleted',[])) if f in before and before[f]!=after.get(f)}
@@ -562,7 +602,7 @@ def _units(payload):
     for snapshot in payload.get('snapshots',[]):
         for entry in snapshot['omitted']:page(['omitted',snapshot['commit']],entry)
         for file in snapshot['files']:
-            lines=[]
+            lines=[];line_bytes=2
             def flush():
                 if lines:add('source',{'commit':snapshot['commit'],'file':file['file'],'lines':list(lines)});lines.clear()
             for line in file['lines']:
@@ -573,7 +613,11 @@ def _units(payload):
                     segment={**line,'text':text[max(0,offset-128):offset+UNIT_BYTES//8]}
                     actual_offset=max(0,offset-128)
                     if offset or len(text)>UNIT_BYTES//8:segment['offset']=actual_offset
-                    if len(json.dumps(lines+[segment],ensure_ascii=False).encode())>UNIT_BYTES:flush()
+                    size=len(json.dumps(segment,ensure_ascii=False).encode())
+                    if lines and line_bytes+2+size>UNIT_BYTES:
+                        flush()
+                        line_bytes=2
+                    line_bytes+=size+(2 if lines else 0)
                     lines.append(segment)
             flush()
     if not units:add('metadata',{'path':[],'value':{}})
@@ -604,6 +648,79 @@ def _batch_payload(header,units,batch_id,prior=None):
         if len(json.dumps(prior,ensure_ascii=False).encode())<=UNIT_BYTES:payload['batch']['prior']=prior
         else:payload['batch']['prior_note']='Earlier validated fragments are retained by the server. Return additions from the original units and this requested context; never repeat unrelated earlier output.'
     return payload
+
+def _matching_files(repo, commit, query, paths, cancelled, deadline):
+    """Ask Git for candidate paths only; original text and line numbers come from _blob_lines."""
+    if not paths or '\0' in query:
+        return set()
+    matches=set()
+    env={**os.environ,'GIT_NO_LAZY_FETCH':'1','LC_ALL':'C'}
+    prefix=commit.encode()+b':'
+    # Limit argv even when the repository contains many long file names.
+    while paths:
+        batch=[]
+        size=0
+        while paths and size < 32*1024:
+            file=paths.pop()
+            batch.append(file)
+            size+=len(os.fsencode(file))+1
+        args=['git','--literal-pathspecs','-C',repo,'grep','--no-textconv','--no-color',
+              '--no-recurse-submodules','-a','-F','-l','-z','-e',query,commit,'--',*batch]
+        process=subprocess.Popen(args,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,env=env)
+        until=time.monotonic()+30
+        try:
+            while True:
+                _checkpoint(cancelled,deadline)
+                if time.monotonic()>=until:raise RunError('source_unavailable','Literal search timed out')
+                try:
+                    output,_=process.communicate(timeout=.2)
+                    break
+                except subprocess.TimeoutExpired:
+                    continue
+            if process.returncode not in (0,1):
+                raise RunError('source_unavailable','The pinned source could not be searched')
+            for record in output.split(b'\0'):
+                if record.startswith(prefix):matches.add(record[len(prefix):].decode('utf-8'))
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.communicate()
+    return matches
+
+
+def _literal_page(repo,commit,query,start,limit,cancelled,deadline,blobs):
+    _checkpoint(cancelled,deadline)
+    entries=[]
+    tree=_git(repo,'ls-tree','-rz','--full-tree',commit)
+    for entry in tree.split(b'\0'):
+        _checkpoint(cancelled,deadline)
+        if not entry:continue
+        meta,raw_file=entry.split(b'\t',1)
+        mode,kind,oid=meta.split()
+        file=raw_file.decode('utf-8')
+        if (mode in (b'100644',b'100755') and kind==b'blob' and not _secret(file)
+                and PurePosixPath(file).suffix.lower() not in BINARY_SUFFIXES):
+            entries.append((file,oid))
+    # Reuse already exported blobs without reading Git again. For the remaining
+    # files the native search avoids exporting every blob to the Python worker.
+    uncached=[file for file,oid in entries if oid not in blobs]
+    matches=_matching_files(repo,commit,query,uncached,cancelled,deadline)
+    files=[]
+    total=0
+    for file,oid in entries:
+        _checkpoint(cancelled,deadline)
+        lines=blobs.get(oid)
+        if lines is None:
+            if file not in matches:continue
+            lines=blobs[oid]=_blob_lines(repo,oid.decode(),cancelled,deadline)
+        if isinstance(lines,str):continue
+        for index,line in enumerate(lines):
+            if index%1024==0:_checkpoint(cancelled,deadline)
+            if query in line['text']:
+                total+=1
+                if start<=total<start+limit:files.append({'file':file,'lines':[line]})
+    return files,{'query':query,'start':start,'total':total,'next':start+limit if start+limit<=total else None}
+
 
 def _needed(repo,commit,needs,cancelled,deadline,payload,blobs=None):
     """Only immutable, eligible blobs; model read requests do not grant path access."""
@@ -642,20 +759,46 @@ def _needed(repo,commit,needs,cancelled,deadline,payload,blobs=None):
         else:
             query=need['query']
             if not isinstance(query,str) or not 1<=len(query)<=200 or '\n' in query:raise RunError('invalid_result','Invalid literal source search')
-            hits=[]
-            for snap in export_source(repo,commit,cancelled=cancelled,deadline=deadline,blobs=blobs):
-                for file in snap['files']:
-                    _checkpoint(cancelled,deadline)
-                    for line in file['lines']:
-                        if query in line['text']:hits.append({'commit':commit,'file':file['file'],'lines':[line]})
-            _,units=_units({'snapshots':[{'commit':commit,'files':[{'file':h['file'],'lines':h['lines']} for h in hits[start-1:start-1+limit]],'omitted':[]}],
-                            'read_page':{'query':query,'start':start,'total':len(hits),'next':start+limit if start-1+limit<len(hits) else None}})
-            units.insert(0,{'id':ai_extract.digest(['search',query,start]),'kind':'metadata','value':{'path':['read_page'],'value':{'query':query,'start':start,'total':len(hits),'next':start+limit if start-1+limit<len(hits) else None}}})
+            files,page=_literal_page(repo,commit,query,start,limit,cancelled,deadline,blobs if blobs is not None else {})
+            _,units=_units({'snapshots':[{'commit':commit,'files':files,'omitted':[]}],'read_page':page})
+            units.insert(0,{'id':ai_extract.digest(['search',query,start]),'kind':'metadata','value':{'path':['read_page'],'value':page}})
             out.extend(units)
     return out
 
+def _preview(run,task,commit,settled,programs,context):
+    """First evidence-backed observations, scoped to this active run only."""
+    if task['task'] not in ('analysis','system'):return
+    rows=(('screens','screen'),('backend_routes','request')) if task['task']=='analysis' else (('nodes','program'),)
+    items=[]
+    for key,kind in rows:
+        for item in settled.get(key,[]):
+            evidence=item['ev'][0] if key=='nodes' else item
+            name=item.get('heading') or item.get('name') or item.get('path')
+            if name:
+                items.append(dict(kind=kind,name=name,**{k:evidence[k] for k in ('file','line','quote')}))
+    if task['task']=='analysis' and isinstance(programs,list) and programs:
+        # These optional entry points are independent of the web map schema.
+        supplied={(unit['value']['file'],line['line']):line['text'] for unit in context
+                  if unit['kind']=='source' and unit['value']['commit']==commit for line in unit['value']['lines']}
+        for program in programs[:8]:
+            if not isinstance(program,dict):continue
+            name,file,line,quote=(program.get(k) for k in ('name','file','line','quote'))
+            if (isinstance(name,str) and name.strip() and isinstance(file,str) and type(line)==int
+                    and isinstance(quote,str) and len(quote.strip())>=6 and quote in supplied.get((file,line),'')):
+                items.append(dict(kind='program',name=name,file=file,line=line,quote=quote))
+    if items:
+        with locked():
+            current=read(run['id'])
+            existing=(current.get('preview') or {}).get('items',[])
+            for item in items:
+                if len(existing)>=24:break
+                if item not in existing:existing.append(item)
+            current['preview']={'commit':commit,'repository':task['repository'],'items':existing}
+            write(current)
+
 def generate(value,task,request,executor,cancelled,deadline,check,blobs=None):
-    payload=_payload(value,task,request,cancelled,deadline,blobs)
+    deferred=[]
+    payload=_payload(value,task,request,cancelled,deadline,blobs,deferred)
     repo=None;raw=None
     if task['task']!='briefing':
         conf,bundle,_,_=ai_extract.context(value['project'],task['repository'],value['branch'])
@@ -681,12 +824,19 @@ def generate(value,task,request,executor,cancelled,deadline,check,blobs=None):
         result=_result(executor(prompt,cancelled=cancelled,timeout=min(TASK_SECONDS,max(1,int(deadline-time.monotonic())))))
         check()
         return result
+    if task['task']=='analysis':
+        payload['prompt']+=' You may add preview_programs: [{name,file,line,quote}] for directly evidenced programs, CLI commands or workers. If there are no screens or routes, still provide inspected evidence and unknown as the map schema requires.'
     extra=[];provisional={}
-    if len(_encoded(payload).encode())<=MAX_PROMPT_BYTES:
+    if not deferred and len(_encoded(payload).encode())<=MAX_PROMPT_BYTES:
         result=invoke(payload);needs=result.pop('needs',[])
         if not isinstance(needs,list):raise RunError('invalid_result','Invalid analysis read requests')
+        programs=result.pop('preview_programs',None)
         validate(result,final=not bool(needs))
-        if not needs:return result
+        if not needs:
+            if programs and task['task']=='analysis':
+                _,context=_units({'snapshots':payload.get('snapshots',[])})
+                _preview(value,task,request['commit'],result,programs,context)
+            return result
         if not repo and any('metadata' not in need for need in needs):raise RunError('invalid_result','This task cannot request source reads')
         extra=_needed(repo,request['commit'],needs,cancelled,deadline,payload,blobs)
         # A direct reply asking for context is provisional. Promote it to the
@@ -698,21 +848,45 @@ def generate(value,task,request,executor,cancelled,deadline,check,blobs=None):
     result=copy.deepcopy(provisional);covered=set();pending=list(units);index=0
     def progress():
         with locked():
-            current=read(value['id']);current['batch_progress']={'task':task['task'],'completed':len(covered),'total':len(units)};write(current)
+            current=read(value['id'])
+            current['batch_progress']={'task':task['task'],'completed':len(covered),'total':len(units),'discovering':bool(deferred)}
+            write(current)
+    if deferred:
+        # Metadata pages may be numerous. Start with source evidence; all pages
+        # remain available to needs and are delivered before final validation.
+        pending.sort(key=lambda unit:unit['kind']!='source')
+    wide_batches=bool(deferred)
     progress()
-    while pending:
+    while pending or deferred:
+        if not pending:
+            path,head,previous,first=deferred.pop()
+            snapshots=export_source(path,head,[previous] if previous else [],cancelled,deadline,
+                                    blobs=blobs,excluded={head:first})
+            _,later=_units({'snapshots':snapshots})
+            pending=[unit for unit in later if unit['id'] not in covered]
+            units.extend(pending)
+            progress()
+            if not pending:break
         check();batch=[];index+=1;batch_id=ai_extract.digest([request['record_arguments'],index])
+        # Leave room for at least one additional source unit and prior claims.
+        budget=MAX_PROMPT_BYTES-2*UNIT_BYTES-4096 if wide_batches and index>1 else MAX_PROMPT_BYTES//2
         while pending:
             candidate=batch+[pending[0]]
-            if len(_encoded(_batch_payload(header,candidate,batch_id)).encode())>MAX_PROMPT_BYTES//2:
+            if len(_encoded(_batch_payload(header,candidate,batch_id)).encode())>budget:
                 if not batch:raise RunError('source_too_large','Analysis metadata could not fit a bounded input')
                 break
             batch.append(pending.pop(0))
         ids=[u['id'] for u in batch];context=list(batch);prior={};reads=[];read_seen=set(ids)
         for round in range(MAX_READ_ROUNDS):
-            answer=invoke(_batch_payload(header,context,batch_id,prior))
+            packet=_batch_payload(header,context,batch_id,prior)
+            if task['task']=='analysis':
+                packet['batch']['rules']+=' Optionally return top-level preview_programs: [{name,file,line,quote}] for entry points directly evidenced in this context, including CLI commands and workers.'
+                if len(_encoded(packet).encode())>MAX_PROMPT_BYTES:
+                    packet=_batch_payload(header,context,batch_id,prior)
+            answer=invoke(packet)
             if answer.get('batch')!=batch_id or answer.get('covered')!=[u['id'] for u in context]:raise RunError('invalid_result','Analysis batch coverage did not match')
             fragment=_result(answer.get('result'))
+            programs=answer.get('preview_programs',fragment.pop('preview_programs',None))
             validate(fragment,False)
             needs=answer.get('needs',[])
             if not isinstance(needs,list):raise RunError('invalid_result','Invalid analysis read requests')
@@ -722,7 +896,10 @@ def generate(value,task,request,executor,cancelled,deadline,check,blobs=None):
                     if unit['id'] not in read_seen:reads.append(unit);read_seen.add(unit['id'])
                 if not reads:raise RunError('invalid_result','Analysis repeated a source read without making progress')
             if not reads:
-                result=_combine(result,_combine(prior,fragment));break
+                settled=_combine(prior,fragment)
+                result=_combine(result,settled)
+                _preview(value,task,request['commit'],settled,programs,context)
+                break
             prior=_combine(prior,fragment)
             sticky=[u for u in context if u['kind']=='source' and u['id'] not in ids]
             context=list(batch)
@@ -811,6 +988,10 @@ def run(run_id, executor=None):
                     _check_pins(value,_plan(value))
                     value['state']='saving';write(value)
                     _save(task,request,result)
+                    preview=value.get('preview',{})
+                    programs=[item for item in preview.get('items',[]) if item['kind']=='program']
+                    if programs and task['task']=='analysis':
+                        value.setdefault('program_observations',[]).append({**preview,'items':programs})
                     value['completed_tasks'].append({k:task.get(k) for k in ('repository','task','target')})
                     value.update(state='running',current_task=None);write(value)
             raise RunError('task_limit','Analysis reached its task limit. Retry to finish remaining tasks')

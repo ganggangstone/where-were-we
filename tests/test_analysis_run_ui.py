@@ -206,6 +206,38 @@ assert(!$('viewAppAnalysis') && !$('retryAppAnalysis'),'No hidden cross-scope re
 assert($('startAppAnalysis'),'Selected scope can be explicitly started after the other run finishes');
 ''')
 
+    def test_verified_preview_opens_before_save_and_is_scoped_to_this_commit(self):
+        self.check_js(r'''
+await flush();
+for(const [lang,title] of [['en','Features verified so far'],['ko','분석 중 확인한 기능']]){
+ S.lang=lang;AnalysisRun.syncScope();
+ status=runRecord('running',{current_task:{task:'analysis',repository:'',commit:'a1b2c3d4'},
+   preview:{repository:'',commit:'a1b2c3d4',items:[{kind:'request',name:'Save <items>',file:'handlers/save',line:21,quote:'<save items>'}]}});
+ await open();await AnalysisRun.check();await flush();
+ assert($('analysisPreview0') && $('insp').innerHTML.includes(title),'Scope and translated preview');
+ await $('analysisPreview0').onclick();
+ assert($('insp').innerHTML.includes('handlers/save:21') && $('insp').innerHTML.includes('&lt;save items>'),'Escaped source and line are readable');
+ assert(count('analysis_run_start')===0 && reads===0,'Opening preview is local');
+ await AnalysisRun.check();
+ assert($('insp').innerHTML.includes('handlers/save:21'),'Expanded source survives polling');
+ status={...status,preview:{...status.preview,commit:'wrong'}};
+ await AnalysisRun.check();assert(!$('analysisPreview0'),'No evidence from another commit');
+}
+''')
+
+    def test_completed_program_evidence_matches_saved_repository_commit(self):
+        self.check_js(r'''
+await open();
+const hash='aecb78901234',group={repository:'service',commit:hash,items:[{kind:'program',name:'CLI command',file:'shell',line:2,quote:'run command'}]};
+status=runRecord('completed',{completed_tasks:[],program_observations:[group],pins:{service:{commit:hash}}});
+native=command=>command==='read_project'?{project:{repositories:[{id:'service',commits:{dev:hash.slice(0,8)}}]},dev:{},main:null,branch_details:{}}:undefined;
+await AnalysisRun.check();renderAgentPrompt();
+await $('analysisPreview0').onclick();
+assert($('insp').innerHTML.includes('shell:2') && $('insp').innerHTML.includes('Verified programs'),'Completed program can be inspected');
+S.projectInfo.repositories[0].commits.dev='another';renderAgentPrompt();
+assert(!$('analysisPreview0'),'Program from a previous commit is hidden');
+''')
+
     def test_entry_points_offer_both_app_run_and_existing_mcp_copy(self):
         self.assertIn('<script src="analysis-run.js"></script>', UI)
         self.assertIn("typeof AnalysisRun!=='undefined'?AnalysisRun.html()", UI)

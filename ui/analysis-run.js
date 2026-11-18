@@ -4,6 +4,7 @@ const AnalysisRun = (() => {
   let scopeKey = '', epoch = 0, revision = 0, timer = null, checking = null;
   let run = null, provider = null, providerBusy = false, busy = false, error = null;
   const loaded = new Set();
+  let openedPreview = null;
   const text = (ko, en) => S.lang === 'en' ? en : ko;
   const scope = () => ({project:S.project, repository:['make_steps','make_jobs'].includes(S.analysisChoice?.task) ? '' : (S.analysisChoice?.target || S.repository || '').replace(/^\*$/, ''), branch:S.branch, lang:S.lang});
   function intent() {
@@ -94,7 +95,7 @@ const AnalysisRun = (() => {
   function syncScope() {
     const next = key();
     if (next === scopeKey) return;
-    scopeKey = next; epoch++; revision++; clearTimeout(timer); checking = null;
+    scopeKey = next; openedPreview = null; epoch++; revision++; clearTimeout(timer); checking = null;
     run = null; busy = false; error = null;
     if (S.project) void check();
   }
@@ -118,6 +119,38 @@ const AnalysisRun = (() => {
     catch (value) { if (current(token)) { error = value; paint(); } }
     finally { if (current(token)) { busy = false; paint(); schedule(token); } }
   }
+  function previewItems() {
+    if (!sameScope() || run.cancel_requested) return [];
+    let groups = [];
+    if (active()) {
+      const preview = run.preview;
+      if (preview && preview.repository === run.current_task?.repository &&
+          preview.commit === run.current_task?.commit) groups = [preview];
+    } else if (run.state === 'completed') {
+      groups = (run.program_observations || []).filter(group => {
+        const commit = group.repository
+          ? S.projectInfo?.repositories?.find(repo => repo.id === group.repository)?.commits?.[S.branch]
+          : S.maps?.[S.branch]?.commit;
+        return commit && group.commit === run.pins?.[group.repository]?.commit && group.commit.startsWith(commit);
+      });
+    }
+    return groups.filter(group => !scope().repository || group.repository === scope().repository)
+      .flatMap(group => (group.items || []).map(item => ({...item,repository:group.repository,commit:group.commit})));
+  }
+  function previewKey(item) {
+    return JSON.stringify([run.id, item.repository, item.commit, item.kind, item.file, item.line, item.name]);
+  }
+  function previewHtml() {
+    const items = previewItems();
+    if (!items.length) return '';
+    const kinds = {screen:text('화면','Screen'),request:text('서버 요청','Server request'),program:text('프로그램','Program')};
+    const rows = items.map((item,i) => {
+      const opened = openedPreview === previewKey(item);
+      return `<div><button class="btn plain" type="button" id="analysisPreview${i}" aria-expanded="${opened}">${esc(kinds[item.kind] || item.kind)} · ${esc(item.name)}</button>
+        ${opened ? `<div class="s">${esc(item.repository || run.project)} · ${esc(item.commit.slice(0,8))}</div><div><code>${esc(item.file)}:${esc(item.line)}</code></div><pre style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(item.quote)}</pre>` : ''}</div>`;
+    });
+    return `<section class="sect"><h3>${active() ? text('분석 중 확인한 기능','Features verified so far') : text('확인한 프로그램','Verified programs')}</h3>${rows.join('')}</section>`;
+  }
   function html() {
     const account = provider?.account, identity = typeof account === 'string' ? account : account?.email || account?.id;
     const done = Array.isArray(run?.completed_tasks) ? run.completed_tasks.length : Number(run?.completed_tasks || 0);
@@ -139,12 +172,22 @@ const AnalysisRun = (() => {
       ${providerBusy ? `<p role="status">${text('Claude Code 계정 확인 중…','Checking the Claude Code account…')}</p>` : provider && !usable() ? `<p role="alert">${esc(message(provider))}</p>` : ''}
       ${run ? `<p class="s">${text('이 분석의 코드','This run analyzes')}: ${esc(runScope)} · ${esc(names[run.intent?.task || 'all'])}${(run.intent?.targets || []).map(t=>' · '+esc(t.repository)+' · '+esc(t.target)).join('')}${runAccount ? ' · '+esc(runAccount) : ''}</p>${!sameScope() ? `<p class="s">${text('다른 작업·대상·코드·버전·언어로 시작한 분석입니다. 진행 중이면 완료하거나 취소한 뒤 선택한 분석을 시작하세요.','This run has a different task, target, code selection, version, or language. If active, finish or cancel it before starting the selected analysis.')}</p>` : ''}<div role="status" aria-live="polite"><strong>${esc(stateLabel())}</strong> · ${done}/${total} ${text('작업 저장됨','tasks saved')}${taskName ? '<div>'+esc(taskName)+'</div>' : ''}</div><progress max="${Math.max(total, 1)}" value="${done}" aria-label="${text('분석 진행률','Analysis progress')}"></progress>${run.blocked?.length ? `<p class="s">${text('먼저 확인할 분석','Analysis requiring attention')}: ${run.blocked.length}</p>` : ''}` : ''}
       ${stats ? `<p class="s">${text('입력 호출','Input calls')}: ${stats.calls} · ${text('전송한 입력 바이트','Encoded input bytes')}: ${stats.bytes}${batches && active() ? ` · ${text('현재 작업 입력 조각','Current task input units')}: ${batches.completed}/${batches.total}` : ''}</p>` : ''}
+      ${previewHtml()}
       ${issue ? `<p role="alert">${esc(message(issue))}</p>` : ''}
       <div class="ctl">${active() ? `<button class="btn" id="cancelAppAnalysis" ${busy || run.cancel_requested ? 'disabled' : ''}>${text('분석 취소','Cancel analysis')}</button>` : sameScope() && ['failed','cancelled'].includes(run?.state) ? `<button class="btn primary" id="retryAppAnalysis" ${canStart ? '' : 'disabled'}>${text('현재 코드로 다시 시도','Retry with current code')}</button>` : `<button class="btn primary" id="startAppAnalysis" ${canStart ? '' : 'disabled'}>${text('Claude Code로 분석 시작','Start analysis with Claude Code')}</button>`}
       <button class="btn quiet" id="checkAppAnalysis" ${busy || providerBusy ? 'disabled' : ''}>${text('계정·상태 다시 확인','Check account and status')}</button>
       ${sameScope() && done > 0 ? `<button class="btn quiet" id="viewAppAnalysis">${text('저장된 결과 보기','View saved results')}</button>` : ''}</div></section>`;
   }
   function bind() {
+    previewItems().forEach((item,i) => {
+      const button = $('analysisPreview'+i);
+      if (button) button.onclick = () => {
+        const key = previewKey(item);
+        openedPreview = openedPreview === key ? null : key;
+        paint();
+        $('analysisPreview'+i)?.focus?.();
+      };
+    });
     if ($('startAppAnalysis')) $('startAppAnalysis').onclick = () => execute('analysis_run_start');
     if ($('retryAppAnalysis')) $('retryAppAnalysis').onclick = () => execute('analysis_run_retry');
     if ($('cancelAppAnalysis')) $('cancelAppAnalysis').onclick = () => execute('analysis_run_cancel');
