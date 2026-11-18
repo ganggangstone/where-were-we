@@ -887,34 +887,67 @@ def generate(value,task,request,executor,cancelled,deadline,check,blobs=None):
                 if not batch:raise RunError('source_too_large','Analysis metadata could not fit a bounded input')
                 break
             batch.append(pending.pop(0))
-        ids=[u['id'] for u in batch];context=list(batch);prior={};reads=[];read_seen=set(ids)
+        ids=[u['id'] for u in batch];context=list(batch);prior={};reads=[]
+        read_transitions=set()
+        explained_read=False
+        satisfied_needs=None
         for round in range(MAX_READ_ROUNDS):
             packet=_batch_payload(batch_header,context,batch_id,prior)
             if task['task']=='analysis':
                 packet['batch']['rules']+=' Optionally return top-level preview_programs: [{name,file,line,quote}] for entry points directly evidenced in this context, including CLI commands and workers.'
                 if len(_encoded(packet).encode())>MAX_PROMPT_BYTES:
                     packet=_batch_payload(batch_header,context,batch_id,prior)
+            if satisfied_needs is not None:
+                packet['batch']['rules']=(
+                    'The exact reads in satisfied_needs are already in snapshots or context_pages, including zero-hit pages. '
+                    'Use those results and return {batch,covered,result,needs:[]}, with covered equal to units. '
+                    'Record uncertainty in unknown if the supplied material cannot establish a finding.')
+                packet['batch']['satisfied_needs']=satisfied_needs
+                if len(_encoded(packet).encode())>MAX_PROMPT_BYTES:
+                    packet['batch'].pop('prior',None)
+                satisfied_needs=None
             answer=invoke(packet)
             if answer.get('batch')!=batch_id or answer.get('covered')!=[u['id'] for u in context]:raise RunError('invalid_result','Analysis batch coverage did not match')
             fragment=_result(answer.get('result'))
             programs=answer.get('preview_programs',fragment.pop('preview_programs',None))
             validate(fragment,False)
+            accumulated=_combine(prior,fragment)
             needs=answer.get('needs',[])
             if not isinstance(needs,list):raise RunError('invalid_result','Invalid analysis read requests')
+            requested_here=[]
             if needs:
                 if not repo and any('metadata' not in need for need in needs):raise RunError('invalid_result','This task cannot request source reads')
+                # Each model invocation sees only this packet. Earlier pages can
+                # be requested again after they fall outside the context budget.
+                present = {u['id'] for u in context}
+                queued = {u['id'] for u in reads}
                 for unit in _needed(repo,request['commit'],needs,cancelled,deadline,payload,blobs):
-                    if unit['id'] not in read_seen:reads.append(unit);read_seen.add(unit['id'])
-                if not reads:raise RunError('invalid_result','Analysis repeated a source read without making progress')
+                    if unit['id'] in present and unit['id'] not in ids:
+                        requested_here.append(unit)
+                    elif unit['id'] not in present and unit['id'] not in queued:
+                        reads.append(unit)
+                        queued.add(unit['id'])
+                if not reads:
+                    if explained_read:
+                        raise RunError('invalid_result','Requested material was already supplied and identified in this batch')
+                    explained_read=True
+                    satisfied_needs=needs
+                    prior=accumulated
+                    continue
+                transition = (frozenset(present), tuple(u['id'] for u in reads),
+                              ai_extract.digest(accumulated))
+                if transition in read_transitions:
+                    raise RunError('invalid_result','Analysis repeated a continuation cycle without new findings')
+                read_transitions.add(transition)
             if not reads:
-                settled=_combine(prior,fragment)
-                result=_combine(result,settled)
-                _preview(value,task,request['commit'],settled,programs,context)
+                result=_combine(result,accumulated)
+                _preview(value,task,request['commit'],accumulated,programs,context)
                 break
-            prior=_combine(prior,fragment)
+            prior=accumulated
             sticky=[u for u in context if u['kind']=='source' and u['id'] not in ids]
             context=list(batch)
-            for unit in sticky:
+            retained={u['id']:u for u in requested_here+sticky}
+            for unit in retained.values():
                 if len(_encoded(_batch_payload(batch_header,context+[unit],batch_id,prior)).encode())<=MAX_PROMPT_BYTES*3//4:context.append(unit)
             before_reads=len(context)
             while reads and len(_encoded(_batch_payload(batch_header,context+[reads[0]],batch_id,prior)).encode())<=MAX_PROMPT_BYTES:

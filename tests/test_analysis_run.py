@@ -451,6 +451,79 @@ class AnalysisRun(unittest.TestCase):
         self.assertEqual(answers,expected)
         self.assertEqual({f:blob_reads.count(f) for f in files},{f:1 for f in files})
 
+    def test_stateless_continuation_can_revisit_an_evicted_page_but_stops_cycles(self):
+        (self.repo/'a-padding.source').write_text('ordinary line\n'*6000)
+        self.git('add','.');self.git('commit','-qm','Force multiple source batches')
+        for sequence,should_finish,call_limit in (
+                (['absent-A']*10, False, 3),
+                (['absent-A', 'absent-B']*20, False, 5),
+                (['absent-A', 'absent-B', 'absent-A'], True, 4)):
+            with self.subTest(sequence=sequence[:4]):
+                baseline=self.raw()
+                run=self.prepare(intent={'task':'analysis','targets':[]})
+                first_batch=None
+                queried=[]
+                def executor(prompt,**kwargs):
+                    nonlocal first_batch
+                    packet=json.loads(prompt.split('\n',1)[1])
+                    batch=packet['batch']
+                    answer={'batch':batch['id'],'covered':batch['units'],'result':{}}
+                    first_batch=first_batch or batch['id']
+                    if first_batch!=batch['id']:return answer
+                    current_queries=[p['value']['query'] for p in packet.get('context_pages',[])
+                                     if p['path']==['read_page']]
+                    if queried:
+                        self.assertIn(queried[-1],current_queries)
+                    if len(queried)==2 and queried==['absent-A']*2:
+                        self.assertEqual(batch['satisfied_needs'],[{'query':'absent-A'}])
+                    if len(queried)<len(sequence):
+                        query=sequence[len(queried)]
+                        queried.append(query)
+                        answer['needs']=[{'query':query}]
+                    else:
+                        answer['result']=self.data
+                    return answer
+                done=analysis_run.run(run['id'],executor)
+                self.assertLessEqual(len(queried),call_limit)
+                if should_finish:
+                    self.assertEqual(done['state'],'completed',done.get('error'))
+                    self.assertEqual(queried,sequence)
+                else:
+                    self.assertEqual(done['state'],'failed')
+                    self.assertEqual(done['error']['code'],'invalid_result')
+                    self.assertEqual(self.raw(),baseline)
+
+    def test_same_read_notice_allows_current_packet_to_settle(self):
+        (self.repo/'noise.source').write_text('unrelated line\n'*6000)
+        self.git('add','.');self.git('commit','-qm','Use bounded read protocol')
+        need={'query':'not-found','start':1,'limit':2}
+        other={'query':'another-absent-term','start':1,'limit':1}
+        notices=[]
+        first_batch=None
+        def executor(prompt,**kwargs):
+            nonlocal first_batch
+            p=json.loads(prompt.split('\n',1)[1]);batch=p['batch']
+            first_batch=first_batch or batch['id']
+            reply={'batch':batch['id'],'covered':batch['units'],'result':{}}
+            if batch['id']==first_batch:
+                if batch.get('satisfied_needs'):
+                    notices.append(batch['satisfied_needs'])
+                    self.assertTrue(any(page['value'].get('total')==0 for page in p.get('context_pages',[])
+                                        if page['path']==['read_page']))
+                    reply['result']=self.data
+                else:
+                    pages=[page['value']['query'] for page in p.get('context_pages',[])
+                           if page['path']==['read_page']]
+                    if not pages:reply['needs']=[need]
+                    elif pages==[need['query']]:reply['needs']=[need,other]
+                    else:
+                        self.assertCountEqual(pages,[need['query'],other['query']])
+                        reply['needs']=[need]
+            return reply
+        done=analysis_run.run(self.prepare(intent={'task':'analysis','targets':[]})['id'],executor)
+        self.assertEqual(done['state'],'completed',done.get('error'))
+        self.assertEqual(notices,[[need]])
+
     def read_source(self,commit,need,blobs,cancelled=None):
         units=analysis_run._needed(str(self.repo),commit,[need],cancelled,None,{},blobs)
         return [(u['value']['file'],line['line'],line['text']) for u in units if u['kind']=='source' for line in u['value']['lines']]
