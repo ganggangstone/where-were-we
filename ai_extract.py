@@ -210,9 +210,26 @@ def analysis_schema(overview=False):
     if overview:schema['backend_routes'][0].pop('steps',None)
     return schema
 
-def analysis_prompt(commit,lang,layout,sc=None,overview=False):
+def analysis_prompt(commit,lang,layout,sc=None,overview=False,partial=False):
+    if partial:
+        source_rule='Use the immutable source lines supplied in this packet. Request additional context only for a specific finding or target in this packet.'
+        scope_rule={
+            'review':('Known rows are [id, method or SCREEN, path, function, file, source]. Return keep:"all" to preserve the catalog by default. '
+                      'Return only new or corrected items supported here. If this evidence resolves a recheck ID, return the item or its supported drop ID.'),
+            'patch':('Report new items only from inspect paths. Resolve only relevant recheck IDs using the item, its successor with replaces, or a supported removed ID. '
+                     'For inspect paths whose effect is established here, return accounted entries with file, kind (items, affects or none), and affected IDs as applicable.'),
+            'full':'Return the screen and route findings that this packet establishes.'
+        }[(sc or {}).get('mode','full')]
+        response_rule=('Return the batch envelope in batch.rules. Put verified contributions in result using the supplied schema. '
+                       'The app merges fragments and checks whole-map coverage and required dispositions at the end. '
+                       'A missing item in this packet does not establish removal or no effect. Do not enumerate unrelated catalog or recheck pages. '
+                       'Use already supplied reads. If evidence remains inconclusive, record it in unknown and finish with needs:[].')
+    else:
+        source_rule=f'Read only this immutable commit using git ls-tree -r --name-only {commit}, git show {commit}:<path>, and git grep -n <pattern> {commit}.'
+        scope_rule=mode_text(commit,sc)
+        response_rule='Return exactly one JSON object with this schema (examples are illustrative, do not copy them):\n'+json.dumps(analysis_schema(overview),ensure_ascii=False)
     return f'''Analyze the tracked source at commit {commit} of this repository, regardless of programming language or framework.
-Read only this immutable commit using git ls-tree -r --name-only {commit}, git show {commit}:<path>, and git grep -n <pattern> {commit}.
+{source_rule}
 Do not read working-tree files, credentials, or environment files. Do not modify any files or execute application code.
 Find screens, navigation actions, client HTTP calls, mounted backend endpoints, tables, external services{'' if overview else ', and request steps'}.
 Configured source roots: {json.dumps(layout)}. A null frontend/backend disables that area; other roots restrict that area to the configured directory.
@@ -224,9 +241,8 @@ Labels, descriptions and unknown entries must be in {'English' if lang=='en' els
 {mapcore.reply_language(lang,'en',saved_results=True)}
 {'Omit request steps; those are analyzed only when explicitly requested.' if overview else 'Each step uses lane 서버, 저장소, 외부 or 화면.'} Tables, services and externals require their own evidence.
 For a route whose path or mount comes from other lines (router include, prefix, base path), cite those lines in dependencies.
-{mode_text(commit,sc)}
-Return exactly one JSON object with this schema (examples are illustrative, do not copy them):
-{json.dumps(analysis_schema(overview),ensure_ascii=False)}'''
+{scope_rule}
+{response_rule}'''
 
 def mode_text(commit,sc):
     sc=sc or {'mode':'full','base':''};base=f'Always put "base": "{sc["base"]}" in the result.'

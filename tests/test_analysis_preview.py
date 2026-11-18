@@ -75,6 +75,8 @@ class Preview(unittest.TestCase):
         request = analysis_run._request(run, task)
         known = [[f'id{i}', 'GET', f'/item/{i}', 'example', 'server/items.go', 'basic'] for i in range(600)]
         request.update(mode='review', known=known, recheck=[{'id': 'existing'}])
+        complete = analysis_run.ai_extract.analysis_prompt(request['commit'],'en',{},request,overview=True)
+        self.assertIn('every recheck id either again or in drop',complete)
         first_id = None
         seen_pages = set()
         extra_read = False
@@ -84,6 +86,11 @@ class Preview(unittest.TestCase):
             nonlocal first_id, extra_read
             packet = json.loads(prompt.split('\n', 1)[1])
             batch = packet['batch']
+            self.assertIn('The app merges fragments',packet['prompt'])
+            self.assertIn('literal single-line quote',packet['prompt'])
+            self.assertNotIn('every recheck id either again or in drop',packet['prompt'])
+            self.assertNotIn('Read the whole commit',packet['prompt'])
+            self.assertIn('Return the batch envelope',prompt.split('\n',1)[0])
             reply = {'batch': batch['id'], 'covered': batch['units'], 'result': {}}
             pages = packet.get('context_pages', [])
             sources = {f['file'] for snap in packet.get('snapshots', []) for f in snap['files']}
