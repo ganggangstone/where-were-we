@@ -209,12 +209,19 @@ def status(run_id=None, project=None, repository='', branch='dev', lang='ko'):
         # A later attempt can fail before it produces its own overview. Keep the
         # latest verified sample per repository accessible across app restarts.
         saved={}
+        legacy_pin=None
+        if any('' in record.get('overviews',{}) and all(record[k]==scope[k] for k in ('project','branch','lang')) for record in values):
+            try:
+                repo,_,rid,commit=ai_extract.context(project,'',branch)
+                if rid=='':legacy_pin={'commit':commit,'configuration':store.fingerprint(repo)}
+            except ai_extract.READ_ERRORS:pass
         for record in sorted(values,key=lambda v:v['created_at']):
             if any(record[k]!=scope[k] for k in ('project','branch','lang')):continue
             for rid,overview in record.get('overviews',{}).items():
-                if not repository or repository=='*' or rid==repository:
-                    saved[rid]=overview
-        return {**selected,'saved_overviews':list(saved.values())}
+                if repository and repository!='*' and rid!=repository:continue
+                if rid=='' and (not legacy_pin or not all(overview.get(k)==v for k,v in legacy_pin.items())):continue
+                saved[rid]=overview
+        return {**selected,'saved_overviews':list(saved.values()),'current_legacy_pin':legacy_pin}
 
 def active():
     with locked():

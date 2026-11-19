@@ -159,6 +159,30 @@ class Preview(unittest.TestCase):
         self.assertEqual(cached['overviews']['service'],group)
         self.assertEqual(len(packets),1)
 
+    def test_legacy_overview_uses_current_git_and_config_pins_despite_an_older_basic_map(self):
+        name='legacy'
+        home=analysis_run.store.home(name)
+        home.mkdir()
+        snapshot=self.raw()['dev']
+        analysis_run.store.atomic(home/'dev.json',snapshot)
+        (self.repo/'worker.py').write_text('run_all_tasks()\n')
+        self.git('add','.');self.git('commit','-qm','Advance the legacy branch')
+        run=analysis_run.prepare(name,lang='en',intent={'task':'overview','targets':[]})
+        def fake(prompt,**kwargs):
+            ref=json.loads(prompt.split('\n',1)[1])['sources'][0]['lines'][0]['ref']
+            return {'items':[{'name':'Worker','description':'Runs tasks','ref':ref}]}
+        done=analysis_run.run(run['id'],fake)
+        self.assertEqual(done['state'],'completed',done.get('error'))
+        group=analysis_run.status(project=name,lang='en')['saved_overviews'][0]
+        self.assertNotEqual(group['commit'],snapshot['commit'])
+        self.assertEqual(group['commit'],self.git('rev-parse','HEAD').strip())
+        self.git('branch','alias')
+        analysis_run.store.atomic(home/'dev.json',{**snapshot,'ref':'alias'})
+        self.assertEqual(analysis_run.status(project=name,lang='en')['saved_overviews'],[])
+        analysis_run.store.atomic(home/'dev.json',snapshot)
+        self.git('commit','--allow-empty','-qm','Move selected ref again')
+        self.assertEqual(analysis_run.status(project=name,lang='en')['saved_overviews'],[])
+
     def test_source_units_share_the_queue_with_matching_review_rows(self):
         def page(key,index,data):
             return {'kind':'metadata','id':key+str(index),'value':{'path':[key,index],'value':data}}

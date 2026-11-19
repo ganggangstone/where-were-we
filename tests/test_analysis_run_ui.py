@@ -258,6 +258,18 @@ assert(!$('savedOverview0'),'Hide a sample from previous settings');
 assert(count('analysis_run_start')===0,'Reopening costs no model call');
 ''')
 
+    def test_legacy_overview_requires_server_validated_live_git_pins(self):
+        self.check_js(r'''
+await open();S.maps={dev:{commit:'older-map'}};
+const group={repository:'',commit:'current-head',configuration:'config',files:['app'],items:[{name:'Start',description:'Runs the app',file:'app',line:2,quote:'run_command()'}],format:'overview-v1'};
+status=runRecord('completed',{intent:{task:'overview',targets:[]},saved_overviews:[group]});
+await AnalysisRun.check();assert(!$('savedOverview0'),'Missing live pin hides results');
+status.current_legacy_pin={commit:group.commit,configuration:group.configuration};
+await AnalysisRun.check();assert($('savedOverview0') && $('insp').innerHTML.includes('Runs the app'),'Verified current legacy result opens despite an old basic map');
+status.current_legacy_pin.configuration='changed';await AnalysisRun.check();
+assert(!$('savedOverview0'),'Configuration mismatch hides the sample');
+''')
+
     def test_completed_program_evidence_matches_saved_repository_commit(self):
         self.check_js(r'''
 await open();

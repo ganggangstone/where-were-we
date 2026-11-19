@@ -122,6 +122,10 @@ const AnalysisRun = (() => {
   function savedOverviews() {
     const groups=run?.saved_overviews || (run?.branch===S.branch && run?.lang===S.lang ? Object.values(run.overviews || {}) : []);
     return groups.filter(group=>{
+      if(group.repository===''){
+        const pin=run.current_legacy_pin;
+        return !scope().repository && !!pin && group.commit===pin.commit && group.configuration===pin.configuration;
+      }
       const repo=S.projectInfo?.repositories?.find(r=>r.id===group.repository);
       const commit=repo?.commits?.[S.branch];
       return (!scope().repository || scope().repository===group.repository) && commit && group.commit.startsWith(commit)
@@ -134,7 +138,7 @@ const AnalysisRun = (() => {
       const key=overviewKey(group);
       const open=openedOverview===key || (openedOverview===null && group.format==='overview-v1');
       const rows=group.items.map(item=>`<div><b>${esc(item.name)}</b> ${esc(item.description || '')} ${esc([item.method,item.path,item.function].filter(Boolean).join(' '))} · <code>${esc(item.file)}:${esc(item.line)}</code><pre>${esc(item.quote)}</pre></div>`).join('');
-      return `<section class="sect"><button class="btn plain" type="button" id="savedOverview${index}" aria-expanded="${open}">${text('저장된 첫 개요','Saved initial overview')} · ${esc(connectionDisplayName(group.repository))}</button>
+      return `<section class="sect"><button class="btn plain" type="button" id="savedOverview${index}" aria-expanded="${open}">${text('저장된 첫 개요','Saved initial overview')} · ${esc(group.repository ? connectionDisplayName(group.repository) : S.project)}</button>
         <p class="s">${text('파일 '+group.files.length+'개의 일부 코드에서 확인한 항목 '+group.items.length+'개','Items verified: '+group.items.length+' · Files sampled: '+group.files.length)}</p>
         ${open ? `<div><code>${esc(group.commit.slice(0,8))}</code><p>${group.files.map(esc).join(', ')}</p>${rows}</div>` : ''}</section>`;
     }).join('');
