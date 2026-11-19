@@ -208,6 +208,38 @@ class Structure(unittest.TestCase):
                                          {'file':'README.md','line':15,'text':'Shows exact `status`'}])
             self.assertEqual(features(excluded=lambda f:f=='alias'),[])
 
+    def test_go_declarations_and_only_unambiguous_same_module_imports(self):
+        with tempfile.TemporaryDirectory() as root:
+            repo=Path(root)
+            git=lambda *a:subprocess.check_output(['git','-C',root,*a]).decode().strip()
+            git('init','-q')
+            sources={'go.mod':'module example.org/demo','cmd/main.go':"""package main
+import (
+    "example.org/demo/one"
+    "example.org/demo/many"
+    "example.org/demo/nested"
+    "fmt"
+)
+type (Item struct{}; Alias = int)
+func (i *Item) Run() {}
+func main() {}
+""",'one/file.go':'package one','one/file_test.go':'package one','many/a.go':'package many',
+                     'many/b.go':'package many','nested/go.mod':'module example.org/other','nested/x.go':'package nested'}
+            for file,text in sources.items():
+                path=repo/file
+                path.parent.mkdir(parents=True,exist_ok=True)
+                path.write_text(text)
+            git('add','.')
+            git('-c','user.name=Test','-c','user.email=test@example.invalid','commit','-qm','go module')
+            pin=git('rev-parse','HEAD')
+            result=structure_index.build(root,pin,only_file='cmd/main.go')
+            self.assertEqual([(d['kind'],d['name'],d['line']) for d in result['declarations']],
+                             [('type','Item',8),('type','Alias',8),('method','Run',9),('function','main',10)])
+            self.assertEqual(result['imports'],[{'file':'cmd/main.go','line':3,'target':'one/file.go'}])
+            self.assertEqual(result['coverage']['unresolved_imports'],3)
+            private=structure_index.build(root,pin,only_file='cmd/main.go',excluded=lambda f:f=='one/file.go')
+            self.assertEqual(private['imports'],[])
+
     def test_bounded_selection_visits_sibling_code_and_keeps_auxiliary_evidence(self):
         paths=['aaa/examples/case'+str(i)+'.py' for i in range(30)]
         paths+=['services/a/worker'+str(i)+'.py' for i in range(30)]

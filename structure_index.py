@@ -23,17 +23,19 @@ MAX_DECLARATIONS = 20_000
 MAX_IMPORTS = 20_000
 
 
-VERSION = 16
+VERSION = 17
 JS_EXTENSIONS = {'.js', '.jsx', '.mjs', '.cjs'}
-LANGUAGES = ('python', 'javascript', 'typescript', 'html')
+LANGUAGES = ('python', 'javascript', 'typescript', 'html', 'go')
 TS_EXTENSIONS = {'.ts', '.tsx', '.mts', '.cts'}
 SUFFIXES = JS_EXTENSIONS | TS_EXTENSIONS
 
 
-@lru_cache(maxsize=3)
+@lru_cache(maxsize=4)
 def _parser(grammar):
     from tree_sitter import Language, Parser
-    if grammar == 'javascript':
+    if grammar == 'go':
+        from tree_sitter_go import language
+    elif grammar == 'javascript':
         from tree_sitter_javascript import language
     elif grammar == 'tsx':
         from tree_sitter_typescript import language_tsx as language
@@ -114,6 +116,40 @@ def _script(file, raw, candidates):
                 edges.append({'file':file,'line':argument.start_point.row+1,'target':target})
     requests=service_flow.javascript_requests(root,file)
     return rows, edges, unresolved, requests, default_flow.sdk_facts(root,file), express_routes(root,file), app_factories(root,file), react_actions.facts(root,requests)
+
+
+def _go_structure(file, raw, module, directories, blocked):
+    root = _parser('go').parse(raw).root_node
+    if root.has_error or not any(n.type == 'package_clause' for n in root.named_children):
+        return None
+    rows, edges, missing = [], [], 0
+    for decl in root.named_children:
+        if decl.type == 'import_declaration':
+            specs = [node for child in decl.named_children
+                     for node in (child.named_children if child.type == 'import_spec_list' else [child])
+                     if node.type == 'import_spec']
+            for spec in specs:
+                path = spec.child_by_field_name('path')
+                name = path.text[1:-1].decode('utf-8', 'replace')
+                target = None
+                if module and (name == module or name.startswith(module + '/')) and chr(92) not in name:
+                    folder = '' if name == module else name[len(module) + 1:]
+                    if (not folder or all(part not in ('', '.', '..') for part in folder.split('/'))) and not any(base == folder or folder.startswith(base + '/') for base in blocked):
+                        target = directories.get(folder)
+                if target and posixpath.dirname(file) != posixpath.dirname(target):
+                    edges.append({'file':file,'line':path.start_point.row + 1,'target':target})
+                else:
+                    missing += 1
+            continue
+        nodes = decl.named_children if decl.type == 'type_declaration' else [decl]
+        for node in nodes:
+            kind = {'function_declaration':'function','method_declaration':'method',
+                    'type_spec':'type','type_alias':'type'}.get(node.type)
+            if kind:
+                name = node.child_by_field_name('name')
+                if name:
+                    rows.append({'kind':kind,'name':name.text.decode('utf-8','replace'),'line':name.start_point.row+1})
+    return rows, edges, missing
 
 
 def _python_tree(raw):
@@ -414,11 +450,25 @@ def build(repo, commit, excluded=None, *, only_file=None):
     manifests = {}
     descriptions = {}
     unsupported_oid = None
+    go_modules = set()
+    go_files = defaultdict(list)
+    go_config = None
+    workspace = False
     for entry in tree.split(b'\0'):
         if not entry:
             continue
         meta, raw_file = entry.split(b'\t', 1)
         mode, kind, oid, size = meta.split()
+        # A nested module, workspace or second package file is a boundary even if its
+        # contents are excluded. Use names only and never open an excluded blob.
+        go_path = os.fsdecode(raw_file)
+        folder, name = posixpath.split(go_path)
+        if name == 'go.mod' and folder:
+            go_modules.add(folder)
+        if go_path == 'go.work':
+            workspace = True
+        if name.endswith('.go') and not name.endswith('_test.go') and not name.startswith(('.', '_')):
+            go_files[folder].append(go_path)
         if mode not in (b'100644', b'100755') or kind != b'blob':
             continue
         try:
@@ -441,8 +491,10 @@ def build(repo, commit, excluded=None, *, only_file=None):
                     descriptions[file] = (oid, int(size))
             if posixpath.basename(file) in ('package.json', 'pyproject.toml'):
                 manifests[file] = (oid, int(size))
+        if file == 'go.mod' and int(size) <= 64 * 1024:
+            go_config = (oid, int(size))
         suffix = PurePosixPath(file).suffix
-        lang = 'python' if suffix == '.py' else 'javascript' if suffix in JS_EXTENSIONS else 'typescript' if suffix in TS_EXTENSIONS else 'html' if suffix in ('.html','.htm') else None
+        lang = 'go' if suffix == '.go' else 'python' if suffix == '.py' else 'javascript' if suffix in JS_EXTENSIONS else 'typescript' if suffix in TS_EXTENSIONS else 'html' if suffix in ('.html','.htm') else None
         if lang:
             languages[file] = lang
             candidates[file] = (oid, int(size))
@@ -497,9 +549,38 @@ def build(repo, commit, excluded=None, *, only_file=None):
             continue
         selected.append((file, entry))
         consumed += size
+    module = None
+    go_targets = {folder:paths[0] for folder, paths in go_files.items() if len(paths)==1 and paths[0] in candidates}
+    if any(languages[f] == 'go' for f, _ in selected) and go_config and go_config[0] not in denied and not workspace:
+        config = next(_blobs(git, env, [('go.mod', go_config)]))[1]
+        modules = re.findall(rb'^module[ \t]+([\w./~-]+)[ \t]*(?://[^\n]*)?$', config, re.M)
+        if len(modules) == 1:
+            module = modules[0].decode('ascii')
+            # A dependency with a matching prefix can override root-module ownership.
+            for path in re.findall(rb'(?:^|\s)' + re.escape(modules[0]) + rb'/([\w./~-]+)', config):
+                go_modules.add(path.decode('ascii'))
     unavailable = set()
     for file, raw in _blobs(git, env, selected):
         language = languages[file]
+        if language == 'go':
+            inside_module = not any(file.startswith(base + '/') for base in go_modules) and 'vendor' not in file.split('/')
+            try:
+                result = _go_structure(file, raw, module if inside_module else None, go_targets, go_modules | {'vendor'})
+            except ImportError:
+                unavailable.add(language)
+                continue
+            if result is None:
+                continue
+            rows, edges, missing = result
+            limited_rows = rows[:MAX_DECLARATIONS - declarations]
+            limited_edges = edges[:MAX_IMPORTS - len(imports)]
+            truncated |= len(rows) != len(limited_rows) or len(edges) != len(limited_edges)
+            files.append({'file':file,'language':language,'declarations':limited_rows})
+            parsed.add(file)
+            imports.extend(limited_edges)
+            unresolved += missing
+            declarations += len(limited_rows)
+            continue
         if language == 'html':
             try:
                 requests.extend(service_flow.html_requests(raw,file,_parser('javascript').parse))
