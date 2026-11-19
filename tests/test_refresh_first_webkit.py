@@ -130,9 +130,12 @@ class RefreshFirstWebKit(unittest.TestCase):
  const savedEdge=window.runningAnalysis.saved_overviews[0].connections[0];
  savedEdge.details=[{kind:'action',event:'onSubmit',label:'Add',evidence:[{file:'form.js',line:4,quote:'onSubmit={add}'}]},
   {kind:'data',model:'Item',operation:'read',evidence:[{file:'api.py',line:11,quote:'select(Item)'},{file:'api.py',line:11,quote:'select(Item)'}]}];
+ savedEdge.details.push({kind:'conditional_filter',model:'Item',when:false,evidence:[{file:'api.py',line:7,quote:'if user.is_admin:'},{file:'api.py',line:13,quote:'Item.owner == user.id'}]});
  savedEdge.basis='declared_defaults';
  const live=S.maps.dev.structure_indexes;S.maps.dev.structure_indexes=[];
  await AnalysisRun.check();
+ const filter=$('insp').querySelector('[data-saved-filter]');check(filter && !filter.open && filter.innerText.includes(S.lang==='en'?'When false':'조건이 거짓일 때'),'Saved condition preserves false polarity');filter.open=true;
+ check(filter.innerText.includes('if user.is_admin:') && filter.innerText.includes('Item.owner == user.id'),'Condition and query predicate keep separate citations');
  const replay=$('insp').querySelector('[data-flow-storage] details');replay.open=true;
  check(replay.innerText.includes('select(Item)') && replay.innerText.split('api.py:11').length===2 && $('insp').querySelector('[data-flow-actions] summary').textContent==='Add','Verified stages reopen without local index or duplicate citations');
  check($('insp').innerText.includes(S.lang==='en'?'Matches configured client and server defaults':'설정·클라이언트 기본값에서 일치'),'Stored conditional basis survives reopening');
