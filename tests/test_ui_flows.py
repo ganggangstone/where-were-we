@@ -1191,8 +1191,8 @@ class Flows(unittest.TestCase):
  M().structure_indexes=[index,{...index,repository:'api',files:[],imports:[],coverage:{...index.coverage,indexed_files:0}}];
  S.view='sys';render();
  const graph=()=>$('moduleGraph'),label=(s)=>graph().innerText.includes(tr(s));
- assert($('moduleFile').value===entry && label('Python import 구조 (베타)') && graph().innerText.includes(commit.slice(0,12)),'A connected source and its pinned commit appear first');
- assert(['확인한 Python 파일','건너뛴 Python 파일','미지원 파일','대상 미확인 import','분석 한도 도달'].every(label),'Partial coverage and unresolved relationships are explicit');
+ assert($('moduleFile').value===entry && label('모듈 연결 (베타)') && graph().innerText.includes(commit.slice(0,12)),'A connected source and its pinned commit appear first');
+ assert(['확인한 파일','건너뛴 파일','미지원 파일','대상 미확인 import','분석 한도 도달'].every(label),'Partial coverage and unresolved relationships are explicit');
  assert(graph().querySelector('a').textContent===entry+':2' && !graph().querySelector('index'),'Edge has a literal source coordinate and escaped target path');
  graph().querySelector('[data-module-neighbor]').click();
  assert($('moduleFile').value===target && graph().querySelector('[data-module-neighbor]').dataset.moduleNeighbor===entry,'Navigate through the edge in both directions');
@@ -1201,7 +1201,21 @@ class Flows(unittest.TestCase):
  const sourceLink=[...graph().querySelectorAll('a[data-url]')].find(a=>a.textContent===target+':10');
  assert(sourceLink.dataset.url.includes('%3Cindex%3E.py:10'),'Working-copy evidence paths are URL encoded');
  $('moduleRepository').value='api';$('moduleRepository').dispatchEvent(new Event('change'));
- assert(!$('moduleFile') && label('확인한 Python 파일'),'A repository without parsed files shows coverage only');
+ assert(!$('moduleFile') && label('확인한 파일'),'A repository without parsed files shows coverage only');
+ assert(label('로컬 Python import'),'Old snapshots retain their original Python-only coverage');
+ const mixed={...index,files:[{file:'app.js',language:'javascript',declarations:[]},{file:'types.ts',language:'typescript',declarations:[{name:'Task',kind:'interface',line:2}]}],imports:[{file:'app.js',line:1,target:'types.ts'}],
+  coverage:{...index.coverage,candidate_files:2,indexed_files:2,languages:{javascript:{candidate_files:1,indexed_files:1},typescript:{candidate_files:1,indexed_files:1},python:{candidate_files:0,indexed_files:0}}}};
+ mixed.service_flow={connections:[{method:'GET',path:'/users',client:{file:'app.js',line:3},server:{file:'server.py',line:8,function:'users'},mounts:[{file:'server.py',line:2}]},
+  {method:'POST',path:'/jobs',client:{file:'app.js',line:4},server:{file:'server.py',line:10,function:'jobs'},mounts:[]}],coverage:{requests:3,routes:2,unresolved_requests:1}};
+ M().structure_indexes=[mixed];render();
+ const http=()=>graph().querySelector('[data-http-flow]');
+ assert(http().innerText.includes('GET /users') && http().innerText.includes('app.js:3') && http().innerText.includes('server.py:8') && http().innerText.includes('server.py:2'),'Matched HTTP flow exposes client, mount and handler evidence');
+ assert(http().compareDocumentPosition(graph().querySelector('.module-neighbors:not(.http-flow)')) & Node.DOCUMENT_POSITION_FOLLOWING,'HTTP flow precedes module connections');
+ $('httpConnection').value='1';$('httpConnection').dispatchEvent(new Event('change'));
+ assert(http().innerText.includes('server.py:10') && !http().innerText.includes('server.py:8') && http().innerText.includes(tr('대상 미확인 요청')+' 1'),'Changing the selected flow refreshes all evidence without hiding unresolved requests');
+ assert(graph().innerText.includes('JavaScript 1/1') && graph().innerText.includes('TypeScript 1/1') && label('Python import · JS/TS 상대 경로 import·재내보내기'),'Mixed-language coverage carries its actual support boundary');
+ assert(graph().querySelector('.module-neighbors').compareDocumentPosition(graph().querySelector('[data-module-coverage]')) & Node.DOCUMENT_POSITION_FOLLOWING,'Connections precede coverage detail');
+ graph().querySelector('[data-module-neighbor]').click();assert(label('인터페이스') && $('moduleFile').value==='types.ts','Static JS to TS connection and TypeScript declaration');
  assert(!window.calls.some(c=>c.command==='analysis_run_start'),'Opening and navigating the structure never executes a model');
 ''')
 

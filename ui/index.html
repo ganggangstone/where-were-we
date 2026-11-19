@@ -385,7 +385,8 @@ Object.assign(UI_EN,{'마지막 새로고침':'Last refresh'});
 Object.assign(UI_EN,{'선택한 기능':'Selected feature','‹ 기능 개요':'‹ Feature overview','기능 선택 해제':'Clear feature','이 기능에 속한 화면입니다.':'This screen belongs to this feature.','선택한 기능 밖의 화면입니다.':'This screen is outside the selected feature.','이 화면의 기능으로 바꾸기':'Switch to this screen’s feature','화면 지도에서 보기':'Show on the screen map','이 기능이 서버에 하는 일 ':'Feature requests: ','이 기능과 이어진 작업 ':'Linked work for this feature: ',"작업 정보 미수집":"Work data not collected","연결된 작업 없음":"No linked work",'기능 복사':'Copy feature','대상 ID: ':'Target ID: ','기능: ':'Feature: ','이어진 작업: ':'Linked work: ','AI가 붙인 이름':'AI-suggested name','선택한 기능의 화면이 쓰는 대상입니다.':'Used by the selected feature’s screens.','선택한 기능의 화면에서 이어진 것을 찾지 못했습니다.':'No link from the selected feature’s screens was found.'});
 Object.assign(UI_EN,{'기존 AI 채팅에 요청':'Use your existing AI chat','저장된 결과 새로고침':'Refresh saved results',"앱에서 자동 분석 (베타)":"Automatic analysis in the app (beta)",'요청 내용·다른 분석':'Request text and other analyses','요청 준비됨':'Request ready','일부 결과 저장됨':'Partial results saved','이전에 저장된 결과':'Previously saved results'});
 Object.assign(UI_EN,{'Git 추적 파일':'Git-tracked files','최상위 폴더':'Top-level folder','파일 수':'File count','루트 디렉터리':'Root directory'});
-Object.assign(UI_EN,{'Python import 구조 (베타)':'Python import graph (beta)','확인한 Python 파일':'Python files indexed','건너뛴 Python 파일':'Python files skipped','미지원 파일':'Unsupported files','대상 미확인 import':'Unresolved imports','분석 한도 도달':'Index limit reached','선택한 모듈':'Selected module','작업 폴더에서 열기':'Open working copy','이 모듈을 가져오는 쪽':'Imported by','이 모듈이 가져오는 쪽':'Imports','모듈 선언':'Declarations','클래스':'Class','함수':'Function','비동기 함수':'Async function'});
+Object.assign(UI_EN,{'모듈 연결 (베타)':'Module connections (beta)','확인한 파일':'Files indexed','건너뛴 파일':'Files skipped','Python import · JS/TS 상대 경로 import·재내보내기':'Python imports · JS/TS relative imports and re-exports','로컬 Python import':'Local Python imports','인터페이스':'Interface','타입 별칭':'Type alias','열거형':'Enum','메서드':'Method','미지원 파일':'Unsupported files','대상 미확인 import':'Unresolved imports','분석 한도 도달':'Index limit reached','선택한 모듈':'Selected module','작업 폴더에서 열기':'Open working copy','이 모듈을 가져오는 쪽':'Imported by','이 모듈이 가져오는 쪽':'Imports','모듈 선언':'Declarations','클래스':'Class','함수':'Function','비동기 함수':'Async function'});
+Object.assign(UI_EN,{'HTTP 요청 흐름 (베타)':'HTTP request flow (beta)','고정 fetch 주소 · FastAPI 경로 대조':'Literal fetch URLs matched to FastAPI routes','요청을 보내는 코드':'Client call site','받는 서버 함수':'Server handler','라우터 등록':'Router registration','연결된 요청':'Matched requests','대상 미확인 요청':'Unresolved requests','확인한 요청':'Requests detected','서버 경로':'Server routes','연결 선택':'Select connection'});
 const UI_PATTERN = new RegExp(Object.keys(UI_EN).sort((a, b) => b.length - a.length).map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'g');
 function tr(text) { return S.lang === 'en' ? String(text).replace(UI_PATTERN, match => UI_EN[match]) : String(text); }
 function ui(parts, ...values) { return parts.reduce((out, part, i) => out + tr(part) + (i < values.length ? values[i] : ''), ''); }
@@ -1362,6 +1363,15 @@ function inventoryView(m) {
     return `<details class="sect" data-inventory="${esc(key)}" ${S.inventoryOpen===key?'open':''}><summary>${esc([label,tr('Git 추적 파일'),row.files].filter(x=>x!=='').join(' · '))}</summary><p class="mono">${esc(row.commit.slice(0,12))}</p><table><thead><tr><th>${tr('최상위 폴더')}</th><th>${tr('파일 수')}</th></tr></thead><tbody>${row.directories.map(([dir,count])=>`<tr><td>${dir?esc(dir):tr('루트 디렉터리')}</td><td>${esc(count)}</td></tr>`).join('')}</tbody></table></details>`;
   }).join('');
 }
+function serviceFlowView(flow,selectedIndex,evidence) {
+  if(!flow)return '';
+  const {connections,coverage:counts}=flow;
+  const link=connections[selectedIndex] || connections[0];
+  const options=connections.length>1?`<label>${tr('연결 선택')} <select id="httpConnection">${connections.map((c,i)=>`<option value="${i}" ${c===link?'selected':''}>${esc(c.method)} ${esc(c.path)} · ${esc(c.client.file)}:${esc(c.client.line)}</option>`).join('')}</select></label>`:'';
+  const diagram=link?`<div class="module-neighbors http-flow"><div class="module-edge"><h4>${tr('요청을 보내는 코드')}</h4>${evidence(link.client.file,link.client.line)}</div><div class="module-center"><span aria-hidden="true">→</span><strong class="mono">${esc(link.method)} ${esc(link.path)}</strong><span aria-hidden="true">→</span></div><div class="module-edge"><h4>${tr('받는 서버 함수')}</h4><b class="mono">${esc(link.server.function)}</b>${evidence(link.server.file,link.server.line)}</div></div>`:'';
+  const mounts=link?.mounts?.length?`<div class="module-scope s">${tr('라우터 등록')} ${link.mounts.map(m=>evidence(m.file,m.line)).join(' · ')}</div>`:'';
+  return `<section class="sect" data-http-flow><h2>${tr('HTTP 요청 흐름 (베타)')}</h2>${options}${diagram}${mounts}<div class="s">${tr('고정 fetch 주소 · FastAPI 경로 대조')} · ${tr('확인한 요청')} ${esc(counts.requests)} · ${tr('서버 경로')} ${esc(counts.routes)} · ${tr('연결된 요청')} ${connections.length} · ${tr('대상 미확인 요청')} ${esc(counts.unresolved_requests)}</div></section>`;
+}
 function structureIndexView(m) {
   const indexes=m.structure_indexes || (m.structure_index ? [m.structure_index] : []);
   if (!indexes.length) return '';
@@ -1375,21 +1385,28 @@ function structureIndexView(m) {
   state.file=selected?.file || '';
   const repoControl=indexes.length>1?`<label>${tr('연결한 코드')} <select id="moduleRepository">${indexes.map(i=>`<option value="${esc(i.repository)}" ${i===index?'selected':''}>${esc(repoLabel(i.repository))}</option>`).join('')}</select></label>`:`<span>${esc(repoLabel(index.repository))}</span>`;
   const commit=`<code class="mono" title="${esc(index.commit)}">${esc(index.commit.slice(0,12))}</code>`;
-  const status=`<div class="module-scope s">${repoControl} ${commit}<span>${tr('확인한 Python 파일')} ${coverage.indexed_files}/${coverage.candidate_files}</span></div>`;
+  const languages={python:'Python',javascript:'JavaScript',typescript:'TypeScript'};
+  const counts=coverage.languages || {python:coverage};
+  const languageCounts=Object.entries(counts).filter(([,v])=>v.candidate_files>0)
+    .map(([name,v])=>`${esc(languages[name] || name)} ${esc(v.indexed_files)}/${esc(v.candidate_files)}`);
+  const status=`<div class="module-scope s">${repoControl} ${commit}<span>${tr('확인한 파일')} ${coverage.indexed_files}/${coverage.candidate_files}</span></div>`;
   const gaps=[
-    ['건너뛴 Python 파일',coverage.skipped_files],
+    ['건너뛴 파일',coverage.skipped_files],
     ['미지원 파일',coverage.unsupported_files],
     ['대상 미확인 import',coverage.unresolved_imports]
   ].filter(([,count])=>count>0).map(([label,count])=>esc(tr(label))+' '+esc(count));
   if(coverage.truncated)gaps.push(tr('분석 한도 도달'));
-  const heading=`<h2>${tr('Python import 구조 (베타)')}</h2>${status}${gaps.length?`<p class="s" role="status">${gaps.join(' · ')}</p>`:''}`;
-  if (!selected) return `<section class="sect" id="moduleGraph">${heading}</section>`;
-  const fileControl=`<label>${tr('선택한 모듈')} <select id="moduleFile">${files.map(f=>`<option value="${esc(f.file)}" ${f===selected?'selected':''}>${esc(f.file)}</option>`).join('')}</select></label>`;
   const evidence=(file,line)=>{
     const qualified=index.repository?index.repository+'/'+file:file;
     const url='zed://file'+codeLocation(m,qualified).split('/').map(encodeURIComponent).join('/')+':'+line;
     return `<a class="lnk mono" data-url="${esc(url)}" title="${esc(tr('작업 폴더에서 열기'))}">${esc(file)}:${esc(line)}</a>`;
   };
+  const http=serviceFlowView(index.service_flow,state.http || 0,evidence);
+  const heading=`${status}${http}<h2>${tr('모듈 연결 (베타)')}</h2>`;
+  const boundary=coverage.languages ? 'Python import · JS/TS 상대 경로 import·재내보내기' : '로컬 Python import';
+  const scopeNote=`<div class="sect s" data-module-coverage><strong>${tr('확인 범위')}</strong> · ${tr(boundary)}${languageCounts.length?`<div>${languageCounts.join(' · ')}</div>`:''}${gaps.length?`<div role="status">${gaps.join(' · ')}</div>`:''}</div>`;
+  if (!selected) return `<section class="sect" id="moduleGraph">${heading}${scopeNote}</section>`;
+  const fileControl=`<label>${tr('선택한 모듈')} · ${esc(languages[selected.language || 'python'] || selected.language)} <select id="moduleFile">${files.map(f=>`<option value="${esc(f.file)}" ${f===selected?'selected':''}>${esc(f.file)}</option>`).join('')}</select></label>`;
   const page=(key,rows,renderRow)=>{
     if(!rows.length)return `<div class="s">${tr('없음')}</div>`;
     const size=8,current=Math.min(state.page[key] || 0,Math.floor((rows.length-1)/size));
@@ -1407,9 +1424,9 @@ function structureIndexView(m) {
     });
     return `<div><h4>${tr(incoming?'이 모듈을 가져오는 쪽':'이 모듈이 가져오는 쪽')} · ${matches.length}</h4>${rows}</div>`;
   };
-  const names={class:'클래스',function:'함수',async_function:'비동기 함수'};
+  const names={class:'클래스',function:'함수',async_function:'비동기 함수',interface:'인터페이스',type:'타입 별칭',enum:'열거형',method:'메서드'};
   const declarations=page('declarations',selected.declarations,d=>`<div class="row"><div class="grow"><span class="s">${esc(tr(names[d.kind] || d.kind))}</span> <b class="mono">${esc(d.name)}</b></div>${evidence(selected.file,d.line)}</div>`);
-  return `<section class="sect" id="moduleGraph">${heading}<div class="module-neighbors">${links(true)}<div class="module-center">${incomingLinks.length?'<span aria-hidden="true">→</span>':''}${fileControl}${outgoingLinks.length?'<span aria-hidden="true">→</span>':''}</div>${links(false)}</div><h4>${tr('모듈 선언')} · ${selected.declarations.length}</h4><div class="group">${declarations}</div></section>`;
+  return `<section class="sect" id="moduleGraph">${heading}<div class="module-neighbors">${links(true)}<div class="module-center">${incomingLinks.length?'<span aria-hidden="true">→</span>':''}${fileControl}${outgoingLinks.length?'<span aria-hidden="true">→</span>':''}</div>${links(false)}</div><h4>${tr('모듈 선언')} · ${selected.declarations.length}</h4><div class="group">${declarations}</div>${scopeNote}</section>`;
 }
 function bindStructureIndex() {
   const graph=$('moduleGraph');
@@ -1420,7 +1437,8 @@ function bindStructureIndex() {
     bindStructureIndex();
     if(focus)$(focus)?.focus();
   };
-  if($('moduleRepository'))$('moduleRepository').onchange=e=>update({repository:e.target.value,file:'',page:{}},'moduleRepository');
+  if($('moduleRepository'))$('moduleRepository').onchange=e=>update({repository:e.target.value,file:'',page:{},http:0},'moduleRepository');
+  if($('httpConnection'))$('httpConnection').onchange=e=>update({http:Number(e.target.value)},'httpConnection');
   if($('moduleFile'))$('moduleFile').onchange=e=>update({file:e.target.value,page:{}},'moduleFile');
   graph.querySelectorAll('[data-module-neighbor]').forEach(button=>button.onclick=()=>update({file:button.dataset.moduleNeighbor,page:{}},'moduleFile'));
   graph.querySelectorAll('[data-module-page]').forEach(button=>button.onclick=()=>{
