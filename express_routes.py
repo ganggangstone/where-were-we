@@ -11,7 +11,7 @@ def _args(call):
     return [child for child in args.named_children if child.type != 'comment'] if args else []
 
 
-def express_routes(root, file):
+def express_routes(root, file, factory=None):
     if root.has_error or b'express' not in root.text:
         return []
     constructors = {}
@@ -19,7 +19,9 @@ def express_routes(root, file):
     handlers = {}
     statements = []
     commonjs = {}
-    for statement in root.named_children:
+    scope = root.named_children if factory is None else [
+        *[n for n in root.named_children if n.type=='import_statement'], *factory.named_children]
+    for statement in scope:
         if statement.type == 'export_statement':
             statement = statement.child_by_field_name('declaration')
             if not statement:
@@ -87,6 +89,19 @@ def express_routes(root, file):
             and constructor in constructors and constructor not in modified and constructors[constructor] < end}
     listeners = {name for name, prop, call in statements if name in apps and prop == 'listen'
                  and _args(call) and call.start_byte >= apps[name]}
+    if factory is not None:
+        last=factory.named_children[-1] if factory.named_children else None
+        if not last or last.type!='return_statement' or len(last.named_children)!=1:return []
+        name=_identifier(last.named_children[0])
+        if name not in apps:return []
+        # Other returns inside this factory may select another application.
+        pending=list(factory.named_children[:-1])
+        while pending:
+            part=pending.pop()
+            if part.type=='return_statement':return []
+            if part.type not in ('arrow_function','function_expression','function_declaration','method_definition'):
+                pending.extend(part.named_children)
+        listeners={name}
     routes = []
     for name, prop, call in statements:
         method = prop.upper()
@@ -109,3 +124,67 @@ def express_routes(root, file):
         routes.append({'method':method, 'path':path, 'server':{'file':file, 'line':call.start_point.row + 1,
                                                                'function':function}, 'mounts':[]})
     return routes
+
+
+def app_factories(root, file):
+    """Find exported factories and unambiguous local named imports invoked as factory().listen()."""
+    factories = {}
+    imports = {}
+    launches = []
+    if root.has_error:
+        return factories, launches
+    external_names={c.text for n in root.named_children if n.type=='import_statement'
+                    and _js_string(n.child_by_field_name('source'))=='express'
+                    for clause in n.named_children if clause.type=='import_clause'
+                    for c in clause.named_children if c.type=='identifier'}
+    for statement in root.named_children:
+        if external_names and statement.type=='export_statement':
+            fn=statement.child_by_field_name('declaration')
+            if fn and fn.type=='function_declaration':
+                name=_identifier(fn.child_by_field_name('name'))
+                body=fn.child_by_field_name('body')
+                # Imported constructor must not be rebound by a factory parameter.
+                params=fn.child_by_field_name('parameters')
+                stack=[params,body]
+                shadowed=False
+                while stack:
+                    param=stack.pop()
+                    if param.type in ('identifier','shorthand_property_identifier_pattern') and param.text in external_names:
+                        parent=param.parent
+                        if parent.type!='call_expression' or parent.child_by_field_name('function')!=param:
+                            # Accesses to express.json() and other static members are reads too.
+                            if parent.type!='member_expression' or parent.child_by_field_name('object')!=param:
+                                shadowed=True
+                    stack.extend(param.named_children)
+                if name and body and not shadowed and (rows:=express_routes(root,file,body)):
+                    factories[name]=(fn.start_point.row+1,rows)
+        if statement.type=='import_statement':
+            for clause in statement.named_children:
+                for specifiers in clause.named_children:
+                    for spec in specifiers.named_children:
+                        if spec.type=='import_specifier' and len(spec.named_children)==1:
+                            imports[spec.text.decode()]=statement.start_point.row+1
+        if statement.type!='expression_statement' or not statement.named_children:continue
+        call=statement.named_children[0]
+        if call.type!='call_expression' or not _args(call):continue
+        fn=call.child_by_field_name('function')
+        if not fn or fn.type!='member_expression' or fn.child_by_field_name('property').text!=b'listen':continue
+        obj=fn.child_by_field_name('object')
+        if obj.type!='call_expression' or _args(obj):continue
+        name=_identifier(obj.child_by_field_name('function'))
+        if name in imports:launches.append((name,imports[name],call.start_point.row+1))
+    return factories, launches
+
+
+def factory_routes(modules, edges):
+    targets={(edge['file'],edge['line']):edge['target'] for edge in edges}
+    result={}
+    for source,(_,launches) in modules.items():
+        for name,import_line,listener in launches:
+            target=targets.get((source,import_line))
+            if target not in modules or name not in modules[target][0]:continue
+            definition,rows=modules[target][0][name]
+            mounts=[{'file':source,'line':import_line},{'file':source,'line':listener},{'file':target,'line':definition}]
+            for row in rows:
+                result.setdefault((target,name,row['server']['line'],row['method'],row['path']),{**row,'mounts':mounts})
+    return list(result.values())

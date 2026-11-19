@@ -11,7 +11,7 @@ import warnings
 
 import service_flow
 import default_flow
-from express_routes import express_routes
+from express_routes import app_factories, express_routes, factory_routes
 
 MAX_FILES = 2048
 MAX_BYTES = 64 * 1024 * 1024
@@ -20,7 +20,7 @@ MAX_DECLARATIONS = 20_000
 MAX_IMPORTS = 20_000
 
 
-VERSION = 4
+VERSION = 5
 JS_EXTENSIONS = {'.js', '.jsx', '.mjs', '.cjs'}
 LANGUAGES = ('python', 'javascript', 'typescript', 'html')
 TS_EXTENSIONS = {'.ts', '.tsx', '.mts', '.cts'}
@@ -88,7 +88,7 @@ def _script(file, raw, candidates):
                 else:
                     unresolved += 1
         stack.extend((child, prefix) for child in reversed(node.named_children))
-    return rows, edges, unresolved, service_flow.javascript_requests(root, file), default_flow.sdk_facts(root,file), express_routes(root,file)
+    return rows, edges, unresolved, service_flow.javascript_requests(root, file), default_flow.sdk_facts(root,file), express_routes(root,file), app_factories(root,file)
 
 
 def _blobs(git, env, selected):
@@ -159,6 +159,7 @@ def build(repo, commit, excluded=None):
     external = {'routers':{}, 'mounts':[]}
     python_modules = {}
     sdk_modules = {}
+    factory_modules = {}
     imports = []
     parsed = set()
     consumed = declarations = unresolved = 0
@@ -195,7 +196,8 @@ def build(repo, commit, excluded=None):
                 continue
             if script is None:
                 continue
-            rows, edges, missing, file_requests, sdk, server_routes = script
+            rows, edges, missing, file_requests, sdk, server_routes, factories = script
+            if any(factories):factory_modules[file]=factories
             routes.extend(server_routes)
             if sdk:sdk_modules[file]=sdk
             requests.extend(file_requests)
@@ -261,6 +263,7 @@ def build(repo, commit, excluded=None):
             stack.extend((child, prefix) for child in reversed(list(ast.iter_child_nodes(node))))
         files.append({'file': file, 'language':'python', 'declarations': rows})
     resolved = [edge for edge in imports if edge['target'] in parsed]
+    routes.extend(factory_routes(factory_modules,resolved))
     routes.extend(service_flow.mounted_routes(external,resolved))
     routes.extend(default_flow.default_routes(python_modules,external['routers']))
     requests.extend(default_flow.sdk_requests(sdk_modules))

@@ -111,10 +111,24 @@ def javascript_requests(root, file):
     """Read bare fetch calls, ignoring files where fetch may be rebound."""
     if root.has_error:
         return []
+    constants = {}
+    for statement in root.named_children:
+        if statement.type != 'lexical_declaration' or statement.children[0].type != 'const':
+            continue
+        for decl in statement.named_children:
+            name = decl.child_by_field_name('name')
+            path = _js_string(decl.child_by_field_name('value'))
+            if name and name.type == 'identifier' and _path(path):
+                constants[name.text] = (path, name)
     stack = [root]
     calls = []
     while stack:
         node = stack.pop()
+        if node.type in ('identifier','shorthand_property_identifier_pattern') and node.text in constants:
+            _, declared = constants[node.text]
+            # Accept only simple reads. Any additional binding or write makes the name ambiguous.
+            if node != declared and node.parent.type not in ('arguments','template_substitution'):
+                del constants[node.text]
         if node.type in ('identifier', 'shorthand_property_identifier_pattern') and node.text == b'fetch':
             parent = node.parent
             if parent is None or parent.type != 'call_expression' or parent.child_by_field_name('function') != node:
@@ -127,6 +141,10 @@ def javascript_requests(root, file):
         if not args:
             continue
         path = _js_string(args[0])
+        declaration = None
+        if args[0].type == 'identifier' and args[0].text in constants:
+            path, declaration = constants[args[0].text]
+            if declaration.end_byte >= call.start_byte:continue
         if not _path(path) or len(args) > 2:
             continue
         method = 'GET'
@@ -146,7 +164,9 @@ def javascript_requests(root, file):
                 if key.text in (b'method', b'"method"', b"'method'"):
                     method = _js_string(prop.child_by_field_name('value'))
         if method and method.upper() in METHODS:
-            requests.append({'method': method.upper(), 'path': path, 'client': {'file': file, 'line': call.start_point[0] + 1}})
+            request={'method': method.upper(), 'path': path, 'client': {'file': file, 'line': call.start_point[0] + 1}}
+            if declaration:request['evidence']=[{'file':file,'line':declaration.start_point.row+1}]
+            requests.append(request)
     return requests
 
 
@@ -192,6 +212,7 @@ def html_requests(raw, file, parse):
     for offset, source in html.sources:
         for request in javascript_requests(parse(source.encode()).root_node, file):
             request['client']['line'] += offset
+            for site in request.get('evidence',[]):site['line'] += offset
             requests.append(request)
     return requests
 
