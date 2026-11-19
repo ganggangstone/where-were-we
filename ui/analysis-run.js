@@ -181,8 +181,10 @@ const AnalysisRun = (() => {
     return savedOverviews().map((group,index)=>{
       const key=overviewKey(group);
       const open=openedOverview===key || (openedOverview===null && group.format==='overview-v1');
+      const coverage=group.scope_coverage;
+      const scopeCounts=coverage?.total ? ' · '+text('로컬에서 확인한 요청 경로 묶음 중 ','Verified request scopes sampled: ')+coverage.selected.length+'/'+coverage.total : '';
       return `<section class="sect"><button class="btn plain" type="button" id="savedOverview${index}" aria-expanded="${open}">${text('저장된 첫 개요','Saved initial overview')} · ${esc(group.repository ? connectionDisplayName(group.repository) : S.project)}</button>
-        <p class="s">${text('파일 '+group.files.length+'개의 일부 코드에서 확인한 항목 '+group.items.length+'개','Items verified: '+group.items.length+' · Files sampled: '+group.files.length)}</p>
+        <p class="s">${text('파일 '+group.files.length+'개의 일부 코드에서 확인한 항목 '+group.items.length+'개','Items verified: '+group.items.length+' · Files sampled: '+group.files.length)}${esc(scopeCounts)}</p>
         ${open ? `<div><code>${esc(group.commit.slice(0,8))}</code>${overviewTree(group)}</div>` : ''}</section>`;
     }).join('');
   }

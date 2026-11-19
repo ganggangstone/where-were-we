@@ -219,6 +219,48 @@ class Preview(unittest.TestCase):
             for side in (edge['client'],edge['server']):
                 self.assertIn(side['quote'],(self.repo/side['file']).read_text().splitlines()[side['line']-1])
 
+    def test_one_call_covers_distinct_verified_resources_and_marks_omitted_scopes(self):
+        (self.repo/'browser.ts').write_text("""export function listOrders(){return fetch('/orders')}
+export function addOrder(){return fetch('/orders',{method:'POST'})}
+export function listReports(){return fetch('/reports')}
+export function listUsers(){return fetch('/users')}
+""")
+        (self.repo/'api.py').write_text("""from fastapi import FastAPI
+app = FastAPI()
+@app.get('/orders')
+def orders(): pass
+@app.post('/orders')
+def add_order(): pass
+@app.get('/reports')
+def reports(): pass
+@app.get('/users')
+def users(): pass
+""")
+        self.git('add','.');self.git('commit','-qm','Register three feature scopes')
+        intent={'task':'overview','targets':[]}
+        run=self.prepare(intent=intent)
+        calls=[]
+        def answer(prompt,**kwargs):
+            packet=json.loads(prompt.split('\n',1)[1])
+            paths={edge['path'] for edge in packet['connections']}
+            calls.append(paths)
+            self.assertEqual(len(paths),2)
+            self.assertLessEqual(len(packet['sources']),4)
+            return {'items':[]}
+        done=analysis_run.run(run['id'],answer)
+        self.assertEqual(done['state'],'completed',done.get('error'))
+        saved=done['overviews']['service']
+        self.assertEqual(saved['scope_coverage']['total'],3)
+        self.assertEqual(calls,[set(saved['scope_coverage']['selected'])])
+        self.assertEqual(saved['version'],analysis_run.OVERVIEW_VERSION)
+        cached=self.prepare(intent=intent)
+        self.assertEqual(analysis_run.run(cached['id'],lambda *a,**k:self.fail('repeated AI'))['state'],'completed')
+        for record in (done,analysis_run.read(cached['id'])):
+            record['overviews']['service'].pop('version')
+            analysis_run.write(record)
+        upgrade=self.prepare(intent=intent)
+        self.assertEqual([t['task'] for t in upgrade['tasks']],['overview'])
+
     def test_overview_preserves_conditional_url_match_in_prompt_and_saved_evidence(self):
         (self.repo/'app.js').write_text("import express from 'express';\nconst app=express();\napp.patch('/items/:id',()=>null);\napp.listen(3000);\n")
         (self.repo/'view.js').write_text("function update(id){fetch(`/items/${id}`,{method:'PATCH'})}\n")

@@ -24,6 +24,7 @@ import project as store
 
 ACTIVE = {'preparing', 'running', 'saving'}
 TERMINAL = {'completed', 'failed', 'cancelled'}
+OVERVIEW_VERSION = 2
 MAX_FILE_BYTES = 300_000
 MAX_PROMPT_BYTES = 128 * 1024
 UNIT_BYTES = 16 * 1024
@@ -192,7 +193,7 @@ def prepare(project, branch='dev', lang='ko', repository='', executor='claude', 
                 if any(old[key]!=scope[key] for key in ('project','lang','branch')):continue
                 for rid,overview in old.get('overviews',{}).items():
                     pin=plan['pins'].get(rid)
-                    if pin and overview.get('format')=='overview-v1' and all(overview.get(k)==v for k,v in pin.items()):
+                    if pin and overview.get('format')=='overview-v1' and overview.get('version')==OVERVIEW_VERSION and all(overview.get(k)==v for k,v in pin.items()):
                         value.setdefault('overviews',{})[rid]=overview
             cached=value.get('overviews',{})
             value['completed_tasks']=[{'task':'overview','repository':rid,'target':None} for rid in cached]
@@ -968,17 +969,26 @@ def _overview_anchors(index):
     ranked=sorted((file for file in declarations if declarations[file] or imports.get(file)),
                   key=lambda f:(-bool(imports.get(f)),-incoming.get(f,0),-len(imports.get(f,[])),f))
     selected=[]
-    flows=[]
+    service=index.get('service_flow') or {}
+    resources={i:group['resource'] for group in service.get('feature_groups',[]) for i in group['connection_indexes']}
+    scopes={}
     seen_endpoints=set()
-    for flow in (index.get('service_flow') or {}).get('connections',[]):
+    for i,flow in enumerate(service.get('connections',[])):
+        scope=resources.get(i,flow['path'])
+        candidates=scopes.setdefault(scope,[])
         endpoint=(flow['method'],flow['path'])
         sides=[flow['client']['file'],flow['server']['file']]
         if len(flow['path'])>256 or endpoint in seen_endpoints or any(f not in declarations for f in sides):continue
         seen_endpoints.add(endpoint)
-        flows.append(flow)
-        for file in sides:
-            if file not in selected:selected.append(file)
-        if len(flows)==2:break
+        candidates.append(flow)
+    first=[(scope,rows[0]) for scope,rows in scopes.items() if rows]
+    flows=first[:2]
+    if len(first)==1:
+        scope=first[0][0]
+        flows.extend((scope,row) for row in scopes[scope][1:2])
+    for _,flow in flows:
+        for side in (flow['client'],flow['server']):
+            if side['file'] not in selected:selected.append(side['file'])
     for file in ranked:
         if len(selected)==4:break
         for candidate in [file]+[edge['target'] for edge in imports.get(file,[])]:
@@ -988,7 +998,7 @@ def _overview_anchors(index):
         if len(selected)==4:break
     anchors={}
     for file in selected:
-        rows={side['line']:{} for flow in flows for side in (flow['client'],flow['server']) if side['file']==file}
+        rows={side['line']:{} for _,flow in flows for side in (flow['client'],flow['server']) if side['file']==file}
         for edge in imports.get(file,[]):
             if len(rows)>=8:break
             rows.setdefault(edge['line'],{'imports':edge['target']})
@@ -996,7 +1006,7 @@ def _overview_anchors(index):
             if len(rows)>=24:break
             rows.setdefault(decl['line'],{'kind':decl['kind'],'name':decl['name']})
         anchors[file]=rows
-    return anchors,flows
+    return anchors,flows,len(scopes)
 
 def _feature_groups(groups, connections):
     # Labels are optional. A malformed label must not discard verified source evidence.
@@ -1021,7 +1031,7 @@ def _quick_overview(repo,request,language,invoke,cancelled,deadline,raw):
     index=raw.get('structure_index') or {}
     if index.get('commit')!=commit or index.get('version')!=structure_index.VERSION:
         index=structure_index.build(repo,commit,excluded=_secret)
-    anchors,flows=_overview_anchors(index)
+    anchors,flows,total_scopes=_overview_anchors(index)
     selected=list(anchors)
     if len(selected)<4:
         fallback=sorted(_first_files(repo,commit,request,overview=True)-set(selected))
@@ -1044,7 +1054,8 @@ def _quick_overview(repo,request,language,invoke,cancelled,deadline,raw):
             references[ref]={'file':source['file'],'line':row['line'],'quote':text}
             rows.append({'ref':ref,'line':row['line'],'text':text,**evidence.get(row['line'],{})})
         if rows:sources.append({'file':source['file'],'lines':rows})
-    result={'format':'overview-v1','files':[s['file'] for s in sources],'items':[]}
+    result={'format':'overview-v1','version':OVERVIEW_VERSION,'files':[s['file'] for s in sources],'items':[],
+            'scope_coverage':{'total':total_scopes,'selected':[]}}
     if not sources:return result
     packet={'lang':language,'sources':sources,
             'prompt':'Describe directly evidenced features and structure in the selected language. '
@@ -1053,9 +1064,10 @@ def _quick_overview(repo,request,language,invoke,cancelled,deadline,raw):
             'schema':{'items':[{'name':'feature or component','description':'what it does','ref':1}]}}
     by_line={(row['file'],row['line']):ref for ref,row in references.items()}
     connections=[]
-    for flow in flows:
+    for scope,flow in flows:
         refs=[by_line.get((side['file'],side['line'])) for side in (flow['client'],flow['server'])]
         if all(refs):
+            if scope not in result['scope_coverage']['selected']:result['scope_coverage']['selected'].append(scope)
             connection={'id':len(connections)+1,'method':flow['method'],'path':flow['path'],'client_ref':refs[0],'server_ref':refs[1]}
             if flow.get('basis')=='path_template':
                 connection.update(basis='path_template',server_path=flow['server_path'])
