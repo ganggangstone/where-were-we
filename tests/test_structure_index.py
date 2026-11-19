@@ -339,10 +339,14 @@ func Ignored() *c.Command {
             (folder/'dev.json').write_text(saved)
             cmd=[sys.executable,str(Path(structure_index.__file__).with_name('project.py')),'directory-structure','demo','--','','dev']
             env={**os.environ,'WHERE_WERE_WE_ROOT':str(folder.parent)}
-            self.assertEqual(json.loads(subprocess.check_output(cmd+[pin,'pkg'],env=env)),result)
+            response=json.loads(subprocess.check_output(cmd+[pin,'pkg'],env=env))
+            self.assertEqual(response.pop('cache_progress'),{'pages':[1],'total_pages':1,'indexed_files':2,'selected_files':2,'unparsed_files':0,'first_missing_page':None})
+            self.assertEqual(response,result)
             import project
             with patch('mapcore.ROOT',folder.parent),patch.object(structure_index,'build',side_effect=AssertionError('cache miss')):
-                self.assertEqual(project.selected_structure('demo','','dev',pin,directory='pkg'),result)
+                reopened=project.selected_structure('demo','','dev',pin,directory='pkg')
+                self.assertEqual(reopened.pop('cache_progress')['pages'],[1])
+                self.assertEqual(reopened,result)
             with patch('mapcore.ROOT',folder.parent),patch.object(structure_index,'MAX_DIRECTORY_FILES',1),patch.object(structure_index,'_blobs',wraps=structure_index._blobs) as blobs:
                 second=project.selected_structure('demo','','dev',pin,directory='pkg',page=2)
                 self.assertEqual(second['pagination']['page'],2)
@@ -351,6 +355,17 @@ func Ignored() *c.Command {
                                  [f['file'] for f in second['files']])
                 with patch.object(structure_index,'build',side_effect=AssertionError('cache miss')):
                     self.assertEqual(project.selected_structure('demo','','dev',pin,directory='pkg',page=2),second)
+                self.assertEqual(second['cache_progress']['pages'],[2])
+                self.assertEqual(second['cache_progress']['first_missing_page'],1)
+                first=project.selected_structure('demo','','dev',pin,directory='pkg')
+                self.assertEqual(first['cache_progress']['pages'],[1,2])
+                slot1,_=project._directory_cache('demo',{'path':root,'refs':{'dev':'HEAD'},'layout':{}},'','dev',pin,'pkg',1)
+                project.atomic(slot1,{'key':'unrelated:17','result':{}})
+                with patch.object(structure_index,'build',side_effect=AssertionError('cache miss')):
+                    reopened=project.selected_structure('demo','','dev',pin,directory='pkg',page=2)
+                self.assertEqual(reopened['cache_progress']['pages'],[2])
+                self.assertEqual(reopened['cache_progress']['indexed_files'],1)
+                self.assertEqual(reopened['cache_progress']['first_missing_page'],1)
             with patch('mapcore.ROOT',folder.parent):
                 repo_config={'path':root,'refs':{'dev':'HEAD'}}
                 slots=[project._directory_cache('demo',repo_config,'','dev',pin,'pkg',page)[0]

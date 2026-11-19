@@ -764,6 +764,41 @@ def _directory_cache(name, repo, repository, branch, commit, directory, page):
     return home(name)/'.directory-cache'/f'{slot:02d}.json', f'{folder_key}:{page}'
 
 
+def _directory_progress(cache_path, key, current):
+    prefix = key.split(':', 1)[0]
+    first_slot = int(prefix[:2],16)
+    total = current['pagination']['total_pages']
+    pages = {}
+    for slot in range(min(total,16)):
+        path = cache_path.with_name(f'{(first_slot + slot) % 16:02d}.json')
+        try:
+            with path.open() as stream:
+                # Atomic writes put the key first. Ignore unrelated cached sources
+                # without loading their results; keep the same descriptor for both reads.
+                if stream.readline(8) != '{\n' or not stream.readline(128).startswith(f' "key": "{prefix}:'):
+                    continue
+                stream.seek(0)
+                entry = json.load(stream)
+        except (ValueError,OSError):
+            continue
+        stored = entry.get('result') if isinstance(entry,dict) else None
+        if not isinstance(stored,dict) or stored.get('commit') != current['commit'] or stored.get('directory') != current['directory']:
+            continue
+        pagination = stored.get('pagination') or {}
+        page = pagination.get('page')
+        if (type(page) is not int or not 1 <= page <= total or (page-1)%16 != slot
+                or entry.get('key') != f'{prefix}:{page}' or pagination.get('total_pages') != total):
+            continue
+        selected = pagination.get('selected_files')
+        indexed = (stored.get('coverage') or {}).get('indexed_files')
+        if stored.get('status')=='indexed' and type(indexed) is int and type(selected) is int and 0 <= indexed <= selected:
+            pages[page] = (selected,indexed)
+    selected = sum(s for s,_ in pages.values())
+    indexed = sum(n for _,n in pages.values())
+    return {'pages':sorted(pages),'total_pages':total,'selected_files':selected,'indexed_files':indexed,
+            'unparsed_files':selected-indexed,'first_missing_page':next((n for n in range(1,total+1) if n not in pages),None)}
+
+
 def selected_structure(name, repository, branch, commit, **scope):
     import ai_extract
     import structure_index
@@ -799,6 +834,8 @@ def selected_structure(name, repository, branch, commit, **scope):
         if len(json.dumps(entry,ensure_ascii=False,indent=1).encode()) <= 1024 * 1024:
             try:atomic(cache_path,entry)
             except OSError:pass  # Caching is optional when the local data folder is read-only.
+    if cache_path:
+        result = {**result,'cache_progress':_directory_progress(cache_path,key,result)}
     return result
 
 
