@@ -203,12 +203,25 @@ const AnalysisRun = (() => {
       const key=overviewKey(group)+i,open=openedFeature===key;
       return `<section class="sect"><button class="btn plain" data-overview-feature="${esc(key)}" aria-expanded="${open}"><strong>${esc(feature.name)}</strong> · ${esc(description)}</button>${open?`<ul>${members.map(edgeHtml).join('')}</ul>`:''}</section>`;
     }).join('');
+    const commands=(group.cli_entries || []).filter(entry=>entry.command && entry.registration?.quote && entry.registration.line>0).map(entry=>{
+      const cobra=entry.kind==='cobra_subcommand';
+      const rows=[
+        [text('상위 명령','Parent command'),entry.parent_evidence],
+        [cobra?text('부모·하위 명령','Parent and subcommand'):text('명령 등록','Command declaration'),entry.registration],
+        [cobra?text('하위 명령 선언','Subcommand declaration'):text('실행 대상','Entry point'),entry.target_evidence],
+        [text('설명','Description'),entry.description_evidence],
+        [text('실행 함수','Command handler'),entry.handler_evidence]
+      ];
+      const citations=rows.filter(([,site])=>site?.quote && site.line>0).map(([label,site])=>`<div class="s">${label} · <code>${esc(site.file)}:${esc(site.line)}</code></div><pre>${esc(site.quote)}</pre>`).join('');
+      const target=entry.target_file && !entry.target_evidence?`<p class="s">${text('대상 파일','Target file')} · <code>${esc(entry.target_file)}</code></p>`:'';
+      return `<details class="sect" data-saved-command><summary><strong class="mono">${esc(entry.command)}</strong>${entry.description && entry.description_evidence?' · '+esc(entry.description):''}</summary>${citations}${target}</details>`;
+    }).join('');
     const remaining=edges.filter(edge=>!grouped.has(edge.id));
     const title=features?text('그 밖의 요청','Other requests'):(remaining.length && remaining.every(edge=>edge.kind==='server_registration')?text('서버 경로','Server routes'):text('코드에서 확인한 요청 연결','Request connections in source'));
     const remainingFlow=remaining.length?`<figure class="overview-tree"><figcaption>${title}</figcaption><ul>${remaining.map(edgeHtml).join('')}</ul></figure>`:'';
     const flow=features && remaining.length?`<details><summary>${title} · ${remaining.length}</summary><ul>${remaining.map(edgeHtml).join('')}</ul></details>`:remainingFlow;
     const sources=`<figure class="overview-tree"><figcaption>${text('파일별 기능 구조도','Feature diagram by source file')}</figcaption><ul>${files}</ul></figure>`;
-    return features?`<section class="overview-tree"><h4>${text('기능별 개요 (베타)','Feature overview (beta)')}</h4>${features}</section>${flow}<details><summary>${text('파일별 근거','Evidence by file')}</summary>${sources}</details>`:`${flow}${sources}`;
+    return features || commands?`<section class="overview-tree"><h4>${text('기능별 개요 (베타)','Feature overview (beta)')}</h4>${commands}${features}</section>${flow}<details><summary>${text('파일별 근거','Evidence by file')}</summary>${sources}</details>`:`${flow}${sources}`;
   }
   function overviewHtml() {
     return savedOverviews().map((group,index)=>{

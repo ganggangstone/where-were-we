@@ -90,6 +90,12 @@ class RefreshFirstWebKit(unittest.TestCase):
  const button=$('insp').querySelector('[data-overview-feature]');button.click();
  const storage=$('insp').querySelector('[data-flow-storage] details');check(storage,'Opening the saved feature shows its model step');
  storage.querySelector('summary').click();check(storage.open && storage.innerText.includes('api.py:11'),'Model citation remains discoverable');
+ const saved=window.runningAnalysis.saved_overviews[0];
+ saved.cli_entries=[{kind:'cobra_subcommand',command:'tool <open>',description:'Read a file',registration:{file:'root.go',line:4,quote:'cmd.AddCommand(open)'},target_file:'open.go',target_evidence:{file:'open.go',line:12,quote:'Use: "open"'},description_evidence:{file:'open.go',line:13,quote:'Short: "Read a file"'}},{kind:'npm_bin',command:'runner',registration:{file:'package.json',line:3,quote:'"bin": "./run.js"'},target_file:'run.js'}];
+ await AnalysisRun.check();const commands=$('insp').querySelectorAll('[data-saved-command]');commands.forEach(cmd=>cmd.open=true);
+ check(commands[0].innerText.includes('root.go:4') && commands[0].innerText.includes('open.go:13') && !commands[0].querySelector('open'),'CLI declaration and description are cited and escaped');
+ check(commands[1].innerText.includes('run.js') && !commands[1].innerText.includes('run.js:'),'Manifest-only command target has no invented line');
+ delete saved.cli_entries;
  const savedEdge=window.runningAnalysis.saved_overviews[0].connections[0];
  savedEdge.details=[{kind:'action',event:'onSubmit',label:'Add',evidence:[{file:'form.js',line:4,quote:'onSubmit={add}'}]},
   {kind:'data',model:'Item',operation:'read',evidence:[{file:'api.py',line:11,quote:'select(Item)'},{file:'api.py',line:11,quote:'select(Item)'}]}];
