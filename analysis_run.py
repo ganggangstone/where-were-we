@@ -71,6 +71,24 @@ def read(run_id):
     if value is None: raise ValueError('Unknown analysis run')
     return value
 
+def _cancellation_probe(run_id):
+    # Registry writes replace the file atomically. Check each time, decoding
+    # the potentially large saved maps only when the registry file changes.
+    record=path(run_id)
+    previous=None
+    stopped=False
+    def cancelled():
+        nonlocal previous,stopped
+        if stopped:return True
+        info=record.stat()
+        revision=(info.st_ino,info.st_mtime_ns,info.st_ctime_ns,info.st_size)
+        if revision!=previous:
+            current=read(run_id)
+            stopped=current['cancel_requested'] or current['state']=='cancelled'
+            previous=revision
+        return stopped
+    return cancelled
+
 def write(value):
     if value['state'] in TERMINAL or value.get('cancel_requested') or not value.get('current_task'):
         value.pop('preview',None)
@@ -1646,9 +1664,7 @@ def run(run_id, executor=None):
             if value['state'] in TERMINAL: return value
             value.update(state='running',started_at=store.now(),launch_epoch=time.time());write(value)
         started=time.monotonic();blobs={}
-        def cancelled():
-            current=read(run_id)
-            return current['cancel_requested'] or current['state']=='cancelled'
+        cancelled=_cancellation_probe(run_id)
         try:
             if executor is None:
                 import cli_executor

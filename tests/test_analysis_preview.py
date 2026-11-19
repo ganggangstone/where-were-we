@@ -13,6 +13,16 @@ class Preview(unittest.TestCase):
     raw = _Fixture.raw
     prepare = _Fixture.prepare
 
+    def test_source_cancellation_probe_reads_only_replaced_run_records(self):
+        from unittest.mock import patch
+        run=self.prepare(intent={'task':'overview','targets':[]})
+        probe=analysis_run._cancellation_probe(run['id'])
+        with patch.object(analysis_run,'read',wraps=analysis_run.read) as decode:
+            self.assertTrue(all(not probe() for _ in range(1000)))
+            self.assertEqual(decode.call_count,1)
+        analysis_run.cancel(run['id'])
+        self.assertTrue(probe())
+
     def test_verified_preview_precedes_final_map_and_cancel_preserves_baseline(self):
         # Keep a real route beyond line 500 in an unrecognized file type and use
         # distinct filler lines so that compression of repeated text cannot pass.
