@@ -1182,6 +1182,29 @@ class Flows(unittest.TestCase):
  assert(name.scrollWidth<=name.clientWidth+1,'The request name is fully visible at 1280: '+name.scrollWidth+'>'+name.clientWidth);
 ''')
 
+    def test_python_import_graph_exposes_pinned_evidence_and_unknown_coverage(self):
+        self.check(r'''
+ const commit='ab'.repeat(20),origin='web',target='core/<index>.py',entry='entry.py';
+ const many=Array.from({length:10},(_,i)=>({kind:'function',name:'work_'+i,line:i+1}));
+ const index={repository:origin,commit,coverage:{candidate_files:3,indexed_files:2,skipped_files:1,unsupported_files:7,unresolved_imports:4,truncated:true},
+  files:[{file:target,declarations:many},{file:entry,declarations:[]}],imports:[{file:entry,target,line:2}]};
+ M().structure_indexes=[index,{...index,repository:'api',files:[],imports:[],coverage:{...index.coverage,indexed_files:0}}];
+ S.view='sys';render();
+ const graph=()=>$('moduleGraph'),label=(s)=>graph().innerText.includes(tr(s));
+ assert($('moduleFile').value===entry && label('Python import 구조 (베타)') && graph().innerText.includes(commit.slice(0,12)),'A connected source and its pinned commit appear first');
+ assert(['확인한 Python 파일','건너뛴 Python 파일','미지원 파일','대상 미확인 import','분석 한도 도달'].every(label),'Partial coverage and unresolved relationships are explicit');
+ assert(graph().querySelector('a').textContent===entry+':2' && !graph().querySelector('index'),'Edge has a literal source coordinate and escaped target path');
+ graph().querySelector('[data-module-neighbor]').click();
+ assert($('moduleFile').value===target && graph().querySelector('[data-module-neighbor]').dataset.moduleNeighbor===entry,'Navigate through the edge in both directions');
+ graph().querySelector('[data-module-page="declarations"]:not(:disabled)').click();
+ assert(graph().innerText.includes('work_9') && !graph().innerText.includes('work_0'),'All declarations remain reachable');
+ const sourceLink=[...graph().querySelectorAll('a[data-url]')].find(a=>a.textContent===target+':10');
+ assert(sourceLink.dataset.url.includes('%3Cindex%3E.py:10'),'Working-copy evidence paths are URL encoded');
+ $('moduleRepository').value='api';$('moduleRepository').dispatchEvent(new Event('change'));
+ assert(!$('moduleFile') && label('확인한 Python 파일'),'A repository without parsed files shows coverage only');
+ assert(!window.calls.some(c=>c.command==='analysis_run_start'),'Opening and navigating the structure never executes a model');
+''')
+
     def test_repository_inventory_is_available_without_an_ai_structure(self):
         self.check(r'''
  S.branchDetails=null;S.system=null;S.proposal=null;S.view='sys';

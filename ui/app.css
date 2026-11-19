@@ -245,3 +245,11 @@ details .kv { margin:var(--space-3) var(--space-0) var(--space-0); word-break:br
 .overview-tree ul ul li { position:relative; padding-left:var(--space-5); margin-bottom:var(--space-4) }
 .overview-tree ul ul li::before { content:""; position:absolute; left:var(--space-0); top:var(--space-3); width:var(--space-4); border-top:var(--border-hairline) }
 .overview-tree pre { white-space:pre-wrap; overflow-wrap:anywhere }
+
+.module-scope, .module-center { display:flex; align-items:center; flex-wrap:wrap; gap:var(--space-3) }
+.module-neighbors { display:grid; grid-template-columns:repeat(3,minmax(var(--size-node),1fr)); align-items:start; gap:var(--space-4); margin-top:var(--space-4); overflow:auto }
+.module-center { justify-content:space-between; border:var(--border-hairline); border-radius:var(--radius-card); background:var(--color-bg-group); padding:var(--space-3) }
+.module-center label { flex:1; min-width:var(--space-0) }
+.module-center select { display:block; width:100% }
+.module-edge { display:grid; gap:var(--space-1); justify-items:start; margin-bottom:var(--space-3) }
+.module-edge button, #moduleGraph a { max-width:100%; overflow-wrap:anywhere; white-space:normal }
