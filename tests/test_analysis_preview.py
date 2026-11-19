@@ -427,6 +427,40 @@ def users(): pass
             self.assertIn(path,overview['items'][0]['quote'])
             self.assertEqual(overview['connections'][0]['id'],1)
 
+    def test_resource_batch_includes_standalone_registration_without_inventing_a_client(self):
+        import structure_index
+        (self.repo/'api.py').write_text("from fastapi import FastAPI\napp=FastAPI()\n@app.get('/catalog')\ndef list_items():pass\n@app.post('/catalog')\ndef add_item():pass\n@app.get('/health')\ndef health():pass")
+        (self.repo/'ui.js').write_text("fetch('/health')")
+        self.git('add','.');self.git('commit','-qm','Register standalone and connected APIs')
+        repo=analysis_run.store.config('demo')['repositories'][0];raw=self.raw()
+        raw['dev']['structure_index']=structure_index.build(str(self.repo),self.git('rev-parse','HEAD').strip())
+        graph=raw['dev']['structure_index']['service_flow']
+        standalone=graph['registered_route_groups']
+        self.assertEqual([g['resource'] for g in standalone],['/catalog'])
+        self.assertEqual(len(standalone[0]['registered_route_indexes']),2)
+        analysis_run.store.publish('demo','service',raw,{'fingerprint':analysis_run.store.fingerprint(repo)})
+        def executor(prompt,**kwargs):
+            packet=json.loads(prompt.split('\n',1)[1]);edges=packet['connections']
+            if packet['resource']=='/catalog':
+                self.assertEqual({e['method'] for e in edges},{'GET','POST'})
+                for edge in edges:
+                    self.assertEqual(edge['kind'],'server_registration')
+                    self.assertNotIn('client_ref',edge)
+                self.assertEqual([s['file'] for s in packet['sources']],['api.py'])
+            else:self.assertIn('client_ref',edges[0])
+            return {'items':[{'name':edges[0]['method'],'description':'Registers the server endpoint.','ref':edges[0]['server_ref']}]}
+        target={'task':'overview','targets':[{'repository':'service','target':'/catalog'}]}
+        first=analysis_run.run(self.prepare(intent=target)['id'],executor)
+        scoped=first['scope_overviews']['service']['/catalog']
+        self.assertTrue(scoped['evidence_digest'])
+        self.assertTrue(all('client' not in e and 'client' not in e['source_connection'] for e in scoped['connections']))
+        intent={'task':'resources','targets':[],'max_calls':1}
+        job=self.prepare(intent=intent)
+        self.assertEqual(job['resource_estimate'],{'total':2,'cached':1,'max_calls':1})
+        done=analysis_run.run(job['id'],executor)
+        self.assertEqual(done['state'],'completed',done.get('error'))
+        self.assertEqual(set(done['scope_overviews']['service']),{'/catalog','/health'})
+
     def test_unavailable_source_does_not_block_other_verified_resources(self):
         import structure_index
         (self.repo/'aaa.js').write_text("fetch\n('/aaa')")

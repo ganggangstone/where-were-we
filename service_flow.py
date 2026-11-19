@@ -321,5 +321,10 @@ def connect(routes, requests):
         signature = (route['method'],route['path'],route['server']['file'],route['server']['line'])
         return (signature in linked, *signature)
     registered = sorted(routes,key=route_order)[:256]
-    return {'registered_routes':registered,'connections': connections, 'feature_groups': groups, 'coverage': {'requests': len(requests), 'routes': len(routes),
+    standalone={}
+    for i,route in enumerate(registered):
+        if not route_order(route)[0]:
+            standalone.setdefault(route['path'],[]).append(i)
+    registered_groups=[{'resource':resource,'registered_route_indexes':indexes} for resource,indexes in standalone.items()]
+    return {'registered_route_groups':registered_groups,'registered_routes':registered,'connections': connections, 'feature_groups': groups, 'coverage': {'requests': len(requests), 'routes': len(routes),
             'unresolved_requests': len(requests) - len(connections)}}

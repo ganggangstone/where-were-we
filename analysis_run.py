@@ -25,7 +25,7 @@ import project as store
 
 ACTIVE = {'preparing', 'running', 'saving'}
 TERMINAL = {'completed', 'failed', 'cancelled'}
-OVERVIEW_VERSION = 3
+OVERVIEW_VERSION = 4
 MAX_FILE_BYTES = 300_000
 MAX_PROMPT_BYTES = 128 * 1024
 UNIT_BYTES = 16 * 1024
@@ -148,7 +148,7 @@ def _plan(value):
                 index=raw[branch].get('structure_index') or {}
                 if head!=pin['commit'] or index.get('commit')!=head or index.get('version')!=structure_index.VERSION:
                     raise ValueError('Refresh the local structure before analyzing its verified resources')
-                targets.extend({'repository':rid,'target':g['resource']} for g in index['service_flow']['feature_groups'])
+                targets.extend({'repository':rid,'target':resource} for resource in _resource_rows(index['service_flow']))
         done={(t['repository'],t.get('target')) for t in [*value.get('completed_tasks',[]),*value.get('unavailable_resources',[])]}
         plan['resource_targets']=targets
         plan['tasks']=[{**t,'task':'overview',**plan['pins'][t['repository']]} for t in targets
@@ -1035,6 +1035,20 @@ def _flow_details(flow):
         yield {'kind':'data','model':step['model'],'operation':step['operation']},sites
 
 
+def _resource_rows(service):
+    resources={}
+    for group in service.get('feature_groups',[]):
+        resources[group['resource']]=[service['connections'][i] for i in group['connection_indexes']]
+    for group in service.get('registered_route_groups',[]):
+        rows=resources.setdefault(group['resource'],[])
+        rows.extend(service['registered_routes'][i] for i in group['registered_route_indexes'])
+    return resources
+
+
+def _endpoints(flow):
+    return [flow['client'],flow['server']] if 'client' in flow else [flow['server']]
+
+
 def _overview_anchors(index,resource=None):
     """Pick connected files and keep declarations and imports from competing for every slot."""
     declarations={item['file']:item['declarations'] for item in index['files'] if not _secret(item['file'])}
@@ -1048,18 +1062,19 @@ def _overview_anchors(index,resource=None):
                   key=lambda f:(-bool(imports.get(f)),-incoming.get(f,0),-len(imports.get(f,[])),f))
     selected=[]
     service=index.get('service_flow') or {}
-    resources={i:group['resource'] for group in service.get('feature_groups',[]) for i in group['connection_indexes']}
     scopes={}
-    seen_endpoints=set()
-    for i,flow in enumerate(service.get('connections',[])):
-        scope=resources.get(i,flow['path'])
+    for scope,rows in _resource_rows(service).items():
         candidates=scopes.setdefault(scope,[])
-        endpoint=(flow['method'],flow['path'])
-        sides=[flow['client']['file'],flow['server']['file']]
-        if len(flow['path'])>256 or endpoint in seen_endpoints or any(f not in declarations for f in sides):continue
-        seen_endpoints.add(endpoint)
-        candidates.append(flow)
+        seen=set()
+        for flow in rows:
+            signature=(flow['method'],flow.get('server_path',flow['path']),flow['server']['file'],flow['server']['line'])
+            if signature in seen or len(flow['path'])>256 or any(site['file'] not in declarations for site in _endpoints(flow)):continue
+            seen.add(signature)
+            candidates.append(flow)
     first=[(scope,rows[0]) for scope,rows in scopes.items() if rows]
+    if resource is None:
+        paired=[(scope,flow) for scope,flow in first if 'client' in flow]
+        if paired:first=paired
     if resource is not None:
         if not scopes.get(resource):raise RunError('scope_unavailable','This resource has no eligible endpoint pair in the selected revision')
         first=[(resource,scopes[resource][0])]
@@ -1068,7 +1083,7 @@ def _overview_anchors(index,resource=None):
         scope=first[0][0]
         flows.extend((scope,row) for row in scopes[scope][1:2])
     for _,flow in flows:
-        for side in (flow['client'],flow['server']):
+        for side in _endpoints(flow):
             if side['file'] not in selected:selected.append(side['file'])
     for _,flow in flows:
         for _,sites in _flow_details(flow):
@@ -1083,7 +1098,7 @@ def _overview_anchors(index,resource=None):
         if len(selected)==4:break
     anchors={}
     for file in selected:
-        rows={side['line']:{} for _,flow in flows for side in (flow['client'],flow['server']) if side['file']==file}
+        rows={side['line']:{} for _,flow in flows for side in _endpoints(flow) if side['file']==file}
         for _,flow in flows:
             for _,sites in _flow_details(flow):
                 for site in sites:
@@ -1099,9 +1114,8 @@ def _overview_anchors(index,resource=None):
 
 def _scope_evidence_digest(index,resource,anchors):
     graph=index.get('service_flow') or {}
-    group=next((g for g in graph.get('feature_groups',[]) if g['resource']==resource),None)
-    if not group:return None
-    connections=[graph['connections'][i] for i in group['connection_indexes']]
+    connections=_resource_rows(graph).get(resource)
+    if not connections:return None
     content=json.dumps([index['version'],connections,anchors],sort_keys=True,separators=(',',':'))
     return hashlib.sha256(content.encode()).hexdigest()
 
@@ -1191,10 +1205,12 @@ def _quick_overview(repo,request,language,invoke,cancelled,deadline,raw,resource
     by_line={(row['file'],row['line']):ref for ref,row in references.items()}
     connections=[];source_flows=[]
     for scope,flow in flows:
-        refs=[by_line.get((side['file'],side['line'])) for side in (flow['client'],flow['server'])]
+        refs=[by_line.get((side['file'],side['line'])) for side in _endpoints(flow)]
         if all(refs):
             if scope not in result['scope_coverage']['selected']:result['scope_coverage']['selected'].append(scope)
-            connection={'id':ref_offset+len(connections)+1,'method':flow['method'],'path':flow['path'],'client_ref':refs[0],'server_ref':refs[1]}
+            connection={'id':ref_offset+len(connections)+1,'method':flow['method'],'path':flow['path'],'server_ref':refs[-1]}
+            if 'client' in flow:connection['client_ref']=refs[0]
+            else:connection['kind']='server_registration'
             if flow.get('basis'):connection['basis']=flow['basis']
             if flow.get('basis')=='path_template':
                 connection.update(basis='path_template',server_path=flow['server_path'])
@@ -1213,9 +1229,9 @@ def _quick_overview(repo,request,language,invoke,cancelled,deadline,raw,resource
         packet['connections']=connections
         packet['schema']['feature_groups']=[{'name':'short feature name','connection_ids':[connections[0]['id']]}]
         packet['prompt']+=' Group related connections by directly evidenced user or service function. Use each supplied connection id at most once. Leave unclassified connections out of feature_groups.'
-        packet['prompt']+=' Describe the evidenced request and matching handler together. Connections are static evidence, not observed traffic. For declared_defaults, the match relies on the declared configuration. For path_template, describe only a possible match when the parameter is one path segment; do not claim an exact URL or guaranteed delivery.'
+        packet['prompt']+=' For server_registration, describe the registered method, path and handler only. No client or user action is established. For paired connections, describe the evidenced request and matching handler together. Connections are static evidence, not observed traffic. For declared_defaults, the match relies on the declared configuration. For path_template, describe only a possible match when the parameter is one path segment; do not claim an exact URL or guaranteed delivery.'
         result['connections']=[{k:v for k,v in edge.items() if k not in ('client_ref','server_ref')} |
-                               {'client':references[edge['client_ref']],'server':references[edge['server_ref']]}
+                               ({'client':references[edge['client_ref']]} if 'client_ref' in edge else {}) | {'server':references[edge['server_ref']]}
                                for edge in connections]
         for edge in result['connections']:
             if 'details' in edge:
