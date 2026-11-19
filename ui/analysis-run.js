@@ -88,18 +88,12 @@ const AnalysisRun = (() => {
     }
     schedule(token);
   }
-  const pendingStatus=new Map();
-  function readStatus(requested) {
-    const key=JSON.stringify([S.loadToken,requested.project,requested.repository,requested.branch,requested.lang]);
-    if(!pendingStatus.has(key))pendingStatus.set(key,invoke('analysis_run_status',{scope:requested}).then(decode).finally(()=>pendingStatus.delete(key)));
-    return pendingStatus.get(key);
-  }
   async function check() {
     const token = epoch, version = revision;
     if (!S.project || document.hidden || !current(token) || checking === token) return;
     checking = token;
     try {
-      const value = await readStatus(scope());
+      const value = decode(await invoke('analysis_run_status',{scope:scope()}));
       if (current(token) && version === revision) await accept(value, token);
     } catch (value) { if (current(token) && version === revision) { error = value; paint(); schedule(token); } }
     finally { if (checking === token) checking = null; schedule(token); }
@@ -169,10 +163,10 @@ const AnalysisRun = (() => {
     const cache={pin,key,groups:new Map()};mapResults=cache;
     const requested={project:pin.project,repository:pin.repository,branch:pin.branch,lang:pin.lang};
     (async()=>{
-      const value=await readStatus(requested);
+      const value=decode(await invoke('analysis_run_status',{scope:requested}));
       rememberScopes(cache,value);
       if(!value && requested.repository && cache===mapResults){
-        rememberScopes(cache,await readStatus({...requested,repository:''}));
+        rememberScopes(cache,decode(await invoke('analysis_run_status',{scope:{...requested,repository:''}})));
       }
       if(cache===mapResults && JSON.stringify(mapPin())===key)showMapBadges();
     })().catch(()=>{if(cache===mapResults)mapResults=null;});
