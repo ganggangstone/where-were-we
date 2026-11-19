@@ -207,9 +207,14 @@ def _bounded_order(items):
         yield item
 
 
-def build(repo, commit, excluded=None):
+def build(repo, commit, excluded=None, *, only_file=None):
     if not re.fullmatch(r'(?:[a-f0-9]{40}|[a-f0-9]{64})', commit):
         raise ValueError('Structure indexing requires a full commit ID')
+    if only_file is not None:
+        if not isinstance(only_file,str) or any(x in ('','.','..') for x in only_file.split('/')) or '\x00' in only_file:
+            raise ValueError('Choose a repository-relative tracked file')
+        file_result={'commit':commit,'file':only_file,'language':None,'declarations':[],'imports':[],
+                     'status':'unavailable','coverage':{'indexed_files':0,'unresolved_imports':0,'truncated':False}}
     if excluded is None:
         from analysis_run import _secret as excluded
     env = {**os.environ, 'GIT_NO_LAZY_FETCH': '1'}
@@ -219,6 +224,7 @@ def build(repo, commit, excluded=None):
     languages = {}
     unsupported = 0
     denied = set()
+    unsupported_oid = None
     for entry in tree.split(b'\0'):
         if not entry:
             continue
@@ -241,6 +247,8 @@ def build(repo, commit, excluded=None):
             candidates[file] = (oid, int(size))
         else:
             unsupported += 1
+            if file == only_file:
+                unsupported_oid = oid
 
     candidates = {file: entry for file, entry in candidates.items() if entry[0] not in denied}
 
@@ -267,9 +275,20 @@ def build(repo, commit, excluded=None):
     groups = [[(f, e) for f, e in candidates.items() if languages[f] == lang]
               for lang in LANGUAGES]
     bounded = len(candidates)>MAX_FILES or sum(size for _,size in candidates.values())>MAX_BYTES
-    if bounded:
-        groups=[_bounded_order(items) for items in groups]
-    ordered = _interleave(groups)
+    if only_file is not None:
+        if only_file not in candidates:
+            if unsupported_oid and unsupported_oid not in denied:
+                file_result['status'] = 'unsupported'
+            return file_result
+        file_result['language']=languages[only_file]
+        if candidates[only_file][1]>MAX_FILE_BYTES:
+            file_result['status']='too_large'
+            file_result['coverage']['truncated']=True
+            return file_result
+        ordered=[(only_file,candidates[only_file])]
+    else:
+        if bounded:groups=[_bounded_order(items) for items in groups]
+        ordered=_interleave(groups)
     for file, entry in ordered:
         size = entry[1]
         if size > MAX_FILE_BYTES or consumed + size > MAX_BYTES or len(selected) >= MAX_FILES:
@@ -365,6 +384,14 @@ def build(repo, commit, excluded=None):
                             truncated = True
             stack.extend((child, prefix) for child in reversed(list(ast.iter_child_nodes(node))))
         files.append({'file': file, 'language':'python', 'declarations': rows})
+    if only_file is not None:
+        # Imports point to unique eligible paths in the same tree. Their blobs are not read.
+        if files:
+            file_result.update(status='indexed',declarations=files[0]['declarations'],imports=imports)
+        elif not unavailable:
+            file_result['status']='unparsed'
+        file_result['coverage']={'indexed_files':len(files),'unresolved_imports':unresolved,'truncated':truncated}
+        return file_result
     resolved = [edge for edge in imports if edge['target'] in parsed]
     routes.extend(factory_routes(factory_modules,resolved))
     routes.extend(service_flow.mounted_routes(external,resolved))

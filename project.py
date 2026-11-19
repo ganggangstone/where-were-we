@@ -668,14 +668,27 @@ def record_test(name,rid,route,file,line,quote):
         return 'Saved verified test evidence for '+repo['id']
     return mutate_tests(name,rid,update)
 
+def file_structure(name, repository, branch, commit, file):
+    import ai_extract
+    import structure_index
+    repo, raw, _, head = ai_extract.context(name,repository,branch)
+    index=(raw[branch].get('structure_index') or {})
+    if commit != head or index.get('commit') != commit:
+        raise ValueError('Code changed; refresh the map before opening this file')
+    return structure_index.build(repo['path'],commit,only_file=file)
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command',choices=['read','configure','refresh','action','github-accounts','github-account','github-logins']);parser.add_argument('project')
+    parser.add_argument('command',choices=['read','configure','refresh','action','github-accounts','github-account','github-logins','file-structure']);parser.add_argument('project')
     parser.add_argument('--repository',default='');parser.add_argument('args',nargs='*')
     args,remaining=parser.parse_known_args()
     if remaining and args.command!='action':parser.error('unrecognized arguments: '+' '.join(remaining))
     if args.command=='action':args.args.extend(remaining)
     if args.command=='read':print(json.dumps(read_bundle(args.project,args.repository),ensure_ascii=False))
+    elif args.command=='file-structure':
+        if len(args.args)!=4:raise ValueError('Expected repository, branch, commit and file')
+        print(json.dumps(file_structure(args.project,*args.args),ensure_ascii=False))
     elif args.command=='configure':print(json.dumps(configure(args.project,json.loads(args.args[0]) if args.args else json.load(sys.stdin)),ensure_ascii=False))
     elif args.command=='refresh':print(refresh_project(args.project,args.repository))
     elif args.command=='github-logins':

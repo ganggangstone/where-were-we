@@ -42,6 +42,46 @@ class Structure(unittest.TestCase):
             self.assertTrue(limited['coverage']['truncated'])
             self.assertLessEqual(limited['coverage']['indexed_files'],1)
 
+    def test_selected_file_uses_only_its_blob_and_resolves_unsampled_imports(self):
+        import json
+        import sys
+        with tempfile.TemporaryDirectory() as root:
+            repo=Path(root)
+            git=lambda *args:subprocess.check_output(['git','-C',root,*args]).decode().strip()
+            git('init','-q')
+            (repo/'target.py').write_text('import peer\ndef run(): pass')
+            (repo/'peer.py').write_text('class Peer: pass')
+            (repo/'.aws').mkdir()
+            (repo/'.aws/key.py').write_text('class Private: pass')
+            (repo/'alias.py').write_bytes((repo/'.aws/key.py').read_bytes())
+            (repo/'note.md').write_text('note')
+            (repo/'bad.py').write_text('def ?')
+            os.symlink('target.py',repo/'link.py')
+            git('add','.')
+            git('-c','user.name=Test','-c','user.email=test@example.invalid','commit','-qm','original')
+            pin=git('rev-parse','HEAD')
+            with patch.object(structure_index,'_blobs',wraps=structure_index._blobs) as blobs:
+                result=structure_index.build(root,pin,only_file='target.py')
+                self.assertEqual([file for file,_ in blobs.call_args.args[2]],['target.py'])
+            self.assertEqual(result['imports'],[{'file':'target.py','target':'peer.py','line':1}])
+            self.assertEqual(result['declarations'],[{'name':'run','kind':'function','line':2}])
+            for file,expected in [('note.md','unsupported'),('bad.py','unparsed'),('link.py','unavailable'),
+                                  ('.aws/key.py','unavailable'),('alias.py','unavailable'),('unknown.py','unavailable')]:
+                self.assertEqual(structure_index.build(root,pin,only_file=file)['status'],expected)
+            with patch.object(structure_index,'MAX_FILE_BYTES',2):
+                self.assertEqual(structure_index.build(root,pin,only_file='target.py')['status'],'too_large')
+            with self.assertRaises(ValueError):
+                structure_index.build(root,pin,only_file='../target.py')
+            folder=repo/'maps'/'demo'
+            folder.mkdir(parents=True)
+            (folder/'dev.json').write_text(json.dumps({'repo':root,'ref':'HEAD','commit':pin,'structure_index':{'commit':pin}}))
+            cmd=[sys.executable,str(Path(structure_index.__file__).with_name('project.py')),'file-structure','demo','--','','dev']
+            env={**os.environ,'WHERE_WERE_WE_ROOT':str(folder.parent)}
+            self.assertEqual(json.loads(subprocess.check_output(cmd+[pin,'target.py'],env=env)),result)
+            stale=subprocess.run(cmd+['0'*40,'target.py'],env=env,capture_output=True)
+            self.assertNotEqual(stale.returncode,0)
+            self.assertIn(b'Code changed',stale.stderr)
+
     def test_bounded_selection_visits_sibling_code_and_keeps_auxiliary_evidence(self):
         paths=['aaa/examples/case'+str(i)+'.py' for i in range(30)]
         paths+=['services/a/worker'+str(i)+'.py' for i in range(30)]

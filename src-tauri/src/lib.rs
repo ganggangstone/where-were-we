@@ -108,6 +108,12 @@ async fn read_project(app: tauri::AppHandle, project: String, repository: Option
 }
 
 #[tauri::command]
+async fn file_structure(app: tauri::AppHandle, project: String, repository: String, branch: String, commit: String, file: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || run_py(&app, "project.py", &["file-structure", &project, "--", &repository, &branch, &commit, &file]))
+        .await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 async fn save_project(app: tauri::AppHandle, project: String, configuration: String) -> Result<String, String> {
     run_py(&app, "project.py", &["configure", &project, &configuration])
 }
@@ -729,7 +735,7 @@ pub fn run() {
             if control::listen(app.state::<std::sync::Arc<control::Hub>>().inner().clone(), &root()).is_err() {eprintln!("App control unavailable; the app remains usable.");}
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![control_poll, control_ack, control_focus, list_projects, read_map, read_project, save_project, github_logins, github_accounts, use_github_account, read_settings, save_settings, open_url, refresh, suggest_groups, make_steps, make_system, make_jobs, analysis_request, analysis_plan, analysis_providers, analysis_run_start, analysis_run_status, analysis_run_cancel, analysis_run_retry, briefing_request, setup_prompt, connection_diagnose, connection_status, tests_prompt, app_version, check_release, app_update_status, start_app_update])
+        .invoke_handler(tauri::generate_handler![control_poll, control_ack, control_focus, list_projects, read_map, read_project, file_structure, save_project, github_logins, github_accounts, use_github_account, read_settings, save_settings, open_url, refresh, suggest_groups, make_steps, make_system, make_jobs, analysis_request, analysis_plan, analysis_providers, analysis_run_start, analysis_run_status, analysis_run_cancel, analysis_run_retry, briefing_request, setup_prompt, connection_diagnose, connection_status, tests_prompt, app_version, check_release, app_update_status, start_app_update])
         .build(tauri::generate_context!()).expect("error while building tauri application");
     app.run(|app, event| {
         if matches!(event, tauri::RunEvent::Ready) {
