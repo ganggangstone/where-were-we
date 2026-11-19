@@ -49,10 +49,12 @@ def hidden(): pass
         self.assertEqual(set(rows),{'/items','/items/{item_id}'})
         self.assertEqual(rows['/items/{item_id}']['server'],{'file':'main.py','function':'detail','line':4})
         self.assertEqual(rows['/items']['data_steps'],routes[1]['data_steps'])
-        many=[dict(routes[1],path='/items/'+str(i)) for i in range(260)]
+        many=[dict(routes[1],path='/items/'+str(i)) for i in range(service_flow.MAX_REGISTERED_ROUTES+1)]
+        complete=service_flow.connect(many[:291],[])
+        self.assertEqual({r['path'] for r in complete['registered_routes']},{r['path'] for r in many[:291]})
         capped=service_flow.connect(many,[])
-        self.assertEqual(len(capped['registered_routes']),256)
-        self.assertEqual(capped['coverage']['routes'],260)
+        self.assertEqual(len(capped['registered_routes']),service_flow.MAX_REGISTERED_ROUTES)
+        self.assertEqual(capped['coverage']['routes'],len(many))
 
     def test_resource_groups_preserve_each_verified_action_and_keep_nested_paths_distinct(self):
         def route(method,path,**more):

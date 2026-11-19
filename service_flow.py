@@ -5,6 +5,7 @@ import posixpath
 from collections import Counter, defaultdict
 from html.parser import HTMLParser
 
+MAX_REGISTERED_ROUTES = 512
 METHODS = {'GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'}
 
 
@@ -363,7 +364,7 @@ def connect(routes, requests):
     def route_order(route):
         signature = (route['method'],route['path'],route['server']['file'],route['server']['line'])
         return (signature in linked, *signature)
-    registered = sorted(routes,key=route_order)[:256]
+    registered = sorted(routes,key=route_order)[:MAX_REGISTERED_ROUTES]
     standalone={}
     for i,route in enumerate(registered):
         if not route_order(route)[0]:
