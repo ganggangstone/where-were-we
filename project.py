@@ -403,6 +403,8 @@ def _compose(name, conf, state, raws, repository='', branch='dev'):
         for repo in conf['repositories']:
             rid=repo['id'];source=qualified[rid]
             if rid in ids:
+                if source.get('structure_index'):
+                    result.setdefault('structure_indexes', []).append({'repository': rid, **source['structure_index']})
                 if source.get('inventory'):
                     result.setdefault('inventories', []).append({'repository': rid, **source['inventory']})
                 for k in ('screens','api_functions','unresolved_calls'):result[k]+=source.get(k,[])

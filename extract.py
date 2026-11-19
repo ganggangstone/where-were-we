@@ -8,6 +8,7 @@ import json, os, re, subprocess, sys
 from collections import defaultdict
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import mapcore
+import structure_index
 
 REPO, REF = sys.argv[1], sys.argv[2]
 OUT = sys.argv[3] if len(sys.argv) > 3 else None
@@ -657,6 +658,7 @@ def main():
     out = {
         "ref": mapcore.configured_refs().get(os.path.basename(OUT or "")[:-5], REF), "commit": commit(), "repo": os.path.abspath(REPO), "models": model_table,
         "inventory": mapcore.tree_inventory(_entries, PIN),
+        "structure_index": structure_index.build(REPO, PIN),
         "coverage": {"frontend": APP in ls() and LAYOUT.get("frontend", True) is not None, "backend": BACKEND + "/main.py" in ls() and LAYOUT.get("backend", True) is not None},
         "extractor": mapcore.extractor_id(HOME),  # 뽑는 방법(코드와 테스트 규칙)이 바뀌면 지도 두 장을 그대로 비교할 수 없다
         "screens": scr, "api_functions": fn_rows, "backend_routes": be,
