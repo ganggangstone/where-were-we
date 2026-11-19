@@ -113,6 +113,10 @@ class RefreshFirstWebKit(unittest.TestCase):
  const storage=$('insp').querySelector('[data-flow-storage] details');check(storage,'Opening the saved feature shows its model step');
  storage.querySelector('summary').click();check(storage.open && storage.innerText.includes('api.py:11'),'Model citation remains discoverable');
  const saved=window.runningAnalysis.saved_overviews[0];
+ saved.items[0].evidence=[{file:'form.js',line:7,quote:'const value = form.value;'}];
+ await AnalysisRun.check();const evidence=$('insp').querySelector('section.sect > [data-claim-evidence]');
+ check(evidence && !evidence.open && evidence.querySelector('summary').innerText.includes('2'),'Multi-line claim keeps citations behind a disclosure');
+ evidence.open=true;check(evidence.innerText.includes('form.js:7') && evidence.innerText.includes('const value = form.value;') && evidence.innerText.includes(saved.items[0].file+':'+saved.items[0].line),'Both the primary and supplementary claim sites remain available');
  saved.cli_entries=[{kind:'cobra_subcommand',command:'tool <open>',description:'Read a file',registration:{file:'root.go',line:4,quote:'cmd.AddCommand(open)'},target_file:'open.go',target_evidence:{file:'open.go',line:12,quote:'Use: "open"'},description_evidence:{file:'open.go',line:13,quote:'Short: "Read a file"'}},{kind:'npm_bin',command:'runner',registration:{file:'package.json',line:3,quote:'"bin": "./run.js"'},target_file:'run.js'}];
  await AnalysisRun.check();const commands=$('insp').querySelectorAll('[data-saved-command]');commands.forEach(cmd=>cmd.open=true);
  check(commands[0].innerText.includes('root.go:4') && commands[0].innerText.includes('open.go:13') && !commands[0].querySelector('open'),'CLI declaration and description are cited and escaped');

@@ -181,13 +181,20 @@ const AnalysisRun = (() => {
     const coverage=Number.isInteger(total) && matched>total?`<span class="s">${text('지도에서 확인','Indexed in map')} · ${total}/${matched}</span>`:'';
     return `<section><h4>${text('개요에 포함된 패키지','Packages sampled')} · ${count}</h4>${coverage}${rows}</section>`;
   }
+  function claimEvidence(item) {
+    const sites=[item,...item.evidence || []].filter(site=>site?.file && site.line>0 && site.quote);
+    if(!sites.length)return '';
+    const unique=new Map(sites.map(site=>[JSON.stringify([site.file,site.line]),site]));
+    const citations=[...unique.values()].map(site=>`<div class="s"><code>${esc(site.file)}:${esc(site.line)}</code></div><pre>${esc(site.quote)}</pre>`).join('');
+    return `<details data-claim-evidence><summary>${text('코드 근거','Code evidence')} · ${unique.size}</summary>${citations}</details>`;
+  }
   function overviewTree(group) {
     const files=group.files.map(file=>{
       const items=group.items.filter(item=>item.file===file);
       const nodes=items.map(item=>`<li><b>${esc(item.name)}</b>
         ${item.description ? `<p>${esc(item.description)}</p>` : ''}
         ${esc([item.method,item.path,item.function].filter(Boolean).join(' '))}
-        <div class="s"><code>${esc(file)}:${esc(item.line)}</code></div><pre>${esc(item.quote)}</pre></li>`).join('');
+        ${claimEvidence(item)}</li>`).join('');
       return `<li><code>${esc(file)}</code>${nodes ? `<ul>${nodes}</ul>` : ''}</li>`;
     }).join('');
     const index=overviewIndex(group);
@@ -218,7 +225,7 @@ const AnalysisRun = (() => {
       const item=group.items.find(item=>item.description && endpoints.some(side=>side.file===item.file && side.line===item.line));
       const description=item?.description || members.map(edge=>edge.method+' '+edge.path).join(' · ');
       const key=overviewKey(group)+i,open=openedFeature===key;
-      return `<section class="sect"><button class="btn plain" data-overview-feature="${esc(key)}" aria-expanded="${open}"><strong>${esc(feature.name)}</strong> · ${esc(description)}</button>${open?`<ul>${members.map(edgeHtml).join('')}</ul>`:''}</section>`;
+      return `<section class="sect"><button class="btn plain" data-overview-feature="${esc(key)}" aria-expanded="${open}"><strong>${esc(feature.name)}</strong> · ${esc(description)}</button>${open?`${item?.evidence?.length?claimEvidence(item):''}<ul>${members.map(edgeHtml).join('')}</ul>`:''}</section>`;
     }).join('');
     const commands=(group.cli_entries || []).filter(entry=>entry.command && entry.registration?.quote && entry.registration.line>0).map(entry=>{
       const cobra=entry.kind==='cobra_subcommand';
