@@ -377,6 +377,27 @@ def backend_test_links(be,files,read_source,conf,imports_reader=None,module_reso
     return hits, stale
 
 
+def git_tree_entries(repo, commit):
+    """Read tree metadata without opening blobs, symlinks, or submodules."""
+    import subprocess
+    raw = subprocess.check_output(['git', '-C', repo, 'ls-tree', '-rz', '--full-tree', commit])
+    for row in raw.split(b'\0'):
+        if row:
+            metadata, path = row.split(b'\t', 1)
+            yield metadata.split(b' ', 1)[0], path
+
+
+def tree_inventory(entries, commit):
+    folders = defaultdict(int)
+    for mode, path in entries:
+        if mode in (b'100644', b'100755'):
+            parent, slash, _ = path.partition(b'/')
+            folders[parent if slash else b''] += 1
+    return {'commit': commit, 'files': sum(folders.values()),
+            'directories': [[name.decode('utf-8', 'backslashreplace'), count]
+                            for name, count in sorted(folders.items())]}
+
+
 def extractor_id(home):
     """뽑는 방법의 판. extract.py 와 테스트 규칙이 같으면 같다. 바뀌면 refresh 가 커밋이 그대로여도 다시 뽑는다."""
     import hashlib

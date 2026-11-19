@@ -384,6 +384,7 @@ Object.assign(UI_EN,{"확인된 서버만 지도에 연결합니다.":"Link veri
 Object.assign(UI_EN,{'마지막 새로고침':'Last refresh'});
 Object.assign(UI_EN,{'선택한 기능':'Selected feature','‹ 기능 개요':'‹ Feature overview','기능 선택 해제':'Clear feature','이 기능에 속한 화면입니다.':'This screen belongs to this feature.','선택한 기능 밖의 화면입니다.':'This screen is outside the selected feature.','이 화면의 기능으로 바꾸기':'Switch to this screen’s feature','화면 지도에서 보기':'Show on the screen map','이 기능이 서버에 하는 일 ':'Feature requests: ','이 기능과 이어진 작업 ':'Linked work for this feature: ',"작업 정보 미수집":"Work data not collected","연결된 작업 없음":"No linked work",'기능 복사':'Copy feature','대상 ID: ':'Target ID: ','기능: ':'Feature: ','이어진 작업: ':'Linked work: ','AI가 붙인 이름':'AI-suggested name','선택한 기능의 화면이 쓰는 대상입니다.':'Used by the selected feature’s screens.','선택한 기능의 화면에서 이어진 것을 찾지 못했습니다.':'No link from the selected feature’s screens was found.'});
 Object.assign(UI_EN,{'기존 AI 채팅에 요청':'Use your existing AI chat','저장된 결과 새로고침':'Refresh saved results',"앱에서 자동 분석 (베타)":"Automatic analysis in the app (beta)",'요청 내용·다른 분석':'Request text and other analyses','요청 준비됨':'Request ready','일부 결과 저장됨':'Partial results saved','이전에 저장된 결과':'Previously saved results'});
+Object.assign(UI_EN,{'Git 추적 파일':'Git-tracked files','최상위 폴더':'Top-level folder','파일 수':'File count','루트 디렉터리':'Root directory'});
 const UI_PATTERN = new RegExp(Object.keys(UI_EN).sort((a, b) => b.length - a.length).map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'g');
 function tr(text) { return S.lang === 'en' ? String(text).replace(UI_PATTERN, match => UI_EN[match]) : String(text); }
 function ui(parts, ...values) { return parts.reduce((out, part, i) => out + tr(part) + (i < values.length ? values[i] : ''), ''); }
@@ -1352,6 +1353,13 @@ function proposalSwitch() {
   if (!S.proposal) return '';
   return `<span class="seg light" role="group" aria-label="${tr('보여 줄 구조')}"><button data-proposal="0" aria-pressed="${!S.showProposal}" class="${S.showProposal ? '' : 'on'}">${tr('기존 서비스 구성')}</button><button data-proposal="1" aria-pressed="${!!S.showProposal}" class="${S.showProposal ? 'on' : ''}">${tr('AI 제안')}</button></span>${S.showProposal ? `<span class="pill ai">${tr('AI 제안 · 기존 서비스 구성은 바뀌지 않았습니다')}</span>` : ''}`;
 }
+function inventoryView(m) {
+  const rows=m.inventories || (m.inventory ? [m.inventory] : []);
+  return rows.map(row=>{
+    const label=row.repository ? connectionDisplayName(row.repository) : '';
+    return `<details class="sect"><summary>${esc([label,tr('Git 추적 파일'),row.files].filter(x=>x!=='').join(' · '))}</summary><p class="mono">${esc(row.commit.slice(0,12))}</p><table><thead><tr><th>${tr('최상위 폴더')}</th><th>${tr('파일 수')}</th></tr></thead><tbody>${row.directories.map(([dir,count])=>`<tr><td>${dir?esc(dir):tr('루트 디렉터리')}</td><td>${esc(count)}</td></tr>`).join('')}</tbody></table></details>`;
+  }).join('');
+}
 function sysView(m) {
   const y = S.system; if (!y) return ui`<div class="hint">서비스 구성이 아직 없습니다.<br><br><button class="btn primary" id="remakeSys">AI에게 서비스 구성 요청</button></div>`; const stale = y.checked && m.commit && !m.commit.startsWith(y.checked);
   const LINKS = sysLinks(y); const near = new Set(LINKS.filter(l => l.from === S.node || l.to === S.node).flatMap(l => [l.from, l.to]));
@@ -1693,7 +1701,7 @@ function render() {
   // 다시 읽은 지도에 같은 화면 묶음이 없으면 고른 기능을 지운다. 같은 자리의 다른 기능으로 넘어가지 않는다.
   if (S.feat && !selectedFeature(m)) S.feat = null;
   const top = $('map').scrollTop, left = $('map').scrollLeft, itop = $('insp').scrollTop, refocus = focusKey(document.activeElement);
-  $('map').innerHTML = searchPanel(m) + (view === 'changes' ? changesView(m) : sys ? sysView(m) : view === 'focus' ? focusView(m) : view === 'feat' ? featView(m) : storyMap(m)); $('insp').innerHTML = view === 'changes' ? changesInspector(m) : sys ? sysInspector(m) : view === 'focus' ? focusFeatureInspector(m) : view === 'feat' ? featInspector(m) : mapInspector(m);
+  $('map').innerHTML = searchPanel(m) + (view === 'changes' ? changesView(m) : sys ? inventoryView(m)+sysView(m) : view === 'focus' ? focusView(m) : view === 'feat' ? featView(m) : storyMap(m)); $('insp').innerHTML = view === 'changes' ? changesInspector(m) : sys ? sysInspector(m) : view === 'focus' ? focusFeatureInspector(m) : view === 'feat' ? featInspector(m) : mapInspector(m);
   S._wires = null;
   if (view === 'focus' && S.focus) { const d = focusData(m); S._wires = d ? [...d.left.map((_, i) => ({ from: 'L' + i, to: 'C', h: true })), ...d.right.map((_, i) => ({ from: 'C', to: 'R' + i, h: true }))] : null; drawWires(); }
   if (view === 'feat') { const f = featureGraph(m); const fi = selectedFeature(m)?.i ?? null; S._wires = f.links.map((l, i) => ({ from: 'G' + (l.back && !l.fwd ? l.b : l.a), to: 'G' + (l.back && !l.fwd ? l.a : l.b), n: i + 1, style: l.ways.length ? '' : 'copy', noend: !l.ways.length, start: !!(l.fwd && l.back), dim: fi != null && l.a !== fi && l.b !== fi })); drawWires();

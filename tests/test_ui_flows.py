@@ -1182,6 +1182,18 @@ class Flows(unittest.TestCase):
  assert(name.scrollWidth<=name.clientWidth+1,'The request name is fully visible at 1280: '+name.scrollWidth+'>'+name.clientWidth);
 ''')
 
+    def test_repository_inventory_is_available_without_an_ai_structure(self):
+        self.check(r'''
+ S.branchDetails=null;S.system=null;S.proposal=null;S.view='sys';
+ M().inventories=[{repository:'web',commit:'aaaaaaaa1111',files:2,directories:[['',1],['<sample>',1]]}];render();
+ const box=$('map').querySelector('details');
+ assert(box.querySelector('summary').textContent.includes(tr('Git 추적 파일')+' · 2'),'Tracked file count is visible');
+ box.open=true;
+ assert(box.innerText.includes('aaaaaaaa1111') && box.innerText.includes(tr('루트 디렉터리')),'The tree is pinned and root files are counted');
+ assert(box.innerText.includes('<sample>') && !box.querySelector('sample'),'Names are escaped');
+ assert(!window.calls.some(c=>c.command==='analysis_run_start'),'Inventory needs no model turn');
+''')
+
     def test_structure_choice_resets_per_project_and_matches_app_control(self):
         self.check(r'''
  const fb=fakeBundle;fakeBundle=n=>{const b=fb(n);const proposal={...b.system,nodes:[{...b.system.nodes[0],name:n+' proposed'}]};b.branch_details.dev={...b.branch_details.dev,'system.ai':proposal};return b;};

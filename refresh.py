@@ -59,6 +59,8 @@ for b in ("dev", "main"):
         # A normal refresh must not spend the user's AI quota or erase an AI map.
         import ai_extract
         if ai_extract.carry_unchanged(cur,REPO,ref):have=ref  # identical tree: every saved input is proven unchanged
+        if (cur.get('inventory') or {}).get('commit') != ref:
+            cur['inventory'] = mapcore.tree_inventory(mapcore.git_tree_entries(REPO, ref), ref)
         cur['analysis']['observed_commit']=ref
         cur['analysis']['stale']=have not in (now,ref)
         ai_extract.refresh_test_links(cur,mapcore.tests_conf(HOME))

@@ -17,23 +17,31 @@ def git(*args):
     return subprocess.run(["git", "-C", REPO, *args], capture_output=True, text=True, errors="replace", check=True).stdout
 
 
-_files = None
+PIN = git('rev-parse', '--verify', REF + '^{commit}').strip()
+_entries = list(mapcore.git_tree_entries(REPO, PIN))
+_files = set()
+for mode, path in _entries:
+    if mode in (b'100644', b'100755'):
+        try:
+            _files.add(path.decode('utf-8'))
+        except UnicodeDecodeError:
+            # Count all tracked files; map evidence paths must round-trip through UTF-8 JSON.
+            continue
+
+
 def ls():
-    global _files
-    if _files is None:
-        _files = set(git("ls-tree", "-r", "--name-only", REF).splitlines())
     return _files
 
 
 _cache = {}
 def show(path):
     if path not in _cache:
-        _cache[path] = git("show", f"{REF}:{path}") if path in ls() else None
+        _cache[path] = git("show", f"{PIN}:{path}") if path in ls() else None
     return _cache[path]
 
 
 def commit():
-    return git("rev-parse", "--short", REF).strip()
+    return git("rev-parse", "--short", PIN).strip()
 
 
 # ---------- 1. 화면: App.tsx 의 <Route path=... element={<X ...> ----------
@@ -648,6 +656,7 @@ def main():
     orphans = [r for r in be if r["mounted"] and (r["file"], r["line"]) not in matched_be]
     out = {
         "ref": mapcore.configured_refs().get(os.path.basename(OUT or "")[:-5], REF), "commit": commit(), "repo": os.path.abspath(REPO), "models": model_table,
+        "inventory": mapcore.tree_inventory(_entries, PIN),
         "coverage": {"frontend": APP in ls() and LAYOUT.get("frontend", True) is not None, "backend": BACKEND + "/main.py" in ls() and LAYOUT.get("backend", True) is not None},
         "extractor": mapcore.extractor_id(HOME),  # 뽑는 방법(코드와 테스트 규칙)이 바뀌면 지도 두 장을 그대로 비교할 수 없다
         "screens": scr, "api_functions": fn_rows, "backend_routes": be,

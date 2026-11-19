@@ -678,6 +678,10 @@ def record(project,repository,branch,lang,commit,configuration,result_json,base=
             except ReviewRequired as error:
                 set_review_flag(project,rid,branch,raw.get(branch) or {},error.reason)  # the map bundle stays byte-identical
                 raise ValueError(str(error)) from None
+        inventory = (raw.get(branch) or {}).get('inventory')
+        if not inventory or inventory.get('commit') != head:
+            inventory = mapcore.tree_inventory(mapcore.git_tree_entries(repo['path'], head), head)
+        updated[branch]['inventory'] = inventory
         updated[branch]['analysis']['provider']=provider
         save(updated)
         return message

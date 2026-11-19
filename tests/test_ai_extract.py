@@ -106,7 +106,26 @@ class Analysis(unittest.TestCase):
         self.assertEqual(project.states('demo')['service']['generation'],generation)
         self.record_map()
         self.assertEqual(project.read_bundle('demo')['dev']['screens'][0]['source_path'],'/items')
+        self.assertEqual(project.read_bundle('demo')['dev']['inventories'][0]['commit'], self.commit)
         self.assertEqual(self.git('status','--porcelain'),before)
+    def test_basic_inventory_counts_only_regular_files_at_the_pinned_commit(self):
+        folder = self.repo / '한글'
+        folder.mkdir()
+        (folder / 'two\nlines.txt').write_text('tracked')
+        (self.repo / 'root.txt').write_text('root')
+        (self.repo / 'link').symlink_to('root.txt')
+        self.git('add', '.')
+        self.git('update-index', '--add', '--cacheinfo', f'160000,{self.commit},submodule')
+        self.git('commit', '-qm', 'Mixed paths')
+        pin = self.git('rev-parse', 'HEAD').strip()
+        (folder / 'later.txt').write_text('later')
+        self.git('add', str(folder))
+        self.git('commit', '-qm', 'Later revision')
+        basic = ai_extract.basic_catalog(str(self.repo), pin, {})
+        self.assertEqual(basic['inventory'], {'commit': pin, 'files': 4,
+                         'directories': [['', 1], ['pages', 1], ['server', 1], ['한글', 1]]})
+        self.assertEqual(basic['screens'], [])
+
     def test_normal_refresh_retains_ai_map_and_marks_changed_commit(self):
         import runpy
         self.git('remote','add','origin',str(self.repo))
@@ -124,6 +143,7 @@ class Analysis(unittest.TestCase):
         refreshed=json.loads((folder/'dev.json').read_text())
         self.assertEqual(refreshed['commit'],self.commit)
         self.assertTrue(refreshed['analysis']['stale'])
+        self.assertEqual(refreshed['inventory']['commit'], refreshed['analysis']['observed_commit'])
         self.assertNotEqual(refreshed['analysis']['observed_commit'],self.commit)
         self.assertFalse(any(command[0]=='claude' for command in commands))
 

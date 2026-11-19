@@ -186,6 +186,7 @@ S.jobs.nodes={};view=sysInspector({});assert.ok(view.includes('Program jobs have
                 output=''
                 if 'rev-parse' in args:output='bbbbbbbb' if '--short' in args else 'b'*40
                 if 'rev-list' in args:output='a'*40
+                if 'ls-tree' in args and '-rz' in args:output=b''
             else:
                 output=''
                 if any(a.endswith('extract.py') for a in args):
@@ -687,7 +688,11 @@ sources=json.load(open(os.environ['FAKE_SOURCES']));files={os.path.realpath(k):v
 if args[0]=='fetch':
  if os.environ.get('FAKE_GITHUB') and os.environ.get('GH_TOKEN')!='test-token-alice':print('wrong Git credential',file=sys.stderr);sys.exit(1)
  if Path(repo).name=='broken':print('fetch denied',file=sys.stderr);sys.exit(1)
-elif args[0]=='ls-tree':print('\n'.join(files))
+elif args[0]=='ls-tree':
+ if '-rz' in args:
+  for file,body in files.items():
+   print('100644 blob '+hashlib.sha1(body.encode()).hexdigest()+'\t'+file,end='\0')
+ else:print('\n'.join(files))
 elif args[0]=='show':
  file=args[-1].split(':',1)[1]
  if file not in files:sys.exit(1)
