@@ -177,6 +177,40 @@ class Preview(unittest.TestCase):
         item=done['overviews']['service']['items'][0]
         self.assertEqual((item['file'],item['line'],item['quote']),('worker.py',74,'def dispatch():'))
 
+    def test_overview_pairs_two_features_across_client_and_server_in_one_call(self):
+        for feature in ('orders','reports'):
+            (self.repo/f'{feature}.ts').write_text(
+                '// filler\n'*80+f"export function load() {{ return fetch('/{feature}'); }}\n")
+            (self.repo/f'{feature}.py').write_text(
+                'from fastapi import FastAPI\napp = FastAPI()\n'+
+                f'@app.get("/{feature}")\ndef load_{feature}():\n    return []\n')
+        (self.repo/'index.py').write_text('from utils import utility\n')
+        (self.repo/'utils.py').write_text('def utility(): return True\n')
+        self.git('add','.');self.git('commit','-qm','Add two client and server features')
+        run=self.prepare(intent={'task':'overview','targets':[]})
+        packets=[]
+        def executor(prompt,**kwargs):
+            packet=json.loads(prompt.split('\n',1)[1]);packets.append(packet)
+            rows={row['ref']:(source['file'],row) for source in packet['sources'] for row in source['lines']}
+            self.assertEqual({edge['path'] for edge in packet['connections']},{'/orders','/reports'})
+            self.assertEqual(len(packet['sources']),4)
+            self.assertLessEqual(len(rows),96)
+            items=[]
+            for edge in packet['connections']:
+                feature=edge['path'][1:]
+                client,row=rows[edge['client_ref']]
+                self.assertEqual((client,row['line']),(feature+'.ts',81))
+                self.assertIn('fetch',row['text'])
+                server,row=rows[edge['server_ref']]
+                self.assertEqual((server,row['line']),(feature+'.py',3))
+                self.assertIn('@app.get',row['text'])
+                items.append({'name':feature,'description':'Loads '+feature,'ref':edge['server_ref']})
+            return {'items':items}
+        done=analysis_run.run(run['id'],executor)
+        self.assertEqual(done['state'],'completed',done.get('error'))
+        self.assertEqual(len(packets),1)
+        self.assertEqual(len(done['overviews']['service']['items']),2)
+
     def test_legacy_overview_uses_current_git_and_config_pins_despite_an_older_basic_map(self):
         name='legacy'
         home=analysis_run.store.home(name)

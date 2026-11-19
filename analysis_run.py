@@ -968,7 +968,19 @@ def _overview_anchors(index):
     ranked=sorted((file for file in declarations if declarations[file] or imports.get(file)),
                   key=lambda f:(-bool(imports.get(f)),-incoming.get(f,0),-len(imports.get(f,[])),f))
     selected=[]
+    flows=[]
+    seen_endpoints=set()
+    for flow in (index.get('service_flow') or {}).get('connections',[]):
+        endpoint=(flow['method'],flow['path'])
+        sides=[flow['client']['file'],flow['server']['file']]
+        if len(flow['path'])>256 or endpoint in seen_endpoints or any(f not in declarations for f in sides):continue
+        seen_endpoints.add(endpoint)
+        flows.append(flow)
+        for file in sides:
+            if file not in selected:selected.append(file)
+        if len(flows)==2:break
     for file in ranked:
+        if len(selected)==4:break
         for candidate in [file]+[edge['target'] for edge in imports.get(file,[])]:
             if candidate in declarations and candidate not in selected:
                 selected.append(candidate)
@@ -976,7 +988,7 @@ def _overview_anchors(index):
         if len(selected)==4:break
     anchors={}
     for file in selected:
-        rows={}
+        rows={side['line']:{} for flow in flows for side in (flow['client'],flow['server']) if side['file']==file}
         for edge in imports.get(file,[]):
             if len(rows)>=8:break
             rows.setdefault(edge['line'],{'imports':edge['target']})
@@ -984,7 +996,7 @@ def _overview_anchors(index):
             if len(rows)>=24:break
             rows.setdefault(decl['line'],{'kind':decl['kind'],'name':decl['name']})
         anchors[file]=rows
-    return anchors
+    return anchors,flows
 
 def _quick_overview(repo,request,language,invoke,cancelled,deadline,raw):
     """One bounded call per repository. A reference selects an actual pinned line."""
@@ -993,7 +1005,7 @@ def _quick_overview(repo,request,language,invoke,cancelled,deadline,raw):
     index=raw.get('structure_index') or {}
     if index.get('commit')!=commit or index.get('version')!=structure_index.VERSION:
         index=structure_index.build(repo,commit,excluded=_secret)
-    anchors=_overview_anchors(index)
+    anchors,flows=_overview_anchors(index)
     selected=list(anchors)
     if len(selected)<4:
         fallback=sorted(_first_files(repo,commit,request,overview=True)-set(selected))
@@ -1006,7 +1018,8 @@ def _quick_overview(repo,request,language,invoke,cancelled,deadline,raw):
         # Spread the excerpt across the file, including its first and last usable lines.
         offsets=sorted({i*(len(lines)-1)//23 for i in range(24)}) if len(lines)>24 else range(len(lines))
         evidence=anchors.get(source['file'],{})
-        pinned=[row for row in lines if row['line'] in evidence]
+        by_number={row['line']:row for row in lines}
+        pinned=[by_number[n] for n in evidence if n in by_number]
         sampled=pinned+[lines[i] for i in offsets if lines[i]['line'] not in evidence]
         rows=[]
         for row in sampled[:24]:
@@ -1022,6 +1035,15 @@ def _quick_overview(repo,request,language,invoke,cancelled,deadline,raw):
                      'Use supplied declaration and import metadata when describing relationships. An import alone does not establish a runtime call. Each item names one feature, component or relationship, explains its role in one sentence and selects its supporting ref. '
                      'Return at most 12 items. Skip unsupported claims. Empty items are valid. Do not request further reads.',
             'schema':{'items':[{'name':'feature or component','description':'what it does','ref':1}]}}
+    by_line={(row['file'],row['line']):ref for ref,row in references.items()}
+    connections=[]
+    for flow in flows:
+        refs=[by_line.get((side['file'],side['line'])) for side in (flow['client'],flow['server'])]
+        if all(refs):
+            connections.append({'method':flow['method'],'path':flow['path'],'client_ref':refs[0],'server_ref':refs[1]})
+    if connections:
+        packet['connections']=connections
+        packet['prompt']+=' Describe the evidenced request and matching handler together. Connections are static method/path matches, not observed traffic.'
     answer=invoke(packet)
     items=answer.get('items')
     if not isinstance(items,list) or len(items)>12 or answer.get('needs'):raise InvalidClaim('Invalid initial overview response')
