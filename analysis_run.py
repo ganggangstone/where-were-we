@@ -1291,13 +1291,14 @@ def generate(value,task,request,executor,cancelled,deadline,check,blobs=None):
             return {'packed_overviews':{target:finalize(invoke(packet))}}
         answer=invoke(payload)
         rows=answer.get('results')
-        if not isinstance(rows,list) or len(rows)!=len(prepared) or any(not isinstance(row,dict) for row in rows):
-            raise InvalidClaim('Missing independent resource results')
-        lookup={row['resource']:row for row in rows if isinstance(row.get('resource'),str)}
-        if set(lookup)!={target for target,_,_ in prepared}:raise InvalidClaim('Resource names did not match this packet')
+        if not isinstance(rows,list):raise InvalidClaim('Missing independent resource results')
         verified={};invalid=[]
         for target,_,finalize in prepared:
-            try:verified[target]=finalize(lookup[target])
+            matches=[row for row in rows if isinstance(row,dict) and row.get('resource')==target]
+            if len(matches)!=1:
+                invalid.append(target)
+                continue
+            try:verified[target]=finalize(matches[0])
             except InvalidClaim:invalid.append(target)
         return {'packed_overviews':verified,'invalid_scopes':invalid}
     if task['task']=='overview':

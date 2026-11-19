@@ -410,15 +410,18 @@ def users(): pass
             if len(calls)==1:
                 wrong.append(rows[0]['resource'])
                 rows[0]['items'][0]['ref']=rows[1]['items'][0]['ref']
+                wrong.extend([rows[1]['resource'],rows[2]['resource']])
+                rows.pop(2)
+                rows.append(dict(rows[1]))
             return {'results':list(reversed(rows))} if 'resources' in packet else rows[0]
         failed=analysis_run.run(job['id'],answer)
         self.assertEqual(failed['state'],'failed',failed.get('error'))
         self.assertEqual(set(failed['scope_overviews']['service']),set(calls[0])-set(wrong))
         retry=analysis_run.retry(job['id'])
-        self.assertEqual(retry['resource_estimate']['max_calls'],9)
+        self.assertEqual(retry['resource_estimate']['max_calls'],11)
         done=analysis_run.run(retry['id'],answer)
         self.assertEqual(done['state'],'completed',done.get('error'))
-        self.assertEqual([len(c) for c in calls],[4,4,4,1])
+        self.assertEqual([len(c) for c in calls],[4,4,4,3])
         self.assertEqual(set(done['scope_overviews']['service']),set(paths))
         for path,overview in done['scope_overviews']['service'].items():
             self.assertIn(path,overview['items'][0]['quote'])
