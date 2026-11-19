@@ -341,6 +341,16 @@ func Ignored() *c.Command {
             env={**os.environ,'WHERE_WERE_WE_ROOT':str(folder.parent)}
             self.assertEqual(json.loads(subprocess.check_output(cmd+[pin,'pkg'],env=env)),result)
             import project
+            with patch('mapcore.ROOT',folder.parent),patch.object(structure_index,'build',side_effect=AssertionError('cache miss')):
+                self.assertEqual(project.selected_structure('demo','','dev',pin,directory='pkg'),result)
+            import analysis_run
+            policy=analysis_run._secret
+            with patch('mapcore.ROOT',folder.parent),patch.object(analysis_run,'_secret',side_effect=lambda f:policy(f) or f=='pkg/main.py'):
+                filtered=project.selected_structure('demo','','dev',pin,directory='pkg')
+                self.assertEqual([f['file'] for f in filtered['files']],['pkg/nested/work.py'])
+            with patch('mapcore.ROOT',folder.parent),patch.object(structure_index,'VERSION',structure_index.VERSION+1),patch.object(structure_index,'build',wraps=structure_index.build) as updated:
+                project.selected_structure('demo','','dev',pin,directory='pkg')
+                updated.assert_called_once()
             build=structure_index.build
             def advance_during_read(*args,**kwargs):
                 result=build(*args,**kwargs)
@@ -348,7 +358,7 @@ func Ignored() *c.Command {
                 return result
             with patch('mapcore.ROOT',folder.parent),patch.object(structure_index,'build',side_effect=advance_during_read):
                 with self.assertRaisesRegex(ValueError,'Code changed'):
-                    project.selected_structure('demo','','dev',pin,directory='pkg')
+                    project.selected_structure('demo','','dev',pin,directory='pkg/nested')
             stale=subprocess.run(cmd+['0'*40,'pkg'],env=env,capture_output=True)
             self.assertNotEqual(stale.returncode,0)
             self.assertEqual((folder/'dev.json').read_text(),saved)

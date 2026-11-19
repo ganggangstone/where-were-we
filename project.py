@@ -738,6 +738,29 @@ def file_structure(name, repository, branch, commit, file):
     return selected_structure(name,repository,branch,commit,only_file=file)
 
 
+def _directory_cache(name, repo, repository, branch, commit, directory):
+    import analysis_run
+    import structure_index
+    from importlib import metadata
+    # Recompute the effective exclusion policy from names only. At the same Git
+    # commit the set of denied blob aliases is determined by these exact paths.
+    paths = subprocess.check_output(['git','-C',repo['path'],'ls-tree','-rz','--name-only','--full-tree',commit],
+                                    env={**os.environ,'GIT_NO_LAZY_FETCH':'1'})
+    denied = hashlib.sha256()
+    for path in paths.split(b'\0'):
+        if path and analysis_run._secret(os.fsdecode(path)):
+            denied.update(path + b'\0')
+    versions = []
+    for package in ('tree-sitter','tree-sitter-go','tree-sitter-javascript','tree-sitter-typescript'):
+        try:versions.append(metadata.version(package))
+        except metadata.PackageNotFoundError:versions.append(None)
+    identity = [structure_index.VERSION, sys.version, versions, fingerprint(repo), repository,
+                os.path.realpath(repo['path']), branch, commit, directory, denied.hexdigest()]
+    key = hashlib.sha256(json.dumps(identity).encode()).hexdigest()
+    # Fixed slots bound storage without races between eviction and another writer.
+    return home(name)/'.directory-cache'/f'{int(key[:2],16) % 16:02d}.json', key
+
+
 def selected_structure(name, repository, branch, commit, **scope):
     import ai_extract
     import structure_index
@@ -747,11 +770,31 @@ def selected_structure(name, repository, branch, commit, **scope):
     saved_pin=inventory_pin or (snapshot.get('structure_index') or {}).get('commit')
     if commit != head or saved_pin != commit:
         raise ValueError('Code changed; refresh the map before opening this file')
-    result=structure_index.build(repo['path'],commit,**scope)
+    cache_path = None
+    result = None
+    if set(scope) == {'directory'}:
+        cache_path, key = _directory_cache(name,repo,repository,branch,commit,scope['directory'])
+        try:
+            cached = read(cache_path)
+        except (ValueError, OSError):
+            cached = None
+        if isinstance(cached,dict) and cached.get('key') == key:
+            candidate = cached.get('result')
+            if (isinstance(candidate,dict) and candidate.get('commit') == commit
+                    and candidate.get('directory') == scope['directory'] and candidate.get('status') == 'indexed'):
+                result = candidate
+    loaded = result is not None
+    if not loaded:
+        result=structure_index.build(repo['path'],commit,**scope)
     # A branch can move while a directory's sources are being parsed.
     current_head=ai_extract.git(repo['path'],'rev-parse','--verify',repo['refs'][branch]+'^{commit}').strip()
     if current_head != commit:
         raise ValueError('Code changed; refresh the map before opening this file')
+    if cache_path and not loaded and result['status']=='indexed' and not result['coverage'].get('unavailable_languages'):
+        entry = {'key':key,'result':result}
+        if len(json.dumps(entry,ensure_ascii=False,indent=1).encode()) <= 1024 * 1024:
+            try:atomic(cache_path,entry)
+            except OSError:pass  # Caching is optional when the local data folder is read-only.
     return result
 
 
