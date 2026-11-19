@@ -6,7 +6,7 @@
 2. collect.py 로 PR·브랜치·이슈를 모으고 AI 가 적은 것의 근거 줄을 대조한다.
 3. 설정에서 고른 기준 시각 뒤에 달라진 것을 changes.json 에 한 건으로 남긴다.
 """
-import json, os, subprocess, sys
+import hashlib, json, os, subprocess, sys
 from datetime import datetime, timezone
 from pathlib import Path
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
@@ -120,11 +120,23 @@ def base_map(branch, commit):
     return json.loads(Path(path).read_text())
 
 bases={}
+comparison_keys={}
+previous_result=ch.get('last_result') or {}
 for branch, pinned in PINNED.items():
     cur=mapcore._read(PROJECT,branch) or {}
     base=git('rev-list','-1','--before='+since.isoformat(),pinned)
     bases[branch]=base or None
     if not base or not cur.get('commit') or base==pinned:continue
+    # Local groups and flow names affect the human-readable diff independently
+    # of the Git commits. Use the same effective branch details as mapcore.Map.
+    details=project_store.branch_bundle({branch:cur,**{k:project_store.read(Path(HOME)/(k+'.json')) for k in ('groups','flows')}},branch)
+    inputs=[os.path.realpath(REPO),base,pinned,mapcore.extractor_id(HOME),details.get('groups'),details.get('flows')]
+    key=hashlib.sha256(json.dumps(inputs,sort_keys=True,ensure_ascii=False).encode()).hexdigest()
+    comparison_keys[branch]=key
+    previous_delta=(previous_result.get('evidence') or {}).get('structure',{}).get(branch)
+    if previous_delta is not None and (previous_result.get('comparison_keys') or {}).get(branch)==key:
+        entry['branches'][branch]=previous_delta
+        continue
     if (cur.get('analysis') or {}).get('source')=='ai':
         # Compare like extractors without overwriting the saved AI map or calling AI.
         path=os.path.join(HOME,branch+'.current-basic.json')
@@ -162,6 +174,6 @@ if changed:
     ch["entries"] = ([entry] + ch["entries"])[:30]
 ch["last_refresh"] = NOW.isoformat()
 import briefing
-ch['last_result']={'at':NOW.isoformat(),'since':since.isoformat(),'since_note':since_note,'changed':bool(changed),'scope':'basic','evidence':briefing.freeze(m.status,entry,PINNED,bases)}
+ch['last_result']={'at':NOW.isoformat(),'since':since.isoformat(),'since_note':since_note,'changed':bool(changed),'scope':'basic','evidence':briefing.freeze(m.status,entry,PINNED,bases),'comparison_keys':comparison_keys}
 json.dump(ch, open(cpath, "w"), ensure_ascii=False, indent=1)
 print(log + (f"달라진 것: PR {len(entry['prs'])}, " + ", ".join(f"{b} {v['from']}→{v['to']}" for b, v in entry["branches"].items()) if changed else f"{since_note} 달라진 것 없음"))
