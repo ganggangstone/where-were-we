@@ -386,7 +386,7 @@ Object.assign(UI_EN,{'선택한 기능':'Selected feature','‹ 기능 개요':'
 Object.assign(UI_EN,{'기존 AI 채팅에 요청':'Use your existing AI chat','저장된 결과 새로고침':'Refresh saved results',"앱에서 자동 분석 (베타)":"Automatic analysis in the app (beta)",'요청 내용·다른 분석':'Request text and other analyses','요청 준비됨':'Request ready','일부 결과 저장됨':'Partial results saved','이전에 저장된 결과':'Previously saved results'});
 Object.assign(UI_EN,{'Git 추적 파일':'Git-tracked files','최상위 폴더':'Top-level folder','파일 수':'File count','루트 디렉터리':'Root directory'});
 Object.assign(UI_EN,{'모듈 연결 (베타)':'Module connections (beta)','확인한 파일':'Files indexed','건너뛴 파일':'Files skipped','Python import · JS/TS 상대 경로 import·재내보내기':'Python imports · JS/TS relative imports and re-exports','로컬 Python import':'Local Python imports','인터페이스':'Interface','타입 별칭':'Type alias','열거형':'Enum','메서드':'Method','미지원 파일':'Unsupported files','대상 미확인 import':'Unresolved imports','분석 한도 도달':'Index limit reached','선택한 모듈':'Selected module','작업 폴더에서 열기':'Open working copy','이 모듈을 가져오는 쪽':'Imported by','이 모듈이 가져오는 쪽':'Imports','모듈 선언':'Declarations','클래스':'Class','함수':'Function','비동기 함수':'Async function'});
-Object.assign(UI_EN,{'매개변수가 한 경로 구간일 때 일치':'Matches when the parameter occupies one URL segment','GitHub 작업 정보 미확인':'GitHub work data unavailable','최근 확인':'Last verified','설정·클라이언트 기본값에서 일치':'Matches configured client and server defaults','기본값 근거':'Default value evidence','HTTP 요청 흐름 (베타)':'HTTP request flow (beta)','고정 fetch 주소 · 서버 경로 대조':'Literal fetch URLs matched to server routes','요청을 보내는 코드':'Client call site','받는 서버 함수':'Server handler','경로 등록·실행 근거':'Route registration and startup evidence','주소 선언':'URL declaration','연결된 요청':'Matched requests','대상 미확인 요청':'Unresolved requests','확인한 요청':'Requests detected','서버 경로':'Server routes','연결 선택':'Select connection'});
+Object.assign(UI_EN,{'요청을 시작하는 화면 동작':'UI actions that trigger this request','양식 제출':'Form submission','버튼 클릭':'Button click','입력 변경':'Input change','이벤트 처리 함수':'Event handler','클라이언트 호출':'Client invocation','클라이언트 정의':'Client definition','매개변수가 한 경로 구간일 때 일치':'Matches when the parameter occupies one URL segment','GitHub 작업 정보 미확인':'GitHub work data unavailable','최근 확인':'Last verified','설정·클라이언트 기본값에서 일치':'Matches configured client and server defaults','기본값 근거':'Default value evidence','HTTP 요청 흐름 (베타)':'HTTP request flow (beta)','고정 fetch 주소 · 서버 경로 대조':'Literal fetch URLs matched to server routes','요청을 보내는 코드':'Client call site','받는 서버 함수':'Server handler','경로 등록·실행 근거':'Route registration and startup evidence','주소 선언':'URL declaration','연결된 요청':'Matched requests','대상 미확인 요청':'Unresolved requests','확인한 요청':'Requests detected','서버 경로':'Server routes','연결 선택':'Select connection'});
 const UI_PATTERN = new RegExp(Object.keys(UI_EN).sort((a, b) => b.length - a.length).map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'g');
 function tr(text) { return S.lang === 'en' ? String(text).replace(UI_PATTERN, match => UI_EN[match]) : String(text); }
 function ui(parts, ...values) { return parts.reduce((out, part, i) => out + tr(part) + (i < values.length ? values[i] : ''), ''); }
@@ -1364,6 +1364,22 @@ function inventoryView(m) {
     return `<details class="sect" data-inventory="${esc(key)}" ${S.inventoryOpen===key?'open':''}><summary>${esc([label,tr('Git 추적 파일'),row.files].filter(x=>x!=='').join(' · '))}</summary><p class="mono">${esc(row.commit.slice(0,12))}</p><table><thead><tr><th>${tr('최상위 폴더')}</th><th>${tr('파일 수')}</th></tr></thead><tbody>${row.directories.map(([dir,count])=>`<tr><td>${dir?esc(dir):tr('루트 디렉터리')}</td><td>${esc(count)}</td></tr>`).join('')}</tbody></table></details>`;
   }).join('');
 }
+function flowActions(actions,evidence) {
+  if (!actions?.length) return '';
+  const labels={'form.onSubmit':'양식 제출','button.onClick':'버튼 클릭','input.onChange':'입력 변경'};
+  const rows=actions.map(action=>{
+    const key=action.element+'.'+action.event;
+    const label=labels[key]?tr(labels[key]):key;
+    const sites=[
+      [tr('이벤트 처리 함수'),action.file,action.handler_line],
+      ['import',action.file,action.import_line],
+      [tr('클라이언트 호출'),action.file,action.call_line],
+      [tr('클라이언트 정의'),action.client_definition?.file,action.client_definition?.line]
+    ];
+    return `<details class="sect"><summary>${esc(label)} · <code>${esc(action.handler)}</code></summary><div class="module-scope s"><code>${esc(key)}</code> ${evidence(action.file,action.line)}</div>${sites.filter(([,file,line])=>file && line).map(([name,file,line])=>`<div class="module-scope s">${esc(name)} ${evidence(file,line)}</div>`).join('')}</details>`;
+  });
+  return `<div data-flow-actions><h4>${tr('요청을 시작하는 화면 동작')}</h4>${rows.join('')}</div>`;
+}
 function serviceFlowView(flow,selectedIndex,evidence) {
   if(!flow)return '';
   const {connections,coverage:counts}=flow;
@@ -1375,7 +1391,7 @@ function serviceFlowView(flow,selectedIndex,evidence) {
   const supporting=link?.evidence?.length?`<div class="module-scope s">${tr(conditional?'기본값 근거':'주소 선언')} ${link.evidence.map(row=>evidence(row.file,row.line)).join(' · ')}</div>`:'';
   const diagram=link?`<div class="module-neighbors http-flow"><div class="module-edge"><h4>${tr('요청을 보내는 코드')}</h4>${evidence(link.client.file,link.client.line)}</div><div class="module-center"><span aria-hidden="true">→</span><strong class="mono">${esc(link.method)} ${esc(link.path)}</strong><span aria-hidden="true">→</span></div><div class="module-edge"><h4>${tr('받는 서버 함수')}</h4>${template && link.server_path?`<code>${esc(link.server_path)}</code>`:''}<b class="mono">${esc(link.server.function)}</b>${evidence(link.server.file,link.server.line)}</div></div>`:'';
   const mounts=link?.mounts?.length?`<div class="module-scope s">${tr('경로 등록·실행 근거')} ${link.mounts.map(m=>evidence(m.file,m.line)).join(' · ')}</div>`:'';
-  return `<section class="sect" data-http-flow><h2>${tr('HTTP 요청 흐름 (베타)')}</h2>${options}${basis}${diagram}${mounts}${supporting}<div class="s">${tr('확인한 요청')} ${esc(counts.requests)} · ${tr('서버 경로')} ${esc(counts.routes)} · ${tr('연결된 요청')} ${connections.length} · ${tr('대상 미확인 요청')} ${esc(counts.unresolved_requests)}</div></section>`;
+  return `<section class="sect" data-http-flow><h2>${tr('HTTP 요청 흐름 (베타)')}</h2>${options}${basis}${flowActions(link?.actions,evidence)}${diagram}${mounts}${supporting}<div class="s">${tr('확인한 요청')} ${esc(counts.requests)} · ${tr('서버 경로')} ${esc(counts.routes)} · ${tr('연결된 요청')} ${connections.length} · ${tr('대상 미확인 요청')} ${esc(counts.unresolved_requests)}</div></section>`;
 }
 function structureIndexView(m) {
   const indexes=m.structure_indexes || (m.structure_index ? [m.structure_index] : []);
