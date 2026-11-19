@@ -30,6 +30,7 @@ MAX_FILE_BYTES = 300_000
 MAX_PROMPT_BYTES = 128 * 1024
 UNIT_BYTES = 16 * 1024
 MAX_READ_ROUNDS = 32
+RESOURCE_PACK_SIZE = 4
 MAX_TASKS = 100
 MAX_SECONDS = 3600
 TASK_SECONDS = 600
@@ -1146,7 +1147,7 @@ def _feature_groups(groups, connections):
     return result
 
 
-def _quick_overview(repo,request,language,invoke,cancelled,deadline,raw,resource=None):
+def _quick_overview(repo,request,language,invoke,cancelled,deadline,raw,resource=None,ref_offset=0):
     """One bounded call per repository. A reference selects an actual pinned line."""
     commit=request['commit']
     import structure_index
@@ -1172,7 +1173,7 @@ def _quick_overview(repo,request,language,invoke,cancelled,deadline,raw,resource
         rows=[]
         for row in sampled[:24]:
             text=row['text'].strip()[:160]
-            ref=len(references)+1
+            ref=ref_offset+len(references)+1
             references[ref]={'file':source['file'],'line':row['line'],'quote':text}
             rows.append({'ref':ref,'line':row['line'],'text':text,**evidence.get(row['line'],{})})
         if rows:sources.append({'file':source['file'],'lines':rows})
@@ -1186,14 +1187,14 @@ def _quick_overview(repo,request,language,invoke,cancelled,deadline,raw,resource
             'prompt':'Describe directly evidenced features and structure in the selected language. '
                      'Use supplied declaration and import metadata when describing relationships. An import alone does not establish a runtime call. Each item names one feature, component or relationship, explains its role in one sentence and selects its supporting ref. '
                      'Return at most 12 items. Skip unsupported claims. Empty items are valid. Do not request further reads.',
-            'schema':{'items':[{'name':'feature or component','description':'what it does','ref':1}]}}
+            'schema':{'items':[{'name':'feature or component','description':'what it does','ref':ref_offset+1}]}}
     by_line={(row['file'],row['line']):ref for ref,row in references.items()}
     connections=[];source_flows=[]
     for scope,flow in flows:
         refs=[by_line.get((side['file'],side['line'])) for side in (flow['client'],flow['server'])]
         if all(refs):
             if scope not in result['scope_coverage']['selected']:result['scope_coverage']['selected'].append(scope)
-            connection={'id':len(connections)+1,'method':flow['method'],'path':flow['path'],'client_ref':refs[0],'server_ref':refs[1]}
+            connection={'id':ref_offset+len(connections)+1,'method':flow['method'],'path':flow['path'],'client_ref':refs[0],'server_ref':refs[1]}
             if flow.get('basis'):connection['basis']=flow['basis']
             if flow.get('basis')=='path_template':
                 connection.update(basis='path_template',server_path=flow['server_path'])
@@ -1225,17 +1226,22 @@ def _quick_overview(repo,request,language,invoke,cancelled,deadline,raw,resource
         if resource:
             for edge,flow in zip(result['connections'],source_flows):
                 edge['source_connection']=flow
-    answer=invoke(packet)
-    if connections:result['feature_groups']=_feature_groups(answer.get('feature_groups'),connections)
-    items=answer.get('items')
-    if not isinstance(items,list) or len(items)>12 or answer.get('needs'):raise InvalidClaim('Invalid initial overview response')
-    for item in items:
-        if (not isinstance(item,dict) or type(item.get('ref'))!=int or item['ref'] not in references
-                or any(not isinstance(item.get(k),str) or not 0<len(item[k].strip())<=500 for k in ('name','description'))):
-            raise InvalidClaim('An initial overview item lacked a supported source reference or description')
-        result['items'].append({k:item[k] for k in ('name','description')} | references[item['ref']])
-    _strict_result('analysis',{'inspected':result['items'],'connections':result.get('connections',[])},repo,commit)
-    return result
+    def finalize(answer):
+        if connections:result['feature_groups']=_feature_groups(answer.get('feature_groups'),connections)
+        if connections and ref_offset:
+            for group in result['feature_groups']:group['connection_ids']=[n-ref_offset for n in group['connection_ids']]
+            for edge in result['connections']:edge['id']-=ref_offset
+        items=answer.get('items')
+        if not isinstance(items,list) or len(items)>12 or answer.get('needs'):raise InvalidClaim('Invalid initial overview response')
+        for item in items:
+            if (not isinstance(item,dict) or type(item.get('ref'))!=int or item['ref'] not in references
+                    or any(not isinstance(item.get(k),str) or not 0<len(item[k].strip())<=500 for k in ('name','description'))):
+                raise InvalidClaim('An initial overview item lacked a supported source reference or description')
+            result['items'].append({k:item[k] for k in ('name','description')} | references[item['ref']])
+        _strict_result('analysis',{'inspected':result['items'],'connections':result.get('connections',[])},repo,commit)
+        return result
+    return (packet,finalize) if invoke is None else finalize(invoke(packet))
+
 
 def generate(value,task,request,executor,cancelled,deadline,check,blobs=None):
     deferred=[]
@@ -1264,6 +1270,36 @@ def generate(value,task,request,executor,cancelled,deadline,check,blobs=None):
         result=_result(executor(prompt,cancelled=cancelled,timeout=min(TASK_SECONDS,max(1,int(deadline-time.monotonic())))))
         check()
         return result
+    if task.get('pack_targets'):
+        prepared=[]
+        for i,target in enumerate(task['pack_targets']):
+            try:
+                # Each scope supplies at most 4 × 24 line refs. Disjoint ranges
+                # make another scope's otherwise valid citation fail validation.
+                packet,finalize=_quick_overview(repo,request,value['lang'],None,cancelled,deadline,raw,target,ref_offset=i*100)
+            except RunError as error:
+                if not prepared or error.code!='scope_unavailable':raise
+                break
+            candidate=[p for _,p,_ in prepared]+[packet]
+            envelope={'resources':candidate,'schema':{'results':[{'resource':'exact resource','items':[],'feature_groups':[]}]},
+                      'prompt':'Answer each independent resource using only its own evidence and IDs. Return one result per resource.'}
+            if len(_encoded(envelope).encode())>MAX_PROMPT_BYTES and prepared:break
+            prepared.append((target,packet,finalize))
+            payload=envelope
+        if len(prepared)==1:
+            target,packet,finalize=prepared[0]
+            return {'packed_overviews':{target:finalize(invoke(packet))}}
+        answer=invoke(payload)
+        rows=answer.get('results')
+        if not isinstance(rows,list) or len(rows)!=len(prepared) or any(not isinstance(row,dict) for row in rows):
+            raise InvalidClaim('Missing independent resource results')
+        lookup={row['resource']:row for row in rows if isinstance(row.get('resource'),str)}
+        if set(lookup)!={target for target,_,_ in prepared}:raise InvalidClaim('Resource names did not match this packet')
+        verified={};invalid=[]
+        for target,_,finalize in prepared:
+            try:verified[target]=finalize(lookup[target])
+            except InvalidClaim:invalid.append(target)
+        return {'packed_overviews':verified,'invalid_scopes':invalid}
     if task['task']=='overview':
         return _quick_overview(repo,request,value['lang'],invoke,cancelled,deadline,raw,task.get('target'))
     payload=_payload(value,task,request,cancelled,deadline,blobs,deferred)
@@ -1515,7 +1551,11 @@ def run(run_id, executor=None):
                         family=path(value.get('resume_from',value['id'])).stem
                         shutil.rmtree(root()/'checkpoints'/family,ignore_errors=True)
                         return value
-                task=plan['tasks'][0];request=_request(value,task)
+                task=plan['tasks'][0]
+                if resource_run and len(value['resource_targets'])>=RESOURCE_PACK_SIZE:
+                    targets=[t['target'] for t in plan['tasks'][:RESOURCE_PACK_SIZE] if t['repository']==task['repository']]
+                    if len(targets)>1:task={**task,'pack_targets':targets}
+                request=_request(value,task)
                 args=request['record_arguments']
                 if task['task']=='briefing':
                     if args['input_hash']!=value['pins'].get('@briefing',{}).get('input_hash'): raise RunError('pins_changed','Briefing evidence changed; start again')
@@ -1550,6 +1590,15 @@ def run(run_id, executor=None):
                     if value['cancel_requested']: raise Cancelled()
                     _check_pins(value,_plan(value))
                     value['state']='saving';write(value)
+                    if task.get('pack_targets'):
+                        rid=task['repository']
+                        packed=json.loads(result)
+                        for target,overview in packed['packed_overviews'].items():
+                            value.setdefault('scope_overviews',{}).setdefault(rid,{})[target]={'repository':rid,**value['pins'][rid],**overview}
+                            value['completed_tasks'].append({'repository':rid,'task':'overview','target':target})
+                        value.update(state='running',current_task=None);write(value)
+                        if packed.get('invalid_scopes'):raise InvalidClaim('Some resource results did not match their own evidence; verified resources were saved')
+                        continue
                     if task['task']=='overview':
                         rid=task['repository']
                         overview={'repository':rid,**value['pins'][rid],**json.loads(result)}

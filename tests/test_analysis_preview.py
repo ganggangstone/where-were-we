@@ -387,6 +387,43 @@ def users(): pass
         self.git('commit','--allow-empty','-qm','Change pin')
         with self.assertRaises(analysis_run.RunError):analysis_run.retry(job['id'])
 
+    def test_packed_resources_isolate_citations_and_resume_only_unsaved_results(self):
+        import structure_index
+        paths=[f'/resource{i}' for i in range(12)]
+        (self.repo/'ui.ts').write_text('\n'.join(f"export function get{i}(){{return fetch('{p}')}}" for i,p in enumerate(paths)))
+        (self.repo/'api.py').write_text('from fastapi import FastAPI\napp=FastAPI()\n'+'\n'.join(f"@app.get('{p}')\ndef read{i}():pass" for i,p in enumerate(paths)))
+        self.git('add','.');self.git('commit','-qm','Register twelve resources')
+        repo=analysis_run.store.config('demo')['repositories'][0];raw=self.raw()
+        raw['dev']['structure_index']=structure_index.build(str(self.repo),self.git('rev-parse','HEAD').strip())
+        analysis_run.store.publish('demo','service',raw,{'fingerprint':analysis_run.store.fingerprint(repo)})
+        job=self.prepare(intent={'task':'resources','targets':[],'max_calls':12})
+        calls=[];wrong=[]
+        def answer(prompt,**kwargs):
+            packet=json.loads(prompt.split('\n',1)[1]);pack=packet.get('resources',[packet])
+            self.assertLessEqual(len(prompt.encode()),analysis_run.MAX_PROMPT_BYTES)
+            self.assertLessEqual(len(pack),4)
+            rows=[]
+            for entry in pack:
+                edge=entry['connections'][0]
+                rows.append({'resource':entry['resource'],'items':[{'name':'Handler','description':'Handles the request','ref':edge['server_ref']}]})
+            calls.append([r['resource'] for r in rows])
+            if len(calls)==1:
+                wrong.append(rows[0]['resource'])
+                rows[0]['items'][0]['ref']=rows[1]['items'][0]['ref']
+            return {'results':list(reversed(rows))} if 'resources' in packet else rows[0]
+        failed=analysis_run.run(job['id'],answer)
+        self.assertEqual(failed['state'],'failed',failed.get('error'))
+        self.assertEqual(set(failed['scope_overviews']['service']),set(calls[0])-set(wrong))
+        retry=analysis_run.retry(job['id'])
+        self.assertEqual(retry['resource_estimate']['max_calls'],9)
+        done=analysis_run.run(retry['id'],answer)
+        self.assertEqual(done['state'],'completed',done.get('error'))
+        self.assertEqual([len(c) for c in calls],[4,4,4,1])
+        self.assertEqual(set(done['scope_overviews']['service']),set(paths))
+        for path,overview in done['scope_overviews']['service'].items():
+            self.assertIn(path,overview['items'][0]['quote'])
+            self.assertEqual(overview['connections'][0]['id'],1)
+
     def test_unavailable_source_does_not_block_other_verified_resources(self):
         import structure_index
         (self.repo/'aaa.js').write_text("fetch\n('/aaa')")
