@@ -261,6 +261,37 @@ def users(): pass
         upgrade=self.prepare(intent=intent)
         self.assertEqual([t['task'] for t in upgrade['tasks']],['overview'])
 
+    def test_selected_resource_has_its_own_cache_and_never_replaces_initial_overview(self):
+        for resource in ('orders','reports','stock'):
+            (self.repo/f'{resource}.ts').write_text(f"export function load(){{return fetch('/{resource}')}}")
+            (self.repo/f'{resource}.py').write_text(f"from fastapi import FastAPI\napp=FastAPI()\n@app.get('/{resource}')\ndef load():pass")
+        self.git('add','.');self.git('commit','-qm','Add three independent resources')
+        def start(path=None):
+            targets=[{'repository':'service','target':path}] if path else []
+            return self.prepare(intent={'task':'overview','targets':targets})['id']
+        def reply(prompt,**kwargs):
+            packet=json.loads(prompt.split('\n',1)[1])
+            if 'resource' in packet:
+                self.assertEqual({e['path'] for e in packet['connections']},{packet['resource']})
+                self.assertEqual({f['file'].split('.')[0] for f in packet['sources']},{packet['resource'][1:]})
+            return {'items':[]}
+        initial=analysis_run.run(start(),reply)['overviews']['service']
+        for path in ('/stock','/orders'):
+            done=analysis_run.run(start(path),reply)
+            self.assertEqual(done['state'],'completed',done.get('error'))
+            detail=done['scope_overviews']['service'][path]
+            self.assertEqual(detail['resource'],path)
+            self.assertEqual(detail['connections'][0]['source_connection']['path'],path)
+            reused=analysis_run.run(start(path),lambda *a,**k:self.fail('already saved scoped overview'))
+            self.assertEqual(reused['scope_overviews']['service'][path],detail)
+        saved=analysis_run.status(project='demo',lang='en')
+        self.assertEqual(saved['saved_overviews'],[initial])
+        self.assertEqual({v['resource'] for v in saved['saved_scope_overviews']},{'/orders','/stock'})
+        failed=analysis_run.run(start('/invented'),lambda *a,**k:self.fail('unknown scope reached AI'))
+        self.assertEqual(failed['state'],'failed')
+        self.git('commit','--allow-empty','-qm','Advance code')
+        self.assertEqual(analysis_run.status(project='demo',lang='en')['saved_scope_overviews'],[])
+
     def test_overview_preserves_conditional_url_match_in_prompt_and_saved_evidence(self):
         (self.repo/'app.js').write_text("import express from 'express';\nconst app=express();\napp.patch('/items/:id',()=>null);\napp.listen(3000);\n")
         (self.repo/'view.js').write_text("function update(id){fetch(`/items/${id}`,{method:'PATCH'})}\n")

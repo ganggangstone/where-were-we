@@ -122,7 +122,9 @@ def _intent(intent,repository):
     if not isinstance(targets,list) or any(not isinstance(t,dict) or set(t)!={'repository','target'} or
             not isinstance(t['repository'],str) or t['repository']=='*' or not isinstance(t['target'],str) or not t['target'] or
             repository and t['repository']!=repository for t in targets):raise ValueError('Choose valid analysis targets')
-    if bool(targets)!=(task in ('steps','jobs')):raise ValueError('Detail tasks require explicit targets')
+    if task=='overview':
+        if len(targets)>1 or targets and not targets[0]['target'].startswith('/'):raise ValueError('Choose one verified resource scope')
+    elif bool(targets)!=(task in ('steps','jobs')):raise ValueError('Detail tasks require explicit targets')
     return {'task':task,'targets':targets}
 
 def _plan(value):
@@ -131,8 +133,11 @@ def _plan(value):
     plan=ai_extract.plan(name,branch,lang,repository,overview=True)
     if chosen=='overview':
         finished={t['repository'] for t in value.get('completed_tasks',[])}
-        plan['tasks']=[{'repository':rid,'task':'overview',**pin} for rid,pin in plan['pins'].items() if rid not in finished]
-        plan['blocked']=[t for t in plan['blocked'] if t['task']=='analysis']
+        target=next(iter(intent['targets']),None)
+        if target and target['repository'] not in plan['pins']:raise ValueError('Unknown or unavailable target repository')
+        plan['tasks']=[{'repository':rid,'task':'overview',**({'target':target['target']} if target else {}),**pin}
+                       for rid,pin in plan['pins'].items() if rid not in finished and (not target or target['repository']==rid)]
+        plan['blocked']=[t for t in plan['blocked'] if t['task']=='analysis' and (not target or t['repository']==target['repository'])]
         return plan
     if chosen=='all':return plan
     if chosen=='briefing':
@@ -189,14 +194,18 @@ def prepare(project, branch='dev', lang='ko', repository='', executor='claude', 
                  'cancel_requested':False,'error':None,'account':None}
         if resume_from is not None:value['resume_from']=resume_from
         if scope['intent']['task']=='overview':
-            for old in history:
+            target=next(iter(scope['intent']['targets']),None)
+            for old in sorted(history,key=lambda record:record['created_at']):
                 if any(old[key]!=scope[key] for key in ('project','lang','branch')):continue
-                for rid,overview in old.get('overviews',{}).items():
-                    pin=plan['pins'].get(rid)
-                    if pin and overview.get('format')=='overview-v1' and overview.get('version')==OVERVIEW_VERSION and all(overview.get(k)==v for k,v in pin.items()):
-                        value.setdefault('overviews',{})[rid]=overview
-            cached=value.get('overviews',{})
-            value['completed_tasks']=[{'task':'overview','repository':rid,'target':None} for rid in cached]
+                for task in value['tasks']:
+                    rid=task['repository'];pin=plan['pins'][rid]
+                    overview=(old.get('scope_overviews',{}).get(rid,{}).get(target['target']) if target else old.get('overviews',{}).get(rid))
+                    if not overview or overview.get('format')!='overview-v1' or overview.get('version')!=OVERVIEW_VERSION:continue
+                    if not all(overview.get(k)==v for k,v in pin.items()):continue
+                    if target:value.setdefault('scope_overviews',{}).setdefault(rid,{})[target['target']]=overview
+                    else:value.setdefault('overviews',{})[rid]=overview
+            cached=value.get('scope_overviews' if target else 'overviews',{})
+            value['completed_tasks']=[{'task':'overview','repository':rid,'target':target['target'] if target else None} for rid in cached]
             value['tasks']=[t for t in value['tasks'] if t['repository'] not in cached]
         return write(value)
 
@@ -211,9 +220,9 @@ def status(run_id=None, project=None, repository='', branch='dev', lang='ko'):
         selected=max(matches,key=lambda v:v['created_at'])
         # A later attempt can fail before it produces its own overview. Keep the
         # latest verified sample per repository accessible across app restarts.
-        saved={}
+        saved={};scoped={};scope_pins={}
         legacy_pin=None
-        if any('' in record.get('overviews',{}) and all(record[k]==scope[k] for k in ('project','branch','lang')) for record in values):
+        if any(('' in record.get('overviews',{}) or '' in record.get('scope_overviews',{})) and all(record[k]==scope[k] for k in ('project','branch','lang')) for record in values):
             try:
                 repo,_,rid,commit=ai_extract.context(project,'',branch)
                 if rid=='':legacy_pin={'commit':commit,'configuration':store.fingerprint(repo)}
@@ -224,7 +233,21 @@ def status(run_id=None, project=None, repository='', branch='dev', lang='ko'):
                 if repository and repository!='*' and rid!=repository:continue
                 if rid=='' and (not legacy_pin or not all(overview.get(k)==v for k,v in legacy_pin.items())):continue
                 saved[rid]=overview
-        return {**selected,'saved_overviews':list(saved.values()),'current_legacy_pin':legacy_pin}
+            for rid,groups in record.get('scope_overviews',{}).items():
+                if scope['repository'] and rid!=scope['repository']:continue
+                if rid not in scope_pins:
+                    if rid=='':scope_pins[rid]=legacy_pin
+                    else:
+                        try:
+                            repo=store.selected_repository(project,rid)
+                            ref=(repo or {}).get('refs',{}).get(branch)
+                            commit=ai_extract.git(repo['path'],'rev-parse','--verify',ref+'^{commit}').strip() if ref else None
+                            scope_pins[rid]={'commit':commit,'configuration':store.fingerprint(repo)} if commit else None
+                        except ai_extract.READ_ERRORS:scope_pins[rid]=None
+                pin=scope_pins[rid]
+                for resource,overview in groups.items():
+                    if pin and all(overview.get(k)==v for k,v in pin.items()):scoped[rid,resource]=overview
+        return {**selected,'saved_overviews':list(saved.values()),'saved_scope_overviews':list(scoped.values()),'current_legacy_pin':legacy_pin}
 
 def active():
     with locked():
@@ -957,7 +980,7 @@ def _preview(run,task,commit,settled,programs,context):
             current['preview']={'commit':commit,'repository':task['repository'],'items':existing}
             write(current)
 
-def _overview_anchors(index):
+def _overview_anchors(index,resource=None):
     """Pick connected files and keep declarations and imports from competing for every slot."""
     declarations={item['file']:item['declarations'] for item in index['files'] if not _secret(item['file'])}
     imports={}
@@ -982,6 +1005,9 @@ def _overview_anchors(index):
         seen_endpoints.add(endpoint)
         candidates.append(flow)
     first=[(scope,rows[0]) for scope,rows in scopes.items() if rows]
+    if resource is not None:
+        if not scopes.get(resource):raise ValueError('This verified resource is unavailable in the selected revision')
+        first=[(resource,scopes[resource][0])]
     flows=first[:2]
     if len(first)==1:
         scope=first[0][0]
@@ -990,7 +1016,7 @@ def _overview_anchors(index):
         for side in (flow['client'],flow['server']):
             if side['file'] not in selected:selected.append(side['file'])
     for file in ranked:
-        if len(selected)==4:break
+        if resource is not None or len(selected)==4:break
         for candidate in [file]+[edge['target'] for edge in imports.get(file,[])]:
             if candidate in declarations and candidate not in selected:
                 selected.append(candidate)
@@ -1024,16 +1050,16 @@ def _feature_groups(groups, connections):
     return result
 
 
-def _quick_overview(repo,request,language,invoke,cancelled,deadline,raw):
+def _quick_overview(repo,request,language,invoke,cancelled,deadline,raw,resource=None):
     """One bounded call per repository. A reference selects an actual pinned line."""
     commit=request['commit']
     import structure_index
     index=raw.get('structure_index') or {}
     if index.get('commit')!=commit or index.get('version')!=structure_index.VERSION:
         index=structure_index.build(repo,commit,excluded=_secret)
-    anchors,flows,total_scopes=_overview_anchors(index)
+    anchors,flows,total_scopes=_overview_anchors(index,resource)
     selected=list(anchors)
-    if len(selected)<4:
+    if resource is None and len(selected)<4:
         fallback=sorted(_first_files(repo,commit,request,overview=True)-set(selected))
         selected.extend(fallback[:4-len(selected)])
     selected=set(selected)
@@ -1056,30 +1082,40 @@ def _quick_overview(repo,request,language,invoke,cancelled,deadline,raw):
         if rows:sources.append({'file':source['file'],'lines':rows})
     result={'format':'overview-v1','version':OVERVIEW_VERSION,'files':[s['file'] for s in sources],'items':[],
             'scope_coverage':{'total':total_scopes,'selected':[]}}
-    if not sources:return result
+    if resource:result['resource']=resource
+    if not sources and not resource:return result
     packet={'lang':language,'sources':sources,
             'prompt':'Describe directly evidenced features and structure in the selected language. '
                      'Use supplied declaration and import metadata when describing relationships. An import alone does not establish a runtime call. Each item names one feature, component or relationship, explains its role in one sentence and selects its supporting ref. '
                      'Return at most 12 items. Skip unsupported claims. Empty items are valid. Do not request further reads.',
             'schema':{'items':[{'name':'feature or component','description':'what it does','ref':1}]}}
     by_line={(row['file'],row['line']):ref for ref,row in references.items()}
-    connections=[]
+    connections=[];source_flows=[]
     for scope,flow in flows:
         refs=[by_line.get((side['file'],side['line'])) for side in (flow['client'],flow['server'])]
         if all(refs):
             if scope not in result['scope_coverage']['selected']:result['scope_coverage']['selected'].append(scope)
             connection={'id':len(connections)+1,'method':flow['method'],'path':flow['path'],'client_ref':refs[0],'server_ref':refs[1]}
+            if flow.get('basis'):connection['basis']=flow['basis']
             if flow.get('basis')=='path_template':
                 connection.update(basis='path_template',server_path=flow['server_path'])
             connections.append(connection)
+            source_flows.append(flow)
+    if resource and not connections:raise ValueError('No eligible source evidence for the selected resource')
+    if resource:
+        packet['resource']=resource
+        packet['prompt']+=' Describe only the selected resource and the supplied evidence.'
     if connections:
         packet['connections']=connections
         packet['schema']['feature_groups']=[{'name':'short feature name','connection_ids':[connections[0]['id']]}]
         packet['prompt']+=' Group related connections by directly evidenced user or service function. Use each supplied connection id at most once. Leave unclassified connections out of feature_groups.'
-        packet['prompt']+=' Describe the evidenced request and matching handler together. Connections are static evidence, not observed traffic. For path_template, describe only a possible match when the parameter is one path segment; do not claim an exact URL or guaranteed delivery.'
+        packet['prompt']+=' Describe the evidenced request and matching handler together. Connections are static evidence, not observed traffic. For declared_defaults, the match relies on the declared configuration. For path_template, describe only a possible match when the parameter is one path segment; do not claim an exact URL or guaranteed delivery.'
         result['connections']=[{k:v for k,v in edge.items() if k not in ('client_ref','server_ref')} |
                                {'client':references[edge['client_ref']],'server':references[edge['server_ref']]}
                                for edge in connections]
+        if resource:
+            for edge,flow in zip(result['connections'],source_flows):
+                edge['source_connection']=flow
     answer=invoke(packet)
     if connections:result['feature_groups']=_feature_groups(answer.get('feature_groups'),connections)
     items=answer.get('items')
@@ -1120,7 +1156,7 @@ def generate(value,task,request,executor,cancelled,deadline,check,blobs=None):
         check()
         return result
     if task['task']=='overview':
-        return _quick_overview(repo,request,value['lang'],invoke,cancelled,deadline,raw)
+        return _quick_overview(repo,request,value['lang'],invoke,cancelled,deadline,raw,task.get('target'))
     payload=_payload(value,task,request,cancelled,deadline,blobs,deferred)
     if task['task']=='analysis':
         payload['prompt']+=' You may add preview_programs: [{name,file,line,quote}] for directly evidenced programs, CLI commands or workers. If there are no screens or routes, still provide inspected evidence and unknown as the map schema requires.'
@@ -1392,7 +1428,9 @@ def run(run_id, executor=None):
                     value['state']='saving';write(value)
                     if task['task']=='overview':
                         rid=task['repository']
-                        value.setdefault('overviews',{})[rid]={'repository':rid,**value['pins'][rid],**json.loads(result)}
+                        overview={'repository':rid,**value['pins'][rid],**json.loads(result)}
+                        if task.get('target'):value.setdefault('scope_overviews',{}).setdefault(rid,{})[task['target']]=overview
+                        else:value.setdefault('overviews',{})[rid]=overview
                     else:_save(task,request,result)
                     preview=value.get('preview',{})
                     programs=[item for item in preview.get('items',[]) if item['kind']=='program']
