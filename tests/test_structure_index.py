@@ -441,6 +441,31 @@ func Ignored() *c.Command {
         self.assertEqual(coverage['directories'][0],{'directory':'backend','candidate_files':2,'indexed_files':0,'skipped_files':2})
         self.assertFalse(any(row['directory']=='area0' for row in coverage['directories']))
 
+    def test_pnpm_workspace_proves_membership_from_exact_manifest_and_glob_lines(self):
+        with tempfile.TemporaryDirectory() as root:
+            repo=Path(root)
+            git=lambda *a:subprocess.check_output(['git','-C',root,*a]).decode().strip()
+            git('init','-q')
+            config="packages:\n  - 'packages/*'\n  - '!packages/omit'\n"
+            sources={'pnpm-workspace.yaml':config,'packages/core/package.json':'{\n"name":"@app/core",\n"description":"Core library."}',
+                     'packages/omit/package.json':'{"name":"omit"}','tests/packages/other/package.json':'{"name":"other"}',
+                     'packages/alias/package.json':'{"name":"hidden"}','.aws/private.json':'{"name":"hidden"}'}
+            for file,text in sources.items():
+                path=repo/file
+                path.parent.mkdir(parents=True,exist_ok=True)
+                path.write_text(text)
+            git('add','.')
+            git('-c','user.name=Test','-c','user.email=test@example.invalid','commit','-qm','workspace')
+            pin=git('rev-parse','HEAD')
+            (repo/'pnpm-workspace.yaml').write_text('packages: []')
+            data=structure_index.build(root,pin)
+            self.assertEqual(data['coverage']['workspace_manifests_matched'],1)
+            self.assertEqual(data['workspace_packages'],[dict(name='@app/core',directory='packages/core',
+                file='packages/core/package.json',line=2,description='Core library.',description_line=3,
+                workspace={'file':'pnpm-workspace.yaml','line':2})])
+            self.assertEqual(structure_index._pnpm_patterns(b'packages:\n  - packages/*\n  - "!**/secret"'),[])
+            self.assertEqual(structure_index._pnpm_patterns(b'packages:\n  - apps/*\npackages: []'),[])
+
     def test_bounded_selection_visits_sibling_code_and_keeps_auxiliary_evidence(self):
         paths=['aaa/examples/case'+str(i)+'.py' for i in range(30)]
         paths+=['services/a/worker'+str(i)+'.py' for i in range(30)]

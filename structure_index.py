@@ -27,7 +27,7 @@ MAX_DECLARATIONS = 20_000
 MAX_IMPORTS = 20_000
 
 
-VERSION = 25
+VERSION = 26
 JS_EXTENSIONS = {'.js', '.jsx', '.mjs', '.cjs'}
 LANGUAGES = ('python', 'javascript', 'typescript', 'html', 'go')
 TS_EXTENSIONS = {'.ts', '.tsx', '.mts', '.cts'}
@@ -387,6 +387,77 @@ def _documented_features(git, env, sources):
     return []
 
 
+def _pnpm_patterns(raw):
+    """Read only pnpm's plain block list of literal or single-segment wildcard globs."""
+    try:
+        lines = raw.decode('utf-8-sig').splitlines()
+    except UnicodeError:
+        return []
+    headers = [i for i,line in enumerate(lines) if re.fullmatch(r'packages:[ \t]*(?:#.*)?',line)]
+    if len(headers) != 1 or sum(bool(re.match(r'^packages\s*:',line)) for line in lines)!=1 or any(line.startswith(('---','...','<<:', '"packages"', "'packages'")) for line in lines):
+        return []
+    patterns = []
+    for index in range(headers[0]+1,len(lines)):
+        line = lines[index]
+        if not line.strip() or line.lstrip().startswith('#'):
+            continue
+        if not line.startswith((' ', '-')):
+            break
+        item = re.fullmatch(r""" *- +(['"]?)(!?[A-Za-z0-9_@.*!/-]+)\1\s*(?:#.*)?""",line)
+        if not item or len(patterns)>=128:
+            return []
+        path = item[2].removeprefix('!')
+        parts = path.removeprefix('./').split('/')
+        if any(part in ('','.','..') or (part != '*' and not re.fullmatch(r'[A-Za-z0-9_@.-]+',part)) for part in parts):
+            return []
+        patterns.append((item[2].startswith('!'),parts,index+1))
+    return patterns
+
+
+def _workspace_packages(git,env,config,manifests):
+    if not config:
+        return [],0
+    patterns = _pnpm_patterns(next(_blobs(git,env,[('pnpm-workspace.yaml',config)]))[1])
+    matched = {}
+    for file,entry in manifests.items():
+        if file == 'package.json' or not file.endswith('/package.json'):
+            continue
+        parts = file.split('/')[:-1]
+        if 'node_modules' in parts:
+            continue
+        hits = [(negative,line) for negative,pattern,line in patterns if len(parts)==len(pattern)
+                and all(p==s or p=='*' and not s.startswith('.') for p,s in zip(pattern,parts))]
+        if hits and not any(negative for negative,_ in hits):
+            matched[file] = (entry,hits[0][1])
+    selected = [(file,matched[file][0]) for file in sorted(matched) if matched[file][0][1]<=64*1024][:64]
+    packages = []
+    for file,raw in _blobs(git,env,selected):
+        try:
+            text = raw.decode('utf-8-sig')
+            manifest = json.loads(text)
+        except (UnicodeError,ValueError,RecursionError):
+            continue
+        if not isinstance(manifest,dict):
+            continue
+        name = manifest.get('name')
+        if not isinstance(name,str) or not re.fullmatch(r'(?:@[a-z0-9_.-]+/)?[a-z0-9][a-z0-9._-]{0,213}',name):
+            continue
+        def field_line(key,value):
+            literal = '"' + key + r'"\s*:\s*' + re.escape(json.dumps(value,ensure_ascii=False))
+            rows = [n for n,line in enumerate(text.splitlines(),1) if re.search(literal,line)]
+            return rows[0] if len(rows)==1 else None
+        line = field_line('name',name)
+        if not line:
+            continue
+        row = {'name':name,'directory':posixpath.dirname(file),'file':file,'line':line,
+               'workspace':{'file':'pnpm-workspace.yaml','line':matched[file][1]}}
+        description = manifest.get('description')
+        if _plain_description(description) and (where := field_line('description',description)):
+            row.update(description=description,description_line=where)
+        packages.append(row)
+    return packages,len(matched)
+
+
 def _cli_entries(git, env, manifests, tracked, files):
     """Resolve tracked package commands without running an installer or importing code."""
     declarations = {row['file']: row['declarations'] for row in files}
@@ -513,6 +584,7 @@ def build(repo, commit, excluded=None, *, only_file=None, directory=None, page=1
     next_config_names = []
     next_sources = {}
     workspace = False
+    pnpm_workspace = None
     for entry in tree.split(b'\0'):
         if not entry:
             continue
@@ -550,6 +622,8 @@ def build(repo, commit, excluded=None, *, only_file=None, directory=None, page=1
             continue
         if scope is None:
             tracked[file] = oid
+            if file == 'pnpm-workspace.yaml' and int(size) <= 64 * 1024:
+                pnpm_workspace = (oid,int(size))
             if (file == 'package.json' or file in next_config_names) and int(size) <= 64 * 1024:
                 next_sources[file] = (oid, int(size))
             if file.lower() in ('readme.md','readme.rst','readme.txt','readme') or file in ('package.json','pyproject.toml'):
@@ -792,6 +866,8 @@ def build(repo, commit, excluded=None, *, only_file=None, directory=None, page=1
     eligible_manifests = {path: entry for path, entry in manifests.items() if entry[0] not in denied}
     cli_entries, manifests_read = _cli_entries(git, env, eligible_manifests, {f for f, oid in tracked.items() if oid not in denied}, files)
     cli_entries.extend(cobra_commands.connect(cobra_facts, go_targets, 1024))
+    workspace_packages,workspace_total = _workspace_packages(git,env,pnpm_workspace if pnpm_workspace and pnpm_workspace[0] not in denied else None,eligible_manifests)
+    coverage['workspace_manifests_matched'] = workspace_total
     coverage['cli_manifests_read'] = manifests_read
     coverage['cli_manifests_total'] = len(eligible_manifests)
     preferred = ['package.json','pyproject.toml','readme.md','readme.rst','readme.txt','readme']
@@ -799,5 +875,5 @@ def build(repo, commit, excluded=None, *, only_file=None, directory=None, page=1
                      key=lambda item:(preferred.index(item[0].lower()),item[0]))
     description = _project_description(git, env, sources)
     features = _documented_features(git, env, [item for item in sources if item[0].lower() == 'readme.md'])
-    return {'version':VERSION,'commit': commit,'project_description':description,'documented_features':features,'cli_entries':cli_entries, 'files': files, 'imports': resolved, 'package_imports':package_imports, 'coverage': coverage,
+    return {'version':VERSION,'commit': commit,'project_description':description,'workspace_packages':workspace_packages,'documented_features':features,'cli_entries':cli_entries, 'files': files, 'imports': resolved, 'package_imports':package_imports, 'coverage': coverage,
             'service_flow':service_flow.connect(routes, requests)}
