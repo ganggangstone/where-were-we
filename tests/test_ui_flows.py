@@ -1207,12 +1207,12 @@ class Flows(unittest.TestCase):
  assert(label('로컬 Python import'),'Old snapshots retain their original Python-only coverage');
  const mixed={...index,files:[{file:'app.js',language:'javascript',declarations:[]},{file:'types.ts',language:'typescript',declarations:[{name:'Task',kind:'interface',line:2}]}],imports:[{file:'app.js',line:1,target:'types.ts'}],
   coverage:{...index.coverage,candidate_files:2,indexed_files:2,languages:{javascript:{candidate_files:1,indexed_files:1},typescript:{candidate_files:1,indexed_files:1},python:{candidate_files:0,indexed_files:0}}}};
- mixed.service_flow={connections:[{method:'GET',path:'/users',client:{file:'app.js',line:3},server:{file:'server.py',line:8,function:'users'},mounts:[{file:'server.py',line:2}]},
+ mixed.service_flow={connections:[{method:'GET',path:'/users',client:{file:'app.js',line:3},evidence:[{file:'app.js',line:1}],server:{file:'server.py',line:8,function:'users'},mounts:[{file:'server.py',line:2}]},
   {basis:'declared_defaults',evidence:[{file:'settings.py',line:18}],method:'POST',path:'/jobs',client:{file:'app.js',line:4},server:{file:'server.py',line:10,function:'jobs'},mounts:[]}],coverage:{requests:3,routes:2,unresolved_requests:1}};
  M().structure_indexes=[mixed];render();
  const http=()=>graph().querySelector('[data-http-flow]');
  assert(http().innerText.includes('GET /users') && http().innerText.includes('app.js:3') && http().innerText.includes('server.py:8') && http().innerText.includes('server.py:2'),'Matched HTTP flow exposes client, mount and handler evidence');
- assert(http().innerText.includes(tr('고정 fetch 주소 · 서버 경로 대조')) && !http().innerText.includes(tr('설정·클라이언트 기본값에서 일치')),'Literal match shows its basis');
+ assert(http().innerText.includes(tr('주소 선언')) && http().innerText.includes('app.js:1') && http().innerText.includes(tr('고정 fetch 주소 · 서버 경로 대조')) && !http().innerText.includes(tr('설정·클라이언트 기본값에서 일치')),'Literal match shows its basis');
  assert(http().compareDocumentPosition(graph().querySelector('.module-neighbors:not(.http-flow)')) & Node.DOCUMENT_POSITION_FOLLOWING,'HTTP flow precedes module connections');
  $('httpConnection').value='1';$('httpConnection').dispatchEvent(new Event('change'));
  assert(http().innerText.includes(tr('설정·클라이언트 기본값에서 일치')) && http().innerText.includes('settings.py:18') && !http().innerText.includes(tr('고정 fetch 주소 · 서버 경로 대조')),'Default-based link shows its condition and evidence');
