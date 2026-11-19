@@ -75,6 +75,9 @@ class RefreshFirstWebKit(unittest.TestCase):
  Object.defineProperty(document,'hidden',{configurable:true,value:false});
  S.agentPurpose='analysis';S.agentPrompt='';renderAgentPrompt();await AnalysisRun.check();
  check(!$('automaticAnalysis').open && $('insp').innerText.includes('Saved items'),'Optional saved group appears without opening AI controls');
+ $('toggleAutomaticAnalysis').click();$('chooseResourceBatch').click();
+ check($('automaticAnalysis').open && $('resourceLimits').innerText.includes('2') && !calls.some(c=>c.command==='analysis_run_start'),'Explicit batch preview is visible before any model call');
+ S.analysisChoice=null;S.automaticPanelOpen=false;AnalysisRun.syncScope();await new Promise(r=>setTimeout(r,20));await AnalysisRun.check();renderAgentPrompt();
  const button=$('insp').querySelector('[data-overview-feature]');button.click();
  const storage=$('insp').querySelector('[data-flow-storage] details');check(storage,'Opening the saved feature shows its model step');
  storage.querySelector('summary').click();check(storage.open && storage.innerText.includes('api.py:11'),'Model citation remains discoverable');

@@ -105,6 +105,22 @@ const started=calls.find(c=>c.command==='analysis_run_start').args;
 assert(started.scope.repository==='backend' && started.scope.intent.task==='overview' && JSON.stringify(started.scope.intent.targets)===JSON.stringify([{repository:'backend',target:'/work'}]),'Only the selected repository and path reach the backend');
 ''')
 
+    def test_batch_requires_separate_confirmation_and_discloses_fixed_call_limit(self):
+        self.check_js(r'''
+S.maps={dev:{structure_indexes:[{repository:'web',service_flow:{feature_groups:[{resource:'/one'},{resource:'/two'}]}}]}};
+await open();await flush();$('chooseResourceBatch').onclick();
+assert(count('analysis_run_start')===0 && $('insp').innerHTML.includes('Path groups: 2 · Up to 2 AI calls'),'The batch shows its cost boundary before starting');
+S.maps.dev.structure_indexes[0].service_flow.feature_groups.push({resource:'/three'});
+await $('startAppAnalysis').onclick();
+const args=calls.find(c=>c.command==='analysis_run_start').args;
+assert(args.scope.intent.task==='resources' && args.scope.intent.max_calls===2,'Confirmation cannot widen when the live map changes');
+const one={task:'overview',repository:'web',target:'/one'},two={...one,target:'/two'};
+status=runRecord('running',{intent:args.scope.intent,current_task:two,tasks:[one,two],completed_tasks:[one]});
+await AnalysisRun.check();
+assert($('insp').innerHTML.includes('Path groups saved: 1 · Remaining: 1') && $('insp').innerHTML.includes('/two') && $('cancelAppAnalysis'),'Current path and remaining count with cancel');
+status.state='cancelled';await AnalysisRun.check();assert($('retryAppAnalysis'),'Cancelled batch can resume');
+''')
+
     def test_initial_overview_and_full_analysis_have_distinct_explicit_buttons(self):
         self.check_js(r'''
 await open();

@@ -9,9 +9,10 @@ const AnalysisRun = (() => {
   const scope = () => ({project:S.project, repository:['make_steps','make_jobs'].includes(S.analysisChoice?.task) ? '' : (S.analysisChoice?.target || S.repository || '').replace(/^\*$/, ''), branch:S.branch, lang:S.lang});
   function intent() {
     const choice=S.analysisChoice || {}, command=choice.task || 'quick_overview';
-    const task=({scope_overview:'overview',quick_overview:'overview',analysis_plan:'all',analysis_request:'analysis',make_system:'system',suggest_groups:'groups',make_steps:'steps',make_jobs:'jobs',briefing_request:'briefing'})[command] || 'all';
+    const task=({resource_batch:'resources',scope_overview:'overview',quick_overview:'overview',analysis_plan:'all',analysis_request:'analysis',make_system:'system',suggest_groups:'groups',make_steps:'steps',make_jobs:'jobs',briefing_request:'briefing'})[command] || 'all';
     const args={...scope(),...(task==='steps'?{screen:choice.detailTarget}:task==='jobs'?{node:choice.detailTarget}:{})};
     const targets=['steps','jobs'].includes(task) ? (choice.targets || analysisCalls(command,args).map(a=>({repository:a.repository || '',target:a.screen || a.node}))) : [];
+    if(task==='resources')return {task,targets:[],max_calls:choice.maxCalls};
     return {task,targets:command==='scope_overview'?[{repository:scope().repository,target:choice.detailTarget}]:targets};
   }
   const key = () => JSON.stringify([scope(), S.analysisChoice, S.loadToken]);
@@ -249,11 +250,20 @@ const AnalysisRun = (() => {
     });
     return `<section class="sect"><h3>${active() ? text('분석 중 확인한 기능','Features verified so far') : text('확인한 프로그램','Verified programs')}</h3>${rows.join('')}</section>`;
   }
+  function localResourceCount() {
+    const map=S.maps?.[S.branch],repo=scope().repository;
+    const indexes=map?.structure_indexes || (map?.structure_index?[map.structure_index]:[]);
+    return indexes.filter(index=>!repo || index.repository===repo).reduce((n,index)=>n+new Set((index.service_flow?.feature_groups || []).map(row=>row.resource)).size,0);
+  }
   function html(includeOverview=true) {
     if(S.analysisChoice?.task==='scope_overview' && savedOverviews().length && !active())return overviewHtml();
     const account = provider?.account, identity = typeof account === 'string' ? account : account?.email || account?.id;
     const done = Array.isArray(run?.completed_tasks) ? run.completed_tasks.length : Number(run?.completed_tasks || 0);
-    const total = done + (run?.tasks?.length || 0);
+    const batchRun=run?.intent?.task==='resources';
+    const completed=new Set((batchRun?run.completed_tasks || []:[]).map(t=>JSON.stringify([t.repository,t.target])));
+    const left=batchRun?(run.tasks || []).filter(t=>!completed.has(JSON.stringify([t.repository,t.target]))).length:run?.tasks?.length || 0;
+    const total=done+left;
+    const progress=batchRun?text('경로 묶음 '+done+'개 저장 · '+left+'개 남음','Path groups saved: '+done+' · Remaining: '+left):done+'/'+total+' '+text('작업 저장됨','tasks saved');
     const task = run?.current_task;
     const batches=run?.batch_progress,stats=run?.input_stats;
     let inputProgress='';
@@ -263,16 +273,21 @@ const AnalysisRun = (() => {
                'Initial input units reviewed: '+batches.completed+' · Total not yet known')
         : text('현재 작업 입력 조각','Current task input units')+': '+batches.completed+'/'+batches.total;
     }
-    const names={overview:text('첫 개요','Initial overview'),all:text('지도·서비스 구성·화면 묶음','Map, service overview, screen groups'),analysis:text('지도','Map'),system:text('서비스 구성','Service overview'),groups:text('화면 묶음','Screen groups'),steps:text('동작 과정','Action steps'),jobs:text('프로그램이 하는 일','Program jobs'),briefing:text('변경 설명','Change explanation')};
-    const taskName = typeof task === 'string' ? task : task ? [task.repository, text(task.task==='overview'?'첫 개요':PLAN_NAMES[task.task] || task.task, ({overview:'Initial overview',analysis:'Detailed map',system:'Architecture',groups:'Screen groups',jobs:'Program jobs',steps:'Action steps',briefing:'Change explanation'})[task.task] || task.task)].filter(Boolean).join(' · ') : '';
+    const names={resources:text('경로 묶음 설명','Path group explanations'),overview:text('첫 개요','Initial overview'),all:text('지도·서비스 구성·화면 묶음','Map, service overview, screen groups'),analysis:text('지도','Map'),system:text('서비스 구성','Service overview'),groups:text('화면 묶음','Screen groups'),steps:text('동작 과정','Action steps'),jobs:text('프로그램이 하는 일','Program jobs'),briefing:text('변경 설명','Change explanation')};
+    const taskName = typeof task === 'string' ? task : batchRun && task?.target ? [task.repository,task.target].filter(Boolean).join(' · ') : task ? [task.repository, text(task.task==='overview'?'첫 개요':PLAN_NAMES[task.task] || task.task, ({overview:'Initial overview',analysis:'Detailed map',system:'Architecture',groups:'Screen groups',jobs:'Program jobs',steps:'Action steps',briefing:'Change explanation'})[task.task] || task.task)].filter(Boolean).join(' · ') : '';
     const issue = error || run?.error;
-    const canStart = usable() && !providerBusy && !busy && !active();
+    const resources=localResourceCount();
+    const batch=intent().task==='resources';
+    const canStart = (!batch || intent().max_calls>0) && usable() && !providerBusy && !busy && !active();
     const runScope = run ? [run.repository ? connectionDisplayName(run.repository) : text('연결한 코드 전체','All connected repositories'),run.branch,run.lang].join(' · ') : '';
     const runAccount = run?.account?.email || run?.account?.id;
     const choice=intent();
+    const cached=run?.resource_estimate?.cached || 0;
+    const savedGroups=batch && batchRun?(run.saved_scope_overviews || []).filter(group=>!scope().repository || scope().repository===group.repository):[];
+    const resultPicker=savedGroups.length?`<div class="ctl"><label>${text('저장된 경로 설명','Saved path explanations')} <select id="batchSavedResource">${savedGroups.map((group,i)=>`<option value="${i}">${esc([group.repository,group.resource].filter(Boolean).join(' · '))}</option>`).join('')}</select></label><button class="btn quiet" id="openBatchSaved">${text('설명 열기','Open explanation')}</button></div>`:'';
     const targets=choice.targets.map(t=>[t.repository,t.target].filter(Boolean).map(esc).join(' · '));
     const scoped=S.analysisChoice?.task==='scope_overview';
-    const startLabel=scoped?text('이 경로 설명 생성','Generate path explanation'):choice.task==='overview' ? text('첫 개요 만들기','Create initial overview')
+    const startLabel=batch?text('경로 묶음 설명 생성','Generate path group explanations'):scoped?text('이 경로 설명 생성','Generate path explanation'):choice.task==='overview' ? text('첫 개요 만들기','Create initial overview')
       : choice.task==='all' ? text('전체 코드 분석 (베타)','Analyze full codebase (beta)')
       : choice.task==='analysis' ? text('상세 지도 분석 (베타)','Analyze detailed map (beta)')
       : text(names[choice.task]+' 분석 시작','Analyze '+names[choice.task]);
@@ -282,15 +297,17 @@ const AnalysisRun = (() => {
       <p class="s">${esc(scope().repository ? connectionDisplayName(scope().repository) : text('연결한 코드 전체','All connected repositories'))} · ${esc(S.branch)}${targets.length?' · '+targets.join(', '):''}</p>
       <p class="s">${text('선택한 코드가 Claude로 전송되며 구독 한도가 적용됩니다.','Claude receives the selected code. Subscription usage limits apply.')}</p>
       ${providerBusy ? `<p role="status">${text('Claude Code 계정 확인 중…','Checking the Claude Code account…')}</p>` : provider && !usable() ? `<p role="alert">${esc(message(provider))}</p>` : ''}
-      ${run ? `${!sameScope() || (runAccount && runAccount!==identity) ? `<p class="s">${text('이 분석의 코드','This run analyzes')}: ${esc(runScope)} · ${esc(names[run.intent?.task || 'all'])}${(run.intent?.targets || []).map(t=>' · '+esc(t.repository)+' · '+esc(t.target)).join('')}${runAccount ? ' · '+esc(runAccount) : ''}</p>` : ''}${!sameScope() ? `<p class="s">${text('다른 분석입니다. 실행 중이면 완료 후 시작하거나 취소하세요.','Different analysis selected. Wait for the active run or cancel it.')}</p>` : ''}<div role="status" aria-live="polite"><strong>${esc(stateLabel())}</strong> · ${done}/${total} ${text('작업 저장됨','tasks saved')}${taskName ? '<div>'+esc(taskName)+'</div>' : ''}</div><progress max="${Math.max(total, 1)}" value="${done}" aria-label="${text('분석 진행률','Analysis progress')}"></progress>${run.blocked?.length ? `<p class="s">${text('먼저 확인할 분석','Analysis requiring attention')}: ${run.blocked.length}</p>` : ''}` : ''}
+      ${run ? `${!sameScope() || (runAccount && runAccount!==identity) ? `<p class="s">${text('이 분석의 코드','This run analyzes')}: ${esc(runScope)} · ${esc(names[run.intent?.task || 'all'])}${(run.intent?.targets || []).map(t=>' · '+esc(t.repository)+' · '+esc(t.target)).join('')}${runAccount ? ' · '+esc(runAccount) : ''}</p>` : ''}${!sameScope() ? `<p class="s">${text('다른 분석입니다. 실행 중이면 완료 후 시작하거나 취소하세요.','Different analysis selected. Wait for the active run or cancel it.')}</p>` : ''}<div role="status" aria-live="polite"><strong>${esc(stateLabel())}</strong> · ${esc(progress)}${batchRun && cached?' · '+text('재사용 '+cached+'개',cached+' reused'):''}${taskName ? '<div>'+esc(taskName)+'</div>' : ''}</div><progress max="${Math.max(total, 1)}" value="${done}" aria-label="${text('분석 진행률','Analysis progress')}"></progress>${run.blocked?.length ? `<p class="s">${text('먼저 확인할 분석','Analysis requiring attention')}: ${run.blocked.length}</p>` : ''}` : ''}
       ${stats ? `<details><summary>${text('AI 사용량','AI usage')}</summary><p class="s">${text('입력 호출','Input calls')}: ${stats.calls} · ${text('전송한 입력 바이트','Encoded input bytes')}: ${stats.bytes}${inputProgress ? ' · '+esc(inputProgress) : ''}</p></details>` : ''}
       ${issue ? `<p role="alert">${esc(message(issue))}</p>` : ''}
       ${!active() && choice.task==='overview' ? `<p class="s" id="overviewLimits">${scoped?text('선택한 경로 · 최대 4개 파일, AI 1회 이내','Selected path: up to 4 files, 1 AI call maximum.'):text('첫 개요 · 연결한 코드마다 최대 4개 파일, AI 1회 이내','Per repository: up to 4 files, 1 AI call maximum.')}</p>` : ''}
-      <div class="ctl">${active() ? `<button class="btn" id="cancelAppAnalysis" ${busy || run.cancel_requested ? 'disabled' : ''}>${text('분석 취소','Cancel analysis')}</button>` : sameScope() && ['failed','cancelled'].includes(run?.state) ? `<button class="btn primary" id="retryAppAnalysis" ${canStart ? '' : 'disabled'}>${text('현재 코드로 다시 시도','Retry with current code')}</button>` : `<button class="btn primary" id="startAppAnalysis" ${choice.task==='overview' ? 'aria-describedby="overviewLimits"' : ''} ${canStart ? '' : 'disabled'}>${esc(startLabel)}</button>`}
+      ${batch && !active()?`<p class="s" id="resourceLimits">${text('경로 묶음 '+choice.max_calls+'개 · AI 최대 '+choice.max_calls+'회','Path groups: '+choice.max_calls+' · Up to '+choice.max_calls+' AI calls')}</p>`:''}
+      <div class="ctl">${active() ? `<button class="btn" id="cancelAppAnalysis" ${busy || run.cancel_requested ? 'disabled' : ''}>${text('분석 취소','Cancel analysis')}</button>` : sameScope() && ['failed','cancelled'].includes(run?.state) ? `<button class="btn primary" id="retryAppAnalysis" ${canStart ? '' : 'disabled'}>${text('현재 코드로 다시 시도','Retry with current code')}</button>` : `<button class="btn primary" id="startAppAnalysis" ${batch?'aria-describedby="resourceLimits"':choice.task==='overview' ? 'aria-describedby="overviewLimits"' : ''} ${canStart ? '' : 'disabled'}>${esc(startLabel)}</button>`}
+      ${resources && !scoped && (!batch || resources!==choice.max_calls) && !active()?`<button class="btn quiet" id="chooseResourceBatch">${text('경로 묶음별 AI 설명 (베타)','AI explanations by path group (beta)')}</button>`:''}
       ${!scoped && !active() && intent().task==='overview' ? `<button class="btn quiet" id="startFullAnalysis" ${canStart ? '' : 'disabled'}>${text('전체 코드 분석 (베타)','Analyze full codebase (beta)')}</button>` : ''}
       <button class="btn quiet" id="checkAppAnalysis" ${busy || providerBusy ? 'disabled' : ''}>${text('계정·상태 다시 확인','Check account and status')}</button>
-      ${sameScope() && done > 0 && run.intent?.task!=='overview' ? `<button class="btn quiet" id="viewAppAnalysis">${text('저장된 결과 보기','View saved results')}</button>` : ''}</div>
-      ${previewHtml()}</section>`;
+      ${!batchRun && sameScope() && done > 0 && run.intent?.task!=='overview' ? `<button class="btn quiet" id="viewAppAnalysis">${text('저장된 결과 보기','View saved results')}</button>` : ''}</div>
+      ${resultPicker}${previewHtml()}</section>`;
   }
   function bind() {
     $('insp')?.querySelectorAll?.('[data-overview-feature]').forEach(button=>button.onclick=()=>{
@@ -325,6 +342,15 @@ const AnalysisRun = (() => {
       };
     });
     if ($('startAppAnalysis')) $('startAppAnalysis').onclick = () => execute('analysis_run_start');
+    if ($('openBatchSaved')) $('openBatchSaved').onclick=()=>{
+      const groups=(run?.saved_scope_overviews || []).filter(group=>!scope().repository || scope().repository===group.repository);
+      const selected=groups[Number($('batchSavedResource').value)];
+      if(selected)openAnalysisPanel('scope_overview',selected.resource,selected.repository);
+    };
+    if ($('chooseResourceBatch')) $('chooseResourceBatch').onclick=()=>{
+      S.analysisChoice={...S.analysisChoice,task:'resource_batch',detailTarget:'',maxCalls:localResourceCount()};
+      syncScope();paint();
+    };
     if ($('startFullAnalysis')) $('startFullAnalysis').onclick = () => {
       S.analysisChoice={...S.analysisChoice,task:'analysis_plan'};
       return execute('analysis_run_start');
