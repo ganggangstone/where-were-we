@@ -270,6 +270,10 @@ const html=$('insp').innerHTML;
 assert(html.includes('Feature diagram by source file') && /<li><code>app<\/code><ul><li><b>Start<\/b>/.test(html),'Verified feature is a child of its cited file');
 assert(html.includes('app:2') && html.includes('run_command()'),'Diagram node retains the pinned evidence');
 
+group.connections=[{method:'GET',path:'/runs',client:{file:'client.ts',line:7,quote:'fetch("/runs")'},server:{file:'app.py',line:21,quote:'@app.get("/runs")'}}];
+await AnalysisRun.check();
+const flow=$('insp').innerHTML;
+assert(flow.includes('GET /runs') && flow.includes('client.ts:7') && flow.includes('app.py:21'),'Both pinned sides reopen with the request');
 status.current_legacy_pin.configuration='changed';await AnalysisRun.check();
 assert(!$('savedOverview0'),'Configuration mismatch hides the sample');
 ''')

@@ -142,7 +142,11 @@ const AnalysisRun = (() => {
         <div class="s"><code>${esc(file)}:${esc(item.line)}</code></div><pre>${esc(item.quote)}</pre></li>`).join('');
       return `<li><code>${esc(file)}</code>${nodes ? `<ul>${nodes}</ul>` : ''}</li>`;
     }).join('');
-    return `<figure class="overview-tree"><figcaption>${text('파일별 기능 구조도','Feature diagram by source file')}</figcaption><ul>${files}</ul></figure>`;
+    const connections=(group.connections || []).map(edge=>`<li><b>${esc(edge.method)} ${esc(edge.path)}</b><ul>${[
+      [text('요청 코드','Request code'),edge.client],[text('서버 함수','Server handler'),edge.server]
+    ].map(([label,side])=>`<li>${label} · <code>${esc(side.file)}:${esc(side.line)}</code><pre>${esc(side.quote)}</pre></li>`).join('')}</ul></li>`).join('');
+    const flow=connections ? `<figure class="overview-tree"><figcaption>${text('코드에서 확인한 요청 연결','Request connections in source')}</figcaption><ul>${connections}</ul></figure>` : '';
+    return `${flow}<figure class="overview-tree"><figcaption>${text('파일별 기능 구조도','Feature diagram by source file')}</figcaption><ul>${files}</ul></figure>`;
   }
   function overviewHtml() {
     return savedOverviews().map((group,index)=>{

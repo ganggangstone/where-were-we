@@ -1044,6 +1044,9 @@ def _quick_overview(repo,request,language,invoke,cancelled,deadline,raw):
     if connections:
         packet['connections']=connections
         packet['prompt']+=' Describe the evidenced request and matching handler together. Connections are static method/path matches, not observed traffic.'
+        result['connections']=[{'method':edge['method'],'path':edge['path'],
+                                'client':references[edge['client_ref']],'server':references[edge['server_ref']]}
+                               for edge in connections]
     answer=invoke(packet)
     items=answer.get('items')
     if not isinstance(items,list) or len(items)>12 or answer.get('needs'):raise InvalidClaim('Invalid initial overview response')
@@ -1052,7 +1055,7 @@ def _quick_overview(repo,request,language,invoke,cancelled,deadline,raw):
                 or any(not isinstance(item.get(k),str) or not 0<len(item[k].strip())<=500 for k in ('name','description'))):
             raise InvalidClaim('An initial overview item lacked a supported source reference or description')
         result['items'].append({k:item[k] for k in ('name','description')} | references[item['ref']])
-    _strict_result('analysis',{'inspected':result['items']},repo,commit)
+    _strict_result('analysis',{'inspected':result['items'],'connections':result.get('connections',[])},repo,commit)
     return result
 
 def generate(value,task,request,executor,cancelled,deadline,check,blobs=None):

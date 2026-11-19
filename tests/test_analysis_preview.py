@@ -209,7 +209,12 @@ class Preview(unittest.TestCase):
         done=analysis_run.run(run['id'],executor)
         self.assertEqual(done['state'],'completed',done.get('error'))
         self.assertEqual(len(packets),1)
-        self.assertEqual(len(done['overviews']['service']['items']),2)
+        saved=analysis_run.status(project='demo',lang='en')['saved_overviews'][0]
+        self.assertEqual(len(saved['items']),2)
+        self.assertEqual({edge['path'] for edge in saved['connections']},{'/orders','/reports'})
+        for edge in saved['connections']:
+            for side in (edge['client'],edge['server']):
+                self.assertIn(side['quote'],(self.repo/side['file']).read_text().splitlines()[side['line']-1])
 
     def test_legacy_overview_uses_current_git_and_config_pins_despite_an_older_basic_map(self):
         name='legacy'
