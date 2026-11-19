@@ -309,7 +309,6 @@ def _documented_features(git, env, sources):
                 continue
             bullet = re.fullmatch(r'[-*+] (\S.*)', line)
             if not bullet:
-                active = False
                 continue
             text = bullet[1]
             # A wrapped sentence needs all its lines to preserve the author's claim.
