@@ -278,10 +278,11 @@ def _supervise(watch_fd, status_fd, timeout, command):
             # guardian can then KILL its entire group, including itself, even
             # on success, without disguising the CLI's exit status.
             os.write(status_fd, str(child.returncode).encode('ascii'))
-        os.killpg(os.getpgrp(), signal.SIGTERM)
-        # Escalate without relying on the app process surviving. This also kills
-        # the guardian itself; every member belongs to this one invocation.
-        time.sleep(0.25)
+        else:
+            # A live CLI gets a short graceful shutdown on timeout or cancellation.
+            os.killpg(os.getpgrp(), signal.SIGTERM)
+            time.sleep(0.25)
+        # Once the CLI has exited, clean up any surviving descendants immediately.
         os.killpg(os.getpgrp(), signal.SIGKILL)
     finally:
         watcher.close()
