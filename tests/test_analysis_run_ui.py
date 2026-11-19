@@ -94,7 +94,7 @@ assert(args.scope.intent.task==='groups' && args.scope.intent.targets.length===0
     def test_initial_overview_and_full_analysis_have_distinct_explicit_buttons(self):
         self.check_js(r'''
 await open();
-assert($('startFullAnalysis') && $('insp').innerHTML.includes('at most one AI call per repository'),'Scope and call bound visible');
+assert($('startFullAnalysis') && $('insp').innerHTML.includes('1 AI call maximum') && $('insp').innerHTML.includes('Analyze full codebase (beta)'),'Scope and call bound visible');
 await $('startAppAnalysis').onclick();await flush();
 assert(calls.filter(c=>c.command==='analysis_run_start').at(-1).args.scope.intent.task==='overview','Default button requests the bounded overview');
 status=null;await AnalysisRun.check();
@@ -108,7 +108,7 @@ await flush();assert(count('analysis_run_status')===1,'Startup recovers status')
 assert(count('analysis_run_start')===0 && count('analysis_providers')===0,'Startup cannot launch or probe a CLI');
 await open();
 assert($('insp').innerHTML.includes('fictional@example.invalid'),'Account visible before start');
-assert($('insp').innerHTML.includes('subscription usage and limits apply'),'Usage visible before start');
+assert($('insp').innerHTML.includes('Subscription usage limits apply'),'Usage visible before start');
 assert(!$('startAppAnalysis').disabled,'Authenticated subscription enables explicit start');
 assert(count('analysis_run_start')===0,'Opening the panel cannot start AI');
 await $('startAppAnalysis').onclick();await flush();
@@ -289,7 +289,8 @@ assert(!$('analysisPreview0'),'Program from a previous commit is hidden');
 
     def test_entry_points_offer_both_app_run_and_existing_mcp_copy(self):
         self.assertIn('<script src="analysis-run.js"></script>', UI)
-        self.assertIn("typeof AnalysisRun!=='undefined'?AnalysisRun.html()", UI)
+        self.assertIn('id="automaticAnalysis"', UI)
+        self.assertIn("AnalysisRun.html()", UI)
         self.assertIn('id="cpAgent"', UI)
         self.assertIn('data-analysis-task=', UI)
         for entry in ('remakeSys', 'requestBriefing', 'mk', 'regroup'):
