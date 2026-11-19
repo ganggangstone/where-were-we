@@ -249,6 +249,60 @@ class AnalysisRun(unittest.TestCase):
             reconstructed+=part[len(reconstructed)-offset:]
         self.assertEqual(reconstructed,text);self.assertGreater(len(calls),3)
 
+    def test_retry_reuses_only_settled_batches_and_completes_full_coverage(self):
+        (self.repo/'padding.txt').write_text('unique row for analysis\n'*6500)
+        self.git('add','.');self.git('commit','-qm','Large full map')
+        baseline=self.raw()
+        run=self.prepare(intent={'task':'analysis','targets':[]})
+        initial=[];remaining=[]
+        def batch_id(prompt):return json.loads(prompt.split('\n',1)[1])['batch']['id']
+        def interrupted(prompt,**kwargs):
+            initial.append(batch_id(prompt))
+            if len(initial)==5:analysis_run.cancel(run['id'])
+            return self.source_fake(prompt,**kwargs)
+        stopped=analysis_run.run(run['id'],interrupted)
+        self.assertEqual(stopped['state'],'cancelled',stopped.get('error'))
+        self.assertEqual(self.raw(),baseline)
+        self.assertEqual(len(initial),5)
+        def resumed(prompt,**kwargs):
+            remaining.append(batch_id(prompt))
+            return self.source_fake(prompt,**kwargs)
+        again=analysis_run.retry(run['id'])
+        done=analysis_run.run(again['id'],resumed)
+        self.assertEqual(done['state'],'completed',done.get('error'))
+        self.assertEqual(remaining[0],initial[-1])
+        self.assertFalse(set(initial[:-1]) & set(remaining))
+        self.assertEqual(done['batch_progress']['completed'],done['batch_progress']['total'])
+        self.assertEqual([r['path'] for r in self.raw()['dev']['backend_routes']],['/items'])
+
+    def test_retry_ignores_settled_batch_from_another_commit(self):
+        source=self.repo/'padding.txt'
+        source.write_text('source row\n'*6500)
+        self.git('add','.');self.git('commit','-qm','Original source')
+        run=self.prepare(intent={'task':'analysis','targets':[]})
+        first=[]
+        def interrupted(prompt,**kwargs):
+            batch=json.loads(prompt.split('\n',1)[1])['batch']
+            first.append(batch['units'])
+            if len(first)==2:analysis_run.cancel(run['id'])
+            return self.source_fake(prompt,**kwargs)
+        self.assertEqual(analysis_run.run(run['id'],interrupted)['state'],'cancelled')
+        source.write_text('changed row\n'+source.read_text())
+        self.git('add','.');self.git('commit','-qm','Change source before retry')
+        again=analysis_run.retry(run['id'])
+        args=analysis_run._request(again,again['tasks'][0])['record_arguments']
+        indices=[]
+        def fresh(prompt,**kwargs):
+            batch=json.loads(prompt.split('\n',1)[1])['batch']
+            indices.append(batch['id'])
+            return self.source_fake(prompt,**kwargs)
+        done=analysis_run.run(again['id'],fresh)
+        self.assertEqual(done['state'],'completed',done.get('error'))
+        self.assertNotEqual(args['commit'],run['pins']['service']['commit'])
+        # The new request starts at its first batch. The old prefix is never eligible.
+        self.assertEqual(indices[0],ai_extract.digest([args,1]))
+        self.assertFalse((analysis_run.root()/'checkpoints'/run['id']).exists())
+
     def test_bad_batch_coverage_claim_cancel_and_changed_pin_preserve_last_good_map(self):
         done=analysis_run.run(self.prepare()['id'],self.fake);self.assertEqual(done['state'],'completed')
         (self.repo/'changed.source').write_text('independent source line\n'*13000)

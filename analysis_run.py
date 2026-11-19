@@ -10,6 +10,7 @@ import os
 from pathlib import Path, PurePosixPath
 import re
 import selectors
+import shutil
 import subprocess
 import sys
 import threading
@@ -171,7 +172,7 @@ def _check_pins(value, plan):
     if plan['pins'] != value['pins']:
         raise RunError('pins_changed','Code, repository configuration or collected evidence changed. Start a new analysis')
 
-def prepare(project, branch='dev', lang='ko', repository='', executor='claude', launch_intended=False, intent=None):
+def prepare(project, branch='dev', lang='ko', repository='', executor='claude', launch_intended=False, intent=None, resume_from=None):
     if executor != 'claude': raise ValueError('Choose the Claude CLI executor')
     scope = _scope(project,repository,branch,lang)
     scope['intent']=_intent(intent,scope['repository'])
@@ -185,6 +186,7 @@ def prepare(project, branch='dev', lang='ko', repository='', executor='claude', 
                  'started_at':None,'finished_at':None,'launch_epoch':None,'prepare_epoch':time.time(),'launch_intended':launch_intended,'pins':plan['pins'],'tasks':plan['tasks'],
                  'blocked':plan['blocked'],'skipped':plan['skipped'],'current_task':None,'completed_tasks':[],
                  'cancel_requested':False,'error':None,'account':None}
+        if resume_from is not None:value['resume_from']=resume_from
         if scope['intent']['task']=='overview':
             for old in history:
                 if any(old[key]!=scope[key] for key in ('project','lang','branch')):continue
@@ -242,7 +244,11 @@ def retry(run_id, launch_intended=False):
     previous = status(run_id)
     if previous['state'] not in ('failed','cancelled'):
         raise RunError('not_retryable','Only failed or cancelled analysis can be retried')
-    return prepare(previous['project'],previous['branch'],previous['lang'],previous['repository'],previous['executor'],launch_intended=launch_intended,intent=previous.get('intent'))
+    resume=previous.get('resume_from',previous['id'])
+    if (previous.get('error') or {}).get('code') in ('invalid_result','analysis_failed'):
+        resume=None  # A conflicting final merge may need new findings.
+    return prepare(previous['project'],previous['branch'],previous['lang'],previous['repository'],previous['executor'],
+                   launch_intended=launch_intended,intent=previous.get('intent'),resume_from=resume)
 
 def start(run_id, expected_account=None):
     import cli_executor
@@ -1032,12 +1038,19 @@ def generate(value,task,request,executor,cancelled,deadline,check,blobs=None):
         # Metadata pages may be numerous. Start with source evidence; all pages
         # remain available to needs and are delivered before final validation.
         pending.sort(key=lambda unit:unit['kind']!='source')
+    # Isolate unpublished, settled batches from the published map and the UI status.
+    # A retry can reuse a packet only within its own worker family and exact task pins.
+    checkpoint_dir=None
+    if task['task']=='analysis':
+        family=path(value.get('resume_from',value['id'])).stem
+        scope_key=ai_extract.digest([1,request['record_arguments'],header,provisional])
+        checkpoint_dir=root()/'checkpoints'/family/scope_key
     wide_batches=bool(deferred)
     progress()
     while pending or deferred:
         if deferred and index:
-            path,head,previous,first=deferred.pop()
-            snapshots=export_source(path,head,[previous] if previous else [],cancelled,deadline,
+            repo_path,head,previous,first=deferred.pop()
+            snapshots=export_source(repo_path,head,[previous] if previous else [],cancelled,deadline,
                                     blobs=blobs,excluded={head:first})
             _,later=_units({'snapshots':snapshots})
             scheduled={unit['id'] for unit in units}
@@ -1067,6 +1080,25 @@ def generate(value,task,request,executor,cancelled,deadline,check,blobs=None):
                 break
             batch.append(pending.pop(0))
         ids=[u['id'] for u in batch];context=list(batch);prior={};reads=[]
+        checkpoint=None
+        if checkpoint_dir:
+            checkpoint=checkpoint_dir/(ai_extract.digest([batch_id,ids])+'.json')
+            if value.get('resume_from'):
+                try:cached=store.read(checkpoint)
+                except (ValueError,OSError):cached=None
+                if isinstance(cached,dict) and 'data' in cached and ai_extract.digest(cached['data'])==cached.get('digest'):
+                    data=cached['data']
+                    validate(data['fragment'],False)
+                    result=_combine(result,data['fragment'])
+                    covered.update(ids)
+                    with locked():
+                        current=read(value['id'])
+                        if current['cancel_requested']:raise Cancelled()
+                        if data['preview']:current['preview']=data['preview']
+                        if data['overview']:current.setdefault('overviews',{})[task['repository']]=data['overview']
+                        write(current)
+                    progress()
+                    continue
         read_transitions=set()
         claim_retry_used=False
         claim_feedback=None
@@ -1137,6 +1169,11 @@ def generate(value,task,request,executor,cancelled,deadline,check,blobs=None):
             if not reads:
                 result=_combine(result,accumulated)
                 _preview(value,task,request['commit'],accumulated,programs,context)
+                if checkpoint:
+                    current=read(value['id'])
+                    data={'fragment':accumulated,'preview':current.get('preview'),
+                          'overview':current.get('overviews',{}).get(task['repository'])}
+                    store.atomic(checkpoint,{'data':data,'digest':ai_extract.digest(data)})
                 break
             prior=accumulated
             sticky=[u for u in context if u['kind']=='source' and u['id'] not in ids]
@@ -1200,7 +1237,11 @@ def run(run_id, executor=None):
                     with locked():
                         value=read(run_id)
                         if value['cancel_requested']: raise Cancelled()
-                        value.update(state='completed',current_task=None,finished_at=store.now());return write(value)
+                        value.update(state='completed',current_task=None,finished_at=store.now())
+                        write(value)
+                        family=path(value.get('resume_from',value['id'])).stem
+                        shutil.rmtree(root()/'checkpoints'/family,ignore_errors=True)
+                        return value
                 task=plan['tasks'][0];request=_request(value,task)
                 args=request['record_arguments']
                 if task['task']=='briefing':
