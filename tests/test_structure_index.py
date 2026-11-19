@@ -173,6 +173,41 @@ class Structure(unittest.TestCase):
                              ['main','main.first','main.recovered','main.success','main.last','main.matched'])
             self.assertEqual(result['imports'],[{'file':'example.py','line':12,'target':'peer.py'}])
 
+    def test_documented_features_only_quote_visible_complete_bullets_of_pinned_readme(self):
+        with tempfile.TemporaryDirectory() as root:
+            repo=Path(root)
+            git=lambda *a:subprocess.check_output(['git','-C',root,*a]).decode().strip()
+            git('init','-q')
+            markdown="""# Demo
+<!--
+## Features
+- Commented claim
+-->
+~~~
+## Features
+- Fenced claim
+~~~
+## 주요 기능
+- 파일 목록을 표시합니다.
+- Only works
+  on Linux.
+- See [site](https://example.org)
+- Shows exact `status`
+## Future
+- Planned feature
+"""
+            (repo/'README.md').write_text(markdown)
+            (repo/'alias').write_text(markdown)
+            git('add','.')
+            git('-c','user.name=Test','-c','user.email=test@example.invalid','commit','-qm','docs')
+            pin=git('rev-parse','HEAD')
+            (repo/'README.md').write_text('## Features\n- Untracked text')
+            def features(**options):
+                return structure_index.build(root,pin,**options)['documented_features']
+            self.assertEqual(features(),[{'file':'README.md','line':11,'text':'파일 목록을 표시합니다.'},
+                                         {'file':'README.md','line':15,'text':'Shows exact `status`'}])
+            self.assertEqual(features(excluded=lambda f:f=='alias'),[])
+
     def test_bounded_selection_visits_sibling_code_and_keeps_auxiliary_evidence(self):
         paths=['aaa/examples/case'+str(i)+'.py' for i in range(30)]
         paths+=['services/a/worker'+str(i)+'.py' for i in range(30)]

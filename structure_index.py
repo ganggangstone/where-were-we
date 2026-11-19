@@ -23,7 +23,7 @@ MAX_DECLARATIONS = 20_000
 MAX_IMPORTS = 20_000
 
 
-VERSION = 15
+VERSION = 16
 JS_EXTENSIONS = {'.js', '.jsx', '.mjs', '.cjs'}
 LANGUAGES = ('python', 'javascript', 'typescript', 'html')
 TS_EXTENSIONS = {'.ts', '.tsx', '.mts', '.cts'}
@@ -271,6 +271,59 @@ def _project_description(git, env, candidates):
             if len(matches) == 1:
                 return {'file':file, 'line':matches[0], 'text':value}
     return None
+
+
+def _documented_features(git, env, sources):
+    """Read top-level Markdown bullets under an explicitly named capabilities heading."""
+    labels = {'features', 'key features', 'capabilities', '기능', '주요 기능'}
+    for file, raw in _blobs(git, env, sources):
+        try:
+            lines = raw.decode('utf-8-sig').splitlines()[:240]
+        except UnicodeError:
+            continue
+        active = False
+        fence = ''
+        comment = False
+        rows = []
+        for index, line in enumerate(lines):
+            if fence:
+                if len(line.strip()) >= len(fence) and set(line.strip()) == {fence[0]}:
+                    fence = ''
+                continue
+            if comment:
+                comment = '-->' not in line
+                continue
+            if '<!--' in line:
+                comment = '-->' not in line.split('<!--', 1)[1]
+                continue
+            marker = re.match(r'^ {0,3}(`{3,}|~{3,})', line)
+            if marker:
+                fence = marker[1]
+                active = False
+                continue
+            heading = re.fullmatch(r'#{1,6}[ \t]+(.+?)\s*#*\s*', line)
+            if heading:
+                active = heading[1].casefold() in labels
+                continue
+            if not active or not line.strip():
+                continue
+            bullet = re.fullmatch(r'[-*+] (\S.*)', line)
+            if not bullet:
+                active = False
+                continue
+            text = bullet[1]
+            # A wrapped sentence needs all its lines to preserve the author's claim.
+            following = lines[index + 1] if index + 1 < len(lines) else ''
+            if following.strip() and not re.match(r'^(?:[-*+] |#{1,6} )', following):
+                continue
+            if (len(text) <= 320 and text.isprintable() and any(c.isalpha() for c in text)
+                    and not any(c in text for c in '<>[]') and '://' not in text):
+                rows.append({'file':file, 'line':index + 1, 'text':text})
+                if len(rows) == 16:
+                    break
+        if rows:
+            return rows
+    return []
 
 
 def _cli_entries(git, env, manifests, tracked, files):
@@ -569,5 +622,6 @@ def build(repo, commit, excluded=None, *, only_file=None):
     sources = sorted(((p,e) for p,e in descriptions.items() if e[0] not in denied),
                      key=lambda item:(preferred.index(item[0].lower()),item[0]))
     description = _project_description(git, env, sources)
-    return {'version':VERSION,'commit': commit,'project_description':description,'cli_entries':cli_entries, 'files': files, 'imports': resolved, 'coverage': coverage,
+    features = _documented_features(git, env, [item for item in sources if item[0].lower() == 'readme.md'])
+    return {'version':VERSION,'commit': commit,'project_description':description,'documented_features':features,'cli_entries':cli_entries, 'files': files, 'imports': resolved, 'coverage': coverage,
             'service_flow':service_flow.connect(routes, requests)}
