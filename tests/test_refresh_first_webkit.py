@@ -118,6 +118,11 @@ class RefreshFirstWebKit(unittest.TestCase):
  check(commands[0].innerText.includes('root.go:4') && commands[0].innerText.includes('open.go:13') && !commands[0].querySelector('open'),'CLI declaration and description are cited and escaped');
  check(commands[1].innerText.includes('run.js') && !commands[1].innerText.includes('run.js:'),'Manifest-only command target has no invented line');
  delete saved.cli_entries;
+ saved.workspace_packages=[{name:'sample',registration:{file:'core/package.json',line:2,quote:'"name":"sample"'},workspace:{file:'package.json',line:9,quote:'"packages/*"'}}];
+ saved.workspace_dependencies=[{source:'sample',target:'util',kind:'dependencies',specifier:'workspace:*',evidence:{file:'core/package.json',line:10,quote:'"util":"workspace:*"'}}];saved.workspace_coverage={verified_packages:39};
+ await AnalysisRun.check();const samplePackage=$('insp').querySelector('[data-saved-package]');samplePackage.open=true;
+ check(samplePackage.parentElement.querySelector('h4').innerText.includes('1/39') && samplePackage.innerText.includes('package.json:9') && samplePackage.innerText.includes('core/package.json:10') && samplePackage.innerText.includes('"util":"workspace:*"'),'Stored package sample and dependency proof retain verified counts and citations');
+ delete saved.workspace_packages;delete saved.workspace_dependencies;delete saved.workspace_coverage;
  const savedEdge=window.runningAnalysis.saved_overviews[0].connections[0];
  savedEdge.details=[{kind:'action',event:'onSubmit',label:'Add',evidence:[{file:'form.js',line:4,quote:'onSubmit={add}'}]},
   {kind:'data',model:'Item',operation:'read',evidence:[{file:'api.py',line:11,quote:'select(Item)'},{file:'api.py',line:11,quote:'select(Item)'}]}];

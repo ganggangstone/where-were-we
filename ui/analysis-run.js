@@ -164,6 +164,23 @@ const AnalysisRun = (() => {
     }
     return [...rows.values()].map(({kind,label,sites})=>`<div ${kind==='action'?'data-flow-actions':'data-flow-storage'}><details class="sect"><summary>${esc(label)}</summary>${[...sites.values()].map(site=>`<div class="s"><code>${esc(site.file)}:${esc(site.line)}</code></div><pre>${esc(site.quote)}</pre>`).join('')}</details></div>`).join('');
   }
+  function savedWorkspace(group) {
+    const valid=site=>site?.file && site.line>0 && site.quote;
+    const packages=(group.workspace_packages || []).filter(pkg=>pkg.name && valid(pkg.registration) && valid(pkg.workspace));
+    if(!packages.length)return '';
+    const cite=site=>`<div class="s"><code>${esc(site.file)}:${esc(site.line)}</code></div><pre>${esc(site.quote)}</pre>`;
+    const rows=packages.map(pkg=>{
+      const description=pkg.description && valid(pkg.description_evidence);
+      const edges=(group.workspace_dependencies || []).filter(edge=>edge.source===pkg.name && valid(edge.evidence));
+      const deps=edges.map(edge=>`<div><b>${esc(edge.target)}</b> · <code>${esc(edge.kind)} · ${esc(edge.specifier)}</code>${cite(edge.evidence)}</div>`).join('');
+      return `<details class="sect" data-saved-package><summary><strong>${esc(pkg.name)}</strong>${description?' · '+esc(pkg.description):''}</summary>${cite(pkg.registration)}${cite(pkg.workspace)}${description?cite(pkg.description_evidence):''}${deps}</details>`;
+    }).join('');
+    const total=group.workspace_coverage?.verified_packages;
+    const count=Number.isInteger(total) && total>=packages.length?`${packages.length}/${total}`:String(packages.length);
+    const matched=group.workspace_coverage?.matched_manifests;
+    const coverage=Number.isInteger(total) && matched>total?`<span class="s">${text('지도에서 확인','Indexed in map')} · ${total}/${matched}</span>`:'';
+    return `<section><h4>${text('개요에 포함된 패키지','Packages sampled')} · ${count}</h4>${coverage}${rows}</section>`;
+  }
   function overviewTree(group) {
     const files=group.files.map(file=>{
       const items=group.items.filter(item=>item.file===file);
@@ -221,7 +238,8 @@ const AnalysisRun = (() => {
     const remainingFlow=remaining.length?`<figure class="overview-tree"><figcaption>${title}</figcaption><ul>${remaining.map(edgeHtml).join('')}</ul></figure>`:'';
     const flow=features && remaining.length?`<details><summary>${title} · ${remaining.length}</summary><ul>${remaining.map(edgeHtml).join('')}</ul></details>`:remainingFlow;
     const sources=`<figure class="overview-tree"><figcaption>${text('파일별 기능 구조도','Feature diagram by source file')}</figcaption><ul>${files}</ul></figure>`;
-    return features || commands?`<section class="overview-tree"><h4>${text('기능별 개요 (베타)','Feature overview (beta)')}</h4>${commands}${features}</section>${flow}<details><summary>${text('파일별 근거','Evidence by file')}</summary>${sources}</details>`:`${flow}${sources}`;
+    const workspace=savedWorkspace(group);
+    return features || commands || workspace?`<section class="overview-tree"><h4>${text('기능별 개요 (베타)','Feature overview (beta)')}</h4>${workspace}${commands}${features}</section>${flow}<details><summary>${text('파일별 근거','Evidence by file')}</summary>${sources}</details>`:`${flow}${sources}`;
   }
   function overviewHtml() {
     return savedOverviews().map((group,index)=>{
