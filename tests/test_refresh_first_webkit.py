@@ -150,6 +150,7 @@ class RefreshFirstWebKit(unittest.TestCase):
  const folderFile=box().querySelector('[data-directory-file]');check(folderFile.options.length===2 && M()===globalMap,'Folder output does not replace the global map');
  folderFile.value='src/nested/worker.ts';folderFile.dispatchEvent(new Event('change',{bubbles:true}));
  const detail=box().querySelector('[data-directory-detail]');check(detail.innerText.includes('locate') && detail.innerText.includes('outside.ts') && detail.innerText.includes('src/nested/worker.ts:3'),'Choosing a folder result exposes declarations and outgoing imports');
+ detail.querySelector('[data-inventory-file$="/outside.ts"]').click();check(calls.at(-1).args.url==='zed://file/fictional/web/outside.ts','Folder import opens its actual destination without borrowing the importing line');
  const folderArgs=calls.filter(c=>c.command==='directory_structure').at(-1).args;check(folderArgs.commit===pin && folderArgs.directory==='src/nested' && folderArgs.repository==='web','Folder analysis is pinned to the selected repository and directory');
  box().querySelector('[data-inspect-directory]').click();
  const fileLink=box().querySelector('[data-inventory-file]');check(fileLink.textContent==='<example name>.go','Paths remain text');

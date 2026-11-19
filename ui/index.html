@@ -1388,9 +1388,10 @@ function fileStructureDetail(selection,url,fileUrl) {
       rows.push('<li>'+goPackageView(pkg,source,member)+'</li>');continue;
     }
     const decl=declarations[i],item=decl || imports[i-declarations.length];
-    const label=decl?declarationKind(decl.kind,result.language)+' · '+decl.name:'import → '+item.target;
+    const target=decl?'':fileUrl(item.target);
+    const label=decl?esc(declarationKind(decl.kind,result.language)+' · '+decl.name):`import → <a class="lnk" data-inventory-file="${esc(target)}" href="${esc(target)}" title="${esc(tr('작업 폴더에서 열기'))}">${esc(item.target)}</a>`;
     const site=selection.file+':'+item.line,destination=url+':'+item.line;
-    rows.push(`<li><code>${esc(label)}</code> <a class="lnk mono" data-inventory-file="${esc(destination)}" href="${esc(destination)}" title="${esc(tr('작업 폴더에서 열기'))}">${esc(site)}</a></li>`);
+    rows.push(`<li><code>${label}</code> <a class="lnk mono" data-inventory-file="${esc(destination)}" href="${esc(destination)}" title="${esc(tr('작업 폴더에서 열기'))}">${esc(site)}</a></li>`);
   }
   const controls=pages>1?`<div class="ctl"><button class="btn quiet" data-structure-page="${page-1}" ${page===0?'disabled':''}>${tr('이전')}</button><span>${page+1} / ${pages}</span><button class="btn quiet" data-structure-page="${page+1}" ${page+1===pages?'disabled':''}>${tr('다음')}</button></div>`:'';
   const unresolved=result.coverage?.unresolved_imports || 0;
