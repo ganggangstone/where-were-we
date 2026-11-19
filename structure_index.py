@@ -27,7 +27,7 @@ MAX_DECLARATIONS = 20_000
 MAX_IMPORTS = 20_000
 
 
-VERSION = 27
+VERSION = 28
 JS_EXTENSIONS = {'.js', '.jsx', '.mjs', '.cjs'}
 LANGUAGES = ('python', 'javascript', 'typescript', 'html', 'go')
 TS_EXTENSIONS = {'.ts', '.tsx', '.mts', '.cts'}
@@ -414,10 +414,62 @@ def _pnpm_patterns(raw):
     return patterns
 
 
+def _package_workspace_patterns(raw):
+    def unique(pairs):
+        value = dict(pairs)
+        if len(value) != len(pairs):
+            raise ValueError('Duplicate manifest key')
+        return value
+    try:
+        text = raw.decode('utf-8-sig')
+        manifest = json.loads(text,object_pairs_hook=unique)
+    except (ValueError, UnicodeError, RecursionError):
+        return []
+    if not isinstance(manifest,dict) or str(manifest.get('packageManager','')).startswith('pnpm@'):
+        return []
+    values = manifest.get('workspaces')
+    declarations = list(re.finditer(r'"workspaces"\s*:\s*',text))
+    if len(declarations)!=1:
+        return []
+    offset = declarations[0].end()
+    decoder = json.JSONDecoder()
+    if isinstance(values,dict):
+        if manifest.get('private') is not True:
+            return []
+        _,end = decoder.raw_decode(text,offset)
+        fields = list(re.finditer(r'"packages"\s*:\s*',text[offset:end]))
+        if len(fields)!=1:
+            return []
+        offset += fields[0].end()
+        values = values.get('packages')
+    if not isinstance(values,list) or len(values)>128 or text[offset:offset+1]!='[':
+        return []
+    offset += 1
+    patterns = []
+    for value in values:
+        if not isinstance(value,str):
+            return []
+        while text[offset] in ' \t\r\n,':
+            offset += 1
+        token,end = decoder.raw_decode(text,offset)
+        if token != value:
+            return []
+        parts = value.removeprefix('./').split('/')
+        if any(part in ('','.','..') or (part != '*' and not re.fullmatch(r'[A-Za-z0-9_@.-]+',part)) for part in parts):
+            return []
+        patterns.append((False,parts,text.count('\n',0,offset)+1))
+        offset = end
+    return patterns
+
+
 def _workspace_packages(git,env,config,manifests):
     if not config:
         return [],0,[]
-    patterns = _pnpm_patterns(next(_blobs(git,env,[('pnpm-workspace.yaml',config)]))[1])
+    workspace_file,entry = config
+    raw = next(_blobs(git,env,[(workspace_file,entry)]))[1]
+    patterns = _pnpm_patterns(raw) if workspace_file=='pnpm-workspace.yaml' else _package_workspace_patterns(raw)
+    if not patterns:
+        return [],0,[]
     matched = {}
     for file,entry in manifests.items():
         if file == 'package.json' or not file.endswith('/package.json'):
@@ -451,7 +503,7 @@ def _workspace_packages(git,env,config,manifests):
         if not line:
             continue
         row = {'name':name,'directory':posixpath.dirname(file),'file':file,'line':line,
-               'workspace':{'file':'pnpm-workspace.yaml','line':matched[file][1]}}
+               'workspace':{'file':workspace_file,'line':matched[file][1]}}
         description = manifest.get('description')
         if _plain_description(description) and (where := field_line('description',description)):
             row.update(description=description,description_line=where)
@@ -607,6 +659,7 @@ def build(repo, commit, excluded=None, *, only_file=None, directory=None, page=1
     next_sources = {}
     workspace = False
     pnpm_workspace = None
+    has_pnpm_workspace = False
     for entry in tree.split(b'\0'):
         if not entry:
             continue
@@ -621,6 +674,8 @@ def build(repo, commit, excluded=None, *, only_file=None, directory=None, page=1
                 next_files.add(go_path)
             if not folder and name.startswith('next.config.'):
                 next_config_names.append(name)
+        if go_path == 'pnpm-workspace.yaml':
+            has_pnpm_workspace = True
         if name == 'go.mod' and folder:
             go_modules.add(folder)
         if go_path == 'go.work':
@@ -888,7 +943,13 @@ def build(repo, commit, excluded=None, *, only_file=None, directory=None, page=1
     eligible_manifests = {path: entry for path, entry in manifests.items() if entry[0] not in denied}
     cli_entries, manifests_read = _cli_entries(git, env, eligible_manifests, {f for f, oid in tracked.items() if oid not in denied}, files)
     cli_entries.extend(cobra_commands.connect(cobra_facts, go_targets, 1024))
-    workspace_packages,workspace_total,workspace_dependencies = _workspace_packages(git,env,pnpm_workspace if pnpm_workspace and pnpm_workspace[0] not in denied else None,eligible_manifests)
+    workspace_config = None
+    if has_pnpm_workspace:
+        if pnpm_workspace and pnpm_workspace[0] not in denied:
+            workspace_config = ('pnpm-workspace.yaml',pnpm_workspace)
+    elif 'package.json' in eligible_manifests and eligible_manifests['package.json'][1]<=64*1024:
+        workspace_config = ('package.json',eligible_manifests['package.json'])
+    workspace_packages,workspace_total,workspace_dependencies = _workspace_packages(git,env,workspace_config,eligible_manifests)
     coverage['workspace_manifests_matched'] = workspace_total
     coverage['cli_manifests_read'] = manifests_read
     coverage['cli_manifests_total'] = len(eligible_manifests)

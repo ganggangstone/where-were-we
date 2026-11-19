@@ -491,6 +491,26 @@ func Ignored() *c.Command {
             (repo/'packages/three/package.json').write_text('{"name":"two"}')
             self.assertEqual(structure_index.build(root,commit())['workspace_dependencies'],[])
 
+    def test_package_json_workspace_array_and_private_yarn_packages_object(self):
+        with tempfile.TemporaryDirectory() as root:
+            repo=Path(root)
+            git=lambda *a:subprocess.check_output(['git','-C',root,*a]).decode().strip()
+            git('init','-q')
+            (repo/'libs/tool').mkdir(parents=True)
+            (repo/'libs/tool/package.json').write_text('{"name":"tool"}')
+            def scan(config):
+                (repo/'package.json').write_text(config)
+                git('add','.')
+                git('-c','user.name=Test','-c','user.email=test@example.invalid','commit','-qm','membership')
+                return structure_index.build(root,git('rev-parse','HEAD'))['workspace_packages']
+            for config in ['{"workspaces":[\n"libs/*"]}', '{"private":true,"workspaces":{"packages":[\n"libs/*"],"nohoist":["**/x"]}}']:
+                self.assertEqual(scan(config),[dict(name='tool',directory='libs/tool',file='libs/tool/package.json',
+                                                   line=1,workspace={'file':'package.json','line':2})])
+            self.assertEqual(scan('{"workspaces":["libs/*"],"workspaces":[]}'),[])
+            self.assertEqual(scan('{"workspaces":["libs/*","**/fixtures"]}'),[])
+            (repo/'pnpm-workspace.yaml').write_text('packages: []')
+            self.assertEqual(scan('{"workspaces":["libs/*"]}'),[])
+
     def test_bounded_selection_visits_sibling_code_and_keeps_auxiliary_evidence(self):
         paths=['aaa/examples/case'+str(i)+'.py' for i in range(30)]
         paths+=['services/a/worker'+str(i)+'.py' for i in range(30)]
