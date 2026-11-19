@@ -1383,10 +1383,15 @@ function flowActions(actions,evidence) {
 function flowDataSteps(steps,evidence) {
   if (!steps?.length) return '';
   const labels={read:'모델 읽기',write:'모델 쓰기'};
-  const rows=steps.filter(step=>labels[step.operation]).map(step=>{
-    const additional=(step.evidence || []).filter(site=>site.file!==step.file || site.line!==step.line);
-    return `<div class="module-scope s"><strong>${tr(labels[step.operation])} · <code>${esc(step.model)}</code></strong> ${[step,...additional].map(site=>evidence(site.file,site.line)).join(' · ')}</div>`;
-  });
+  const groups=new Map();
+  for(const step of steps) {
+    if (!labels[step.operation]) continue;
+    const label=tr(labels[step.operation])+' · '+step.model;
+    if (!groups.has(label)) groups.set(label,new Map());
+    const sites=groups.get(label);
+    for (const site of [step,...step.evidence || []]) sites.set(JSON.stringify([site.file,site.line]),site);
+  }
+  const rows=[...groups].map(([label,sites])=>`<details class="sect"><summary>${esc(label)}</summary><div class="module-scope s">${[...sites.values()].map(site=>evidence(site.file,site.line)).join(' · ')}</div></details>`);
   return rows.length?`<div data-flow-storage><h4>${tr('서버의 데이터 접근')}</h4>${rows.join('')}</div>`:'';
 }
 function serviceFlowView(flow,selectedIndex,evidence) {
