@@ -258,3 +258,20 @@ details .kv { margin:var(--space-3) var(--space-0) var(--space-0); word-break:br
 .flow-operation-list .btn { display:flex; flex-direction:column; align-items:flex-start; justify-content:center; gap:var(--space-1); padding:var(--space-3); min-height:60px; background:var(--color-bg-content); border:var(--border-hairline); border-radius:var(--radius-card); text-align:left }
 .flow-operation-list small { color:var(--color-text-secondary) }
 .flow-operation-list [aria-pressed="true"] { border-color:var(--color-text); box-shadow:inset 0 0 0 1px var(--color-text) }
+.resource-flow { max-width:1060px; margin:var(--space-5) 0; border:var(--border-hairline); border-radius:16px; background:var(--color-bg-content); overflow:hidden }
+.flow-header { display:flex; align-items:center; flex-wrap:wrap; gap:var(--space-4); justify-content:space-between; padding:var(--space-5) var(--space-6); border-bottom:var(--border-hairline) }
+.flow-header h2 { margin:0; font-size:24px; letter-spacing:-.035em }
+.flow-header .ctl { margin:0 }
+.flow-workspace { display:grid; grid-template-columns:minmax(150px,1fr) minmax(0,2.2fr) }
+.flow-workspace .flow-operation-list { display:flex; flex-direction:column; gap:var(--space-1); margin:0; padding:var(--space-3); background:var(--color-bg-group); border-right:var(--border-hairline) }
+.flow-operation-list .btn { min-height:54px; border:1px solid transparent; background:transparent; border-radius:8px; padding:var(--space-2) var(--space-3) }
+.flow-operation-list .btn[aria-pressed="true"] { background:var(--color-bg-content); border:var(--border-hairline); box-shadow:inset 3px 0 var(--color-accent) }
+.flow-focus { padding:var(--space-6); min-width:0 }
+.flow-focus h3 { margin:0 0 var(--space-5); font-size:26px; letter-spacing:-.035em }
+.flow-trace { display:flex; flex-wrap:wrap; align-items:center; gap:var(--space-2); margin-bottom:var(--space-5) }
+.flow-trace strong,.flow-trace code { border:var(--border-hairline); border-radius:7px; padding:var(--space-2) var(--space-3); overflow-wrap:anywhere }
+.flow-trace code { color:var(--color-accent); background:var(--color-accent-tint) }
+.flow-trace span { color:var(--color-text-secondary) }
+.flow-tools { display:flex; flex-wrap:wrap; align-items:baseline; gap:var(--space-4) }
+.flow-tools details[open] { flex-basis:100% }
+@media(max-width:700px) { .flow-workspace { grid-template-columns:1fr } .flow-workspace .flow-operation-list { border-right:0; border-bottom:var(--border-hairline) } }

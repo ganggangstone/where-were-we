@@ -97,6 +97,10 @@ class RefreshFirstWebKit(unittest.TestCase):
  check(S.view==='sys' && $('map').querySelector('[data-local-resource="/profiles"]').getAttribute('aria-expanded')==='true','Open the exact local group from a sampled overview');
  check(!calls.some(c=>c.command==='analysis_run_start'),'Viewing saved evidence starts no AI');
  check(!$('flowFeature') && !$('flowProof').open && $('map').querySelector('[data-flow-operation]'),'Operations precede closed technical evidence');
+ check($('flowSources') && !$('flowSources').open && $('map').querySelector('.flow-trace').innerText.includes('client.js'),'Group shows connected code while documentation and module counts stay closed');
+ for(const [ko,en] of [['기능 (베타)','Features (beta)'],['AI 설명 (베타)','AI explanation (beta)'],['문서·모듈','Docs and modules'],['호출 흐름','Request flow'],['구성 요소','Components']]){
+   const old=S.lang;S.lang='en';check(tr(ko)===en,'English '+ko);S.lang=old;
+ }
  $('flowProof').querySelector('summary').click();check($('flowProof').open && $('flowProof').innerText.includes('client.js:5'),'Endpoint evidence opens on demand');
  $('explainLocalScope').click();await new Promise(r=>setTimeout(r,30));
  check($('insp').innerText.includes('/profiles') && $('overviewLimits') && $('startAppAnalysis') && !$('startFullAnalysis'),'Scope has an explicit generation control and bounded disclosure');
