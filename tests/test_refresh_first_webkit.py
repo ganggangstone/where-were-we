@@ -71,7 +71,7 @@ class RefreshFirstWebKit(unittest.TestCase):
  storage.querySelector('summary').click();check(storage.open && storage.innerText.includes('api.py:11'),'Model citation remains discoverable');
  check(!calls.some(c=>c.command==='analysis_run_start'),'Viewing saved evidence starts no AI');
  S.agentPrompt=null;
- const paths=['src/nested/<example name>.go','src/nested/worker.ts',...Array.from({length:80},(_,i)=>'src/item'+String(i).padStart(2,'0')+'.go')];
+ const paths=['src/nested/<example name>.go','src/nested/worker.ts','src/nested/notes.md',...Array.from({length:80},(_,i)=>'src/item'+String(i).padStart(2,'0')+'.go')];
  window.mutateBundle=b=>{b.dev.structure_indexes=[{...index,files:[],imports:[],service_flow:null}];b.dev.inventories=[{repository:'web',commit:pin,files:82,paths,paths_truncated:true,directories:[['src',82]]}]};
  await doRefresh();
  const box=()=>$('map').querySelector('[data-inventory]');
@@ -86,7 +86,8 @@ class RefreshFirstWebKit(unittest.TestCase):
  const fileLink=box().querySelector('[data-inventory-file]');check(fileLink.textContent==='<example name>.go','Paths remain text');
  fileLink.click();check(calls.at(-1).command==='open_url' && calls.at(-1).args.url==='zed://file/fictional/web/src/nested/%3Cexample%20name%3E.go','Editor opens the qualified working file without inventing a line');
  const inspect=path=>box().querySelector('[data-inspect-path="'+path+'"]').click();
- inspect('src/nested/<example name>.go');await new Promise(r=>setTimeout(r,10));check(box().innerText.includes(tr('지원하지 않는 파일 형식')),'Unsupported paths do not invent declarations');
+ check(!box().querySelector('[data-inspect-path="src/nested/notes.md"]'),'Documentation can open as a file without an unsupported parser button');
+ inspect('src/nested/<example name>.go');await new Promise(r=>setTimeout(r,10));check(box().innerText.includes('Go') && box().innerText.includes(tr('타입 선언')+' · Runner'),'Go type names and language render at pinned positions');
  inspect('src/nested/worker.ts');await new Promise(r=>setTimeout(r,10));
  const args=calls.filter(c=>c.command==='file_structure').at(-1).args;
  check(args.commit===pin && args.repository==='web' && args.file==='src/nested/worker.ts','Detail reads only the selected file and full commit');
@@ -101,7 +102,8 @@ const originalNative=window.__TAURI__.core.invoke;
 window.__TAURI__.core.invoke=async(command,args)=>{
  if(command!=='file_structure')return originalNative(command,args);
  calls.push({command,args});
- return JSON.stringify({...args,status:args.file.endsWith('.go')?'unsupported':'indexed',language:'typescript',
+ if(args.file.endsWith('.go'))return JSON.stringify({...args,status:'indexed',language:'go',declarations:[{name:'Runner',kind:'type',line:3}],imports:[],coverage:{}});
+ return JSON.stringify({...args,status:'indexed',language:'typescript',
    declarations:Array.from({length:21},(_,i)=>({name:'doWork'+i,kind:'function',line:i+1})),imports:[{target:'utility.ts',line:33}],
    coverage:{indexed_files:1,unresolved_imports:1,truncated:true}});
 };
