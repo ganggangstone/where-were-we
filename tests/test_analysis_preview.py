@@ -543,6 +543,30 @@ def users(): pass
         self.assertEqual(done['state'],'completed',done.get('error'))
         self.assertEqual(set(done['scope_overviews']['service']),{'/catalog','/health'})
 
+    def test_area_batch_requires_exact_pinned_standalone_scope_and_shares_cache(self):
+        import structure_index
+        paths=['/api/v1/chat','/api/v1/chat/new','/api/v1/chats']
+        (self.repo/'api.py').write_text('from fastapi import FastAPI\napp=FastAPI()\n'+'\n'.join(
+            f"@app.get('{path}')\ndef read{i}(): pass" for i,path in enumerate(paths)))
+        self.git('add','.');self.git('commit','-qm','Register neighboring route areas')
+        repo=analysis_run.store.config('demo')['repositories'][0];raw=self.raw()
+        pin=self.git('rev-parse','HEAD').strip()
+        raw['dev']['structure_index']=structure_index.build(str(self.repo),pin)
+        analysis_run.store.publish('demo','service',raw,{'fingerprint':analysis_run.store.fingerprint(repo)})
+        area={'prefix':paths[0],'resources':paths[:2],'commit':pin,'repository':'service'}
+        intent={'task':'resources','targets':[],'max_calls':2,'area':area}
+        for change in ({'commit':'0'*40},{'resources':paths},{'resources':paths[:1]}):
+            with self.assertRaisesRegex(ValueError,'changed'):
+                self.prepare(intent={**intent,'area':{**area,**change}})
+        with self.assertRaisesRegex(ValueError,'maximum'):
+            self.prepare(intent={**intent,'max_calls':1})
+        job=self.prepare(intent=intent)
+        self.assertEqual({t['target'] for t in job['tasks']},set(paths[:2]))
+        done=analysis_run.run(job['id'],lambda *args,**kwargs:{'items':[]})
+        self.assertEqual(done['state'],'completed',done.get('error'))
+        again=self.prepare(intent={'task':'resources','targets':[],'max_calls':1})
+        self.assertEqual(again['resource_estimate'],{'total':3,'cached':2,'max_calls':1})
+
     def test_unavailable_source_does_not_block_other_verified_resources(self):
         import structure_index
         (self.repo/'aaa.js').write_text("fetch\n('/aaa')")

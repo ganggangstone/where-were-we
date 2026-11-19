@@ -150,12 +150,31 @@ def _intent(intent,repository):
     if task=='resources':
         limit=intent.get('max_calls')
         if type(limit)!=int or limit<0:raise ValueError('Confirm the maximum number of resource analysis calls')
-        return {'task':task,'targets':targets,'max_calls':limit}
+        normalized={'task':task,'targets':targets,'max_calls':limit}
+        if 'area' in intent:
+            area=intent['area']
+            if (not isinstance(area,dict) or set(area)!={'repository','prefix','commit','resources'}
+                    or not isinstance(area['repository'],str) or repository and area['repository']!=repository
+                    or not isinstance(area['prefix'],str) or not area['prefix'].startswith('/')
+                    or not isinstance(area['commit'],str) or not re.fullmatch(r'[a-f0-9]{40,64}',area['commit'])
+                    or not isinstance(area['resources'],list) or not area['resources']
+                    or any(not isinstance(path,str) for path in area['resources'])
+                    or len(set(area['resources']))!=len(area['resources'])):
+                raise ValueError('Confirm a verified route area and its resources')
+            normalized['area']=area
+        return normalized
     return {'task':task,'targets':targets}
+
+def _route_area(path):
+    parts=[part for part in path.split('/') if part]
+    depth=1 if parts[:1]==['api'] else 0
+    if depth<len(parts) and re.fullmatch(r'v[0-9]+',parts[depth],re.I):depth+=1
+    return '/'+ '/'.join(parts[:depth+1])
 
 def _plan(value):
     name,branch,lang,repository=(value[k] for k in ('project','branch','lang','repository'))
     intent=value.get('intent',{'task':'all','targets':[]});chosen=intent['task']
+    if chosen=='resources' and 'area' in intent:repository=intent['area']['repository']
     plan=ai_extract.plan(name,branch,lang,repository,overview=True)
     if chosen=='resources':
         if 'expected_pins' in value:_check_pins({'pins':value['expected_pins']},plan)
@@ -168,7 +187,17 @@ def _plan(value):
                 index=raw[branch].get('structure_index') or {}
                 if head!=pin['commit'] or index.get('commit')!=head or index.get('version')!=structure_index.VERSION:
                     raise ValueError('Refresh the local structure before analyzing its verified resources')
-                targets.extend({'repository':rid,'target':resource} for resource in _resource_rows(index['service_flow']))
+                service=index['service_flow']
+                area=intent.get('area')
+                if area:
+                    if rid!=area['repository']:continue
+                    resources=[g['resource'] for g in service.get('registered_route_groups',[])
+                               if _route_area(g['resource'])==area['prefix']]
+                    if head!=area['commit'] or set(resources)!=set(area['resources']):
+                        raise ValueError('The verified route area changed; refresh and confirm again')
+                else:resources=_resource_rows(service)
+                targets.extend({'repository':rid,'target':resource} for resource in resources)
+            if intent.get('area') and not targets:raise ValueError('The verified route area is unavailable')
         done={(t['repository'],t.get('target')) for t in [*value.get('completed_tasks',[]),*value.get('unavailable_resources',[])]}
         plan['resource_targets']=targets
         plan['tasks']=[{**t,'task':'overview',**plan['pins'][t['repository']]} for t in targets
