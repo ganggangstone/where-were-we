@@ -290,5 +290,14 @@ def connect(routes, requests):
             connections.append({**route, **request, 'server_path':route['path']})
         elif not template and len(exact) == 1:
             connections.append({**route, **request})
-    return {'connections': connections, 'coverage': {'requests': len(requests), 'routes': len(routes),
+    # Group exact endpoint paths across methods. A terminal Express parameter
+    # also belongs to its literal collection path; nested fixed paths stay distinct.
+    resources = {}
+    for index, connection in enumerate(connections):
+        path = connection.get('server_path', connection['path'])
+        parent, _, last = path.rpartition('/')
+        resource = parent if connection.get('express_parameters') and last.startswith(':') and parent else path
+        resources.setdefault(resource, []).append(index)
+    groups = [{'resource':resource, 'connection_indexes':indexes} for resource,indexes in resources.items()]
+    return {'connections': connections, 'feature_groups': groups, 'coverage': {'requests': len(requests), 'routes': len(routes),
             'unresolved_requests': len(requests) - len(connections)}}

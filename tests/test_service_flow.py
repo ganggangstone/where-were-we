@@ -6,6 +6,26 @@ import structure_index
 
 
 class ServiceFlow(unittest.TestCase):
+    def test_resource_groups_preserve_each_verified_action_and_keep_nested_paths_distinct(self):
+        def route(method,path,**more):
+            return {'method':method,'path':path,'server':{'file':'server.js','line':3},**more}
+        def request(method,path,**more):
+            return {'method':method,'path':path,'client':{'file':'client.js','line':4},**more}
+        action={'label':'Save task','event':'onSubmit','file':'Form.tsx','line':9}
+        routes=[route('GET','/v1/tasks'),route('POST','/v1/tasks'),route('PATCH','/v1/tasks/:id',express_parameters=True),
+                route('GET','/v1/tasks/history'),route('GET','/v2/tasks')]
+        requests=[request('GET','/v1/tasks'),request('POST','/v1/tasks',actions=[action]),
+                  request('PATCH','/v1/tasks/{id}',basis='path_template'),request('GET','/v1/tasks/history'),
+                  request('GET','/v2/tasks'),request('GET','/unmatched')]
+        flow=service_flow.connect(routes,requests)
+        self.assertEqual(flow['feature_groups'],[{'resource':'/v1/tasks','connection_indexes':[0,1,2]},
+                        {'resource':'/v1/tasks/history','connection_indexes':[3]},
+                        {'resource':'/v2/tasks','connection_indexes':[4]}])
+        self.assertEqual(flow['connections'][1]['actions'],[action])
+        self.assertEqual(flow['connections'][2]['basis'],'path_template')
+        self.assertEqual(flow['coverage']['unresolved_requests'],1)
+        self.assertEqual(service_flow.connect([],requests)['feature_groups'],[])
+
     def test_mounted_fastapi_and_literal_typescript_fetch_share_evidence(self):
         server = """from fastapi import APIRouter, FastAPI
 app = FastAPI()
