@@ -146,6 +146,12 @@ class RefreshFirstWebKit(unittest.TestCase):
  check(box().innerText.includes('item79.go'),'Final partial page is reachable');
  box().querySelector('[data-inventory-page="1"]').click();box().querySelector('[data-inventory-page="0"]').click();
  box().querySelector('[data-inventory-dir="src/nested"]').click();
+ const globalMap=M(),folder=box().querySelector('[data-inspect-directory]');folder.click();await new Promise(r=>setTimeout(r,10));
+ const folderFile=box().querySelector('[data-directory-file]');check(folderFile.options.length===2 && M()===globalMap,'Folder output does not replace the global map');
+ folderFile.value='src/nested/worker.ts';folderFile.dispatchEvent(new Event('change',{bubbles:true}));
+ const detail=box().querySelector('[data-directory-detail]');check(detail.innerText.includes('locate') && detail.innerText.includes('outside.ts') && detail.innerText.includes('src/nested/worker.ts:3'),'Choosing a folder result exposes declarations and outgoing imports');
+ const folderArgs=calls.filter(c=>c.command==='directory_structure').at(-1).args;check(folderArgs.commit===pin && folderArgs.directory==='src/nested' && folderArgs.repository==='web','Folder analysis is pinned to the selected repository and directory');
+ box().querySelector('[data-inspect-directory]').click();
  const fileLink=box().querySelector('[data-inventory-file]');check(fileLink.textContent==='<example name>.go','Paths remain text');
  fileLink.click();check(calls.at(-1).command==='open_url' && calls.at(-1).args.url==='zed://file/fictional/web/src/nested/%3Cexample%20name%3E.go','Editor opens the qualified working file without inventing a line');
  const inspect=path=>box().querySelector('[data-inspect-path="'+path+'"]').click();
@@ -166,6 +172,9 @@ class RefreshFirstWebKit(unittest.TestCase):
         fake_file = r'''
 const originalNative=window.__TAURI__.core.invoke;
 window.__TAURI__.core.invoke=async(command,args)=>{
+ if(command==='directory_structure'){
+   calls.push({command,args});return JSON.stringify({...args,status:'indexed',files:[{file:'src/nested/a.py',language:'python',declarations:[]},{file:'src/nested/worker.ts',language:'typescript',declarations:[{kind:'function',name:'locate',line:8}]}],imports:[{file:'src/nested/worker.ts',target:'outside.ts',line:3}],coverage:{candidate_files:3,indexed_files:2,skipped_files:1,truncated:true}});
+ }
  if(command!=='file_structure')return originalNative(command,args);
  calls.push({command,args});
  if(args.file.endsWith('.go'))return JSON.stringify({...args,status:'indexed',language:'go',declarations:[{name:'Runner',kind:'type',line:3}],imports:[],package_imports:[{file:args.file,line:4,package:'example.org/pkg',directory:'pkg',members:['pkg/a.go'],member_count:2}],coverage:{}});
