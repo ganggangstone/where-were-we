@@ -107,6 +107,36 @@ def _js_string(node):
     return None
 
 
+def _template_url(node, constants):
+    if node.type != 'template_string':
+        return None, None
+    pieces = []
+    declaration = None
+    for index, part in enumerate(node.named_children):
+        if part.type == 'string_fragment':
+            pieces.append(part.text.decode())
+        elif part.type == 'template_substitution' and len(part.named_children) == 1:
+            value = part.named_children[0]
+            if value.type != 'identifier':
+                return None, None
+            if index == 0 and value.text in constants:
+                prefix, declaration = constants[value.text]
+                if declaration.end_byte >= node.start_byte:return None, None
+                pieces.append(prefix)
+            elif re.fullmatch(rb'[A-Za-z_][A-Za-z_0-9]*', value.text):
+                pieces.append('{'+value.text.decode()+'}')
+            else:return None, None
+        else:return None, None
+    path = ''.join(pieces)
+    segments = path.split('/')
+    if not any(re.fullmatch(r'[{][A-Za-z_]\w*[}]',segment) for segment in segments):
+        return None, None
+    fixed = '/'.join('param' if re.fullmatch(r'[{][A-Za-z_]\w*[}]',seg) else seg for seg in segments)
+    if not _path(fixed) or not segments[1] or segments[1].startswith('{'):
+        return None, None
+    return path, declaration
+
+
 def javascript_requests(root, file):
     """Read bare fetch calls, ignoring files where fetch may be rebound."""
     if root.has_error:
@@ -145,7 +175,10 @@ def javascript_requests(root, file):
         if args[0].type == 'identifier' and args[0].text in constants:
             path, declaration = constants[args[0].text]
             if declaration.end_byte >= call.start_byte:continue
-        if not _path(path) or len(args) > 2:
+        template = args[0].type == 'template_string'
+        if template:
+            path, declaration = _template_url(args[0], constants)
+        if not path or (not template and not _path(path)) or len(args) > 2:
             continue
         method = 'GET'
         if len(args) == 2:
@@ -165,6 +198,7 @@ def javascript_requests(root, file):
                     method = _js_string(prop.child_by_field_name('value'))
         if method and method.upper() in METHODS:
             request={'method': method.upper(), 'path': path, 'client': {'file': file, 'line': call.start_point[0] + 1}}
+            if template:request['basis']='path_template'
             if declaration:request['evidence']=[{'file':file,'line':declaration.start_point.row+1}]
             requests.append(request)
     return requests
@@ -229,14 +263,32 @@ def mounted_routes(external, imports):
 
 
 def connect(routes, requests):
-    """Resolve only unique, fixed method/path pairs. This is static correspondence."""
+    """Resolve exact paths, or one unique compatible parameter shape with a conditional label."""
     by_endpoint = defaultdict(list)
+    by_shape = defaultdict(list)
+    parameter_routes = defaultdict(list)
     for route in routes:
         by_endpoint[route['method'], route['path']].append(route)
+        segments = route['path'].split('/')
+        key = route['method'], segments[1], len(segments)
+        shape=[None if s.startswith(':') and route.get('express_parameters') else s for s in segments]
+        by_shape[key].append((route,shape))
+        if None in shape:parameter_routes[key].append((route,shape))
     connections = []
     for request in requests:
-        matches = by_endpoint[request['method'], request['path']]
-        if len(matches) == 1:
-            connections.append({**matches[0], **request})
+        template = request.get('basis') == 'path_template'
+        segments = [None if template and s.startswith('{') else s for s in request['path'].split('/')]
+        key = request['method'], segments[1], len(segments)
+        exact = by_endpoint.get((request['method'],request['path']), [])
+        # Other registered shapes can overlap even if their parameter names differ.
+        candidates = by_shape[key] if template else [(r,segments) for r in exact]+parameter_routes[key]
+        compatible = [(route, shape) for route, shape in candidates
+                      if all(a is None or b is None or a == b for a,b in zip(segments,shape))]
+        if len(compatible) != 1:continue
+        route, shape = compatible[0]
+        if template and shape == segments:
+            connections.append({**route, **request, 'server_path':route['path']})
+        elif not template and len(exact) == 1:
+            connections.append({**route, **request})
     return {'connections': connections, 'coverage': {'requests': len(requests), 'routes': len(routes),
             'unresolved_requests': len(requests) - len(connections)}}

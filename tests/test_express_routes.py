@@ -34,7 +34,7 @@ app.listen(3000);
         for source in ["const fake=other(); fake.get('/x',()=>{});fake.listen(30)",
                        base+"app.get('/x',()=>{});",
                        base+"if(active) app.get('/x',()=>{}); app.listen(30)",
-                       base+"app.get('/x/:id',()=>{}); app.listen(30)",
+                       base+"app.get('/x/:id?',()=>{}); app.listen(30)",
                        base+"app.get('/x',external); app.listen(30)",
                        base+"app.get=custom;app.get('/x',()=>{});app.listen(30)",
                        "function require(x){return fake} "+base+"app.get('/x',()=>{});app.listen(30)"]:
@@ -66,3 +66,20 @@ class ExportedAppFactory(unittest.TestCase):
             modules['api.js']=adapter.app_factories(application(other),'api.js')
             self.assertEqual(adapter.factory_routes(modules,[edge]),[])
         self.assertEqual(javascript_requests(parse("const BASE='/v1/tasks'; function go(BASE){fetch(BASE)}"),'browser.js'),[])
+
+    def test_unencoded_parameter_has_only_a_conditional_unique_shape_match(self):
+        import structure_index
+        import express_routes as adapter
+        from service_flow import javascript_requests, connect
+        parse=lambda code:structure_index._parser('javascript').parse(code.encode()).root_node
+        def routes(patterns):
+            code="import express from 'express'; const app=express();\n"
+            code+='\n'.join(f"app.patch('{path}', () => null);" for path in patterns)
+            return adapter.express_routes(parse(code+'\napp.listen(3000);'),'api.js')
+        requests=javascript_requests(parse("const BASE='/items'; fetch(`${BASE}/${itemId}`,{method:'PATCH'})"),'ui.js')
+        row,=connect(routes(['/items/:id']),requests)['connections']
+        self.assertEqual((row['basis'],row['path'],row['server_path']),('path_template','/items/{itemId}','/items/:id'))
+        for overlap in ['/items/:name','/items/current']:
+            self.assertEqual(connect(routes(['/items/:id',overlap]),requests)['connections'],[])
+        for url in ['`/${unknown}/items`','`/items/${compute()}`','`/items/${id}x`','`/items/${id}?raw`']:
+            self.assertEqual(javascript_requests(parse("fetch("+url+")"),'ui.js'),[])

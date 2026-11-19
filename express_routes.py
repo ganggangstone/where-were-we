@@ -1,4 +1,6 @@
 """Static Express application routes with a same-module listener, without evaluating JS."""
+import re
+
 from service_flow import METHODS, _js_string, _path
 
 
@@ -113,7 +115,12 @@ def express_routes(root, file, factory=None):
             continue
         path = _js_string(args[0])
         handler = args[1]
-        if not _path(path):
+        parameterized = isinstance(path,str) and any(s.startswith(':') for s in path.split('/'))
+        if parameterized:
+            parts=path.split('/')
+            fixed='/'.join('param' if re.fullmatch(r':[A-Za-z_]\w*',part) else part for part in parts)
+            if not _path(fixed) or not parts[1] or parts[1].startswith(':'):continue
+        elif not _path(path):
             continue
         if handler.type in ('arrow_function','function_expression'):
             function = _identifier(handler.child_by_field_name('name')) or ''
@@ -122,7 +129,8 @@ def express_routes(root, file, factory=None):
             if function not in handlers or function in modified:
                 continue
         routes.append({'method':method, 'path':path, 'server':{'file':file, 'line':call.start_point.row + 1,
-                                                               'function':function}, 'mounts':[]})
+                                                               'function':function}, 'mounts':[],
+                       **({'express_parameters':True} if parameterized else {})})
     return routes
 
 
