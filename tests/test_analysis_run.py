@@ -249,6 +249,19 @@ class AnalysisRun(unittest.TestCase):
             reconstructed+=part[len(reconstructed)-offset:]
         self.assertEqual(reconstructed,text);self.assertGreater(len(calls),3)
 
+    def test_large_batch_encoding_preserves_every_source_coordinate_and_omission(self):
+        lines=[{'line':1,'text':'original "\t" line'},{'line':3,'text':'긴 줄의 일부','offset':2176}]
+        omitted=[{'file':f'assets/image{i}.png','reason':'binary_asset'} for i in range(500)]
+        _,units=analysis_run._units({'snapshots':[{'commit':'pinned','files':[{'file':'app','lines':lines}],'omitted':omitted}]})
+        header={'source_line_format':'[line,text,offset?]'}
+        packet=analysis_run._batch_payload(header,units,'batch')
+        self.assertEqual(packet['snapshots'][0]['files'][0]['numbered_lines'],[[1,lines[0]['text']],[3,lines[1]['text'],2176]])
+        self.assertEqual([entry for page in packet['context_pages'] for entry in page['value']],omitted)
+        self.assertTrue(all(len(x)==16 for x in packet['batch']['units']))
+        self.assertLess(len(packet['context_pages']),10)
+        units[0]['id']=units[1]['id'][:16]+'x'*48
+        self.assertEqual(analysis_run._batch_payload(header,units,'batch')['batch']['units'],[u['id'] for u in units])
+
     def test_retry_reuses_only_settled_batches_and_completes_full_coverage(self):
         (self.repo/'padding.txt').write_text('unique row for analysis\n'*6500)
         self.git('add','.');self.git('commit','-qm','Large full map')
