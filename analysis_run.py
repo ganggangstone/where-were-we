@@ -25,7 +25,7 @@ import project as store
 
 ACTIVE = {'preparing', 'running', 'saving'}
 TERMINAL = {'completed', 'failed', 'cancelled'}
-OVERVIEW_VERSION = 2
+OVERVIEW_VERSION = 3
 MAX_FILE_BYTES = 300_000
 MAX_PROMPT_BYTES = 128 * 1024
 UNIT_BYTES = 16 * 1024
@@ -987,6 +987,20 @@ def _preview(run,task,commit,settled,programs,context):
             current['preview']={'commit':commit,'repository':task['repository'],'items':existing}
             write(current)
 
+def _flow_details(flow):
+    for action in flow.get('actions',[])[:2]:
+        sites=[{'file':action['file'],'line':action[key]} for key in ('line','call_line') if action.get(key)]
+        if len(sites)!=2:continue
+        label=action.get('label_source')
+        if label:sites.append(label)
+        yield {'kind':'action','event':action['event'],**({'label':action['label']} if label else {})},sites
+    for step in flow.get('data_steps',[])[:2]:
+        sites=[{'file':step['file'],'line':step['line']}]
+        local=next((s for s in step.get('evidence',[]) if s['file']==step['file']),None)
+        if local:sites.append(local)
+        yield {'kind':'data','model':step['model'],'operation':step['operation']},sites
+
+
 def _overview_anchors(index,resource=None):
     """Pick connected files and keep declarations and imports from competing for every slot."""
     declarations={item['file']:item['declarations'] for item in index['files'] if not _secret(item['file'])}
@@ -1022,6 +1036,10 @@ def _overview_anchors(index,resource=None):
     for _,flow in flows:
         for side in (flow['client'],flow['server']):
             if side['file'] not in selected:selected.append(side['file'])
+    for _,flow in flows:
+        for _,sites in _flow_details(flow):
+            for site in sites:
+                if len(selected)<4 and site['file'] in declarations and site['file'] not in selected:selected.append(site['file'])
     for file in ranked:
         if resource is not None or len(selected)==4:break
         for candidate in [file]+[edge['target'] for edge in imports.get(file,[])]:
@@ -1032,6 +1050,10 @@ def _overview_anchors(index,resource=None):
     anchors={}
     for file in selected:
         rows={side['line']:{} for _,flow in flows for side in (flow['client'],flow['server']) if side['file']==file}
+        for _,flow in flows:
+            for _,sites in _flow_details(flow):
+                for site in sites:
+                    if site['file']==file and len(rows)<24:rows.setdefault(site['line'],{})
         for edge in imports.get(file,[]):
             if len(rows)>=8:break
             rows.setdefault(edge['line'],{'imports':edge['target']})
@@ -1141,6 +1163,11 @@ def _quick_overview(repo,request,language,invoke,cancelled,deadline,raw,resource
             if flow.get('basis'):connection['basis']=flow['basis']
             if flow.get('basis')=='path_template':
                 connection.update(basis='path_template',server_path=flow['server_path'])
+            details=[]
+            for detail,sites in _flow_details(flow):
+                detail_refs=[by_line.get((site['file'],site['line'])) for site in sites]
+                if all(detail_refs):details.append({**detail,'refs':detail_refs})
+            if details:connection['details']=details
             connections.append(connection)
             source_flows.append(flow)
     if resource and not connections:raise ValueError('No eligible source evidence for the selected resource')
@@ -1155,6 +1182,12 @@ def _quick_overview(repo,request,language,invoke,cancelled,deadline,raw,resource
         result['connections']=[{k:v for k,v in edge.items() if k not in ('client_ref','server_ref')} |
                                {'client':references[edge['client_ref']],'server':references[edge['server_ref']]}
                                for edge in connections]
+        for edge in result['connections']:
+            if 'details' in edge:
+                edge['details']=[{k:v for k,v in detail.items() if k!='refs'} |
+                                 {'evidence':[references[ref] for ref in detail['refs']]} for detail in edge['details']]
+        if any(edge.get('details') for edge in connections):
+            packet['prompt']+=' Use supplied action and data evidence when describing a feature. A read does not imply a write; do not infer persistence or an unobserved user action.'
         if resource:
             for edge,flow in zip(result['connections'],source_flows):
                 edge['source_connection']=flow

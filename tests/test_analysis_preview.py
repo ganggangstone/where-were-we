@@ -314,6 +314,35 @@ def users(): pass
         self.assertTrue(analysis_run.read(start('/stock'))['tasks'])
 
 
+    def test_optional_flow_details_must_have_refs_and_reopen_as_pinned_source(self):
+        import structure_index
+        (self.repo/'api.js').write_text("export const api={save:()=>fetch('/save')};")
+        (self.repo/'App.jsx').write_text("import {api} from './api.js';\nfunction App(){\nfunction submit(){api.save()}\nreturn <form onSubmit={submit}>\n<button type='submit'>Add</button></form>;}")
+        (self.repo/'server.js').write_text("import express from 'express';\nconst app=express();\napp.get('/save',()=>null);\napp.listen(3000);")
+        self.git('add','.');self.git('commit','-qm','Use a labeled form action')
+        pin=self.git('rev-parse','HEAD').strip()
+        index=structure_index.build(str(self.repo),pin)
+        def invoke(packet):
+            edge,=packet['connections']
+            detail,=edge['details']
+            rows={r['ref']:r for f in packet['sources'] for r in f['lines']}
+            self.assertEqual((detail['label'],detail['event']),('Add','onSubmit'))
+            self.assertEqual([rows[ref]['line'] for ref in detail['refs']],[4,3,5])
+            return {'items':[{'name':'Add','description':'The form calls save','ref':detail['refs'][0]}]}
+        result=analysis_run._quick_overview(str(self.repo),{'commit':pin},'en',invoke,None,None,{'structure_index':index})
+        detail,=result['connections'][0]['details']
+        self.assertEqual([row['file'] for row in detail['evidence']],['App.jsx']*3)
+        self.assertIn('Add',detail['evidence'][-1]['quote'])
+        self.assertNotIn('refs',detail)
+        graph=index['service_flow']['connections'][0]
+        graph['data_steps']=[{'operation':'read','model':'Item','file':'server.js','line':3,'evidence':[]},
+                             {'operation':'write','model':'Item','file':'server.js','line':99,'evidence':[]}]
+        def data_reply(packet):
+            details=packet['connections'][0]['details']
+            self.assertEqual([(d['model'],d['operation']) for d in details if d['kind']=='data'],[('Item','read')])
+            return {'items':[]}
+        analysis_run._quick_overview(str(self.repo),{'commit':pin},'en',data_reply,None,None,{'structure_index':index})
+
     def test_overview_preserves_conditional_url_match_in_prompt_and_saved_evidence(self):
         (self.repo/'app.js').write_text("import express from 'express';\nconst app=express();\napp.patch('/items/:id',()=>null);\napp.listen(3000);\n")
         (self.repo/'view.js').write_text("function update(id){fetch(`/items/${id}`,{method:'PATCH'})}\n")
