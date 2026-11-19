@@ -22,7 +22,7 @@ MAX_DECLARATIONS = 20_000
 MAX_IMPORTS = 20_000
 
 
-VERSION = 10
+VERSION = 11
 JS_EXTENSIONS = {'.js', '.jsx', '.mjs', '.cjs'}
 LANGUAGES = ('python', 'javascript', 'typescript', 'html')
 TS_EXTENSIONS = {'.ts', '.tsx', '.mts', '.cts'}
@@ -55,9 +55,22 @@ def _script(file, raw, candidates):
              'class_declaration':'class', 'abstract_class_declaration':'class', 'method_definition':'method',
              'interface_declaration':'interface', 'type_alias_declaration':'type', 'enum_declaration':'enum'}
     rows, edges, unresolved = [], [], 0
+    cjs = suffix == '.cjs'
+    direct_requires = []
+    shadowed_require = False
     stack = [(root, '')]
     while stack:
         node, prefix = stack.pop()
+        if cjs and (node.type == 'identifier' or node.type == 'shorthand_property_identifier_pattern') and node.text == b'require':
+            parent = node.parent
+            if parent.type == 'call_expression' and parent.child_by_field_name('function') == node:
+                args = parent.child_by_field_name('arguments')
+                values = [arg for arg in args.named_children if arg.type != 'comment'] if args else []
+                if len(values) == 1 and values[0].type == 'string':
+                    direct_requires.append(values[0])
+            else:
+                # A renamed loader, shadowed binding or assignment clouds provenance.
+                shadowed_require = True
         kind = kinds.get(node.type)
         if node.type == 'variable_declarator':
             value = node.child_by_field_name('value')
@@ -90,6 +103,14 @@ def _script(file, raw, candidates):
                 else:
                     unresolved += 1
         stack.extend((child, prefix) for child in reversed(node.named_children))
+    if not shadowed_require:
+        for argument in direct_requires:
+            spec = argument.text[1:-1].decode()
+            target = posixpath.normpath(posixpath.join(posixpath.dirname(file),spec))
+            if not spec.startswith(('./','../')) or chr(92) in spec or not spec.endswith('.cjs') or target not in candidates:
+                unresolved += 1
+            elif target != file:
+                edges.append({'file':file,'line':argument.start_point.row+1,'target':target})
     requests=service_flow.javascript_requests(root,file)
     return rows, edges, unresolved, requests, default_flow.sdk_facts(root,file), express_routes(root,file), app_factories(root,file), react_actions.facts(root,requests)
 

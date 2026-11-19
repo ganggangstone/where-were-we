@@ -42,6 +42,23 @@ class Structure(unittest.TestCase):
             self.assertTrue(limited['coverage']['truncated'])
             self.assertLessEqual(limited['coverage']['indexed_files'],1)
 
+    def test_standalone_commonjs_cli_connects_explicit_local_modules(self):
+        with tempfile.TemporaryDirectory() as root:
+            repo=Path(root)
+            git=lambda *args:subprocess.check_output(['git','-C',root,*args]).decode().strip()
+            git('init','-q')
+            (repo/'cli.cjs').write_text("#!/usr/bin/env node\nconst worker=require('./worker.cjs');\nworker.run();")
+            (repo/'worker.cjs').write_text('function run(){};module.exports={run};')
+            (repo/'shadow.cjs').write_text("function other({require}){return require('./worker.cjs')} ")
+            (repo/'missing.cjs').write_text("require('./absent.cjs');require('third-party');")
+            git('add','.');git('-c','user.name=Test','-c','user.email=test@example.invalid','commit','-qm','Add CLI')
+            index=structure_index.build(root,git('rev-parse','HEAD'))
+            self.assertEqual(index['service_flow']['connections'],[])
+            self.assertEqual(index['imports'],[{'file':'cli.cjs','line':2,'target':'worker.cjs'}])
+            self.assertEqual(index['coverage']['unresolved_imports'],2)
+            worker=next(row for row in index['files'] if row['file']=='worker.cjs')
+            self.assertEqual(worker['declarations'],[{'name':'run','kind':'function','line':1}])
+
     def test_typescript_tsx_and_javascript_static_structure(self):
         with tempfile.TemporaryDirectory() as root:
             repo=Path(root)
