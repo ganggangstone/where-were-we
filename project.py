@@ -757,10 +757,11 @@ def _directory_cache(name, repo, repository, branch, commit, directory, page):
     limits = [structure_index.MAX_DIRECTORY_FILES, structure_index.MAX_DIRECTORY_BYTES, structure_index.MAX_FILE_BYTES,
               structure_index.MAX_FILES, structure_index.MAX_BYTES, structure_index.MAX_DECLARATIONS, structure_index.MAX_IMPORTS]
     identity = [structure_index.VERSION, limits, sys.version, versions, fingerprint(repo), repository,
-                os.path.realpath(repo['path']), branch, commit, directory, page, denied.hexdigest()]
-    key = hashlib.sha256(json.dumps(identity).encode()).hexdigest()
-    # Fixed slots bound storage without races between eviction and another writer.
-    return home(name)/'.directory-cache'/f'{int(key[:2],16) % 16:02d}.json', key
+                os.path.realpath(repo['path']), branch, commit, directory, denied.hexdigest()]
+    folder_key = hashlib.sha256(json.dumps(identity).encode()).hexdigest()
+    # Consecutive pages occupy distinct slots; the full key still validates every hit.
+    slot = (int(folder_key[:2],16) + page - 1) % 16
+    return home(name)/'.directory-cache'/f'{slot:02d}.json', f'{folder_key}:{page}'
 
 
 def selected_structure(name, repository, branch, commit, **scope):

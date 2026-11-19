@@ -351,6 +351,12 @@ func Ignored() *c.Command {
                                  [f['file'] for f in second['files']])
                 with patch.object(structure_index,'build',side_effect=AssertionError('cache miss')):
                     self.assertEqual(project.selected_structure('demo','','dev',pin,directory='pkg',page=2),second)
+            with patch('mapcore.ROOT',folder.parent):
+                repo_config={'path':root,'refs':{'dev':'HEAD'}}
+                slots=[project._directory_cache('demo',repo_config,'','dev',pin,'pkg',page)[0]
+                       for page in range(1,18)]
+                self.assertEqual(len(set(slots[:16])),16)
+                self.assertEqual(slots[0],slots[16])
             import analysis_run
             policy=analysis_run._secret
             with patch('mapcore.ROOT',folder.parent),patch.object(analysis_run,'_secret',side_effect=lambda f:policy(f) or f=='pkg/main.py'):
