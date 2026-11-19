@@ -41,6 +41,12 @@ class Structure(unittest.TestCase):
                 limited=structure_index.build(root,pin)
             self.assertTrue(limited['coverage']['truncated'])
             self.assertLessEqual(limited['coverage']['indexed_files'],1)
+            by_dir={row['directory']:row for row in limited['coverage']['directories']}
+            self.assertEqual(set(by_dir),{'.','src'})
+            self.assertEqual(sum(row['candidate_files'] for row in by_dir.values()),limited['coverage']['candidate_files'])
+            self.assertEqual(sum(row['indexed_files'] for row in by_dir.values()),limited['coverage']['indexed_files'])
+            self.assertEqual(sum(row['skipped_files'] for row in by_dir.values()),limited['coverage']['skipped_files'])
+            self.assertNotIn('directories',index['coverage'])
 
     def test_selected_file_uses_only_its_blob_and_resolves_unsampled_imports(self):
         import json
@@ -377,6 +383,14 @@ func Ignored() *c.Command {
             (repo/'next.config.ts').unlink()
             (repo/'package.json').write_text('{}')
             self.assertEqual(routes(commit()),[])
+
+    def test_coverage_limits_directory_rows_but_preserves_the_total(self):
+        candidates=[f'area{i}/source.py' for i in range(31)]+['backend/first.py','backend/second.py']
+        coverage=structure_index._directory_coverage(candidates,{'area0/source.py'})
+        self.assertEqual(coverage['directory_count'],32)
+        self.assertEqual(len(coverage['directories']),24)
+        self.assertEqual(coverage['directories'][0],{'directory':'backend','candidate_files':2,'indexed_files':0,'skipped_files':2})
+        self.assertFalse(any(row['directory']=='area0' for row in coverage['directories']))
 
     def test_bounded_selection_visits_sibling_code_and_keeps_auxiliary_evidence(self):
         paths=['aaa/examples/case'+str(i)+'.py' for i in range(30)]

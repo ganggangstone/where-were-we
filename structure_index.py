@@ -3,7 +3,7 @@ import ast
 import json
 import os
 import posixpath
-from collections import defaultdict, deque
+from collections import Counter, defaultdict, deque
 from functools import lru_cache
 from pathlib import PurePosixPath
 import re
@@ -27,7 +27,7 @@ MAX_DECLARATIONS = 20_000
 MAX_IMPORTS = 20_000
 
 
-VERSION = 24
+VERSION = 25
 JS_EXTENSIONS = {'.js', '.jsx', '.mjs', '.cjs'}
 LANGUAGES = ('python', 'javascript', 'typescript', 'html', 'go')
 TS_EXTENSIONS = {'.ts', '.tsx', '.mts', '.cts'}
@@ -230,6 +230,19 @@ def _spread_paths(items, depth=0):
         if len(parts)<=depth+1:local.append(item)
         else:buckets[parts[depth]].append(item)
     return _interleave([local,*(_spread_paths(buckets[k],depth+1) for k in sorted(buckets))])
+
+
+def _directory_coverage(candidates, parsed):
+    """Summarize the same eligible Git paths used by the bounded sampler."""
+    def top(file):
+        folder, separator, _ = file.partition('/')
+        return folder if separator else '.'
+    totals = Counter(top(file) for file in candidates)
+    indexed = Counter(top(file) for file in parsed)
+    rows = [{'directory':folder,'candidate_files':count,'indexed_files':indexed[folder],
+             'skipped_files':count-indexed[folder]} for folder,count in totals.items()]
+    rows.sort(key=lambda row:(-row['skipped_files'],-row['candidate_files'],row['directory']))
+    return {'directories':rows[:24],'directory_count':len(rows)}
 
 
 def _bounded_order(items):
@@ -741,7 +754,9 @@ def build(repo, commit, excluded=None, *, only_file=None, directory=None):
                                    'indexed_files':sum(languages[f]==lang for f in parsed)}
                              for lang in LANGUAGES}
     coverage['unavailable_languages'] = sorted(unavailable)
-    if bounded:coverage['selection']='bounded_directory_sample'
+    if bounded:
+        coverage['selection']='bounded_directory_sample'
+        coverage.update(_directory_coverage(candidates, parsed))
     eligible_manifests = {path: entry for path, entry in manifests.items() if entry[0] not in denied}
     cli_entries, manifests_read = _cli_entries(git, env, eligible_manifests, {f for f, oid in tracked.items() if oid not in denied}, files)
     cli_entries.extend(cobra_commands.connect(cobra_facts, go_targets, 1024))
