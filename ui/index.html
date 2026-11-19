@@ -1662,7 +1662,9 @@ function workspaceView(index,state,evidence,hasFolder) {
     return `<details class="sect" data-workspace-package="${esc(item.name)}"><summary><strong>${esc(item.name)}</strong>${item.description?' · '+esc(item.description):''}</summary><div class="ctl">${folder} ${evidence(item.file,item.line)} ${item.description_line && item.description_line!==item.line?evidence(item.file,item.description_line):''} ${evidence(item.workspace.file,item.workspace.line)}</div>${dependencies}</details>`;
   });
   const control=pages>1?`<div class="ctl"><button class="btn quiet" data-package-page="${page-1}" ${page===0?'disabled':''}>${tr('이전')}</button><span>${page+1} / ${pages}</span><button class="btn quiet" data-package-page="${page+1}" ${page+1===pages?'disabled':''}>${tr('다음')}</button></div>`:'';
-  return `<section class="sect" data-workspace-packages><h2>${tr('워크스페이스 패키지')} · ${items.length}</h2>${rows.join('')}${control}</section>`;
+  const matched=index.coverage?.workspace_manifests_matched;
+  const count=matched>items.length?`${items.length}/${matched}`:String(items.length);
+  return `<section class="sect" data-workspace-packages><h2>${tr('워크스페이스 패키지')} · ${count}</h2>${rows.join('')}${control}</section>`;
 }
 function structureIndexView(m,includePurpose=true,featuresOnly=false) {
   const all=m.structure_indexes || (m.structure_index ? [m.structure_index] : []);

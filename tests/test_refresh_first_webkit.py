@@ -42,7 +42,9 @@ class RefreshFirstWebKit(unittest.TestCase):
  const wsIndex=crossMap.structure_indexes[0];wsIndex.workspace_packages=[{name:'@sample/core',directory:'packages/core',file:'packages/core/package.json',line:2,description:'Main <package>.',description_line:3,workspace:{file:'pnpm-workspace.yaml',line:4}}];
  wsIndex.workspace_packages.push(...Array.from({length:8},(_,i)=>({...wsIndex.workspace_packages[0],name:'lib'+i})));
  wsIndex.workspace_dependencies=[{source:'@sample/core',target:'lib7',kind:'devDependencies',specifier:'workspace:*',file:'packages/core/package.json',line:12}];
+ wsIndex.coverage.workspace_manifests_matched=12;
  const inventories=crossMap.inventories;crossMap.inventories=[{repository:wsIndex.repository,commit:wsIndex.commit,paths:['packages/core/package.json'],files:1}];render();
+ check($('map').querySelector('[data-workspace-packages] h2').innerText.endsWith('9/12'),'Partial verified workspaces include the manifest candidate count');
  const w=$('map').querySelector('[data-workspace-packages] details');check(w && !w.open && w.innerText.includes('Main <package>.'),'Workspace summary uses literal package metadata');
  w.open=true;check(w.innerText.includes('pnpm-workspace.yaml:4') && w.innerText.includes('packages/core/package.json:2'),'Membership and package declaration have their own citations');
  const deps=w.querySelector('details');check(deps && !deps.open,'Dependency evidence starts collapsed');
