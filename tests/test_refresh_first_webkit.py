@@ -39,6 +39,12 @@ class RefreshFirstWebKit(unittest.TestCase):
  check(anchors[0].dataset.url==='zed://file/fictional/web/src/shared%20file.js:4' && anchors[1].dataset.url==='zed://file/fictional/service/src/shared%20file.js:8','Identically named paths resolve under their own repository');
  anchors[1].dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));check(calls.at(-1).command==='open_url' && calls.at(-1).args.url===anchors[1].dataset.url,'Server proof opens its own working path');
  delete crossMap.cross_repository_connections;
+ const wsIndex=crossMap.structure_indexes[0];wsIndex.workspace_packages=[{name:'@sample/core',directory:'packages/core',file:'packages/core/package.json',line:2,description:'Main <package>.',description_line:3,workspace:{file:'pnpm-workspace.yaml',line:4}}];
+ const inventories=crossMap.inventories;crossMap.inventories=[{repository:wsIndex.repository,commit:wsIndex.commit,paths:['packages/core/package.json'],files:1}];render();
+ const w=$('map').querySelector('[data-workspace-packages] details');check(w && !w.open && w.innerText.includes('Main <package>.'),'Workspace summary uses literal package metadata');
+ w.open=true;check(w.innerText.includes('pnpm-workspace.yaml:4') && w.innerText.includes('packages/core/package.json:2'),'Membership and package declaration have their own citations');
+ w.querySelector('[data-package-folder]').click();check($('map').querySelector('[data-inspect-directory="packages/core"]'),'Package folder opens in the existing repository inventory');
+ delete wsIndex.workspace_packages;crossMap.inventories=inventories;
  index.files=Array.from({length:160},(_,i)=>({file:'module'+i+'.cjs',language:'javascript',declarations:[]}));
  index.imports=[{file:'module0.cjs',target:'module150.cjs',line:1},{file:'module45.cjs',target:'module150.cjs',line:3}];
  index.commit='bbbbbbbb2222';await doRefresh();
@@ -122,7 +128,7 @@ class RefreshFirstWebKit(unittest.TestCase):
  check(!calls.some(c=>c.command==='analysis_run_start'),'Viewing saved evidence starts no AI');
  check(!$('flowFeature') && !$('flowProof').open && $('map').querySelector('[data-flow-operation]'),'Operations precede closed technical evidence');
  check($('flowSources') && !$('flowSources').open && $('map').querySelector('.flow-trace').innerText.includes('client.js'),'Group shows connected code while documentation and module counts stay closed');
- for(const [ko,en] of [['기능 (베타)','Features (beta)'],['AI 설명 (베타)','AI explanation (beta)'],['문서·모듈','Docs and modules'],['저장된 페이지','Saved pages'],['미저장 페이지로','Go to unsaved page'],['호출 흐름','Request flow'],['구성 요소','Components']]){
+ for(const [ko,en] of [['기능 (베타)','Features (beta)'],['AI 설명 (베타)','AI explanation (beta)'],['문서·모듈','Docs and modules'],['워크스페이스 패키지','Workspace packages'],['저장된 페이지','Saved pages'],['미저장 페이지로','Go to unsaved page'],['호출 흐름','Request flow'],['구성 요소','Components']]){
    const old=S.lang;S.lang='en';check(tr(ko)===en,'English '+ko);S.lang=old;
  }
  $('flowProof').querySelector('summary').click();check($('flowProof').open && $('flowProof').innerText.includes('client.js:5'),'Endpoint evidence opens on demand');
