@@ -121,6 +121,31 @@ class Structure(unittest.TestCase):
             private=structure_index.build(root,pin,excluded=lambda file:file=='tool')
             self.assertEqual([r['command'] for r in private['cli_entries']],['start'])
 
+    def test_project_description_uses_pinned_plain_text_and_excludes_private_aliases(self):
+        with tempfile.TemporaryDirectory() as root:
+            repo=Path(root)
+            git=lambda *args:subprocess.check_output(['git','-C',root,*args]).decode().strip()
+            git('init','-q')
+            (repo/'README.md').write_text('# Example\n\n![Build](external)\n\nA public project introduction.\n')
+            (repo/'package.json').write_text('{\n"description":"A packaged tool."\n}')
+            (repo/'pyproject.toml').write_text('[project]\ndescription = "A Python tool."')
+            (repo/'alias').write_bytes((repo/'package.json').read_bytes())
+            git('add','.')
+            git('-c','user.name=Test','-c','user.email=test@example.invalid','commit','-qm','descriptions')
+            pin=git('rev-parse','HEAD')
+            (repo/'README.md').write_text('Working tree text')
+            def description(*excluded):
+                return structure_index.build(root,pin,excluded=excluded.__contains__)['project_description']
+            self.assertEqual(description(),dict(file='package.json',line=2,text='A packaged tool.'))
+            self.assertEqual(description('alias'),dict(file='pyproject.toml',line=2,text='A Python tool.'))
+            self.assertEqual(description('alias','pyproject.toml'),dict(file='README.md',line=5,text='A public project introduction.'))
+            self.assertIsNone(description('alias','pyproject.toml','README.md'))
+            (repo/'README.md').write_text('# Example\n\n## Installation\n\nInstall this tool.\n')
+            git('add','README.md')
+            git('-c','user.name=Test','-c','user.email=test@example.invalid','commit','-qm','instructions only')
+            pin=git('rev-parse','HEAD')
+            self.assertIsNone(description('alias','pyproject.toml'))
+
     def test_bounded_selection_visits_sibling_code_and_keeps_auxiliary_evidence(self):
         paths=['aaa/examples/case'+str(i)+'.py' for i in range(30)]
         paths+=['services/a/worker'+str(i)+'.py' for i in range(30)]

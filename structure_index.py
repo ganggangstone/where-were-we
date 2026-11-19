@@ -23,7 +23,7 @@ MAX_DECLARATIONS = 20_000
 MAX_IMPORTS = 20_000
 
 
-VERSION = 14
+VERSION = 15
 JS_EXTENSIONS = {'.js', '.jsx', '.mjs', '.cjs'}
 LANGUAGES = ('python', 'javascript', 'typescript', 'html')
 TS_EXTENSIONS = {'.ts', '.tsx', '.mts', '.cts'}
@@ -218,6 +218,61 @@ def _manifest_lines(raw):
     return literals
 
 
+def _plain_description(value):
+    return (isinstance(value, str) and 8 <= len(value) <= 320 and value.isprintable()
+            and not any(char in value for char in '<>[]`') and any(c.isalpha() for c in value))
+
+
+def _project_description(git, env, candidates):
+    for file, raw in _blobs(git, env, candidates):
+        try:
+            text = raw.decode('utf-8-sig')
+            if file == 'package.json':
+                package = json.loads(text)
+                value = package.get('description') if isinstance(package, dict) else None
+            elif file == 'pyproject.toml':
+                import tomllib
+                project = tomllib.loads(text).get('project')
+                value = project.get('description') if isinstance(project, dict) else None
+            else:
+                # Only the introduction before a second heading or a code block is eligible.
+                heading = False
+                lines = text.splitlines()[:80]
+                for index, line in enumerate(lines):
+                    body = line.strip()
+                    if not body:
+                        continue
+                    if body.startswith('#'):
+                        if heading or not body.startswith('# '):
+                            break
+                        heading = True
+                        continue
+                    if re.fullmatch(r'[=-]{3,}', body):
+                        continue
+                    if index + 1 < len(lines) and re.fullmatch(r'[=-]{3,}', lines[index + 1].strip()):
+                        if heading:
+                            break
+                        heading = True
+                        continue
+                    if body.startswith(('![', '[![')):
+                        continue
+                    if line != body or not body[0].isalnum() or not _plain_description(body):
+                        break
+                    return {'file':file, 'line':index + 1, 'text':body}
+                continue
+        except (ImportError, ValueError, UnicodeError, RecursionError):
+            continue
+        if _plain_description(value):
+            if file == 'package.json':
+                literal = r'"description"\s*:\s*' + re.escape(json.dumps(value, ensure_ascii=False))
+            else:
+                literal = r'^\s*description\s*=\s*(?:' + re.escape('"' + value + '"') + '|' + re.escape("'" + value + "'") + ')'
+            matches = [n for n, source in enumerate(text.splitlines(), 1) if re.search(literal, source)]
+            if len(matches) == 1:
+                return {'file':file, 'line':matches[0], 'text':value}
+    return None
+
+
 def _cli_entries(git, env, manifests, tracked, files):
     """Resolve tracked package commands without running an installer or importing code."""
     declarations = {row['file']: row['declarations'] for row in files}
@@ -305,6 +360,7 @@ def build(repo, commit, excluded=None, *, only_file=None):
     denied = set()
     tracked = {}
     manifests = {}
+    descriptions = {}
     unsupported_oid = None
     for entry in tree.split(b'\0'):
         if not entry:
@@ -328,6 +384,9 @@ def build(repo, commit, excluded=None, *, only_file=None):
             continue
         if only_file is None:
             tracked[file] = oid
+            if file.lower() in ('readme.md','readme.rst','readme.txt','readme') or file in ('package.json','pyproject.toml'):
+                if int(size) <= 64 * 1024:
+                    descriptions[file] = (oid, int(size))
             if posixpath.basename(file) in ('package.json', 'pyproject.toml'):
                 manifests[file] = (oid, int(size))
         suffix = PurePosixPath(file).suffix
@@ -502,5 +561,9 @@ def build(repo, commit, excluded=None, *, only_file=None):
     cli_entries, manifests_read = _cli_entries(git, env, eligible_manifests, {f for f, oid in tracked.items() if oid not in denied}, files)
     coverage['cli_manifests_read'] = manifests_read
     coverage['cli_manifests_total'] = len(eligible_manifests)
-    return {'version':VERSION,'commit': commit,'cli_entries':cli_entries, 'files': files, 'imports': resolved, 'coverage': coverage,
+    preferred = ['package.json','pyproject.toml','readme.md','readme.rst','readme.txt','readme']
+    sources = sorted(((p,e) for p,e in descriptions.items() if e[0] not in denied),
+                     key=lambda item:(preferred.index(item[0].lower()),item[0]))
+    description = _project_description(git, env, sources)
+    return {'version':VERSION,'commit': commit,'project_description':description,'cli_entries':cli_entries, 'files': files, 'imports': resolved, 'coverage': coverage,
             'service_flow':service_flow.connect(routes, requests)}
