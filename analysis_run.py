@@ -148,7 +148,7 @@ def _plan(value):
                 if head!=pin['commit'] or index.get('commit')!=head or index.get('version')!=structure_index.VERSION:
                     raise ValueError('Refresh the local structure before analyzing its verified resources')
                 targets.extend({'repository':rid,'target':g['resource']} for g in index['service_flow']['feature_groups'])
-        done={(t['repository'],t.get('target')) for t in value.get('completed_tasks',[])}
+        done={(t['repository'],t.get('target')) for t in [*value.get('completed_tasks',[]),*value.get('unavailable_resources',[])]}
         plan['resource_targets']=targets
         plan['tasks']=[{**t,'task':'overview',**plan['pins'][t['repository']]} for t in targets
                        if t['repository'] in plan['pins'] and (t['repository'],t['target']) not in done]
@@ -1060,7 +1060,7 @@ def _overview_anchors(index,resource=None):
         candidates.append(flow)
     first=[(scope,rows[0]) for scope,rows in scopes.items() if rows]
     if resource is not None:
-        if not scopes.get(resource):raise ValueError('This verified resource is unavailable in the selected revision')
+        if not scopes.get(resource):raise RunError('scope_unavailable','This resource has no eligible endpoint pair in the selected revision')
         first=[(resource,scopes[resource][0])]
     flows=first[:2]
     if len(first)==1:
@@ -1204,7 +1204,7 @@ def _quick_overview(repo,request,language,invoke,cancelled,deadline,raw,resource
             if details:connection['details']=details
             connections.append(connection)
             source_flows.append(flow)
-    if resource and not connections:raise ValueError('No eligible source evidence for the selected resource')
+    if resource and not connections:raise RunError('scope_unavailable','No eligible source evidence for the selected resource')
     if resource:
         packet['resource']=resource
         packet['prompt']+=' Describe only the selected resource and the supplied evidence.'
@@ -1504,6 +1504,8 @@ def run(run_id, executor=None):
                     value=read(run_id)
                     value.update(tasks=plan['tasks'],blocked=plan['blocked'],skipped=plan['skipped']);write(value)
                 if not plan['tasks']:
+                    if value.get('unavailable_resources'):
+                        raise RunError('analysis_blocked','Saved all eligible resource explanations; '+str(len(value['unavailable_resources']))+' resource scopes had no eligible source evidence')
                     if plan['blocked']: raise RunError('analysis_blocked','Some analysis is blocked: '+str(plan['blocked'][0].get('reason','Review project settings')))
                     with locked():
                         value=read(run_id)
@@ -1529,7 +1531,17 @@ def run(run_id, executor=None):
                     _check_pins(value,_plan(value))
                     current=_request(value,task)['record_arguments']
                     if current!=request['record_arguments']:raise RunError('pins_changed','The analysis input or saved base changed')
-                result=generate(value,task,request,executor,cancelled,deadline,check,blobs)
+                try:
+                    result=generate(value,task,request,executor,cancelled,deadline,check,blobs)
+                except RunError as error:
+                    if not resource_run or error.code!='scope_unavailable':raise
+                    with locked():
+                        value=read(run_id)
+                        if value['cancel_requested']:raise Cancelled()
+                        _check_pins(value,_plan(value))
+                        value.setdefault('unavailable_resources',[]).append({'repository':task['repository'],'target':task['target'],'reason':str(error)})
+                        value.update(current_task=None);write(value)
+                    continue
                 if time.monotonic()>deadline: raise RunError('timeout','Analysis reached its time limit; late output was not saved')
                 if isinstance(result,dict): result=json.dumps(result,ensure_ascii=False)
                 if not isinstance(result,str) or len(result)>8_000_000: raise RunError('invalid_result','The analysis executor returned invalid output; saved results were retained')

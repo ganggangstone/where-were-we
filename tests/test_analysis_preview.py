@@ -387,6 +387,30 @@ def users(): pass
         self.git('commit','--allow-empty','-qm','Change pin')
         with self.assertRaises(analysis_run.RunError):analysis_run.retry(job['id'])
 
+    def test_unavailable_source_does_not_block_other_verified_resources(self):
+        import structure_index
+        (self.repo/'aaa.js').write_text("fetch\n('/aaa')")
+        (self.repo/'bbb.js').write_text("fetch('/bbb')")
+        (self.repo/'api.py').write_text("from fastapi import FastAPI\napp=FastAPI()\n@app.get('/aaa')\ndef a():pass\n@app.get('/bbb')\ndef b():pass")
+        self.git('add','.');self.git('commit','-qm','Register two resources')
+        repo=analysis_run.store.config('demo')['repositories'][0];raw=self.raw()
+        raw['dev']['structure_index']=structure_index.build(str(self.repo),self.git('rev-parse','HEAD').strip())
+        analysis_run.store.publish('demo','service',raw,{'fingerprint':analysis_run.store.fingerprint(repo)})
+        job=self.prepare(intent={'task':'resources','targets':[],'max_calls':2})
+        called=[]
+        def executor(prompt,**kwargs):
+            called.append(json.loads(prompt.split('\n',1)[1])['resource']);return {'items':[]}
+        done=analysis_run.run(job['id'],executor)
+        self.assertEqual(done['state'],'failed')
+        self.assertEqual(done['error']['code'],'analysis_blocked')
+        self.assertEqual(called,['/bbb'])
+        self.assertEqual([r['target'] for r in done['unavailable_resources']],['/aaa'])
+        self.assertEqual(set(done['scope_overviews']['service']),{'/bbb'})
+        retry=analysis_run.retry(done['id'])
+        self.assertEqual(retry['resource_estimate'],{'total':2,'cached':1,'max_calls':1})
+        self.assertEqual(analysis_run.run(retry['id'],executor)['state'],'failed')
+        self.assertEqual(called,['/bbb'])
+
     def test_overview_preserves_conditional_url_match_in_prompt_and_saved_evidence(self):
         (self.repo/'app.js').write_text("import express from 'express';\nconst app=express();\napp.patch('/items/:id',()=>null);\napp.listen(3000);\n")
         (self.repo/'view.js').write_text("function update(id){fetch(`/items/${id}`,{method:'PATCH'})}\n")
