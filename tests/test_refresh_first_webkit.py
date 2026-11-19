@@ -80,12 +80,13 @@ class RefreshFirstWebKit(unittest.TestCase):
  $('map').querySelector('[data-local-resource="/items"]').click();
  const trace=$('map').querySelector('.flow-trace');
  check([...trace.children].map(e=>e.dataset.traceStage).join(',')==='client,request,server,data' && trace.lastElementChild.innerText.includes('Item'),'Only evidenced stages appear and repeated model reads share a node');
- index.service_flow.registered_routes=[{...edge},...Array.from({length:9},(_,i)=>({method:'GET',path:'/internal/'+i,server:{file:'api.py',function:'handler'+i,line:20+i},mounts:[]}))];
+ index.service_flow.registered_routes=[{...edge},...Array.from({length:9},(_,i)=>({method:'GET',path:'/internal/'+i,framework:i===8?'next_app_router':undefined,server:{file:i===8?'app/api/internal/route.ts':'api.py',function:'handler'+i,line:20+i},mounts:i===8?[{file:'package.json',line:26}]:[]}))];
  index.service_flow.coverage.routes=10;await doRefresh();
  const routes=()=>$('registeredRoutes');routes().open=true;
  check(routes().querySelectorAll('[data-registered-route]').length===8 && !routes().innerText.includes('/items'),'Registered routes page omits already connected endpoints');
  routes().querySelector('[data-route-page="1"]').click();const route=routes().querySelector('[data-registered-route]');route.open=true;route.querySelector('details').open=true;
- check(route.querySelector('[data-trace-stage="server"]').textContent==='handler8' && !route.querySelector('[data-trace-stage="client"]') && route.innerText.includes('api.py:28'),'A standalone server handler has its own source and no invented client');
+ check(route.querySelector('[data-trace-stage="server"]').textContent==='handler8' && !route.querySelector('[data-trace-stage="client"]') && route.innerText.includes('app/api/internal/route.ts:28'),'A standalone server handler has its own source and no invented client');
+ check(route.innerText.includes(tr('Next.js 파일 경로')) && route.innerText.includes('package.json:26') && route.innerText.split('app/api/internal/route.ts:28').length===2,'Filesystem provenance identifies the route file and supporting package evidence once');
  window.runningAnalysis={id:'saved',state:'completed',project:'First',repository:'',branch:'dev',lang:S.lang,intent:{task:'overview',targets:[]},completed_tasks:[],tasks:[],saved_overviews:[{
   repository:'web',configuration:'pin',commit:pin,format:'overview-v1',files:[client.file,server.file],
   scope_coverage:{selected:['/items'],total:2},items:[{name:'Browse',description:'Read stored items.',...client}],connections:[edge],feature_groups:[{name:'Saved items',connection_ids:[1]}]}]};
