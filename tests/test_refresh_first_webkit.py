@@ -40,10 +40,15 @@ class RefreshFirstWebKit(unittest.TestCase):
  anchors[1].dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));check(calls.at(-1).command==='open_url' && calls.at(-1).args.url===anchors[1].dataset.url,'Server proof opens its own working path');
  delete crossMap.cross_repository_connections;
  const wsIndex=crossMap.structure_indexes[0];wsIndex.workspace_packages=[{name:'@sample/core',directory:'packages/core',file:'packages/core/package.json',line:2,description:'Main <package>.',description_line:3,workspace:{file:'pnpm-workspace.yaml',line:4}}];
+ wsIndex.workspace_packages.push(...Array.from({length:8},(_,i)=>({...wsIndex.workspace_packages[0],name:'lib'+i})));
+ wsIndex.workspace_dependencies=[{source:'@sample/core',target:'lib7',kind:'devDependencies',specifier:'workspace:*',file:'packages/core/package.json',line:12}];
  const inventories=crossMap.inventories;crossMap.inventories=[{repository:wsIndex.repository,commit:wsIndex.commit,paths:['packages/core/package.json'],files:1}];render();
  const w=$('map').querySelector('[data-workspace-packages] details');check(w && !w.open && w.innerText.includes('Main <package>.'),'Workspace summary uses literal package metadata');
  w.open=true;check(w.innerText.includes('pnpm-workspace.yaml:4') && w.innerText.includes('packages/core/package.json:2'),'Membership and package declaration have their own citations');
- w.querySelector('[data-package-folder]').click();check($('map').querySelector('[data-inspect-directory="packages/core"]'),'Package folder opens in the existing repository inventory');
+ const deps=w.querySelector('details');check(deps && !deps.open,'Dependency evidence starts collapsed');
+ deps.open=true;check(deps.innerText.includes('devDependencies · workspace:*') && deps.innerText.includes('packages/core/package.json:12'),'Dependency manifest declaration stays distinct from runtime calls');
+ deps.querySelector('[data-package-target]').click();const destination=$('map').querySelector('[data-workspace-package="lib7"]');check(destination.open && document.activeElement===destination.querySelector('summary'),'Dependency opens and focuses its package across pages');
+ destination.querySelector('[data-package-folder]').click();check($('map').querySelector('[data-inspect-directory="packages/core"]'),'Package folder opens in the existing repository inventory');
  delete wsIndex.workspace_packages;crossMap.inventories=inventories;
  index.files=Array.from({length:160},(_,i)=>({file:'module'+i+'.cjs',language:'javascript',declarations:[]}));
  index.imports=[{file:'module0.cjs',target:'module150.cjs',line:1},{file:'module45.cjs',target:'module150.cjs',line:3}];
