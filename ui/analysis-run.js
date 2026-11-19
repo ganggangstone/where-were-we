@@ -76,24 +76,43 @@ const AnalysisRun = (() => {
   async function accept(value, token) {
     if (!current(token)) return;
     run = value; error = null;
-    if(value && mapResults && mapResults.pin.project===scope().project && mapResults.pin.branch===scope().branch && mapResults.pin.lang===scope().lang && (!scope().repository || scope().repository===mapResults.pin.repository)){
+    if(value && Array.isArray(value.saved_scope_overviews) && mapResults && mapResults.pin.project===scope().project && mapResults.pin.branch===scope().branch && mapResults.pin.lang===scope().lang && (!scope().repository || scope().repository===mapResults.pin.repository)){
       rememberScopes(mapResults,value);showMapBadges();
     }
     paint();
     // Use the existing analysis-only read: never collect or move change history.
-    if (run?.intent?.task!=='overview' && sameScope() && !active() && (run.state === 'completed' || run.completed_tasks?.length) && !loaded.has(run.id)) {
+    if (run?.intent?.task!=='overview' && sameScope() && !active() && (run.state === 'completed' || (run.completed_tasks?.length || Number(run.completed_tasks)>0)) && !loaded.has(run.id)) {
       const id = run.id; loaded.add(id);
       try { await reloadAnalysisOnly(() => current(token) && run?.id === id); }
       catch { if (current(token)) { loaded.delete(id); error = {code:'result_read_failed'}; paint(); } }
     }
     schedule(token);
   }
-  async function check() {
+  const catalog=requested=>invoke('analysis_run_status',{scope:requested,view:'catalog'}).then(decode);
+  async function readResource(ref) {
+    if(ref.files && ref.items)return ref;
+    const value=decode(await invoke('analysis_run_status',{view:'resource',scope:{...scope(),repository:ref.repository},resource:ref.resource}));
+    return value && value.commit===ref.commit && value.configuration===ref.configuration && value.repository===ref.repository && value.resource===ref.resource?value:null;
+  }
+  async function check(refreshCatalog=false) {
     const token = epoch, version = revision;
     if (!S.project || document.hidden || !current(token) || checking === token) return;
     checking = token;
     try {
-      const value = decode(await invoke('analysis_run_status',{scope:scope()}));
+      let value;
+      if(active() && !refreshCatalog){
+        const progress=decode(await invoke('analysis_run_status',{view:'progress',runId:run.id}));
+        if(progress && activeStates.has(progress.state))value={...run,...progress};
+      }
+      if(!value)value=await catalog(scope());
+      if(value && S.analysisChoice?.task==='scope_overview'){
+        const refs=value.saved_scope_overviews || [];
+        const ref=refs.find(group=>group.resource===S.analysisChoice.detailTarget && group.repository===scope().repository);
+        if(ref && !ref.files){
+          const detail=await readResource(ref);
+          value={...value,saved_scope_overviews:refs.filter(g=>g!==ref).concat(detail || [])};
+        }
+      }
       if (current(token) && version === revision) await accept(value, token);
     } catch (value) { if (current(token) && version === revision) { error = value; paint(); schedule(token); } }
     finally { if (checking === token) checking = null; schedule(token); }
@@ -136,22 +155,34 @@ const AnalysisRun = (() => {
   function rememberScopes(cache,value) {
     if(!value || cache!==mapResults)return;
     const pin=cache.pin,configuration=pin.configuration || value.current_legacy_pin?.configuration;
+    const resource=S.analysisChoice?.task==='saved_scope'?S.analysisChoice.detailTarget:null;
+    const opened=cache.groups.get(resource);
     cache.groups.clear();
     if(!configuration)return;
     for(const group of value.saved_scope_overviews || []){
-      if(group.repository===pin.repository && group.commit===pin.commit && group.configuration===configuration)cache.groups.set(group.resource,group);
+      if(group.repository===pin.repository && group.commit===pin.commit && group.configuration===configuration){
+        cache.groups.set(group.resource,group.resource===resource && opened?.files && !group.files?opened:group);
+      }
     }
   }
   function showMapBadges() {
     const cache=mapResults;
     for(const button of document.querySelectorAll('#moduleGraph [data-saved-scope]')){
       button.hidden=!cache?.groups.has(button.dataset.savedScope);
-      button.onclick=e=>{
+      button.onclick=async e=>{
         e.preventDefault();e.stopPropagation();
         if(cache!==mapResults || cache.key!==JSON.stringify(mapPin()) || !cache.groups.has(button.dataset.savedScope))return;
         const group=cache.groups.get(button.dataset.savedScope);
         openAnalysisPanel('saved_scope',group.resource,cache.pin.repository);
-        if(group.feature_groups?.length){openedFeature=overviewKey(group)+0;paint();}
+        if(!group.files){
+          const choice=S.analysisChoice;
+          let detail;try{detail=await readResource(group);}catch{}
+          if(cache!==mapResults || cache.key!==JSON.stringify(mapPin()) || S.analysisChoice!==choice)return;
+          if(!detail){cache.groups.delete(group.resource);showMapBadges();paint();return;}
+          cache.groups.set(group.resource,detail);
+          if(detail.feature_groups?.length)openedFeature=overviewKey(detail)+0;
+          paint();
+        }else if(group.feature_groups?.length){openedFeature=overviewKey(group)+0;paint();}
       };
     }
   }
@@ -163,17 +194,15 @@ const AnalysisRun = (() => {
     const cache={pin,key,groups:new Map()};mapResults=cache;
     const requested={project:pin.project,repository:pin.repository,branch:pin.branch,lang:pin.lang};
     (async()=>{
-      const value=decode(await invoke('analysis_run_status',{scope:requested}));
+      const value=await catalog(requested);
       rememberScopes(cache,value);
-      if(!value && requested.repository && cache===mapResults){
-        rememberScopes(cache,decode(await invoke('analysis_run_status',{scope:{...requested,repository:''}})));
-      }
       if(cache===mapResults && JSON.stringify(mapPin())===key)showMapBadges();
     })().catch(()=>{if(cache===mapResults)mapResults=null;});
   }
   function savedScopeHtml() {
     const group=savedOverviews()[0];
-    if(!group)return '';
+    if(!group)return text('저장된 설명을 읽지 못했습니다.','Saved explanation unavailable.');
+    if(!group.files)return text('불러오는 중…','Loading…');
     return `<code>${esc(group.commit.slice(0,8))}</code>${overviewTree(group)}`;
   }
   function savedOverviews() {
@@ -373,8 +402,8 @@ const AnalysisRun = (() => {
     const account = provider?.account, identity = typeof account === 'string' ? account : account?.email || account?.id;
     const done = Array.isArray(run?.completed_tasks) ? run.completed_tasks.length : Number(run?.completed_tasks || 0);
     const batchRun=run?.intent?.task==='resources';
-    const completed=new Set((batchRun?run.completed_tasks || []:[]).map(t=>JSON.stringify([t.repository,t.target])));
-    const left=batchRun?(run.tasks || []).filter(t=>!completed.has(JSON.stringify([t.repository,t.target]))).length:run?.tasks?.length || 0;
+    const completed=new Set((batchRun && Array.isArray(run.completed_tasks)?run.completed_tasks:[]).map(t=>JSON.stringify([t.repository,t.target])));
+    const left=Number.isInteger(run?.tasks)?run.tasks:batchRun?(run.tasks || []).filter(t=>!completed.has(JSON.stringify([t.repository,t.target]))).length:run?.tasks?.length || 0;
     const total=done+left;
     const progress=batchRun?text('경로 묶음 '+done+'개 저장 · '+left+'개 남음','Path groups saved: '+done+' · Remaining: '+left):done+'/'+total+' '+text('작업 저장됨','tasks saved');
     const task = run?.current_task;
@@ -420,7 +449,7 @@ const AnalysisRun = (() => {
       ${!scoped && !active() && intent().task==='overview' ? `<button class="btn quiet" id="startFullAnalysis" ${canStart ? '' : 'disabled'}>${text('전체 코드 분석 (베타)','Analyze full codebase (beta)')}</button>` : ''}
       <button class="btn quiet" id="checkAppAnalysis" ${busy || providerBusy ? 'disabled' : ''}>${text('계정·상태 다시 확인','Check account and status')}</button>
       ${!batchRun && sameScope() && done > 0 && run.intent?.task!=='overview' ? `<button class="btn quiet" id="viewAppAnalysis">${text('저장된 결과 보기','View saved results')}</button>` : ''}</div>
-      ${resultPicker}${previewHtml()}</section>`;
+      ${resultPicker}${batch && batchRun && active() && done>savedGroups.length?`<button class="btn quiet" id="refreshSavedBatch">${text('저장된 결과 보기','View saved results')}</button>`:''}${previewHtml()}</section>`;
   }
   function bind() {
     $('insp')?.querySelectorAll?.('[data-overview-feature]').forEach(button=>button.onclick=()=>{
@@ -466,6 +495,7 @@ const AnalysisRun = (() => {
       };
     });
     if ($('startAppAnalysis')) $('startAppAnalysis').onclick = () => execute('analysis_run_start');
+    if($('refreshSavedBatch'))$('refreshSavedBatch').onclick=()=>check(true);
     if ($('openBatchSaved')) $('openBatchSaved').onclick=()=>{
       const groups=savedBatchGroups();
       const selected=groups[Number($('batchSavedResource').value)];

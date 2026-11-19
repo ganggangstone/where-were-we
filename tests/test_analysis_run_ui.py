@@ -121,6 +121,19 @@ assert($('insp').innerHTML.includes('Path groups saved: 1 · Remaining: 1') && $
 status.state='cancelled';await AnalysisRun.check();assert($('retryAppAnalysis'),'Cancelled batch can resume');
 ''')
 
+    def test_active_poll_uses_progress_then_recovers_terminal_catalog(self):
+        self.check_js(r'''
+await flush();S.analysisChoice={task:'resource_batch',maxCalls:3};await open();await flush();
+await $('startAppAnalysis').onclick();const intent=calls.find(c=>c.command==='analysis_run_start').args.scope.intent;
+native=(command,args)=>{
+ if(command==='analysis_run_status' && args.view==='progress')return runRecord('running',{intent,completed_tasks:2,tasks:1});
+};
+await AnalysisRun.check();assert($('insp').innerHTML.includes('Path groups saved: 2 · Remaining: 1') && $('refreshSavedBatch'),'Compact counts with an on-demand result catalog');
+assert(calls.at(-1).args.view==='progress' && calls.at(-1).args.runId==='run-1','Routine poll only asks for compact progress');
+native=(command,args)=>command==='analysis_run_status'?runRecord('completed',{intent,completed_tasks:3,tasks:0}):undefined;
+await AnalysisRun.check();assert(calls.filter(c=>c.command==='analysis_run_status').at(-1).args.view==='catalog','Terminal transition reads the saved catalog');
+''')
+
     def test_initial_overview_and_full_analysis_have_distinct_explicit_buttons(self):
         self.check_js(r'''
 await open();
