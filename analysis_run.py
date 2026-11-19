@@ -6,6 +6,7 @@ import codecs
 from contextlib import contextmanager
 import fcntl
 import hashlib
+import collections
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -25,7 +26,8 @@ import project as store
 
 ACTIVE = {'preparing', 'running', 'saving'}
 TERMINAL = {'completed', 'failed', 'cancelled'}
-OVERVIEW_VERSION = 5
+OVERVIEW_VERSION = 6
+SCOPED_OVERVIEW_VERSION = 5
 MAX_FILE_BYTES = 300_000
 MAX_PROMPT_BYTES = 128 * 1024
 UNIT_BYTES = 16 * 1024
@@ -228,7 +230,7 @@ def prepare(project, branch='dev', lang='ko', repository='', executor='claude', 
                 for task in value['tasks']:
                     rid=task['repository'];pin=plan['pins'][rid];target=task.get('target')
                     overview=(old.get('scope_overviews',{}).get(rid,{}).get(target) if target else old.get('overviews',{}).get(rid))
-                    if not overview or overview.get('format')!='overview-v1' or overview.get('version')!=OVERVIEW_VERSION:continue
+                    if not overview or overview.get('format')!='overview-v1' or overview.get('version')!=(SCOPED_OVERVIEW_VERSION if target else OVERVIEW_VERSION):continue
                     if not all(overview.get(k)==v for k,v in pin.items()):
                         overview=_reuse_scope(overview,pin,scope,rid,contexts) if target else None
                         if not overview:continue
@@ -1123,7 +1125,7 @@ def _scope_evidence_digest(index,resource,anchors):
 def _reuse_scope(overview,pin,scope,rid,contexts):
     """Only documentation-only changes can be proven independent of unresolved code/config dependencies."""
     import structure_index
-    if (overview.get('configuration')!=pin['configuration'] or overview.get('version')!=OVERVIEW_VERSION
+    if (overview.get('configuration')!=pin['configuration'] or overview.get('version')!=SCOPED_OVERVIEW_VERSION
             or not overview.get('evidence_digest') or not overview.get('resource')):return None
     try:
         if rid not in contexts:contexts[rid]=ai_extract.context(scope['project'],rid,scope['branch'])
@@ -1180,6 +1182,20 @@ def _overview_cli(index):
     return entries
 
 
+def _overview_workspace(index):
+    packages=index.get('workspace_packages') or []
+    if len(packages)<2:return [],None
+    by_name={p['name']:p for p in packages}
+    edges=[e for e in index.get('workspace_dependencies',[]) if e['source'] in by_name and e['target'] in by_name]
+    # Prefer the member that connects the most peers, then a documented pair.
+    counts=collections.Counter(e['source'] for e in edges)
+    edge=min(edges,key=lambda e:(-counts[e['source']],not by_name[e['source']].get('description'),
+                                 not by_name[e['target']].get('description'),e['source'],e['target']),default=None)
+    if edge:return [by_name[edge[k]] for k in ('source','target')],edge
+    chosen=sorted(packages,key=lambda p:(not p.get('description'),p['file']))[:2]
+    return chosen,None
+
+
 def _quick_overview(repo,request,language,invoke,cancelled,deadline,raw,resource=None,ref_offset=0):
     """One bounded call per repository. A reference selects an actual pinned line."""
     commit=request['commit']
@@ -1194,6 +1210,17 @@ def _quick_overview(repo,request,language,invoke,cancelled,deadline,raw,resource
         for entry,sites in cli:
             for file,line in sites.values():pinned.setdefault(file,{})[line]={}
             pinned.setdefault(entry['target'],{})
+        for file,rows in anchors.items():
+            if file in pinned or len(pinned)<4:pinned.setdefault(file,{}).update(rows)
+        anchors=pinned
+    members,dependency=_overview_workspace(index) if resource is None else ([],None)
+    if members:
+        pinned={}
+        for p in members:
+            pinned.setdefault(p['file'],{})[p['line']]={}
+            if p.get('description_line'):pinned[p['file']][p['description_line']]={}
+            site=p['workspace'];pinned.setdefault(site['file'],{})[site['line']]={}
+        if dependency:pinned[dependency['file']][dependency['line']]={}
         for file,rows in anchors.items():
             if file in pinned or len(pinned)<4:pinned.setdefault(file,{}).update(rows)
         anchors=pinned
@@ -1219,7 +1246,7 @@ def _quick_overview(repo,request,language,invoke,cancelled,deadline,raw,resource
             references[ref]={'file':source['file'],'line':row['line'],'quote':text}
             rows.append({'ref':ref,'line':row['line'],'text':text,**evidence.get(row['line'],{})})
         if rows:sources.append({'file':source['file'],'lines':rows})
-    result={'format':'overview-v1','version':OVERVIEW_VERSION,'files':[s['file'] for s in sources],'items':[],
+    result={'format':'overview-v1','version':SCOPED_OVERVIEW_VERSION if resource else OVERVIEW_VERSION,'files':[s['file'] for s in sources],'items':[],
             'scope_coverage':{'total':total_scopes,'selected':[]}}
     if resource:
         result['resource']=resource
@@ -1231,6 +1258,27 @@ def _quick_overview(repo,request,language,invoke,cancelled,deadline,raw,resource
                      'Return at most 12 items. Skip unsupported claims. Empty items are valid. Do not request further reads.',
             'schema':{'items':[{'name':'feature or component','description':'what it does','ref':ref_offset+1}]}}
     by_line={(row['file'],row['line']):ref for ref,row in references.items()}
+    for member in members:
+        site=member['workspace']
+        registration=by_line.get((member['file'],member['line']))
+        workspace=by_line.get((site['file'],site['line']))
+        if not registration or not workspace or member['name'] not in references[registration]['quote']:continue
+        fields={'name':member['name']};refs={'registration':registration,'workspace':workspace}
+        description=by_line.get((member['file'],member.get('description_line')))
+        if description and member.get('description') in references[description]['quote']:
+            fields['description']=member['description'];refs['description_evidence']=description
+        packet.setdefault('workspace_packages',[]).append({**fields,**{k+'_ref':v for k,v in refs.items()}})
+        result.setdefault('workspace_packages',[]).append({**fields,**{k:references[v] for k,v in refs.items()}})
+    if dependency and len(result.get('workspace_packages',[]))==2:
+        ref=by_line.get((dependency['file'],dependency['line']))
+        if ref and all(dependency[k] in references[ref]['quote'] for k in ('target','specifier')):
+            fields={k:dependency[k] for k in ('source','target','kind','specifier')}
+            packet['workspace_dependencies']=[{**fields,'evidence_ref':ref}]
+            result['workspace_dependencies']=[{**fields,'evidence':references[ref]}]
+    if 'workspace_packages' in packet:
+        result['workspace_coverage']={'verified_packages':len(index['workspace_packages']),
+                                      'matched_manifests':index['coverage']['workspace_manifests_matched']}
+        packet['prompt']+=' Describe workspace members and declared package dependencies using their refs. A dependency declaration alone does not establish a runtime call.'
     for entry,sites in cli:
         refs={key:by_line[site] for key,site in sites.items() if site in by_line}
         if 'registration' not in refs or entry['kind']=='cobra_subcommand' and not {'parent_evidence','target_evidence'}<=refs.keys():continue

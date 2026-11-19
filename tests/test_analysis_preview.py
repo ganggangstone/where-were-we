@@ -427,6 +427,35 @@ def users(): pass
             self.assertIn(path,overview['items'][0]['quote'])
             self.assertEqual(overview['connections'][0]['id'],1)
 
+    def test_first_overview_pins_workspace_members_and_a_declared_dependency(self):
+        (self.repo/'pnpm-workspace.yaml').write_text("packages:\n  - 'packages/*'\n")
+        for name in ['engine','store','extra']:
+            folder=self.repo/'packages'/name
+            folder.mkdir(parents=True)
+            manifest={'name':name,'description':name+' package'}
+            if name=='engine':manifest['dependencies']={'store':'workspace:*'}
+            (folder/'package.json').write_text(json.dumps(manifest,indent=2))
+        self.git('add','.');self.git('commit','-qm','Register workspace members')
+        run=self.prepare(intent={'task':'overview','targets':[]})
+        def executor(prompt,**kwargs):
+            packet=json.loads(prompt.split('\n',1)[1])
+            self.assertLessEqual(len(packet['sources']),4)
+            self.assertLessEqual(sum(len(f['lines']) for f in packet['sources']),96)
+            members=packet['workspace_packages']
+            self.assertEqual([m['name'] for m in members],['engine','store'])
+            refs={r['ref']:r['text'] for f in packet['sources'] for r in f['lines']}
+            self.assertIn('packages/*',refs[members[0]['workspace_ref']])
+            self.assertIn('engine package',refs[members[0]['description_evidence_ref']])
+            edge,=packet['workspace_dependencies']
+            self.assertIn('"store": "workspace:*"',refs[edge['evidence_ref']])
+            return {'items':[{'name':'engine','description':'Workspace package','ref':members[0]['registration_ref']}]}
+        done=analysis_run.run(run['id'],executor)
+        self.assertEqual(done['state'],'completed',done.get('error'))
+        self.assertEqual(done['input_stats']['calls'],1)
+        overview=analysis_run.status(project='demo',lang='en')['saved_overviews'][0]
+        self.assertEqual(overview['workspace_coverage'],{'verified_packages':3,'matched_manifests':3})
+        self.assertEqual(overview['workspace_dependencies'][0]['evidence']['file'],'packages/engine/package.json')
+
     def test_first_overview_cites_cli_registration_and_entrypoint_without_http(self):
         (self.repo/'pyproject.toml').write_text('[project]\nname="example"\n[project.scripts]\nreports="reports:main"\n')
         (self.repo/'reports.py').write_text('# implementation\n'*80+'def main():\n    return 0\n')
