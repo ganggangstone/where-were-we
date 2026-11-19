@@ -56,6 +56,13 @@ class RefreshFirstWebKit(unittest.TestCase):
  check(npm.innerText.includes('tool-11') && npm.querySelectorAll('a')[1].dataset.url.endsWith('/bin/tool.js') && !npm.innerText.includes('undefined'),'Missing locations remain file-only');
  check(!calls.some(c=>c.command==='analysis_run_start'),'Command inspection has no model call');
  index.cli_entries=[];
+ index.cli_entries=[];index.files=[{file:'main.go',language:'go',declarations:[]},{file:'pkg/a.go',language:'go',declarations:[]}];index.imports=[];index.commit='go-edges';
+ index.package_imports=[{file:'main.go',line:4,package:'example.org/pkg',directory:'pkg',members:['pkg/a.go','pkg/b.go'],member_count:3}];
+ await doRefresh();const pkg=$('map').querySelector('[data-go-package]');pkg.querySelector('summary').click();
+ check(pkg.innerText.includes('2/3') && pkg.innerText.includes('main.go:4') && pkg.innerText.includes('pkg/b.go'),'Source import and bounded package membership are separate');
+ check(pkg.querySelector('a[data-url$="/pkg/b.go"]'),'Unindexed package members point to their working files without fake line numbers');
+ pkg.querySelector('[data-module-neighbor]').click();check($('moduleFile').value==='pkg/a.go','Indexed package member opens its module');
+ index.package_imports=[];index.commit=pin;
  const client={file:'client.js',line:5,quote:'fetch("/items")'},server={file:'api.py',line:9,quote:'@router.get("/items")',function:'items'};
  const edge={id:1,method:'GET',path:'/items',client,server,data_steps:[{operation:'read',model:'Item',file:'api.py',line:11,evidence:[]}]};
  index.service_flow={connections:[edge],feature_groups:[{resource:'/items',connection_indexes:[0]}],coverage:{requests:1,routes:1,unresolved_requests:0}};
@@ -88,6 +95,9 @@ class RefreshFirstWebKit(unittest.TestCase):
  const inspect=path=>box().querySelector('[data-inspect-path="'+path+'"]').click();
  check(!box().querySelector('[data-inspect-path="src/nested/notes.md"]'),'Documentation can open as a file without an unsupported parser button');
  inspect('src/nested/<example name>.go');await new Promise(r=>setTimeout(r,10));check(box().innerText.includes('Go') && box().innerText.includes(tr('타입 선언')+' · Runner'),'Go type names and language render at pinned positions');
+ const singlePkg=box().querySelector('[data-go-package]');singlePkg.querySelector('summary').click();
+ check(singlePkg.open && singlePkg.innerText.includes('src/nested/<example name>.go:4'),'On-demand package points to the import line');
+ singlePkg.querySelector('a[data-inventory-file$="/pkg/a.go"]').click();check(calls.at(-1).args.url.endsWith('/pkg/a.go'),'Member opens as a file, not the import source line');
  inspect('src/nested/worker.ts');await new Promise(r=>setTimeout(r,10));
  const args=calls.filter(c=>c.command==='file_structure').at(-1).args;
  check(args.commit===pin && args.repository==='web' && args.file==='src/nested/worker.ts','Detail reads only the selected file and full commit');
@@ -102,7 +112,7 @@ const originalNative=window.__TAURI__.core.invoke;
 window.__TAURI__.core.invoke=async(command,args)=>{
  if(command!=='file_structure')return originalNative(command,args);
  calls.push({command,args});
- if(args.file.endsWith('.go'))return JSON.stringify({...args,status:'indexed',language:'go',declarations:[{name:'Runner',kind:'type',line:3}],imports:[],coverage:{}});
+ if(args.file.endsWith('.go'))return JSON.stringify({...args,status:'indexed',language:'go',declarations:[{name:'Runner',kind:'type',line:3}],imports:[],package_imports:[{file:args.file,line:4,package:'example.org/pkg',directory:'pkg',members:['pkg/a.go'],member_count:2}],coverage:{}});
  return JSON.stringify({...args,status:'indexed',language:'typescript',
    declarations:Array.from({length:21},(_,i)=>({name:'doWork'+i,kind:'function',line:i+1})),imports:[{target:'utility.ts',line:33}],
    coverage:{indexed_files:1,unresolved_imports:1,truncated:true}});
