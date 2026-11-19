@@ -991,7 +991,7 @@ def _quick_overview(repo,request,language,invoke,cancelled,deadline,raw):
     commit=request['commit']
     import structure_index
     index=raw.get('structure_index') or {}
-    if index.get('commit')!=commit:
+    if index.get('commit')!=commit or index.get('version')!=structure_index.VERSION:
         index=structure_index.build(repo,commit,excluded=_secret)
     anchors=_overview_anchors(index)
     selected=list(anchors)
