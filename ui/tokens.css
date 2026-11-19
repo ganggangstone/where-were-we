@@ -69,7 +69,7 @@
   --font-mono:var(--app-font-mono);
   --font-title:var(--typography-tagline-weight) var(--typography-tagline-size)/var(--typography-tagline-leading) var(--typography-tagline-family);
   --tracking-title:var(--typography-tagline-tracking);
-  --font-heading:var(--typography-caption-strong-weight) var(--typography-caption-strong-size)/var(--typography-caption-strong-leading) var(--font-sans);
+  --font-heading:var(--typography-caption-strong-weight) var(--typography-body-size)/var(--typography-body-leading) var(--font-sans);
   --font-body:var(--typography-caption-weight) var(--typography-caption-size)/var(--typography-caption-leading) var(--font-sans);
   --tracking-body:var(--typography-caption-tracking);
   --font-secondary:var(--typography-fine-print-weight) var(--typography-fine-print-size)/var(--app-leading-wrapped) var(--font-sans);

@@ -278,7 +278,7 @@ class Guide(unittest.TestCase):
         self.check(r"""
  $('guideNext').click();
  const step=$('guide').querySelector('.guide-step'),text=step.innerText;
- const once=tr('같은 요청 하나로 연결·코드 확인·첫 지도·첫 AI 분석까지 이어집니다.'),cost=tr('첫 AI 분석은 연결한 AI의 요금과 사용 한도를 씁니다.'),button=tr('AI에게 보낼 요청 복사');
+ const once=tr('한 번의 요청으로 코드 연결부터 첫 분석까지 진행합니다.'),cost=tr('첫 분석에 AI 요금·한도가 적용됩니다.'),button=tr('AI에게 보낼 요청 복사');
  assert(text.includes(once),'Says one request does everything');
  assert(text.includes(cost),'Says the AI cost before copying');
  assert(text.indexOf(cost)<text.indexOf(button),'Cost is stated before the copy button');
@@ -403,7 +403,7 @@ class Guide(unittest.TestCase):
  window.configuredBundle=fakeBundle('Lumen');window.configuredBundle.project.repositories=configuration.repositories.map(r=>({...r,collected:true,commits:{dev:'aaaaaaaa1111'}}));
  const result=await applyAppCommand({action:'configure',arguments:{project:'Lumen',configuration}});await wait(60);
  assert(result.ok && G.step===3 && $('guideTitle').textContent===tr('첫 분석'),'The service the AI connected moves the guide to the first analysis by itself');
- assert($('guide').innerText.includes(tr('AI가 분석을 마치면 앱으로 돌아올 때 저장된 결과를 자동으로 읽습니다.')) && !$('guideFinish'),'It waits for the saved analysis; a connection is not the result');
+ assert($('guide').innerText.includes(tr('앱으로 돌아오면 결과를 읽습니다.')) && !$('guideFinish'),'It waits for the saved analysis; a connection is not the result');
  guideStep(1);await wait();assert(G.step===1,'The user can still go back; it moves only once');
  guideStep(3);const reads0=reads();
  // the AI prepares the whole-project request, runs it, and the saved results arrive while the app is in the background
@@ -711,19 +711,19 @@ class Flows(unittest.TestCase):
  if($('guide').open)closeGuide('skipped');
  // One first entry: explore my code. Both ways are explained, and nothing runs AI by itself.
  assert(main().includes(tr('내 코드 살펴보기')) && !main().includes(tr('어떤 코드를 살펴볼까요?')),'Entry offers the two choices without a duplicate prompt: '+main());
- assert(main().includes(tr('AI 분석은 앱에서 시작을 누르거나 AI에게 요청할 때만 실행됩니다.')),'No automatic AI execution is stated');
+ assert(main().includes(tr('AI 분석은 직접 요청할 때만 실행됩니다.')),'No automatic AI execution is stated');
  assert($('startWithAI').textContent===tr('작업하던 AI에게 맡기기') && $('startProject').textContent===tr('코드 위치를 직접 입력'),'The two ways name what each one does');
  assert($('newProject').title===tr('다른 서비스 추가'),'The header plus adds another service');
  $('startProject').click();const d=$('project-dialog');assert(d.open && d.querySelector('h2').textContent===tr('살펴볼 코드 추가'),'The editor is about code to explore');
- assert(d.textContent.includes(tr('서비스 이름은 함께 살펴볼 코드를 묶는 이름입니다.')) && d.textContent.includes(tr('비워 두면 첫 코드의 이름을 씁니다.')),'Service name is explained as a grouping name with a default');
+ assert(d.textContent.includes(tr('코드 그룹 이름')) && d.textContent.includes(tr('기본값: 첫 코드 이름')),'Service name is explained as a grouping name with a default');
  assert($('saveProject').textContent===tr('저장'),'Saving is called saving');
  document.querySelector('[data-field="path"]').value='/fictional/lumen-web';
  $('saveProject').click();for(let i=0;i<80 && !S.project;i++)await wait();await wait();
  assert(S.project==='lumen-web' && window.savedProjects.includes('lumen-web'),'An empty service name falls back to the first code name: '+S.project);
  assert($('manageRepositories').textContent===tr('코드 추가·수정'),'The code bar button says add or edit code');
- $('manageRepositories').click();assert(d.querySelector('h2').textContent===tr('살펴보는 코드') && !d.textContent.includes(tr('비워 두면 첫 코드의 이름을 씁니다.')),'Editing names the explored code without the default hint');d.close();
+ $('manageRepositories').click();assert(d.querySelector('h2').textContent===tr('살펴보는 코드') && !d.textContent.includes(tr('기본값: 첫 코드 이름')),'Editing names the explored code without the default hint');d.close();
  assert($('analyzeMap').textContent.startsWith(tr('AI로 자세한 지도 만들기')),'The AI button says what the AI makes: '+$('analyzeMap').textContent);
- $('analyzeMap').click();assert(pane().includes(tr('AI로 자세한 지도 만들기')) && pane().includes(tr('이 요청은 복사해 AI 채팅에 전달합니다. 요청을 만들기만 해서는 분석되지 않습니다.')),'The panel keeps the explicit handoff');
+ $('analyzeMap').click();assert(pane().includes(tr('AI로 자세한 지도 만들기')) && pane().includes(tr('AI 채팅에 붙여 넣어 실행합니다.')),'The panel keeps the explicit handoff');
 ''',query='&empty=1')
 
     def test_dictionary_has_no_duplicate_interface_keys(self):
@@ -920,7 +920,7 @@ class Flows(unittest.TestCase):
  S.agentPrompt=null;render();await doRefresh();await wait();
  assert(calls.filter(c=>c.command==='analysis_plan').length===1 && S.analysisRequest?.handoff==='After refresh','Refresh prepares the same unified request once');
  assert(window.copied===undefined && S.agentPurpose!=='analysis','No clipboard write and no panel opened');
- assert($('analyzeMap').innerText.includes(tr('결과 확인 대기')),'The prepared request is visible on the button');
+ assert($('analyzeMap').innerText.includes(tr('요청 준비됨')),'The prepared request is visible on the button');
  S.analysisRequest={...S.analysisRequest,copied:true,scope:{...S.analysisRequest.scope,project:'Second'},handoff:'Other project'};
  let before=calls.filter(c=>c.command==='analysis_plan').length;
  await applyAppCommand({id:'app-refresh-1',action:'refresh',arguments:{}});await wait();
@@ -942,7 +942,7 @@ class Flows(unittest.TestCase):
  assert($('checkAnalysisResults'),'Result check is offered');
  document.querySelector('#view [data-v="sys"]').click();
  assert(!$('checkAnalysisResults'),'Browsing replaced the panel');
- assert($('analyzeMap').innerText.includes(tr('결과 확인 대기')),'The waiting request stays visible');
+ assert($('analyzeMap').innerText.includes(tr('요청 준비됨')),'The prepared request stays visible');
  $('analyzeMap').click();
  assert($('checkAnalysisResults') && pane().includes(tr('요청 복사')),'The same request reopens with the result check');
 ''')
@@ -1292,6 +1292,10 @@ class AutoRead(unittest.TestCase):
     def test_returning_to_the_app_reads_the_copied_request_without_clicking(self):
         self.check(r"""
  await copied();const n=reads();done();
+ assert(!$('automaticAnalysis').open && $('automaticAnalysis').contains($('startAppAnalysis')),'App execution is a separate collapsed option');
+ const refresh=$('checkAnalysisResults');
+ assert(refresh.getClientRects().length && refresh.classList.contains('primary') && refresh.textContent===tr('저장된 결과 새로고침'),'After copying the visible next action refreshes saved results');
+ assert($('cpAgent').compareDocumentPosition($('automaticAnalysis')) & Node.DOCUMENT_POSITION_FOLLOWING,'Existing AI request comes before automatic execution');
  await back();
  assert(S.analysisRequest.state==='saved' && reads()===n+1,'Focus read the saved result: '+S.analysisRequest.state);
  assert(pane().includes(tr('새 결과가 저장된 것을 확인했습니다.')) && $('viewAnalysisResults'),'The panel shows the saved state and the result button');
@@ -1675,9 +1679,9 @@ class FeatureContext(unittest.TestCase):
  $('insp').querySelector('[data-goscr="web::/items"]').click();await wait();
  const screen=$('insp').innerText;assert(screen.split('#42 ').length-1===1 && screen.split('#7 ').length-1===1,'A member screen keeps its own work list');
  window.mutateBundle=b=>{featureBundle(b);b.status=null;};await loadProject('First',false,'');S.view='feat';render();
- assert(S.feat===itemsId() && $('insp').innerText.includes(tr('작업 정보를 아직 수집하지 않았습니다.')) && !$('insp').innerText.includes(tr('수집된 작업 중 이 기능의 화면과 이어진 것이 없습니다.')),'Uncollected work is not reported as none');
+ assert(S.feat===itemsId() && $('insp').innerText.includes(tr('작업 정보 미수집')) && !$('insp').innerText.includes(tr('연결된 작업 없음')),'Uncollected work is not reported as none');
  window.mutateBundle=b=>{featureBundle(b);b.status.open_prs=b.status.open_prs.filter(p=>p.number===100);for(const k of ['merged_prs','branches','worktrees','issues'])b.status[k]=[];};await loadProject('First',false,'');render();
- assert($('insp').innerText.includes(tr('수집된 작업 중 이 기능의 화면과 이어진 것이 없습니다.')),'Collected but unlinked work says so');
+ assert($('insp').innerText.includes(tr('연결된 작업 없음')),'Collected but unlinked work says so');
 ''')
 
     def test_copy_holds_only_the_feature_context_and_screen_copy_is_unchanged(self):

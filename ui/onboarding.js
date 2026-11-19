@@ -64,8 +64,8 @@ function guideBody(){
     <p role="status" id="guideProjectState">${S.project?`<span class="dot ok"></span>${tr('연결한 서비스: ')}${esc(S.project)}`:tr('아직 연결된 서비스가 없습니다. AI 채팅에서 연결을 마친 뒤 돌아오세요.')}</p>
     ${S.project?`<ul>${guideCodes().map(guideCodeLine).join('')}</ul>`:''}
     <div class="ctl">${S.project?`<button class="btn primary" id="guideNext">${tr('다음')}</button>`:`<button class="btn primary" id="guideToAgent">${tr('AI에게 맡기기')}</button>`}${guideManual()}</div>`;
-  if(G.step===1)return `<h2 id="guideTitle" tabindex="-1">${tr('작업하던 AI에게 연결을 맡기세요')}</h2><p>${tr('같은 요청 하나로 연결·코드 확인·첫 지도·첫 AI 분석까지 이어집니다.')}</p>
-    <p class="s">${tr('첫 AI 분석은 연결한 AI의 요금과 사용 한도를 씁니다.')} ${tr('분석 전에 AI가 먼저 묻고, 복사만으로는 아무것도 실행되지 않습니다.')}</p>
+  if(G.step===1)return `<h2 id="guideTitle" tabindex="-1">${tr('작업하던 AI에게 연결을 맡기세요')}</h2><p>${tr('한 번의 요청으로 코드 연결부터 첫 분석까지 진행합니다.')}</p>
+    <p class="s">${tr('첫 분석에 AI 요금·한도가 적용됩니다.')} ${tr('분석 전 승인 필요')}</p>
     <div class="ctl"><button class="btn ${G.connection?'quiet':'primary'}" id="guideCopySetup">${tr('AI에게 보낼 요청 복사')}</button><span id="guideCopyState" role="status">${G.copied?tr('복사했습니다. 작업하던 AI 채팅에 붙여 넣으세요.'):''}</span></div>
     ${G.setup?helpDetails(`<pre class="prompt mono">${esc(G.setup.text)}</pre>`,'연결 안내 보기'):''}
     <div class="ctl">${guideManual()}</div>
@@ -76,7 +76,7 @@ function guideBody(){
 function guideAnalysisBody(m){
   const a=guideAnalysisState(),done=a.state==='done';
   const status=!S.project?tr('먼저 서비스를 연결하세요.'):!m?tr('아직 지도를 가져오지 않았습니다.'):`<span class="dot ${done?'ok':''}"></span>${tr(GUIDE_ANALYSIS_TEXT[a.state])}`;
-  const waiting=guideAwaiting() && !done?`<p class="s">${tr('AI가 분석을 마치면 앱으로 돌아올 때 저장된 결과를 자동으로 읽습니다.')}</p>`:'';
+  const waiting=guideAwaiting() && !done?`<p class="s">${tr('앱으로 돌아오면 결과를 읽습니다.')}</p>`:'';
   const codes=m && a.codes.length?`<ul>${a.codes.map(c=>`<li data-guide-code><b>${esc(c.name)}</b> · ${tr(GUIDE_CODE_ANALYSIS[c.state])}</li>`).join('')}</ul>`:'';
   const plan=a.state==='remaining'?planSummary({remaining:a.plan.tasks,tasks:[],blocked:a.plan.blocked}):'';
   const error=G.readError?`<p role="alert" class="s error">${tr('저장된 결과를 읽지 못했습니다.')}</p>`:!m && S.project && $('status').classList.contains('error')?`<p role="alert" class="s error">${esc($('status').textContent)}</p>`:'';
@@ -86,7 +86,7 @@ function guideAnalysisBody(m){
     :`<button class="btn primary" id="guideReadNow" ${G.reading?'disabled':''}>${tr('저장된 결과 읽기')}</button><button class="btn quiet" id="guideAnalysis">${tr(['missing','language','stale'].includes(a.state)?'직접 분석 요청 만들기':'남은 분석 요청 만들기')}</button>`;
   return `<h2 id="guideTitle" tabindex="-1">${tr('첫 분석')}</h2>
     <p role="status" id="guideMapState">${status}</p>${codes}${plan}${error}${waiting}
-    ${m && !done?`<p class="s">${tr('분석은 연결한 AI가 하며, 그 AI의 요금·사용 한도가 적용됩니다. 기본 지도는 AI 없이 만듭니다.')}</p>`:''}
+    ${m && !done?`<p class="s">${tr('기본 지도는 AI 미사용 · 분석은 계정 요금 적용')}</p>`:''}
     <div class="ctl">${buttons}</div>`;
 }
 // A service that is already shown is edited in place; only an empty workspace starts a new one.

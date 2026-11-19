@@ -59,6 +59,11 @@ header > input[type=search] { flex:1 1 var(--space-0); max-width:var(--size-sear
 .search-results { margin-bottom:var(--space-6) } button.row { width:100%; font:inherit; color:inherit; text-align:left; background:none; border-left:none; border-right:none; border-bottom:none }
 .chips { display:inline-flex; max-width:100%; min-width:var(--space-0); flex-wrap:wrap; gap:var(--space-2) }
 .hint.start { text-align:left; max-width:calc(var(--size-inspector) + var(--size-column)); margin:var(--space-0) auto } .hint.start ol { padding-left:var(--space-6) }
+#automaticAnalysis { border-top:var(--border-hairline); padding-top:var(--space-4) }
+#automaticAnalysis > summary { font:var(--font-secondary); color:var(--color-text-secondary) }
+#insp > h2 + h3 { margin-top:var(--space-5); margin-bottom:var(--space-2) }
+#insp .ctl > .primary { font-weight:var(--weight-strong) }
+
 /* 키보드로 고른 곳이 보이게 */
 [role=button]:focus-visible, button:focus-visible, summary:focus-visible, select:focus-visible, input:focus-visible { outline:var(--outline-focus) }
 

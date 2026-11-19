@@ -34,7 +34,7 @@ try{
   S.lang=lang;S.briefings={dev:{[lang]:{state:'not_analyzed',warnings,result:null}}};
   const pane=$('insp');pane.innerHTML=briefingPanel();let text=visibleText(pane);
   assert(!text.includes('legacy'),'Internal legacy label must not be displayed');
-  const limit=tr('일부 자료가 빠졌을 수 있어요.');assert(text.split(limit).length-1===2,'One limit warning per code connection, not per collection part');
+  const limit=tr('일부 자료 누락 가능');assert(text.split(limit).length-1===2,'One limit warning per code connection, not per collection part');
   assert(text.includes('Lumen')&&text.includes('Worker'),'Connection display names must remain distinct');
   assert(text.includes(tr('수집에 실패했습니다. 다시 수집해 주세요.')),'An actionable collection failure remains visible');
   const rule=tr('같은 문제의 PR은 묶고, 다른 문제를 푼 PR은 나눠 설명합니다.');
@@ -66,7 +66,7 @@ try{
   assert(!pane.querySelector('.request-steps')&&!/[123]\. /.test(text),'No numbered step cards');
   assert(text.split(tr('작업하던 AI 채팅에 요청을 붙여 넣으세요.')).length===2,'Paste guidance appears once');
   assert(!visibleButtons().some(b=>b.dataset.analysisTask),'Other analyses are collapsed after a request is prepared');
-  assert(!visibleButtons().some(b=>b.id==='checkAnalysisResults')&&$('checkAnalysisResults'),'Manual check is secondary but available');
+  assert(visibleButtons().includes($('checkAnalysisResults'))&&!$('checkAnalysisResults').classList.contains('primary'),'Result refresh is visible and secondary before copying');
   assert(!text.includes(tr('결과만 읽습니다. 새로고침이 아니며 바뀐 것과 비교 시작점은 유지됩니다.')),'Repeated policy text is collapsed');assert(!pane.querySelector('details details'),'Analysis help does not nest disclosures');
   S.analysisRequest.copied=true;renderAgentPrompt();text=visibleText(pane);assert(text.includes(tr('복사했습니다. 작업하던 AI 채팅에 붙여 넣고, AI가 끝나면 앱으로 돌아오세요.'))&&!/분석 중|Analyzing/.test(text),'After copy it asks to paste and return without claiming the AI runs');
   S.analysisRequest.state='saved';renderAgentPrompt();assert(visibleButtons().filter(b=>b.classList.contains('primary')).map(b=>b.id).join()==='viewAnalysisResults'&&$('cpAgent')&&!$('cpAgent').classList.contains('primary'),'Saved results become the primary action; copy stays secondary');
