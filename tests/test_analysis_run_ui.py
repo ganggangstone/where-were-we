@@ -95,6 +95,16 @@ const args=calls.filter(c=>c.command==='analysis_run_start').at(-1).args;
 assert(args.scope.intent.task==='groups' && args.scope.intent.targets.length===0,'Explicit grouping intent reaches native bridge');
 ''')
 
+    def test_explicit_local_scope_sends_only_selected_resource(self):
+        self.check_js(r'''
+S.analysisChoice={task:'scope_overview',target:'backend',detailTarget:'/work'};
+await open();await flush();
+assert(count('analysis_run_start')===0 && !$('startFullAnalysis'),'Only direct confirmation starts the bounded request');
+await $('startAppAnalysis').onclick();
+const started=calls.find(c=>c.command==='analysis_run_start').args;
+assert(started.scope.repository==='backend' && started.scope.intent.task==='overview' && JSON.stringify(started.scope.intent.targets)===JSON.stringify([{repository:'backend',target:'/work'}]),'Only the selected repository and path reach the backend');
+''')
+
     def test_initial_overview_and_full_analysis_have_distinct_explicit_buttons(self):
         self.check_js(r'''
 await open();

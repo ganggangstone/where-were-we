@@ -83,6 +83,15 @@ class RefreshFirstWebKit(unittest.TestCase):
  $('overviewOpenScope0').click();
  check(S.view==='sys' && $('map').querySelector('[data-local-resource="/profiles"]').getAttribute('aria-expanded')==='true','Open the exact local group from a sampled overview');
  check(!calls.some(c=>c.command==='analysis_run_start'),'Viewing saved evidence starts no AI');
+ $('explainLocalScope').click();await new Promise(r=>setTimeout(r,30));
+ check($('insp').innerText.includes('/profiles') && $('overviewLimits') && $('startAppAnalysis') && !$('startFullAnalysis'),'Scope has an explicit generation control and bounded disclosure');
+ check(!calls.some(c=>c.command==='analysis_run_start'),'Opening scoped AI details is free');
+ const record={...window.runningAnalysis.saved_overviews[0],resource:'/profiles',feature_groups:[{name:'Profile evidence',connection_ids:[1]}]};
+ window.runningAnalysis.saved_scope_overviews=[{...record,resource:'/items'},record];
+ await AnalysisRun.check();
+ check($('insp').innerText.includes('Profile evidence') && !$('startAppAnalysis') && !$('insp').innerText.includes('Saved items'),'Stored path reopens independently from the initial overview without another model turn');
+ window.runningAnalysis.saved_scope_overviews=[{...record,commit:'different'}];await AnalysisRun.check();
+ check(!$('insp').innerText.includes('Profile evidence') && $('startAppAnalysis'),'A changed pin hides stale path explanations');
  S.agentPrompt=null;
  const paths=['src/nested/<example name>.go','src/nested/worker.ts','src/nested/notes.md',...Array.from({length:80},(_,i)=>'src/item'+String(i).padStart(2,'0')+'.go')];
  window.mutateBundle=b=>{b.dev.structure_indexes=[{...index,files:[],imports:[],service_flow:null}];b.dev.inventories=[{repository:'web',commit:pin,files:82,paths,paths_truncated:true,directories:[['src',82]]}]};
