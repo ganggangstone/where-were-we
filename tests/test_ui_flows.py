@@ -57,7 +57,7 @@ window.__TAURI__={core:{invoke:async(command,args)=>{
  if(command==='app_update_status')return null;
  if(command==='control_poll')return null;
  if(command==='control_focus')return null;
- if(command==='analysis_run_status')return 'null';
+ if(command==='analysis_run_status')return JSON.stringify(window.runningAnalysis || null);
  if(command==='analysis_providers' && window.appAnalysisFixture)return JSON.stringify({providers:[{id:'claude',available:true,authenticated:true,account:{email:'fictional@example.invalid'}}]});
  if(command==='analysis_run_start' && window.appAnalysisFixture)return window.completeAppAnalysis ? JSON.stringify({...args.scope,id:'fixture-'+calls.length,state:'completed',completed_tasks:[{task:args.scope.intent.task}],tasks:[]}) : 'null';
  if(command==='analysis_plan'){if(window.holdPlan)await window.holdPlan;if(window.failPlan)throw Error('fictional plan failure');return JSON.stringify(window.planResult||{tasks:[],blocked:[],requirements:[],handoff:'',up_to_date:true});}
@@ -807,6 +807,19 @@ class Flows(unittest.TestCase):
  openAnalysisPanel('briefing_request');await wait();await $('startAppAnalysis').onclick();await wait();
  await $('viewAppAnalysis').onclick();await wait();assert(S.view==='changes','Saved briefing opens changes');
 ''')
+
+    def test_program_card_opens_while_app_analysis_is_running(self):
+        self.check(r"""
+ S.view='sys';S.node=null;render();
+ window.runningAnalysis={id:'active',project:S.project,repository:S.repository,branch:S.branch,lang:S.lang,state:'running',intent:{task:'all',targets:[]}};
+ openAnalysisPanel();await AnalysisRun.check();await wait();
+ assert($('cancelAppAnalysis'),'In-progress analysis is visible');
+ document.querySelector('.card[data-node="api::worker"]').click();
+ assert(S.node==='api::worker' && $('makeProgramJobs') && !$('cancelAppAnalysis'),'Selected program details remain visible during analysis');
+ await AnalysisRun.check();await wait();
+ assert($('makeProgramJobs') && !$('cancelAppAnalysis'),'Polling keeps the selected program visible');
+ assert(!calls.some(c=>['analysis_run_start','analysis_run_cancel'].includes(c.command)),'Browsing neither starts nor cancels analysis');
+""")
 
     def test_on_demand_app_controls_keep_real_targets_and_translations(self):
         self.check(r'''

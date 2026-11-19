@@ -1621,7 +1621,7 @@ function selectScreen(path,relations=false) {
   if(relations)return setFocus('screen|'+path);
   S.sel=path;S.open=null;S.step=-1;S.ev=-1;S.view='map';render();$('insp').scrollTop=0;
 }
-function selectProgram(id,toggle=true) {S.controlTarget=null;S.view='sys';S.node=toggle && S.node===id?null:id;render();}
+function selectProgram(id,toggle=true) {S.agentPrompt=null;S.controlTarget=null;S.view='sys';S.node=toggle && S.node===id?null:id;render();}
 function setFocus(f) { S.agentPrompt = null; const i = f.indexOf('|'); const t = f.slice(0, i), id = f.slice(i + 1); S.focus = { t, id }; S.view = 'focus'; S.step = -1; S.ev = -1;
   if (t === 'screen') { S.sel = id; S.open = null; } if (t === 'route') { const u = routeUse(M())[id]; S.sel=u?.[0]?.s.path || null;S.open=id; }
   render(); $('map').scrollTop = 0; $('insp').scrollTop = 0; }
