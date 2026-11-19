@@ -1082,12 +1082,13 @@ def _reuse_scope(overview,pin,scope,rid,contexts):
         repo,raw,_,head=contexts[rid]
         index=(raw.get(scope['branch']) or {}).get('structure_index') or {}
         if head!=pin['commit'] or index.get('commit')!=head or index.get('version')!=structure_index.VERSION:return None
-        changes=_git(repo['path'],'diff-tree','--no-renames','--no-commit-id','--name-only','-r','-z',overview['commit'],head)
-        for raw_path in changes.split(b'\0'):
-            if not raw_path:continue
-            path=raw_path.decode()
-            if not path.startswith('docs/') or PurePosixPath(path).suffix.lower() not in ('.md','.rst','.txt'):return None
-            if path in overview['files'] or any(path in ai_extract.files_in(c) for c in overview['connections']):return None
+        pair=(rid,overview['commit'],head)
+        if pair not in contexts:
+            changes=_git(repo['path'],'diff-tree','--no-renames','--no-commit-id','--name-only','-r','-z',overview['commit'],head)
+            paths={p.decode() for p in changes.split(b'\0') if p}
+            contexts[pair]=paths if all(p.startswith('docs/') and PurePosixPath(p).suffix.lower() in ('.md','.rst','.txt') for p in paths) else None
+        changed=contexts[pair]
+        if changed is None or changed.intersection(overview['files']) or changed.intersection(ai_extract.files_in(overview['connections'])):return None
         anchors,_,total=_overview_anchors(index,overview['resource'])
         if _scope_evidence_digest(index,overview['resource'],anchors)!=overview['evidence_digest']:return None
         return {**overview,**pin,'generated_commit':overview.get('generated_commit',overview['commit']),

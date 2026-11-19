@@ -302,7 +302,10 @@ def users(): pass
         self.git('add','.');self.git('commit','-qm','Update documentation')
         self.assertEqual(analysis_run.status(project='demo',lang='en')['saved_scope_overviews'],[])
         current=refresh_index()
-        saved=analysis_run.status(project='demo',lang='en')['saved_scope_overviews']
+        from unittest.mock import patch
+        with patch.object(analysis_run,'_git',wraps=analysis_run._git) as git:
+            saved=analysis_run.status(project='demo',lang='en')['saved_scope_overviews']
+        self.assertEqual(sum('diff-tree' in c.args for c in git.call_args_list),1)
         self.assertEqual({v['resource'] for v in saved},{'/stock','/orders'})
         for v in saved:self.assertEqual((v['commit'],v['generated_commit']),(current,initial['commit']))
         reused=analysis_run.run(start('/stock'),lambda *a,**k:self.fail('documentation-only edit reached AI'))
