@@ -390,13 +390,32 @@ def git_tree_entries(repo, commit):
             yield metadata.split(b' ', 1)[0], path
 
 
+INVENTORY_PATH_LIMIT = 32_768
+INVENTORY_PATH_BYTES = 1024 * 1024
+
+
 def tree_inventory(entries, commit):
+    from analysis_run import _secret
     folders = defaultdict(int)
+    paths = []
+    path_bytes = 0
+    truncated = False
     for mode, path in entries:
         if mode in (b'100644', b'100755'):
             parent, slash, _ = path.partition(b'/')
             folders[parent if slash else b''] += 1
-    return {'commit': commit, 'files': sum(folders.values()),
+            try:
+                name = path.decode('utf-8')
+            except UnicodeDecodeError:
+                continue
+            if _secret(name):
+                continue
+            if len(paths) >= INVENTORY_PATH_LIMIT or path_bytes + len(path) > INVENTORY_PATH_BYTES:
+                truncated = True
+                continue
+            paths.append(name)
+            path_bytes += len(path)
+    return {'commit': commit, 'files': sum(folders.values()), 'paths':paths, 'paths_truncated':truncated,
             'directories': [[name.decode('utf-8', 'backslashreplace'), count]
                             for name, count in sorted(folders.items())]}
 

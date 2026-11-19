@@ -82,7 +82,7 @@ for b in ("dev", "main"):
         # A normal refresh must not spend the user's AI quota or erase an AI map.
         import ai_extract
         if ai_extract.carry_unchanged(cur,REPO,ref):have=ref  # identical tree: every saved input is proven unchanged
-        if (cur.get('inventory') or {}).get('commit') != ref:
+        if (cur.get('inventory') or {}).get('commit') != ref or 'paths' not in cur['inventory']:
             cur['inventory'] = mapcore.tree_inventory(mapcore.git_tree_entries(REPO, ref), ref)
         import structure_index
         if ((cur.get('structure_index') or {}).get('commit') != ref or

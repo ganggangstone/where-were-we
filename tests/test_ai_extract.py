@@ -123,8 +123,21 @@ class Analysis(unittest.TestCase):
         self.git('commit', '-qm', 'Later revision')
         basic = ai_extract.basic_catalog(str(self.repo), pin, {})
         self.assertEqual(basic['inventory'], {'commit': pin, 'files': 4,
-                         'directories': [['', 1], ['pages', 1], ['server', 1], ['한글', 1]]})
+                         'directories': [['', 1], ['pages', 1], ['server', 1], ['한글', 1]],
+                         'paths':['pages/items.vue','root.txt','server/items.go','한글/two\nlines.txt'],
+                         'paths_truncated':False})
         self.assertEqual(basic['screens'], [])
+
+    def test_language_independent_inventory_excludes_private_paths_and_caps_list_size(self):
+        import mapcore
+        entries=[(b'100644',p) for p in (b'.env',b'.aws/private.rs',b'src/main.rs',b'src/tiny.rs',b'docs/a.md')]
+        with patch.object(mapcore,'INVENTORY_PATH_BYTES',11):
+            inventory=mapcore.tree_inventory(entries,'commit')
+        self.assertEqual(inventory['files'],5)
+        self.assertEqual(inventory['paths'],['src/main.rs'])
+        self.assertTrue(inventory['paths_truncated'])
+        with patch.object(mapcore,'INVENTORY_PATH_LIMIT',2):
+            self.assertEqual(mapcore.tree_inventory(entries,'commit')['paths'],['src/main.rs','src/tiny.rs'])
 
     def test_normal_refresh_retains_ai_map_and_marks_changed_commit(self):
         import runpy
