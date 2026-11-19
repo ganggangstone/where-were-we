@@ -122,7 +122,7 @@ class RefreshFirstWebKit(unittest.TestCase):
  check(!calls.some(c=>c.command==='analysis_run_start'),'Viewing saved evidence starts no AI');
  check(!$('flowFeature') && !$('flowProof').open && $('map').querySelector('[data-flow-operation]'),'Operations precede closed technical evidence');
  check($('flowSources') && !$('flowSources').open && $('map').querySelector('.flow-trace').innerText.includes('client.js'),'Group shows connected code while documentation and module counts stay closed');
- for(const [ko,en] of [['기능 (베타)','Features (beta)'],['AI 설명 (베타)','AI explanation (beta)'],['문서·모듈','Docs and modules'],['호출 흐름','Request flow'],['구성 요소','Components']]){
+ for(const [ko,en] of [['기능 (베타)','Features (beta)'],['AI 설명 (베타)','AI explanation (beta)'],['문서·모듈','Docs and modules'],['저장된 페이지','Saved pages'],['미저장 페이지로','Go to unsaved page'],['호출 흐름','Request flow'],['구성 요소','Components']]){
    const old=S.lang;S.lang='en';check(tr(ko)===en,'English '+ko);S.lang=old;
  }
  $('flowProof').querySelector('summary').click();check($('flowProof').open && $('flowProof').innerText.includes('client.js:5'),'Endpoint evidence opens on demand');
@@ -163,8 +163,15 @@ class RefreshFirstWebKit(unittest.TestCase):
  const detail=box().querySelector('[data-directory-detail]');check(detail.innerText.includes('locate') && detail.innerText.includes('outside.ts') && detail.innerText.includes('src/nested/worker.ts:3'),'Choosing a folder result exposes declarations and outgoing imports');
  detail.querySelector('[data-inventory-file$="/outside.ts"]').click();check(calls.at(-1).args.url==='zed://file/fictional/web/outside.ts','Folder import opens its actual destination without borrowing the importing line');
  const folderArgs=calls.filter(c=>c.command==='directory_structure').at(-1).args;check(folderArgs.commit===pin && folderArgs.directory==='src/nested' && folderArgs.repository==='web','Folder analysis is pinned to the selected repository and directory');
+ const originalFolder=S.inventoryDirectory.result;
+ const sparse={...originalFolder,pagination:{...originalFolder.pagination,total_pages:5},cache_progress:{pages:[1,2,4],total_pages:5,first_missing_page:3}};
+ const sample=document.createElement('div');sample.innerHTML=directoryDetail({...S.inventoryDirectory,result:sparse},file=>'zed://file/'+file);
+ check(sample.querySelector('[data-missing-page]').dataset.directoryPage==='3' && sample.querySelector('[data-directory-page="2"]').innerText===tr('다음'),'A nonadjacent gap is directly reachable while preserving sequential navigation');
+ const jump=box().querySelector('[data-missing-page]');
+ check(jump?.dataset.directoryPage==='2' && jump.innerText===tr('미저장 페이지로')+' · 2' && box().querySelector('[data-saved-pages]').innerText===tr('저장된 페이지')+' 1/2','Cached pages and first available gap use one adjacent control');
  const nextPage=()=>box().querySelector('[data-directory-page="2"]').click();
  nextPage();await new Promise(r=>setTimeout(r,20));
+ check(!box().querySelector('[data-missing-page]') && box().querySelector('[data-saved-pages]').innerText.endsWith('2/2'),'Fully cached folder has no unsaved-page action');
  check(box().innerText.includes(tr('확인한 파일')+' 0/1') && box().querySelector('[data-directory-page="3"]').disabled,'Unparsed last page retains counts and navigation');
  box().querySelector('[data-directory-page="1"]').click();await new Promise(r=>setTimeout(r,10));
  nextPage();box().querySelector('[data-inspect-directory]').click();await new Promise(r=>setTimeout(r,20));
@@ -192,8 +199,9 @@ window.__TAURI__.core.invoke=async(command,args)=>{
  if(command==='directory_structure'){
    calls.push({command,args});
    const pagination={page:args.page,total_pages:2,selected_files:args.page===2?1:2};
-   if(args.page===2){await new Promise(r=>setTimeout(r,5));return JSON.stringify({...args,pagination,status:'indexed',files:[],coverage:{candidate_files:3,indexed_files:0}});}
-   return JSON.stringify({...args,pagination,status:'indexed',files:[{file:'src/nested/a.py',language:'python',declarations:[]},{file:'src/nested/worker.ts',language:'typescript',declarations:[{kind:'function',name:'locate',line:8}]}],imports:[{file:'src/nested/worker.ts',target:'outside.ts',line:3}],coverage:{candidate_files:3,indexed_files:2,skipped_files:1,truncated:true}});
+   const cache_progress={pages:args.page===2?[1,2]:[1],total_pages:2,first_missing_page:args.page===2?null:2};
+   if(args.page===2){await new Promise(r=>setTimeout(r,5));return JSON.stringify({...args,pagination,cache_progress,status:'indexed',files:[],coverage:{candidate_files:3,indexed_files:0}});}
+   return JSON.stringify({...args,pagination,cache_progress,status:'indexed',files:[{file:'src/nested/a.py',language:'python',declarations:[]},{file:'src/nested/worker.ts',language:'typescript',declarations:[{kind:'function',name:'locate',line:8}]}],imports:[{file:'src/nested/worker.ts',target:'outside.ts',line:3}],coverage:{candidate_files:3,indexed_files:2,skipped_files:1,truncated:true}});
  }
  if(command!=='file_structure')return originalNative(command,args);
  calls.push({command,args});
