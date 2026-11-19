@@ -99,9 +99,13 @@ class RefreshFirstWebKit(unittest.TestCase):
  check(!$('routeArea'),'Short route lists omit the area picker');
  const registered=index.service_flow.registered_routes;
  index.service_flow.registered_routes=[...registered,...Array.from({length:10},(_,i)=>({method:'GET',path:'/api/v2/teams/'+i,server:{file:'teams.py',line:i+5,function:'list'}}))];
+ index.service_flow.registered_route_groups=Array.from({length:10},(_,i)=>({resource:'/api/v2/teams/'+i,registered_route_indexes:[registered.length+i]}));
  await doRefresh();const chooseArea=value=>{const menu=$('routeArea');menu.value=value;menu.dispatchEvent(new Event('change'));};
  check($('routeArea').value==='' && [...$('routeArea').options].some(o=>o.text.endsWith('/api/v2/teams · 10')),'Versioned prefix and distinct standalone count');
  chooseArea('/api/v2/teams');routes().querySelector('[data-route-page="1"]').click();check(routes().querySelectorAll('[data-registered-route]').length===2 && routes().innerText.includes('/api/v2/teams/9'),'Page within one path area');
+ $('explainRouteArea').click();
+ check(S.analysisChoice.area.resources.length===10 && S.analysisChoice.area.commit===index.commit && S.analysisChoice.maxCalls===10 && $('resourceLimits').innerText.includes('10') && !$('chooseResourceBatch') && !calls.some(c=>c.command==='analysis_run_start'),'Area preview binds all pages, commit and cost before any model call');
+ S.agentPrompt=null;S.analysisChoice=null;S.agentPurpose=null;index.service_flow.registered_route_groups=[];AnalysisRun.syncScope();
  chooseArea('');check(routes().innerText.includes('/internal/0'),'All areas restore the first page');
  index.service_flow.registered_routes=registered;await doRefresh();routes().open=true;
  check(routes().querySelectorAll('[data-registered-route]').length===8 && !routes().innerText.includes('/items'),'Registered routes page omits already connected endpoints');

@@ -12,7 +12,7 @@ const AnalysisRun = (() => {
     const task=({resource_batch:'resources',scope_overview:'overview',quick_overview:'overview',analysis_plan:'all',analysis_request:'analysis',make_system:'system',suggest_groups:'groups',make_steps:'steps',make_jobs:'jobs',briefing_request:'briefing'})[command] || 'all';
     const args={...scope(),...(task==='steps'?{screen:choice.detailTarget}:task==='jobs'?{node:choice.detailTarget}:{})};
     const targets=['steps','jobs'].includes(task) ? (choice.targets || analysisCalls(command,args).map(a=>({repository:a.repository || '',target:a.screen || a.node}))) : [];
-    if(task==='resources')return {task,targets:[],max_calls:choice.maxCalls};
+    if(task==='resources')return {task,targets:[],max_calls:choice.maxCalls,...(choice.area?{area:choice.area}:{})};
     return {task,targets:command==='scope_overview'?[{repository:scope().repository,target:choice.detailTarget}]:targets};
   }
   const key = () => JSON.stringify([scope(), S.analysisChoice, S.loadToken]);
@@ -298,6 +298,11 @@ const AnalysisRun = (() => {
     });
     return `<section class="sect"><h3>${active() ? text('분석 중 확인한 기능','Features verified so far') : text('확인한 프로그램','Verified programs')}</h3>${rows.join('')}</section>`;
   }
+  function savedBatchGroups() {
+    const {area}=intent(),repository=scope().repository;
+    return (run?.saved_scope_overviews || []).filter(group=>(!repository || group.repository===repository)
+      && (!area || group.repository===area.repository && area.resources.includes(group.resource)));
+  }
   function localResourceCount() {
     const map=S.maps?.[S.branch],repo=scope().repository;
     const indexes=map?.structure_indexes || (map?.structure_index?[map.structure_index]:[]);
@@ -331,7 +336,7 @@ const AnalysisRun = (() => {
     const runAccount = run?.account?.email || run?.account?.id;
     const choice=intent();
     const cached=run?.resource_estimate?.cached || 0;
-    const savedGroups=batch && batchRun?(run.saved_scope_overviews || []).filter(group=>!scope().repository || scope().repository===group.repository):[];
+    const savedGroups=batch && batchRun?savedBatchGroups():[];
     const resultPicker=savedGroups.length?`<div class="ctl"><label>${text('저장된 경로 설명','Saved path explanations')} <select id="batchSavedResource">${savedGroups.map((group,i)=>`<option value="${i}">${esc([group.repository,group.resource].filter(Boolean).join(' · '))}</option>`).join('')}</select></label><button class="btn quiet" id="openBatchSaved">${text('설명 열기','Open explanation')}</button></div>`:'';
     const targets=choice.targets.map(t=>[t.repository,t.target].filter(Boolean).map(esc).join(' · '));
     const scoped=S.analysisChoice?.task==='scope_overview';
@@ -351,7 +356,7 @@ const AnalysisRun = (() => {
       ${!active() && choice.task==='overview' ? `<p class="s" id="overviewLimits">${scoped?text('선택한 경로 · 최대 4개 파일, AI 1회 이내','Selected path: up to 4 files, 1 AI call maximum.'):text('첫 개요 · 연결한 코드마다 최대 4개 파일, AI 1회 이내','Per repository: up to 4 files, 1 AI call maximum.')}</p>` : ''}
       ${batch && !active()?`<p class="s" id="resourceLimits">${text('경로 묶음 '+choice.max_calls+'개 · AI 최대 '+choice.max_calls+'회','Path groups: '+choice.max_calls+' · Up to '+choice.max_calls+' AI calls')}</p>`:''}
       <div class="ctl">${active() ? `<button class="btn" id="cancelAppAnalysis" ${busy || run.cancel_requested ? 'disabled' : ''}>${text('분석 취소','Cancel analysis')}</button>` : sameScope() && ['failed','cancelled'].includes(run?.state) ? `<button class="btn primary" id="retryAppAnalysis" ${canStart ? '' : 'disabled'}>${text('현재 코드로 다시 시도','Retry with current code')}</button>` : `<button class="btn primary" id="startAppAnalysis" ${batch?'aria-describedby="resourceLimits"':choice.task==='overview' ? 'aria-describedby="overviewLimits"' : ''} ${canStart ? '' : 'disabled'}>${esc(startLabel)}</button>`}
-      ${resources && !scoped && (!batch || resources!==choice.max_calls) && !active()?`<button class="btn quiet" id="chooseResourceBatch">${text('경로 묶음별 AI 설명 (베타)','AI explanations by path group (beta)')}</button>`:''}
+      ${resources && !choice.area && !scoped && (!batch || resources!==choice.max_calls) && !active()?`<button class="btn quiet" id="chooseResourceBatch">${text('경로 묶음별 AI 설명 (베타)','AI explanations by path group (beta)')}</button>`:''}
       ${!scoped && !active() && intent().task==='overview' ? `<button class="btn quiet" id="startFullAnalysis" ${canStart ? '' : 'disabled'}>${text('전체 코드 분석 (베타)','Analyze full codebase (beta)')}</button>` : ''}
       <button class="btn quiet" id="checkAppAnalysis" ${busy || providerBusy ? 'disabled' : ''}>${text('계정·상태 다시 확인','Check account and status')}</button>
       ${!batchRun && sameScope() && done > 0 && run.intent?.task!=='overview' ? `<button class="btn quiet" id="viewAppAnalysis">${text('저장된 결과 보기','View saved results')}</button>` : ''}</div>
@@ -402,7 +407,7 @@ const AnalysisRun = (() => {
     });
     if ($('startAppAnalysis')) $('startAppAnalysis').onclick = () => execute('analysis_run_start');
     if ($('openBatchSaved')) $('openBatchSaved').onclick=()=>{
-      const groups=(run?.saved_scope_overviews || []).filter(group=>!scope().repository || scope().repository===group.repository);
+      const groups=savedBatchGroups();
       const selected=groups[Number($('batchSavedResource').value)];
       if(selected)openAnalysisPanel('scope_overview',selected.resource,selected.repository);
     };
