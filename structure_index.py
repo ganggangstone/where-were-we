@@ -1,16 +1,91 @@
-"""Local, commit-bound Python declarations and statically resolvable module imports."""
+"""Local, commit-bound declarations and statically resolvable module imports."""
 import ast
 import os
+import posixpath
+from functools import lru_cache
+from itertools import zip_longest
 from pathlib import PurePosixPath
 import re
 import subprocess
 import warnings
+
+import service_flow
 
 MAX_FILES = 2048
 MAX_BYTES = 64 * 1024 * 1024
 MAX_FILE_BYTES = 512 * 1024
 MAX_DECLARATIONS = 20_000
 MAX_IMPORTS = 20_000
+
+
+VERSION = 2
+JS_EXTENSIONS = {'.js', '.jsx', '.mjs', '.cjs'}
+TS_EXTENSIONS = {'.ts', '.tsx', '.mts', '.cts'}
+SUFFIXES = JS_EXTENSIONS | TS_EXTENSIONS
+
+
+@lru_cache(maxsize=3)
+def _parser(grammar):
+    from tree_sitter import Language, Parser
+    if grammar == 'javascript':
+        from tree_sitter_javascript import language
+    elif grammar == 'tsx':
+        from tree_sitter_typescript import language_tsx as language
+    else:
+        from tree_sitter_typescript import language_typescript as language
+    return Parser(Language(language()))
+
+
+def _script(file, raw, candidates):
+    suffix = PurePosixPath(file).suffix
+    grammar = 'javascript' if suffix in JS_EXTENSIONS else 'tsx' if suffix == '.tsx' else 'typescript'
+    try:
+        raw.decode('utf-8')
+    except UnicodeDecodeError:
+        return None
+    root = _parser(grammar).parse(raw).root_node
+    if root.has_error:
+        return None
+    kinds = {'function_declaration':'function', 'generator_function_declaration':'function',
+             'class_declaration':'class', 'abstract_class_declaration':'class', 'method_definition':'method',
+             'interface_declaration':'interface', 'type_alias_declaration':'type', 'enum_declaration':'enum'}
+    rows, edges, unresolved = [], [], 0
+    stack = [(root, '')]
+    while stack:
+        node, prefix = stack.pop()
+        kind = kinds.get(node.type)
+        if node.type == 'variable_declarator':
+            value = node.child_by_field_name('value')
+            if value and value.type in ('arrow_function', 'function_expression', 'generator_function'):
+                kind = 'function'
+                if any(c.type == 'async' for c in value.children):
+                    kind = 'async_function'
+        name = node.child_by_field_name('name') if kind else None
+        if name and name.type in ('identifier', 'type_identifier', 'property_identifier', 'private_property_identifier'):
+            if kind == 'function' and any(c.type == 'async' for c in node.children):
+                kind = 'async_function'
+            qualified = prefix + name.text.decode()
+            rows.append({'name':qualified, 'kind':kind, 'line':name.start_point.row + 1})
+            prefix = qualified + '.'
+        if node.type in ('import_statement', 'export_statement'):
+            source = node.child_by_field_name('source')
+            if source:
+                spec = source.text[1:-1].decode()
+                targets = set()
+                if spec.startswith(('./', '../')) and chr(92) not in spec:
+                    base = posixpath.normpath(posixpath.join(posixpath.dirname(file), spec))
+                    if base in candidates and PurePosixPath(base).suffix in SUFFIXES:
+                        targets.add(base)
+                    elif not PurePosixPath(base).suffix:
+                        targets = {path for ext in SUFFIXES for path in (base + ext, base + '/index' + ext) if path in candidates}
+                if len(targets) == 1:
+                    target = targets.pop()
+                    if target != file:
+                        edges.append({'file':file, 'line':source.start_point.row + 1, 'target':target})
+                else:
+                    unresolved += 1
+        stack.extend((child, prefix) for child in reversed(node.named_children))
+    return rows, edges, unresolved, service_flow.javascript_requests(root, file)
 
 
 def _blobs(git, env, selected):
@@ -42,6 +117,7 @@ def build(repo, commit, excluded=None):
     git = ['git', '-C', repo]
     tree = subprocess.check_output([*git, 'ls-tree', '-rlz', '--full-tree', commit], env=env)
     candidates = {}
+    languages = {}
     unsupported = 0
     denied = set()
     for entry in tree.split(b'\0'):
@@ -59,7 +135,10 @@ def build(repo, commit, excluded=None):
         if excluded(file):
             denied.add(oid)
             continue
-        if file.endswith('.py'):
+        suffix = PurePosixPath(file).suffix
+        lang = 'python' if suffix == '.py' else 'javascript' if suffix in JS_EXTENSIONS else 'typescript' if suffix in TS_EXTENSIONS else None
+        if lang:
+            languages[file] = lang
             candidates[file] = (oid, int(size))
         else:
             unsupported += 1
@@ -72,19 +151,46 @@ def build(repo, commit, excluded=None):
         return next(iter(matches)) if len(matches) == 1 else None
 
     files = []
+    routes = []
+    requests = []
     imports = []
     parsed = set()
     consumed = declarations = unresolved = 0
     selected = []
     truncated = False
-    for file, entry in candidates.items():
+    # A large repository can exhaust the file limit within a single language.
+    groups = [[(f, e) for f, e in candidates.items() if languages[f] == lang]
+              for lang in ('python', 'javascript', 'typescript')]
+    ordered = (pair for group in zip_longest(*groups) for pair in group if pair is not None)
+    for file, entry in ordered:
         size = entry[1]
         if size > MAX_FILE_BYTES or consumed + size > MAX_BYTES or len(selected) >= MAX_FILES:
             truncated = True
             continue
         selected.append((file, entry))
         consumed += size
+    unavailable = set()
     for file, raw in _blobs(git, env, selected):
+        language = languages[file]
+        if language != 'python':
+            try:
+                script = _script(file, raw, candidates)
+            except ImportError:
+                unavailable.add(language)
+                continue
+            if script is None:
+                continue
+            rows, edges, missing, file_requests = script
+            requests.extend(file_requests)
+            unresolved += missing
+            limited_rows = rows[:MAX_DECLARATIONS - declarations]
+            limited_edges = edges[:MAX_IMPORTS - len(imports)]
+            truncated |= len(rows) != len(limited_rows) or len(edges) != len(limited_edges)
+            imports.extend(limited_edges)
+            declarations += len(limited_rows)
+            files.append({'file':file, 'language':language, 'declarations':limited_rows})
+            parsed.add(file)
+            continue
         try:
             with warnings.catch_warnings():
                 warnings.simplefilter('ignore', SyntaxWarning)
@@ -92,6 +198,7 @@ def build(repo, commit, excluded=None):
         except (SyntaxError, ValueError, UnicodeError, RecursionError):
             continue
         parsed.add(file)
+        routes.extend(service_flow.python_routes(tree, file))
         rows = []
         stack = [(tree, '')]
         while stack:
@@ -134,10 +241,15 @@ def build(repo, commit, excluded=None):
                         else:
                             truncated = True
             stack.extend((child, prefix) for child in reversed(list(ast.iter_child_nodes(node))))
-        files.append({'file': file, 'declarations': rows})
+        files.append({'file': file, 'language':'python', 'declarations': rows})
     resolved = [edge for edge in imports if edge['target'] in parsed]
     unresolved += len(imports) - len(resolved)
     coverage = {'candidate_files': len(candidates), 'indexed_files': len(files),
                 'skipped_files': len(candidates) - len(files), 'unsupported_files': unsupported,
                 'unresolved_imports': unresolved, 'truncated': truncated}
-    return {'commit': commit, 'files': files, 'imports': resolved, 'coverage': coverage}
+    coverage['languages'] = {lang:{'candidate_files':sum(languages[f]==lang for f in candidates),
+                                   'indexed_files':sum(languages[f]==lang for f in parsed)}
+                             for lang in ('python','javascript','typescript')}
+    coverage['unavailable_languages'] = sorted(unavailable)
+    return {'version':VERSION,'commit': commit, 'files': files, 'imports': resolved, 'coverage': coverage,
+            'service_flow':service_flow.connect(routes, requests)}

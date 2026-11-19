@@ -147,7 +147,7 @@ class Analysis(unittest.TestCase):
         self.assertEqual(refreshed['inventory']['commit'], refreshed['analysis']['observed_commit'])
         self.assertNotEqual(refreshed['analysis']['observed_commit'],self.commit)
         self.assertEqual(refreshed['structure_index']['commit'],refreshed['analysis']['observed_commit'])
-        self.assertEqual(refreshed['structure_index']['files'],[{'file':'worker.py','declarations':[{'name':'run_worker','kind':'function','line':1}]}])
+        self.assertEqual(refreshed['structure_index']['files'],[{'file':'worker.py','language':'python','declarations':[{'name':'run_worker','kind':'function','line':1}]}])
         self.assertFalse(any(command[0]=='claude' for command in commands))
 
     def test_isolated_cli_action_and_split_repo_composition(self):

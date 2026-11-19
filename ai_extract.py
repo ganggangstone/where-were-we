@@ -683,8 +683,8 @@ def record(project,repository,branch,lang,commit,configuration,result_json,base=
             inventory = mapcore.tree_inventory(mapcore.git_tree_entries(repo['path'], head), head)
         updated[branch]['inventory'] = inventory
         index = (raw.get(branch) or {}).get('structure_index')
-        if not index or index.get('commit') != head:
-            import structure_index
+        import structure_index
+        if not index or index.get('commit') != head or index.get('version') != structure_index.VERSION:
             index = structure_index.build(repo['path'], head)
         updated[branch]['structure_index'] = index
         updated[branch]['analysis']['provider']=provider

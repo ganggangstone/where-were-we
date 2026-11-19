@@ -41,3 +41,42 @@ class Structure(unittest.TestCase):
                 limited=structure_index.build(root,pin)
             self.assertTrue(limited['coverage']['truncated'])
             self.assertLessEqual(limited['coverage']['indexed_files'],1)
+
+    def test_typescript_tsx_and_javascript_static_structure(self):
+        with tempfile.TemporaryDirectory() as root:
+            repo=Path(root)
+            git=lambda *args:subprocess.check_output(['git','-C',root,*args]).decode().strip()
+            git('init','-q')
+            sources={
+                'src/main.tsx':"""import {run} from './task';
+export {shared} from './shared.js';
+import {ambiguous} from './choice';
+import external from 'external';
+// import unused from './fake';
+const text = "export function fake() {}";
+export function View() { return <div/> }
+export const persist = async () => run();
+""",
+                'src/task.ts':"export interface Item { name: string }\nexport async function run() {}\n",
+                'src/choice.ts':'export type X = string;',
+                'src/choice.js':'export function noop() {}',
+                'src/shared.js':'export class Shared { save() {} }',
+                'src/bad.ts':'const = ;',
+            }
+            for name,txt in sources.items():
+                path=repo/name;path.parent.mkdir(parents=True,exist_ok=True);path.write_text(txt)
+            git('add','.');git('-c','user.name=Test','-c','user.email=test@example.invalid','commit','-qm','Pinned modules')
+            pin=git('rev-parse','HEAD')
+            index=structure_index.build(root,pin)
+            if index['coverage']['unavailable_languages']:
+                self.skipTest('Install the packaged JavaScript and TypeScript grammars to check parsing')
+            files={f['file']:f for f in index['files']}
+            self.assertEqual(files['src/main.tsx']['language'],'typescript')
+            self.assertEqual([(x['kind'],x['name'],x['line']) for x in files['src/main.tsx']['declarations']],
+                             [('function','View',7),('async_function','persist',8)])
+            self.assertEqual(files['src/shared.js']['declarations'][-1]['name'],'Shared.save')
+            self.assertEqual(files['src/task.ts']['declarations'][0]['kind'],'interface')
+            self.assertEqual(index['imports'],[{'file':'src/main.tsx','line':1,'target':'src/task.ts'},
+                                               {'file':'src/main.tsx','line':2,'target':'src/shared.js'}])
+            self.assertEqual(index['coverage']['unresolved_imports'],2)
+            self.assertEqual(index['coverage']['languages']['typescript'],{'candidate_files':4,'indexed_files':3})
