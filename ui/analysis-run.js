@@ -145,6 +145,20 @@ const AnalysisRun = (() => {
     const sampled=new Set(group.scope_coverage.selected);
     return (overviewIndex(group)?.service_flow?.feature_groups || []).map(row=>row.resource).filter(resource=>!sampled.has(resource));
   }
+  function savedStages(details) {
+    const rows=new Map();
+    for(const detail of details || []){
+      const kind=detail.kind;
+      const label=kind==='action' ? detail.label || detail.event
+        : kind==='data' && ['read','write'].includes(detail.operation) && detail.model
+          ? text(detail.operation==='read'?'모델 읽기':'모델 쓰기',detail.operation==='read'?'Model read':'Model write')+' · '+detail.model : '';
+      if(!label || !detail.evidence?.length)continue;
+      const key=JSON.stringify([kind,label]);
+      if(!rows.has(key))rows.set(key,{kind,label,sites:new Map()});
+      for(const site of detail.evidence)rows.get(key).sites.set(JSON.stringify([site.file,site.line]),site);
+    }
+    return [...rows.values()].map(({kind,label,sites})=>`<div ${kind==='action'?'data-flow-actions':'data-flow-storage'}><details class="sect"><summary>${esc(label)}</summary>${[...sites.values()].map(site=>`<div class="s"><code>${esc(site.file)}:${esc(site.line)}</code></div><pre>${esc(site.quote)}</pre>`).join('')}</details></div>`).join('');
+  }
   function overviewTree(group) {
     const files=group.files.map(file=>{
       const items=group.items.filter(item=>item.file===file);
@@ -158,9 +172,12 @@ const AnalysisRun = (() => {
     const edgesInSource=index?.service_flow?.connections || [];
     const sameSite=(a,b)=>a?.file===b.file && a?.line===b.line;
     const edgeHtml=edge=>{
-      const match=edgesInSource.find(row=>row.method===edge.method && row.path===edge.path && sameSite(row.client,edge.client) && sameSite(row.server,edge.server));
+      const matches=row=>row && row.method===edge.method && row.path===edge.path && sameSite(row.client,edge.client) && sameSite(row.server,edge.server);
+      const live=edgesInSource.find(matches);
+      const match=live || (matches(edge.source_connection)?edge.source_connection:null);
       const evidence=(file,line)=>`<code>${esc(file)}:${esc(line)}</code>`;
-      const stages=match?flowActions(match.actions,evidence)+flowDataSteps(match.data_steps,evidence):'';
+      const stored=!live && savedStages(edge.details);
+      const stages=stored || (match?flowActions(match.actions,evidence)+flowDataSteps(match.data_steps,evidence):'');
       const basis=edge.basis || match?.basis;
       const condition=basis==='path_template'?` · ${text('경로 패턴이 맞을 때','If the path pattern matches')} <code>${esc(edge.server_path || match?.server_path)}</code>`:basis==='declared_defaults'?` · ${text('설정·클라이언트 기본값에서 일치','Matches configured client and server defaults')}`:'';
       return `<li><b>${esc(edge.method)} ${esc(edge.path)}</b>${condition}<ul>${[

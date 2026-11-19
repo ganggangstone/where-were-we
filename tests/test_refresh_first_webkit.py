@@ -78,6 +78,16 @@ class RefreshFirstWebKit(unittest.TestCase):
  const button=$('insp').querySelector('[data-overview-feature]');button.click();
  const storage=$('insp').querySelector('[data-flow-storage] details');check(storage,'Opening the saved feature shows its model step');
  storage.querySelector('summary').click();check(storage.open && storage.innerText.includes('api.py:11'),'Model citation remains discoverable');
+ const savedEdge=window.runningAnalysis.saved_overviews[0].connections[0];
+ savedEdge.details=[{kind:'action',event:'onSubmit',label:'Add',evidence:[{file:'form.js',line:4,quote:'onSubmit={add}'}]},
+  {kind:'data',model:'Item',operation:'read',evidence:[{file:'api.py',line:11,quote:'select(Item)'},{file:'api.py',line:11,quote:'select(Item)'}]}];
+ savedEdge.basis='declared_defaults';
+ const live=S.maps.dev.structure_indexes;S.maps.dev.structure_indexes=[];
+ await AnalysisRun.check();
+ const replay=$('insp').querySelector('[data-flow-storage] details');replay.open=true;
+ check(replay.innerText.includes('select(Item)') && replay.innerText.split('api.py:11').length===2 && $('insp').querySelector('[data-flow-actions] summary').textContent==='Add','Verified stages reopen without local index or duplicate citations');
+ check($('insp').innerText.includes(S.lang==='en'?'Matches configured client and server defaults':'설정·클라이언트 기본값에서 일치'),'Stored conditional basis survives reopening');
+ S.maps.dev.structure_indexes=live;await AnalysisRun.check();
  const scopePicker=$('overviewLocalScope0');
  check(scopePicker && scopePicker.options.length===1 && scopePicker.value==='/profiles' && $('insp').innerText.includes('1/2'),'Only unreviewed local scopes are offered');
  $('overviewOpenScope0').click();
