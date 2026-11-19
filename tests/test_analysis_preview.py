@@ -289,8 +289,30 @@ def users(): pass
         self.assertEqual({v['resource'] for v in saved['saved_scope_overviews']},{'/orders','/stock'})
         failed=analysis_run.run(start('/invented'),lambda *a,**k:self.fail('unknown scope reached AI'))
         self.assertEqual(failed['state'],'failed')
-        self.git('commit','--allow-empty','-qm','Advance code')
+        import structure_index
+        def refresh_index():
+            repo=analysis_run.store.config('demo')['repositories'][0]
+            raw=self.raw()
+            commit=self.git('rev-parse','HEAD').strip()
+            raw['dev']['structure_index']=structure_index.build(str(self.repo),commit)
+            analysis_run.store.publish('demo','service',raw,{'fingerprint':analysis_run.store.fingerprint(repo)})
+            return commit
+        (self.repo/'docs').mkdir()
+        (self.repo/'docs/release.md').write_text('Documentation-only edit')
+        self.git('add','.');self.git('commit','-qm','Update documentation')
         self.assertEqual(analysis_run.status(project='demo',lang='en')['saved_scope_overviews'],[])
+        current=refresh_index()
+        saved=analysis_run.status(project='demo',lang='en')['saved_scope_overviews']
+        self.assertEqual({v['resource'] for v in saved},{'/stock','/orders'})
+        for v in saved:self.assertEqual((v['commit'],v['generated_commit']),(current,initial['commit']))
+        reused=analysis_run.run(start('/stock'),lambda *a,**k:self.fail('documentation-only edit reached AI'))
+        self.assertEqual(reused['scope_overviews']['service']['/stock']['commit'],current)
+        (self.repo/'stock.py').write_text((self.repo/'stock.py').read_text()+'\n# change outside quoted line')
+        self.git('add','.');self.git('commit','-qm','Change a cited file outside its selected lines')
+        refresh_index()
+        self.assertEqual(analysis_run.status(project='demo',lang='en')['saved_scope_overviews'],[])
+        self.assertTrue(analysis_run.read(start('/stock'))['tasks'])
+
 
     def test_overview_preserves_conditional_url_match_in_prompt_and_saved_evidence(self):
         (self.repo/'app.js').write_text("import express from 'express';\nconst app=express();\napp.patch('/items/:id',()=>null);\napp.listen(3000);\n")

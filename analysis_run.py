@@ -5,6 +5,7 @@ import copy
 import codecs
 from contextlib import contextmanager
 import fcntl
+import hashlib
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -195,13 +196,16 @@ def prepare(project, branch='dev', lang='ko', repository='', executor='claude', 
         if resume_from is not None:value['resume_from']=resume_from
         if scope['intent']['task']=='overview':
             target=next(iter(scope['intent']['targets']),None)
+            contexts={}
             for old in sorted(history,key=lambda record:record['created_at']):
                 if any(old[key]!=scope[key] for key in ('project','lang','branch')):continue
                 for task in value['tasks']:
                     rid=task['repository'];pin=plan['pins'][rid]
                     overview=(old.get('scope_overviews',{}).get(rid,{}).get(target['target']) if target else old.get('overviews',{}).get(rid))
                     if not overview or overview.get('format')!='overview-v1' or overview.get('version')!=OVERVIEW_VERSION:continue
-                    if not all(overview.get(k)==v for k,v in pin.items()):continue
+                    if not all(overview.get(k)==v for k,v in pin.items()):
+                        overview=_reuse_scope(overview,pin,scope,rid,contexts) if target else None
+                        if not overview:continue
                     if target:value.setdefault('scope_overviews',{}).setdefault(rid,{})[target['target']]=overview
                     else:value.setdefault('overviews',{})[rid]=overview
             cached=value.get('scope_overviews' if target else 'overviews',{})
@@ -220,7 +224,7 @@ def status(run_id=None, project=None, repository='', branch='dev', lang='ko'):
         selected=max(matches,key=lambda v:v['created_at'])
         # A later attempt can fail before it produces its own overview. Keep the
         # latest verified sample per repository accessible across app restarts.
-        saved={};scoped={};scope_pins={}
+        saved={};scoped={};scope_pins={};contexts={}
         legacy_pin=None
         if any(('' in record.get('overviews',{}) or '' in record.get('scope_overviews',{})) and all(record[k]==scope[k] for k in ('project','branch','lang')) for record in values):
             try:
@@ -246,7 +250,10 @@ def status(run_id=None, project=None, repository='', branch='dev', lang='ko'):
                         except ai_extract.READ_ERRORS:scope_pins[rid]=None
                 pin=scope_pins[rid]
                 for resource,overview in groups.items():
-                    if pin and all(overview.get(k)==v for k,v in pin.items()):scoped[rid,resource]=overview
+                    if not pin:continue
+                    if not all(overview.get(k)==v for k,v in pin.items()):
+                        overview=_reuse_scope(overview,pin,scope,rid,contexts)
+                    if overview:scoped[rid,resource]=overview
         return {**selected,'saved_overviews':list(saved.values()),'saved_scope_overviews':list(scoped.values()),'current_legacy_pin':legacy_pin}
 
 def active():
@@ -1034,6 +1041,39 @@ def _overview_anchors(index,resource=None):
         anchors[file]=rows
     return anchors,flows,len(scopes)
 
+def _scope_evidence_digest(index,resource,anchors):
+    graph=index.get('service_flow') or {}
+    group=next((g for g in graph.get('feature_groups',[]) if g['resource']==resource),None)
+    if not group:return None
+    connections=[graph['connections'][i] for i in group['connection_indexes']]
+    content=json.dumps([index['version'],connections,anchors],sort_keys=True,separators=(',',':'))
+    return hashlib.sha256(content.encode()).hexdigest()
+
+
+def _reuse_scope(overview,pin,scope,rid,contexts):
+    """Only documentation-only changes can be proven independent of unresolved code/config dependencies."""
+    import structure_index
+    if (overview.get('configuration')!=pin['configuration'] or overview.get('version')!=OVERVIEW_VERSION
+            or not overview.get('evidence_digest') or not overview.get('resource')):return None
+    try:
+        if rid not in contexts:contexts[rid]=ai_extract.context(scope['project'],rid,scope['branch'])
+        repo,raw,_,head=contexts[rid]
+        index=(raw.get(scope['branch']) or {}).get('structure_index') or {}
+        if head!=pin['commit'] or index.get('commit')!=head or index.get('version')!=structure_index.VERSION:return None
+        changes=_git(repo['path'],'diff-tree','--no-renames','--no-commit-id','--name-only','-r','-z',overview['commit'],head)
+        for raw_path in changes.split(b'\0'):
+            if not raw_path:continue
+            path=raw_path.decode()
+            if not path.startswith('docs/') or PurePosixPath(path).suffix.lower() not in ('.md','.rst','.txt'):return None
+            if path in overview['files'] or any(path in ai_extract.files_in(c) for c in overview['connections']):return None
+        anchors,_,total=_overview_anchors(index,overview['resource'])
+        if _scope_evidence_digest(index,overview['resource'],anchors)!=overview['evidence_digest']:return None
+        return {**overview,**pin,'generated_commit':overview.get('generated_commit',overview['commit']),
+                'scope_coverage':{**overview['scope_coverage'],'total':total}}
+    except (RunError,*ai_extract.READ_ERRORS,UnicodeError):
+        return None
+
+
 def _feature_groups(groups, connections):
     # Labels are optional. A malformed label must not discard verified source evidence.
     valid={edge['id'] for edge in connections}
@@ -1082,7 +1122,9 @@ def _quick_overview(repo,request,language,invoke,cancelled,deadline,raw,resource
         if rows:sources.append({'file':source['file'],'lines':rows})
     result={'format':'overview-v1','version':OVERVIEW_VERSION,'files':[s['file'] for s in sources],'items':[],
             'scope_coverage':{'total':total_scopes,'selected':[]}}
-    if resource:result['resource']=resource
+    if resource:
+        result['resource']=resource
+        result['evidence_digest']=_scope_evidence_digest(index,resource,anchors)
     if not sources and not resource:return result
     packet={'lang':language,'sources':sources,
             'prompt':'Describe directly evidenced features and structure in the selected language. '
