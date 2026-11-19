@@ -1240,6 +1240,26 @@ class Flows(unittest.TestCase):
  assert(!window.calls.some(c=>c.command==='analysis_run_start'),'Opening and navigating the structure never executes a model');
 ''')
 
+    def test_what_it_does_shows_local_api_and_cli_evidence_without_screens(self):
+        self.check(r'''
+ window.mutateBundle=b=>{
+   b.dev.screens=[];
+   b.dev.structure_indexes=[{repository:'web',commit:'aaaaaaaa1111',files:[],imports:[],coverage:{indexed_files:0,candidate_files:0},
+     cli_entries:Array.from({length:13},(_,i)=>({command:'tool-'+i,kind:'npm_bin',file:'package.json',line:4,target:'bin/task.js'})),
+     service_flow:{connections:[],feature_groups:[],registered_routes:[{method:'GET',path:'/items',server:{file:'api.py',line:8,function:'list_items'}}],
+       registered_route_groups:[{resource:'/items',registered_route_indexes:[0]}],coverage:{routes:1,requests:0}}}];
+ };
+ await doRefresh();S.workView=null;document.querySelector('#view [data-v="work"]').click();
+ const graph=()=>$('map').querySelector('[data-work-features]');
+ assert(S.view==='feat' && graph() && !$('regroup'),'What it does starts from verified local features without empty screen grouping');
+ assert(graph().innerText.includes('GET /items') && graph().innerText.includes('tool-0'),'Current map includes both locally registered API and command');
+ graph().querySelector('[data-registered-route] summary').click();
+ assert(graph().innerText.includes('list_items') && graph().innerHTML.includes('api.py:8'),'Handler and evidence can be inspected in place');
+ graph().querySelector('[data-cli-page="1"]').click();
+ assert(graph().innerText.includes('tool-12') && !$('moduleFile'),'CLI paging keeps the feature-only view');
+ assert(!window.calls.some(c=>c.command==='analysis_run_start'),'Browsing evidenced features costs no AI call');
+''')
+
     def test_repository_inventory_is_available_without_an_ai_structure(self):
         self.check(r'''
  S.branchDetails=null;S.system=null;S.proposal=null;S.view='sys';

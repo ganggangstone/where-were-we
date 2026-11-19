@@ -1590,8 +1590,10 @@ function readmeFeaturesView(index,evidence) {
   const items=features.map(feature=>`<li>${esc(feature.text)} · ${evidence(feature.file,feature.line)}</li>`);
   return `<details class="sect" data-readme-features><summary>${tr('README에 적힌 기능')} · ${features.length}</summary><code title="${esc(index.commit)}">${esc(index.commit.slice(0,12))}</code><ul>${items.join('')}</ul></details>`;
 }
-function structureIndexView(m,includePurpose=true) {
-  const indexes=m.structure_indexes || (m.structure_index ? [m.structure_index] : []);
+function structureIndexView(m,includePurpose=true,featuresOnly=false) {
+  const all=m.structure_indexes || (m.structure_index ? [m.structure_index] : []);
+  const indexes=featuresOnly?all.filter(index=>index.cli_entries?.length || index.documented_features?.length ||
+    index.service_flow?.connections?.length || index.service_flow?.registered_routes?.length):all;
   if (!indexes.length) return '';
   const scope=JSON.stringify([S.project,S.repository,S.branch,indexes.map(index=>[index.repository,index.commit])]);
   if (S.moduleGraph?.scope!==scope) S.moduleGraph={scope,repository:indexes[0].repository,file:'',page:{}};
@@ -1635,6 +1637,7 @@ function structureIndexView(m,includePurpose=true) {
   const hasGroups=!!cli || resourceMap;
   const metadata=`${includePurpose?purposeView(m,index):''}${status}`;
   const docs=readmeFeaturesView(index,evidence);
+  if(featuresOnly)return `<section class="sect" id="moduleGraph" data-work-features>${indexes.length>1?repoControl:''}${http}${cli}${docs}</section>`;
   const modules=hasGroups?`<details id="moduleDetails" ${state.moduleOpen?'open':''}><summary>${tr('모듈 연결 (베타)')}</summary>`:`<h2>${tr('모듈 연결 (베타)')}</h2>`;
   const heading=resourceMap?`${indexes.length>1?repoControl:''}${http}${cli}<details class="sect" id="flowSources" ${state.sourcesOpen?'open':''}><summary>${tr('문서·모듈')}</summary>${includePurpose?purposeView(m,index):''}${indexes.length>1?commit:status}${docs}${modules}`:`${metadata}${cli}${http}${docs}${modules}`;
   const end=(hasGroups?'</details>':'')+(resourceMap?'</details>':'');
@@ -1678,7 +1681,7 @@ function bindStructureIndex() {
   if(!graph)return;
   const update=(change,focus)=>{
     Object.assign(S.moduleGraph,change);
-    graph.outerHTML=structureIndexView(M());
+    graph.outerHTML=structureIndexView(M(),true,graph.hasAttribute('data-work-features'));
     bindStructureIndex();
     if(focus)$(focus)?.focus();
   };
@@ -1945,14 +1948,17 @@ function featureCopyText(m, f) {
   L.push(baseLine(m)); return L.join('\n');
 }
 function featView(m) {
-  const f = featureGraph(m); const sel = selectedFeature(m)?.i ?? null; const near = (i) => sel == null || i === sel || f.links.some(l => (l.a === sel && l.b === i) || (l.b === sel && l.a === i)); const on = (l) => sel == null || l.a === sel || l.b === sel;
+  const local=structureIndexView(m,false,true);
+  const f = featureGraph(m);
+  if(local && !f.gs.length)return local;
+  const sel = selectedFeature(m)?.i ?? null; const near = (i) => sel == null || i === sel || f.links.some(l => (l.a === sel && l.b === i) || (l.b === sel && l.a === i)); const on = (l) => sel == null || l.a === sel || l.b === sel;
   let h = ui`<div class="legend"><span><b class="strong">${f.gs.length}</b> 기능 묶음 · 화면 <b class="strong">${visibleScreens(m).length}</b></span>${lineLegend([['calls','화면 이동'],['shared','데이터 전달']])}${S.groups ? `<span class="pill ai">${tr('AI가 정리한 이름')}</span>` : `<span class="pill">${tr('화면 주소')}</span>`}<span class="spacer"></span><button class="btn plain" id="regroup" title="화면 주소·제목·버튼 글자만 AI에게 넘겨 묶음과 이름을 다시 받습니다">화면을 기능별로 정리하기</button></div><div class="sys three" id="sys">${WIRES}`;
   f.gs.forEach((g, i) => { const st = f.stat[i];
     h += ui`<div class="card node gc${f.pos[i].col} gr${f.pos[i].row} ${i === sel ? 'sel' : ''} ${near(i) ? '' : 'dim'}" data-feat="${i}" data-w="G${i}"><div class="nm"><span class="${g.ai ? 'ai' : ''}">${esc(g.name)}</span></div><div class="s">${esc(g.description || '')}</div>
       <div class="meta"><span>화면 ${g.list.length} · 서버에 하는 일 ${st.reqs}</span>${st.reqs ? ui`<span class="bar" title="테스트 연결 ${st.tested}/${st.reqs}"><i style="width:${Math.round(st.tested / st.reqs * 100)}%"></i></span>` : ''}</div><div class="meta">${st.ext.map(x => `<span class="pill">${esc(x)}</span>`).join('')}</div></div>`; });
   h += ui`</div><div class="sect"><h4>선 ${f.links.length}개</h4><div class="group">` + f.links.map((l, i) => { const data = [...new Set([...l.ab, ...l.ba])];
     return `<div class="row ${on(l) ? '' : 'dim'}"><span class="wn inline">${i + 1}</span><div class="grow"><div class="tw"><b class="strong">${esc(f.gs[l.a].name)} ${l.fwd && l.back ? '↔' : l.back ? '←' : l.fwd ? '→' : '···'} ${esc(f.gs[l.b].name)}</b> ${l.ways.length ? ui`넘어가는 길 ${l.ways.length}` : tr('넘어가는 길은 없고 데이터만')}${data.length ? ui` · 주고받는 데이터 ${data.length}` : ''}</div></div></div>`; }).join('') + `</div></div>`;
-  return h;
+  return local+h;
 }
 function featInspector(m) {
   const f = featureGraph(m); const sel = selectedFeature(m);
@@ -2156,7 +2162,7 @@ function render() {
   if ($('regroup')) $('regroup').onclick=()=>openAnalysisPanel('suggest_groups');
   renderPendingActions();
   if (S.agentPrompt != null) renderAgentPrompt();
-  if(sys)bindStructureIndex();
+  if(sys || view==='feat')bindStructureIndex();
   keyboardTargets(); if (refocus) document.querySelector(refocus)?.focus();
   if(typeof controlDecoration==='function')controlDecoration();
 }
