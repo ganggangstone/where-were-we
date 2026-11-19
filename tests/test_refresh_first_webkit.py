@@ -69,6 +69,9 @@ class RefreshFirstWebKit(unittest.TestCase):
  const edge={id:1,method:'GET',path:'/items',client,server,data_steps:[{operation:'read',model:'Item',file:'api.py',line:11,evidence:[]}]};
  index.service_flow={connections:[edge,{...edge,path:'/profiles',data_steps:[]}],feature_groups:[{resource:'/items',connection_indexes:[0]},{resource:'/profiles',connection_indexes:[1]}],coverage:{requests:2,routes:2,unresolved_requests:0}};
  await doRefresh();check($('map').querySelector('[data-local-resource]'),'Local resource groups appear first');
+ $('map').querySelector('[data-local-resource="/items"]').click();
+ const trace=$('map').querySelector('.flow-trace');
+ check([...trace.children].map(e=>e.dataset.traceStage).join(',')==='client,request,server,data' && trace.lastElementChild.innerText.includes('Item'),'Only evidenced stages appear and repeated model reads share a node');
  window.runningAnalysis={id:'saved',state:'completed',project:'First',repository:'',branch:'dev',lang:S.lang,intent:{task:'overview',targets:[]},completed_tasks:[],tasks:[],saved_overviews:[{
   repository:'web',configuration:'pin',commit:pin,format:'overview-v1',files:[client.file,server.file],
   scope_coverage:{selected:['/items'],total:2},items:[{name:'Browse',description:'Read stored items.',...client}],connections:[edge],feature_groups:[{name:'Saved items',connection_ids:[1]}]}]};
