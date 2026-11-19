@@ -51,6 +51,21 @@ class RefreshFirstWebKit(unittest.TestCase):
  const storage=$('insp').querySelector('[data-flow-storage] details');check(storage,'Opening the saved feature shows its model step');
  storage.querySelector('summary').click();check(storage.open && storage.innerText.includes('api.py:11'),'Model citation remains discoverable');
  check(!calls.some(c=>c.command==='analysis_run_start'),'Viewing saved evidence starts no AI');
+ S.agentPrompt=null;
+ const paths=['src/nested/<example name>.go',...Array.from({length:80},(_,i)=>'src/item'+String(i).padStart(2,'0')+'.go')];
+ window.mutateBundle=b=>{b.dev.structure_indexes=[{...index,files:[],imports:[],service_flow:null}];b.dev.inventories=[{repository:'web',commit:pin,files:82,paths,paths_truncated:true,directories:[['src',82]]}]};
+ await doRefresh();
+ const box=()=>$('map').querySelector('[data-inventory]');
+ check(box().open && box().innerText.includes(pin) && box().innerText.includes(tr('파일 경로 표시 한도 도달')),'Unsupported repositories open a pinned, explicitly partial path inventory');
+ box().querySelector('[data-inventory-dir="src"]').click();
+ check(box().querySelectorAll('li').length===40 && !box().innerText.includes('item79.go'),'Directory pages have a bounded DOM');
+ box().querySelector('[data-inventory-page="1"]').click();box().querySelector('[data-inventory-page="2"]').click();
+ check(box().innerText.includes('item79.go'),'Final partial page is reachable');
+ box().querySelector('[data-inventory-page="1"]').click();box().querySelector('[data-inventory-page="0"]').click();
+ box().querySelector('[data-inventory-dir="src/nested"]').click();
+ const fileLink=box().querySelector('[data-inventory-file]');check(fileLink.textContent==='<example name>.go','Paths remain text');
+ fileLink.click();check(calls.at(-1).command==='open_url' && calls.at(-1).args.url==='zed://file/fictional/web/src/nested/%3Cexample%20name%3E.go','Editor opens the qualified working file without inventing a line');
+ box().querySelector('[data-inventory-dir="src"]').click();check(box().querySelector('[data-inventory-dir="src/nested"]'),'Parent navigation is reversible');
 })().then(()=>window.uiSystemResult='[]').catch(e=>window.uiSystemResult=JSON.stringify([String(e)]));
 """
         source = (ROOT / 'ui/index.html').read_text().replace('<script>', '<script>' + BOOTSTRAP, 1)

@@ -384,7 +384,7 @@ Object.assign(UI_EN,{"확인된 서버만 지도에 연결합니다.":"Link veri
 Object.assign(UI_EN,{'마지막 새로고침':'Last refresh'});
 Object.assign(UI_EN,{'선택한 기능':'Selected feature','‹ 기능 개요':'‹ Feature overview','기능 선택 해제':'Clear feature','이 기능에 속한 화면입니다.':'This screen belongs to this feature.','선택한 기능 밖의 화면입니다.':'This screen is outside the selected feature.','이 화면의 기능으로 바꾸기':'Switch to this screen’s feature','화면 지도에서 보기':'Show on the screen map','이 기능이 서버에 하는 일 ':'Feature requests: ','이 기능과 이어진 작업 ':'Linked work for this feature: ',"작업 정보 미수집":"Work data not collected","연결된 작업 없음":"No linked work",'기능 복사':'Copy feature','대상 ID: ':'Target ID: ','기능: ':'Feature: ','이어진 작업: ':'Linked work: ','AI가 붙인 이름':'AI-suggested name','선택한 기능의 화면이 쓰는 대상입니다.':'Used by the selected feature’s screens.','선택한 기능의 화면에서 이어진 것을 찾지 못했습니다.':'No link from the selected feature’s screens was found.'});
 Object.assign(UI_EN,{'기존 AI 채팅에 요청':'Use your existing AI chat','저장된 결과 새로고침':'Refresh saved results',"앱에서 자동 분석 (베타)":"Automatic analysis in the app (beta)",'요청 내용·다른 분석':'Request text and other analyses','요청 준비됨':'Request ready','일부 결과 저장됨':'Partial results saved','이전에 저장된 결과':'Previously saved results'});
-Object.assign(UI_EN,{'Git 추적 파일':'Git-tracked files','최상위 폴더':'Top-level folder','파일 수':'File count','루트 디렉터리':'Root directory'});
+Object.assign(UI_EN,{'상위 폴더':'Parent folder','파일 경로 표시 한도 도달':'File path display limit reached','Git 추적 파일':'Git-tracked files','최상위 폴더':'Top-level folder','파일 수':'File count','루트 디렉터리':'Root directory'});
 Object.assign(UI_EN,{'모듈 연결 (베타)':'Module connections (beta)','로컬 .cjs require':'Local .cjs require','확인한 파일':'Files indexed','건너뛴 파일':'Files skipped','Python import · JS/TS 상대 경로 import·재내보내기':'Python imports · JS/TS relative imports and re-exports','로컬 Python import':'Local Python imports','인터페이스':'Interface','타입 별칭':'Type alias','열거형':'Enum','메서드':'Method','미지원 파일':'Unsupported files','대상 미확인 import':'Unresolved imports','분석 한도 도달':'Index limit reached','선택한 모듈':'Selected module','작업 폴더에서 열기':'Open working copy','이 모듈을 가져오는 쪽':'Imported by','이 모듈이 가져오는 쪽':'Imports','모듈 선언':'Declarations','클래스':'Class','함수':'Function','비동기 함수':'Async function'});
 Object.assign(UI_EN,{'파일 범위':'File range','코드에서 확인한 기능 (베타)':'Features found in source (beta)','기능 흐름 (베타)':'Feature flows (beta)','기능 선택':'Select feature','화면 문구':'Interface label','서버의 데이터 접근':'Server data access','모델 읽기':'Read model','모델 쓰기':'Write model','요청을 시작하는 화면 동작':'UI actions that trigger this request','양식 제출':'Form submission','버튼 클릭':'Button click','입력 변경':'Input change','이벤트 처리 함수':'Event handler','클라이언트 호출':'Client invocation','클라이언트 정의':'Client definition','매개변수가 한 경로 구간일 때 일치':'Matches when the parameter occupies one URL segment','GitHub 작업 정보 미확인':'GitHub work data unavailable','최근 확인':'Last verified','설정·클라이언트 기본값에서 일치':'Matches configured client and server defaults','기본값 근거':'Default value evidence','HTTP 요청 흐름 (베타)':'HTTP request flow (beta)','고정 fetch 주소 · 서버 경로 대조':'Literal fetch URLs matched to server routes','요청을 보내는 코드':'Client call site','받는 서버 함수':'Server handler','경로 등록·실행 근거':'Route registration and startup evidence','주소 선언':'URL declaration','연결된 요청':'Matched requests','대상 미확인 요청':'Unresolved requests','확인한 요청':'Requests detected','서버 경로':'Server routes','연결 선택':'Select connection'});
 const UI_PATTERN = new RegExp(Object.keys(UI_EN).sort((a, b) => b.length - a.length).map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'g');
@@ -1360,12 +1360,43 @@ function proposalSwitch() {
   if (!S.proposal) return '';
   return `<span class="seg light" role="group" aria-label="${tr('보여 줄 구조')}"><button data-proposal="0" aria-pressed="${!S.showProposal}" class="${S.showProposal ? '' : 'on'}">${tr('기존 서비스 구성')}</button><button data-proposal="1" aria-pressed="${!!S.showProposal}" class="${S.showProposal ? 'on' : ''}">${tr('AI 제안')}</button></span>${S.showProposal ? `<span class="pill ai">${tr('AI 제안 · 기존 서비스 구성은 바뀌지 않았습니다')}</span>` : ''}`;
 }
+function inventoryBrowser(m,row,key) {
+  const state=S.inventoryBrowse?.key===key?S.inventoryBrowse:{dir:'',page:0};
+  const prefix=state.dir?state.dir+'/':'';
+  const children=new Map();
+  for(const path of row.paths){
+    if(!path.startsWith(prefix))continue;
+    const tail=path.slice(prefix.length),slash=tail.indexOf('/');
+    children.set(slash<0?tail:tail.slice(0,slash),slash>=0);
+  }
+  const entries=[...children.entries()].sort(([a,folderA],[b,folderB])=>Number(folderB)-Number(folderA) || a.localeCompare(b));
+  const size=40,pages=Math.ceil(entries.length/size),page=Math.max(0,Math.min(state.page,pages-1));
+  const rows=entries.slice(page*size,(page+1)*size).map(([name,folder])=>{
+    const path=prefix+name;
+    if(folder)return `<li><button class="btn quiet mono" data-inventory-dir="${esc(path)}">${esc(name)}/</button></li>`;
+    const file=row.repository?row.repository+'/'+path:path;
+    const url='zed://file'+codeLocation(m,file).split('/').map(encodeURIComponent).join('/');
+    return `<li><a class="lnk mono" href="${esc(url)}" data-inventory-file="${esc(url)}" title="${esc(tr('작업 폴더에서 열기'))}">${esc(name)}</a></li>`;
+  });
+  const parent=state.dir.split('/').slice(0,-1).join('/');
+  const controls=pages>1?`<div class="ctl"><button class="btn quiet" data-inventory-page="${page-1}" ${page===0?'disabled':''}>${tr('이전')}</button><span>${page+1} / ${pages}</span><button class="btn quiet" data-inventory-page="${page+1}" ${page+1===pages?'disabled':''}>${tr('다음')}</button></div>`:'';
+  return `<div class="ctl">${state.dir?`<button class="btn quiet" data-inventory-dir="${esc(parent)}">${tr('상위 폴더')}</button>`:''}<code>${esc(state.dir || '/')}</code></div><ul>${rows.join('')}</ul>${controls}${row.paths_truncated?`<p class="s">${tr('파일 경로 표시 한도 도달')}</p>`:''}`;
+}
 function inventoryView(m) {
   const rows=m.inventories || (m.inventory ? [m.inventory] : []);
+  const indexes=m.structure_indexes || (m.structure_index?[m.structure_index]:[]);
+  const scope=JSON.stringify([S.project,S.branch,S.repository,rows.map(row=>[row.repository,row.commit])]);
+  if(S.inventoryScope!==scope){
+    S.inventoryScope=scope;S.inventoryBrowse=null;S.inventoryOpen=null;
+    if(rows.length===1 && rows[0].paths?.length && !indexes.some(index=>index.files?.length)){
+      S.inventoryOpen=JSON.stringify([S.project,rows[0].repository || '',rows[0].commit]);
+    }
+  }
   return rows.map(row=>{
     const label=row.repository ? connectionDisplayName(row.repository) : '';
-    const key=JSON.stringify([S.project,row.repository || '',row.commit]);
-    return `<details class="sect" data-inventory="${esc(key)}" ${S.inventoryOpen===key?'open':''}><summary>${esc([label,tr('Git 추적 파일'),row.files].filter(x=>x!=='').join(' · '))}</summary><p class="mono">${esc(row.commit.slice(0,12))}</p><table><thead><tr><th>${tr('최상위 폴더')}</th><th>${tr('파일 수')}</th></tr></thead><tbody>${row.directories.map(([dir,count])=>`<tr><td>${dir?esc(dir):tr('루트 디렉터리')}</td><td>${esc(count)}</td></tr>`).join('')}</tbody></table></details>`;
+    const key=JSON.stringify([S.project,row.repository || '',row.commit]),open=S.inventoryOpen===key;
+    const legacyCounts=()=>`<table><thead><tr><th>${tr('최상위 폴더')}</th><th>${tr('파일 수')}</th></tr></thead><tbody>${row.directories.map(([dir,count])=>`<tr><td>${dir?esc(dir):tr('루트 디렉터리')}</td><td>${esc(count)}</td></tr>`).join('')}</tbody></table>`;
+    return `<details class="sect" data-inventory="${esc(key)}" ${open?'open':''}><summary>${esc([label,tr('Git 추적 파일'),row.files].filter(x=>x!=='').join(' · '))}</summary>${open?`<p class="mono" title="${esc(row.commit)}">${esc(row.commit.slice(0,12))}</p>${Array.isArray(row.paths)?inventoryBrowser(m,row,key):legacyCounts()}`:''}</details>`;
   }).join('');
 }
 function flowActionName(action) {
@@ -1892,7 +1923,14 @@ function render() {
   // 다시 읽은 지도에 같은 화면 묶음이 없으면 고른 기능을 지운다. 같은 자리의 다른 기능으로 넘어가지 않는다.
   if (S.feat && !selectedFeature(m)) S.feat = null;
   const top = $('map').scrollTop, left = $('map').scrollLeft, itop = $('insp').scrollTop, refocus = focusKey(document.activeElement);
-  $('map').innerHTML = searchPanel(m) + (view === 'changes' ? changesView(m) : sys ? structureIndexView(m)+inventoryView(m)+sysView(m) : view === 'focus' ? focusView(m) : view === 'feat' ? featView(m) : storyMap(m)); $('insp').innerHTML = view === 'changes' ? changesInspector(m) : sys ? sysInspector(m) : view === 'focus' ? focusFeatureInspector(m) : view === 'feat' ? featInspector(m) : mapInspector(m);
+  let structure='';
+  if(sys){
+    const indexes=m.structure_indexes || (m.structure_index?[m.structure_index]:[]);
+    const hasPaths=(m.inventories || [m.inventory]).some(row=>row?.paths?.length);
+    structure=hasPaths && !indexes.some(index=>index.files?.length)
+      ? inventoryView(m)+structureIndexView(m) : structureIndexView(m)+inventoryView(m);
+  }
+  $('map').innerHTML = searchPanel(m) + (view === 'changes' ? changesView(m) : sys ? structure+sysView(m) : view === 'focus' ? focusView(m) : view === 'feat' ? featView(m) : storyMap(m)); $('insp').innerHTML = view === 'changes' ? changesInspector(m) : sys ? sysInspector(m) : view === 'focus' ? focusFeatureInspector(m) : view === 'feat' ? featInspector(m) : mapInspector(m);
   S._wires = null;
   if (view === 'focus' && S.focus) { const d = focusData(m); S._wires = d ? [...d.left.map((_, i) => ({ from: 'L' + i, to: 'C', h: true })), ...d.right.map((_, i) => ({ from: 'C', to: 'R' + i, h: true }))] : null; drawWires(); }
   if (view === 'feat') { const f = featureGraph(m); const fi = selectedFeature(m)?.i ?? null; S._wires = f.links.map((l, i) => ({ from: 'G' + (l.back && !l.fwd ? l.b : l.a), to: 'G' + (l.back && !l.fwd ? l.a : l.b), n: i + 1, style: l.ways.length ? '' : 'copy', noend: !l.ways.length, start: !!(l.fwd && l.back), dim: fi != null && l.a !== fi && l.b !== fi })); drawWires();
@@ -1910,11 +1948,18 @@ function render() {
   document.querySelectorAll('[data-proposal]').forEach(b => b.onclick = () => { S.showProposal = b.dataset.proposal === '1'; S.node = null; render(); });
   if ($('remakeSys')) $('remakeSys').onclick=()=>openAnalysisPanel('make_system');
   if ($('requestBriefing')) $('requestBriefing').onclick=()=>openAnalysisPanel('briefing_request');
-  if (sys) document.querySelectorAll('[data-inventory] > summary').forEach(summary=>summary.onclick=e=>{
-    e.preventDefault();
-    const details=summary.parentElement;
-    S.inventoryOpen=details.open ? null : details.dataset.inventory;
-    document.querySelectorAll('[data-inventory]').forEach(box=>{box.open=box.dataset.inventory===S.inventoryOpen;});
+  if(sys)document.querySelectorAll('[data-inventory]').forEach(box=>{
+    box.onclick=e=>{
+      const control=e.target.closest('summary,[data-inventory-dir],[data-inventory-page],[data-inventory-file]');
+      if(!control)return;
+      e.preventDefault();
+      const key=box.dataset.inventory;
+      if(control.hasAttribute('data-inventory-file')){invoke('open_url',{url:control.dataset.inventoryFile});return;}
+      if(control.matches('summary'))S.inventoryOpen=box.open?null:key;
+      else if(control.hasAttribute('data-inventory-dir'))S.inventoryBrowse={key,dir:control.dataset.inventoryDir,page:0};
+      else S.inventoryBrowse={key,dir:S.inventoryBrowse?.key===key?S.inventoryBrowse.dir:'',page:Number(control.dataset.inventoryPage)};
+      render();
+    };
   });
   if (sys && S.system) { S._wires = sysLinks(S.system).map((l, i) => ({ ...l, n: i + 1, dim: !!S.node && l.from !== S.node && l.to !== S.node })); drawWires(); document.querySelectorAll('.card[data-node], .row[data-node]').forEach(el => el.onclick = () => { selectProgram(el.dataset.node); });
     if ($('toMap')) $('toMap').onclick = () => { S.view = 'map'; render(); } }
