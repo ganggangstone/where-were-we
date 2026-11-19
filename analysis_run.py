@@ -673,6 +673,31 @@ def _units(payload):
     if not units:add('metadata',{'path':[],'value':{}})
     return header,units
 
+def _source_first(units):
+    """Pair each source unit with a related review page; keep all excess pages queued."""
+    sources=[];pages={}
+    for unit in units:
+        if unit['kind']=='source':
+            sources.append(unit)
+            continue
+        page=unit['value']
+        row=page['value']
+        if page['path'][:1]==['known'] and isinstance(row,list) and len(row)>4 and isinstance(row[4],str):
+            file=row[4]
+        elif page['path'][:1]==['recheck'] and isinstance(row,dict) and isinstance(row.get('file'),str):
+            file=row['file']
+        else:continue
+        pages.setdefault(file,[]).append(unit)
+    ordered=[];paired=set()
+    for source in sources:
+        ordered.append(source)
+        related=pages.get(source['value']['file'])
+        if related:
+            page=related.pop()
+            ordered.append(page)
+            paired.add(page['id'])
+    return ordered+[unit for unit in units if unit['kind']!='source' and unit['id'] not in paired]
+
 def _batch_payload(header,units,batch_id,prior=None):
     payload=copy.deepcopy(header);snapshots={};pages=[]
     for unit in units:
@@ -917,13 +942,15 @@ def generate(value,task,request,executor,cancelled,deadline,check,blobs=None):
     wide_batches=bool(deferred)
     progress()
     while pending or deferred:
-        if not pending:
+        if deferred and index:
             path,head,previous,first=deferred.pop()
             snapshots=export_source(path,head,[previous] if previous else [],cancelled,deadline,
                                     blobs=blobs,excluded={head:first})
             _,later=_units({'snapshots':snapshots})
-            pending=[unit for unit in later if unit['id'] not in covered]
-            units.extend(pending)
+            scheduled={unit['id'] for unit in units}
+            later=[unit for unit in later if unit['id'] not in scheduled]
+            units.extend(later)
+            pending=_source_first(pending+later)
             progress()
             if not pending:break
         check();batch=[];index+=1;batch_id=ai_extract.digest([request['record_arguments'],index])

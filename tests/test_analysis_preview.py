@@ -81,9 +81,10 @@ class Preview(unittest.TestCase):
         seen_pages = set()
         extra_read = False
         final_sources = set()
+        first_later_batch = None
 
         def executor(prompt, **kwargs):
-            nonlocal first_id, extra_read
+            nonlocal first_id, extra_read, first_later_batch
             packet = json.loads(prompt.split('\n', 1)[1])
             batch = packet['batch']
             self.assertIn('The app merges fragments',packet['prompt'])
@@ -107,6 +108,9 @@ class Preview(unittest.TestCase):
                 self.assertTrue(any(p['path'] == ['known'] and p['value'] == [known[4]] for p in pages))
                 extra_read = True
             else:
+                if first_later_batch is None:
+                    first_later_batch=batch['id']
+                    self.assertTrue(sources, 'Second batch must include remaining source')
                 self.assertEqual(packet['recheck'], request['recheck'])
                 seen_pages.update(p['path'][1] for p in pages if p['path'][:1] == ['known'])
             return reply
@@ -116,6 +120,18 @@ class Preview(unittest.TestCase):
         self.assertTrue(extra_read)
         self.assertEqual(seen_pages, set(range(len(known))))
         self.assertEqual(final_sources, set(self.git('ls-files').splitlines()))
+
+    def test_source_units_share_the_queue_with_matching_review_rows(self):
+        def page(key,index,data):
+            return {'kind':'metadata','id':key+str(index),'value':{'path':[key,index],'value':data}}
+        def source(file):
+            return {'kind':'source','id':file,'value':{'file':file}}
+        known=page('known',0,['id','GET','/path','handle','app','basic'])
+        recheck=page('recheck',0,{'id':'other','file':'worker'})
+        unmatched=page('known',1,['none','GET','/old','old','deleted','basic'])
+        units=[unmatched,known,recheck,source('app'),source('worker'),source('third')]
+        ordered=analysis_run._source_first(units)
+        self.assertEqual(ordered,[source('app'),known,source('worker'),recheck,source('third'),unmatched])
 
     def test_web_free_command_with_unknown_extension_has_early_local_evidence(self):
         self.git('rm', '-q', 'pages/items.vue', 'server/items.go')
