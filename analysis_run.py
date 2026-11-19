@@ -187,9 +187,18 @@ def status(run_id=None, project=None, repository='', branch='dev', lang='ko'):
         scope = _scope(project,repository,branch,lang)
         values=_runs()
         active_project=[v for v in values if v['project']==project and v['state'] in ACTIVE]
-        if active_project:return max(active_project,key=lambda v:v['created_at'])
-        matches = [v for v in values if all(v[k]==scope[k] for k in scope)]
-        return max(matches,key=lambda v:v['created_at']) if matches else None
+        matches=active_project or [v for v in values if all(v[k]==scope[k] for k in scope)]
+        if not matches:return None
+        selected=max(matches,key=lambda v:v['created_at'])
+        # A later attempt can fail before it produces its own overview. Keep the
+        # latest verified sample per repository accessible across app restarts.
+        saved={}
+        for record in sorted(values,key=lambda v:v['created_at']):
+            if any(record[k]!=scope[k] for k in ('project','branch','lang')):continue
+            for rid,overview in record.get('overviews',{}).items():
+                if not repository or repository=='*' or rid==repository:
+                    saved[rid]=overview
+        return {**selected,'saved_overviews':list(saved.values())}
 
 def active():
     with locked():
@@ -845,28 +854,50 @@ def _preview(run,task,commit,settled,programs,context):
     if task['task'] not in ('analysis','system'):return
     rows=(('screens','screen'),('backend_routes','request')) if task['task']=='analysis' else (('nodes','program'),)
     items=[]
+    sample_rows=[]
     for key,kind in rows:
         for item in settled.get(key,[]):
             evidence=item['ev'][0] if key=='nodes' else item
             name=item.get('heading') or item.get('name') or item.get('path')
             if name:
-                items.append(dict(kind=kind,name=name,**{k:evidence[k] for k in ('file','line','quote')}))
-    if task['task']=='analysis' and isinstance(programs,list) and programs:
-        # These optional entry points are independent of the web map schema.
-        supplied={}
+                item_evidence=dict(kind=kind,name=name,**{k:evidence[k] for k in ('file','line','quote')})
+                items.append(item_evidence)
+                if kind in ('screen','request'):
+                    sample_rows.append({**item_evidence,**{k:item[k] for k in ('path','method','function') if k in item}})
+    supplied={}
+    if task['task']=='analysis':
         for unit in context:
             if unit['kind']=='source' and unit['value']['commit']==commit:
                 for row in unit['value']['lines']:
                     supplied.setdefault((unit['value']['file'],row['line']),[]).append(row['text'])
+    if task['task']=='analysis' and isinstance(programs,list) and programs:
+        # These optional entry points are independent of the web map schema.
         for program in programs[:8]:
             if not isinstance(program,dict):continue
             name,file,line,quote=(program.get(k) for k in ('name','file','line','quote'))
             if (isinstance(name,str) and name.strip() and isinstance(file,str) and type(line)==int
                     and isinstance(quote,str) and len(quote.strip())>=6 and any(quote in text for text in supplied.get((file,line),[]))):
-                items.append(dict(kind='program',name=name,file=file,line=line,quote=quote))
-    if items:
+                observation=dict(kind='program',name=name,file=file,line=line,quote=quote)
+                items.append(observation)
+                sample_rows.append(observation)
+    if items or supplied:
         with locked():
             current=read(run['id'])
+            if current['cancel_requested'] or current['state'] in TERMINAL:return
+            rid=task['repository']
+            if supplied:
+                overviews=current.setdefault('overviews',{})
+                previous=overviews.get(rid)
+                if not previous or not previous['items']:
+                    sample=[item for item in sample_rows
+                            if any(item['quote'] in text for text in supplied.get((item['file'],item['line']),[]))]
+                    if not previous or sample:
+                        files=sorted({file for file,line in supplied})
+                        overviews[rid]={'repository':rid,'commit':commit,'configuration':current['pins'][rid]['configuration'],
+                                        'files':files,'items':sample[:24]}
+            if not items:
+                write(current)
+                return
             existing=(current.get('preview') or {}).get('items',[])
             for item in items:
                 if len(existing)>=24:break
@@ -911,7 +942,7 @@ def generate(value,task,request,executor,cancelled,deadline,check,blobs=None):
         programs=result.pop('preview_programs',None)
         validate(result,final=not bool(needs))
         if not needs:
-            if programs and task['task']=='analysis':
+            if task['task']=='analysis':
                 _,context=_units({'snapshots':payload.get('snapshots',[])})
                 _preview(value,task,request['commit'],result,programs,context)
             return result
@@ -1136,7 +1167,7 @@ def run(run_id, executor=None):
                     _save(task,request,result)
                     preview=value.get('preview',{})
                     programs=[item for item in preview.get('items',[]) if item['kind']=='program']
-                    if programs and task['task']=='analysis':
+                    if task['task']=='analysis':
                         value.setdefault('program_observations',[]).append({**preview,'items':programs})
                     value['completed_tasks'].append({k:task.get(k) for k in ('repository','task','target')})
                     value.update(state='running',current_task=None);write(value)

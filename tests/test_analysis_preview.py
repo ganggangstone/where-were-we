@@ -59,6 +59,14 @@ class Preview(unittest.TestCase):
             if cancel:
                 self.assertEqual(done['state'], 'cancelled', done.get('error'))
                 self.assertEqual(self.raw(), baseline)
+                overview=analysis_run.status(project='demo',lang='en')['saved_overviews'][0]
+                self.assertTrue(overview['items'])
+                self.assertTrue(overview['files'])
+                self.assertEqual(overview['configuration'],done['pins']['service']['configuration'])
+                self.assertEqual(done['completed_tasks'],[])
+                retry=analysis_run.retry(done['id'])
+                self.assertEqual(analysis_run.status(project='demo',lang='en')['saved_overviews'],[overview])
+                analysis_run.cancel(retry['id'])
             else:
                 self.assertEqual(done['state'], 'completed', done.get('error'))
                 mapped = self.raw()['dev']

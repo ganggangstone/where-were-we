@@ -4,7 +4,7 @@ const AnalysisRun = (() => {
   let scopeKey = '', epoch = 0, revision = 0, timer = null, checking = null;
   let run = null, provider = null, providerBusy = false, busy = false, error = null;
   const loaded = new Set();
-  let openedPreview = null;
+  let openedPreview = null, openedOverview = '';
   const text = (ko, en) => S.lang === 'en' ? en : ko;
   const scope = () => ({project:S.project, repository:['make_steps','make_jobs'].includes(S.analysisChoice?.task) ? '' : (S.analysisChoice?.target || S.repository || '').replace(/^\*$/, ''), branch:S.branch, lang:S.lang});
   function intent() {
@@ -119,6 +119,26 @@ const AnalysisRun = (() => {
     catch (value) { if (current(token)) { error = value; paint(); } }
     finally { if (current(token)) { busy = false; paint(); schedule(token); } }
   }
+  function savedOverviews() {
+    const groups=run?.saved_overviews || (run?.branch===S.branch && run?.lang===S.lang ? Object.values(run.overviews || {}) : []);
+    return groups.filter(group=>{
+      const repo=S.projectInfo?.repositories?.find(r=>r.id===group.repository);
+      const commit=repo?.commits?.[S.branch];
+      return (!scope().repository || scope().repository===group.repository) && commit && group.commit.startsWith(commit)
+        && repo.fingerprint===group.configuration && !repo.config_changed;
+    });
+  }
+  const overviewKey = group => JSON.stringify([S.project,S.branch,S.lang,group.repository,group.commit,group.configuration]);
+  function overviewHtml() {
+    return savedOverviews().map((group,index)=>{
+      const key=overviewKey(group);
+      const open=openedOverview===key;
+      const rows=group.items.map(item=>`<div><b>${esc(item.name)}</b> ${esc([item.method,item.path,item.function].filter(Boolean).join(' '))} · <code>${esc(item.file)}:${esc(item.line)}</code><pre>${esc(item.quote)}</pre></div>`).join('');
+      return `<section class="sect"><button class="btn plain" type="button" id="savedOverview${index}" aria-expanded="${open}">${text('저장된 첫 개요','Saved initial overview')} · ${esc(connectionDisplayName(group.repository))}</button>
+        <p class="s">${text('파일 '+group.files.length+'개의 일부 코드에서 확인한 항목 '+group.items.length+'개','Items verified: '+group.items.length+' · Files sampled: '+group.files.length)}</p>
+        ${open ? `<div><code>${esc(group.commit.slice(0,8))}</code><p>${group.files.map(esc).join(', ')}</p>${rows}</div>` : ''}</section>`;
+    }).join('');
+  }
   function previewItems() {
     if (!sameScope() || run.cancel_requested) return [];
     let groups = [];
@@ -179,6 +199,7 @@ const AnalysisRun = (() => {
       ${providerBusy ? `<p role="status">${text('Claude Code 계정 확인 중…','Checking the Claude Code account…')}</p>` : provider && !usable() ? `<p role="alert">${esc(message(provider))}</p>` : ''}
       ${run ? `<p class="s">${text('이 분석의 코드','This run analyzes')}: ${esc(runScope)} · ${esc(names[run.intent?.task || 'all'])}${(run.intent?.targets || []).map(t=>' · '+esc(t.repository)+' · '+esc(t.target)).join('')}${runAccount ? ' · '+esc(runAccount) : ''}</p>${!sameScope() ? `<p class="s">${text('다른 작업·대상·코드·버전·언어로 시작한 분석입니다. 진행 중이면 완료하거나 취소한 뒤 선택한 분석을 시작하세요.','This run has a different task, target, code selection, version, or language. If active, finish or cancel it before starting the selected analysis.')}</p>` : ''}<div role="status" aria-live="polite"><strong>${esc(stateLabel())}</strong> · ${done}/${total} ${text('작업 저장됨','tasks saved')}${taskName ? '<div>'+esc(taskName)+'</div>' : ''}</div><progress max="${Math.max(total, 1)}" value="${done}" aria-label="${text('분석 진행률','Analysis progress')}"></progress>${run.blocked?.length ? `<p class="s">${text('먼저 확인할 분석','Analysis requiring attention')}: ${run.blocked.length}</p>` : ''}` : ''}
       ${stats ? `<p class="s">${text('입력 호출','Input calls')}: ${stats.calls} · ${text('전송한 입력 바이트','Encoded input bytes')}: ${stats.bytes}${inputProgress ? ' · '+esc(inputProgress) : ''}</p>` : ''}
+      ${overviewHtml()}
       ${previewHtml()}
       ${issue ? `<p role="alert">${esc(message(issue))}</p>` : ''}
       <div class="ctl">${active() ? `<button class="btn" id="cancelAppAnalysis" ${busy || run.cancel_requested ? 'disabled' : ''}>${text('분석 취소','Cancel analysis')}</button>` : sameScope() && ['failed','cancelled'].includes(run?.state) ? `<button class="btn primary" id="retryAppAnalysis" ${canStart ? '' : 'disabled'}>${text('현재 코드로 다시 시도','Retry with current code')}</button>` : `<button class="btn primary" id="startAppAnalysis" ${canStart ? '' : 'disabled'}>${text('Claude Code로 분석 시작','Start analysis with Claude Code')}</button>`}
@@ -186,6 +207,14 @@ const AnalysisRun = (() => {
       ${sameScope() && done > 0 ? `<button class="btn quiet" id="viewAppAnalysis">${text('저장된 결과 보기','View saved results')}</button>` : ''}</div></section>`;
   }
   function bind() {
+    savedOverviews().forEach((group,i)=>{
+      const button=$('savedOverview'+i);
+      if(button)button.onclick=()=>{
+        const key=overviewKey(group);
+        openedOverview=openedOverview===key?'':key;
+        paint();
+      };
+    });
     previewItems().forEach((item,i) => {
       const button = $('analysisPreview'+i);
       if (button) button.onclick = () => {

@@ -231,6 +231,22 @@ for(const [lang,title] of [['en','Features verified so far'],['ko','분석 중 �
 }
 ''')
 
+    def test_saved_partial_overview_reopens_after_cancel_and_hides_stale_configuration(self):
+        self.check_js(r'''
+await open();
+const group={repository:'service',commit:'abcd1234ef',configuration:'pin',files:['src/cli'],items:[{name:'Save',file:'src/cli',line:3,quote:'<save>'}]};
+S.projectInfo={repositories:[{id:'service',fingerprint:'pin',commits:{dev:'abcd1234'}}]};
+status=runRecord('cancelled',{saved_overviews:[group],cancel_requested:true});
+await AnalysisRun.check();
+assert($('savedOverview0') && !$('viewAppAnalysis'),'Partial sample is available without completing a map task');
+await $('savedOverview0').onclick();
+assert($('insp').innerHTML.includes('Files sampled: 1') && $('insp').innerHTML.includes('&lt;save>'),'Scoped coverage and escaped evidence');
+await AnalysisRun.check();assert($('insp').innerHTML.includes('src/cli:3'),'Expanded overview survives polling');
+S.projectInfo.repositories[0].fingerprint='changed';renderAgentPrompt();
+assert(!$('savedOverview0'),'Hide a sample from previous settings');
+assert(count('analysis_run_start')===0,'Reopening costs no model call');
+''')
+
     def test_completed_program_evidence_matches_saved_repository_commit(self):
         self.check_js(r'''
 await open();
