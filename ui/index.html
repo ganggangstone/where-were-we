@@ -1385,7 +1385,7 @@ function structureIndexView(m) {
   state.file=selected?.file || '';
   const repoControl=indexes.length>1?`<label>${tr('연결한 코드')} <select id="moduleRepository">${indexes.map(i=>`<option value="${esc(i.repository)}" ${i===index?'selected':''}>${esc(repoLabel(i.repository))}</option>`).join('')}</select></label>`:`<span>${esc(repoLabel(index.repository))}</span>`;
   const commit=`<code class="mono" title="${esc(index.commit)}">${esc(index.commit.slice(0,12))}</code>`;
-  const languages={python:'Python',javascript:'JavaScript',typescript:'TypeScript'};
+  const languages={python:'Python',javascript:'JavaScript',typescript:'TypeScript',html:'HTML'};
   const counts=coverage.languages || {python:coverage};
   const languageCounts=Object.entries(counts).filter(([,v])=>v.candidate_files>0)
     .map(([name,v])=>`${esc(languages[name] || name)} ${esc(v.indexed_files)}/${esc(v.candidate_files)}`);
