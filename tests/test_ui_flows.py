@@ -1207,10 +1207,11 @@ class Flows(unittest.TestCase):
  assert(label('로컬 Python import'),'Old snapshots retain their original Python-only coverage');
  const mixed={...index,files:[{file:'app.js',language:'javascript',declarations:[]},{file:'types.ts',language:'typescript',declarations:[{name:'Task',kind:'interface',line:2}]}],imports:[{file:'app.js',line:1,target:'types.ts'}],
   coverage:{...index.coverage,candidate_files:2,indexed_files:2,languages:{javascript:{candidate_files:1,indexed_files:1},typescript:{candidate_files:1,indexed_files:1},python:{candidate_files:0,indexed_files:0}}}};
- mixed.service_flow={connections:[{method:'GET',path:'/users',client:{file:'app.js',line:3},evidence:[{file:'app.js',line:1}],server:{file:'server.py',line:8,function:'users'},mounts:[{file:'server.py',line:2}]},
+ mixed.service_flow={connections:[{method:'GET',path:'/users',client:{file:'app.js',line:3},evidence:[{file:'app.js',line:1}],server:{file:'server.py',line:8,function:''},mounts:[{file:'server.py',line:2}]},
   {basis:'declared_defaults',evidence:[{file:'settings.py',line:18}],method:'POST',path:'/jobs',client:{file:'app.js',line:4},server:{file:'server.py',line:10,function:'jobs'},mounts:[]},{basis:'path_template',method:'PATCH',path:'/jobs/{id}',server_path:'/jobs/:id',data_steps:[{operation:'write',model:'Job',file:'server.js',line:14,evidence:[{file:'server.js',line:14},{file:'server.js',line:15}]}],actions:[{element:'input',event:'onChange',handler:'toggle',file:'App.jsx',line:17,handler_line:5,import_line:1,call_line:7,client_definition:{file:'app.js',line:3}},{element:'button',event:'onClick',handler:'save',label:'Save <entry>',label_source:{file:'App.jsx',line:25},file:'App.jsx',line:26,handler_line:20,call_line:21,import_line:1,client_definition:{file:'app.js',line:3}}],client:{file:'app.js',line:5},server:{file:'server.js',line:11,function:'update'},mounts:[]}],coverage:{requests:4,routes:2,unresolved_requests:1}};
  M().structure_indexes=[mixed];render();
  const http=()=>graph().querySelector('[data-http-flow]');
+ assert($('flowFeature').options[0].textContent==='GET /users','Anonymous callbacks retain their verified HTTP identity');
  assert($('flowFeature').selectedOptions[0].textContent.includes('toggle') && $('httpConnection').value==='2','Proven UI actions come first');
  $('flowFeature').value='2.1';$('flowFeature').dispatchEvent(new Event('change'));
  const named=http().querySelector('[data-flow-actions] details');named.open=true;

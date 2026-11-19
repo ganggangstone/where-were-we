@@ -1409,7 +1409,8 @@ function serviceFlowView(flow,state,evidence) {
       link.actions.forEach((action,i)=>features.push({http,action:i,label:flowActionName(action)}));
     } else {
       const data=[...new Set((link.data_steps || []).map(step=>step.model+' · '+tr(step.operation==='read'?'모델 읽기':'모델 쓰기')))];
-      features.push({http,action:0,label:data.length?data.join(', ')+' · '+link.server.function:link.server.function});
+      const handler=link.server.function || link.method+' '+link.path;
+      features.push({http,action:0,label:data.length?data.join(', ')+' · '+handler:handler});
     }
   });
   const initial=features.find(feature=>connections[feature.http].actions?.length) || features[0];
