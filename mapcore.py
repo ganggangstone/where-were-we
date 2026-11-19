@@ -345,6 +345,9 @@ def backend_test_links(be,files,read_source,conf,imports_reader=None,module_reso
             by_func[(r["file"], r["function"])].append(r)
     router_files = {k[0] for k in by_func}
     pats = [call_regex(t) for t in conf["calls"]]
+    if not be:
+        # A test cannot link to an absent route; every explicit record is stale.
+        return hits, len(conf["records"])
     is_test = lambda f: any(fnmatch.fnmatch(f if "/" in g else os.path.basename(f), g) for g in conf["files"])
     for f in files:
         if not is_test(f):

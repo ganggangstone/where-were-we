@@ -9,6 +9,15 @@ import unittest
 
 
 class RefreshReuse(unittest.TestCase):
+    def test_no_routes_does_not_read_test_sources_and_retains_stale_records(self):
+        import mapcore
+        def source(file):
+            self.fail('No source should be needed when no route can match')
+        rules={'calls':['client.<method>("<path>")'],'files':['test_*.py'],
+               'records':[{'file':'test_item.py','route':'app.py::missing','line':1,'quote':'sample'}]}
+        hits,stale=mapcore.backend_test_links([],['test_item.py'],source,rules)
+        self.assertEqual((hits,stale),({},1))
+
     def test_shared_pin_preserves_each_ref_and_previous_map(self):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp)
