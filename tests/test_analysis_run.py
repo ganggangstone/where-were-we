@@ -493,6 +493,46 @@ class AnalysisRun(unittest.TestCase):
                     self.assertEqual(done['error']['code'],'invalid_result')
                     self.assertEqual(self.raw(),baseline)
 
+    def test_batched_citation_uses_unique_visible_literal_when_number_is_wrong(self):
+        (self.repo/'z-padding.txt').write_text('ordinary line\n'*6000)
+        self.git('add','.');self.git('commit','-qm','Force source batches')
+        batches=[]
+        def executor(prompt,**kwargs):
+            packet=json.loads(prompt.split('\n',1)[1])
+            batch=packet['batch']
+            files=[f['file'] for snap in packet.get('snapshots',[]) for f in snap['files']]
+            fragment={}
+            if 'server/items.go' in files:
+                route=copy.deepcopy(self.data['backend_routes'][0])
+                route['line']=2
+                fragment={'backend_routes':[route]}
+                batches.append(batch['id'])
+            return {'batch':batch['id'],'covered':batch['units'],'result':fragment}
+        done=analysis_run.run(self.prepare(intent={'task':'analysis','targets':[]})['id'],executor)
+        self.assertEqual(done['state'],'completed',done.get('error'))
+        self.assertEqual(len(batches),len(set(batches)))
+        route=self.raw()['dev']['backend_routes'][0]
+        self.assertEqual((route['line'],route['quote']),(4,self.data['backend_routes'][0]['quote']))
+
+    def test_batched_citation_relocation_requires_unique_same_file_and_visible_current_line(self):
+        path='notes.txt'
+        (self.repo/path).write_bytes('same text\rsame text\r\n한글 reference\u2028other content'.encode())
+        self.git('add','.');self.git('commit','-qm','Pin duplicate and Unicode source lines')
+        commit=self.git('rev-parse','HEAD').strip()
+        repo=str(self.repo)
+        oid=self.git('rev-parse',f'HEAD:{path}').strip()
+        lines=analysis_run._blob_lines(repo,oid)
+        self.assertEqual(lines[2],{'line':3,'text':'한글 reference'})
+        def check(quote,visible,source_commit=commit,line=4):
+            data={'inspected':[{'file':path,'line':line,'quote':quote}]}
+            unit={'kind':'source','value':{'commit':source_commit,'file':path,'lines':visible}}
+            analysis_run._strict_result('analysis',data,repo,commit,context=[unit])
+            return data['inspected'][0]['line']
+        self.assertEqual(check('한글 reference',lines),3)
+        for args in [('same text',lines[:1]),('invented content',lines),('한글 reference',lines[:2]),
+                     ('한글 reference',lines,self.commit),('한글 reference',lines,0)]:
+            with self.subTest(args=args),self.assertRaises(analysis_run.InvalidClaim):check(*args)
+
     def test_evidence_accepts_literal_unicode_and_tab_in_tracked_path(self):
         path='작업\t명령.py'
         (self.repo/path).write_text('run_command()\n')

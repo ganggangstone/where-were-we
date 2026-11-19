@@ -458,7 +458,7 @@ def _result(value):
     if not isinstance(value,dict):raise RunError('invalid_result','Analysis output must be an object')
     return value
 
-def _strict_result(task,data,repo,commit,request=None,raw=None,final=True):
+def _strict_result(task,data,repo,commit,request=None,raw=None,final=True,context=()):
     """App replies cannot silently lose raw claims in the compatibility parsers."""
     def fail(reason='An analysis claim did not match the task schema'):raise InvalidClaim(reason)
     evidence,cache,rejected=ai_extract.evidence_reader(repo,commit)
@@ -469,7 +469,24 @@ def _strict_result(task,data,repo,commit,request=None,raw=None,final=True):
         if mode in (b'100644',b'100755') and kind==b'blob' and not _secret(file) and PurePosixPath(file).suffix.lower() not in BINARY_SUFFIXES:regular.add(file)
     for ev in ai_extract.cited(data):
         if not isinstance(ev['file'],str) or ev['file'] not in regular:fail('A citation did not name an eligible tracked file')
-        if not evidence(ev):fail('A citation did not match the exact source line and literal quote of at least six characters')
+        if not evidence(ev):
+            file,line,quote=ev['file'],ev.get('line'),ev.get('quote')
+            # A stateless batch can copy a literal correctly but miscount its line.
+            # Repair only the number of a unique match actually supplied for this commit.
+            candidates=[]
+            if context and type(line) is int and line>0 and isinstance(quote,str) and len(quote.strip())>=6:
+                candidates=[i for i,text in enumerate(cache.get(file,[]),1) if quote in text]
+            mismatch='A citation did not match the exact source line and literal quote of at least six characters'
+            if len(candidates)!=1:
+                if context and len(candidates)>1:mismatch+=' (the literal matches several lines)'
+                elif context:mismatch+=' (check the literal against the numbered text)'
+                fail(mismatch)
+            if not any(
+                    unit['kind']=='source' and unit['value']['commit']==commit and unit['value']['file']==file
+                    and any(row['line']==candidates[0] and quote in row['text'] for row in unit['value']['lines'])
+                    for unit in context):
+                fail(mismatch+' (the matching line was outside this packet)')
+            ev['line']=candidates[0]
         # A valid quote in a symlink's blob still is not eligible source.
         if any('\x00' in line for line in cache.get(ev['file'],[])):fail()
     def rows(value,key):
@@ -477,9 +494,10 @@ def _strict_result(task,data,repo,commit,request=None,raw=None,final=True):
         if not isinstance(out,list) or any(not isinstance(x,dict) for x in out):fail()
         return out
     if task=='analysis':
+        rejected_before_parse=rejected()
         parsed=ai_extract.parse(data,evidence,commit)
         if parsed['dropped']:fail('A screen or route lacked a valid path, HTTP method, handler or citation')
-        if rejected():fail('An item lacked a valid source citation')
+        if rejected()!=rejected_before_parse:fail('An item lacked a valid source citation')
         for item in rows(data,'screens'):
             if item.get('heading') is not None and not isinstance(item['heading'],str):fail()
             for action in rows(item,'actions'):
@@ -810,7 +828,7 @@ def generate(value,task,request,executor,cancelled,deadline,check,blobs=None):
     if task['task']!='briefing':
         conf,bundle,_,_=ai_extract.context(value['project'],task['repository'],value['branch'])
         repo=conf['path'];raw=bundle[value['branch']]
-    def validate(result,final=True):
+    def validate(result,final=True,context=()):
         pins=request['record_arguments']
         for key in ('commit','configuration','base','snapshot','branch','lang'):
             if key in result and result[key]!=pins.get(key):raise RunError('pins_changed','Analysis response named a different source pin')
@@ -819,7 +837,7 @@ def generate(value,task,request,executor,cancelled,deadline,check,blobs=None):
             for key,area in (('screens','frontend'),('backend_routes','backend')):
                 if any(not ai_extract.within(item.get('file'),area,conf['layout']) for item in result.get(key,[]) if isinstance(item,dict)):raise RunError('invalid_result','Analysis claimed an item outside the configured area')
         if repo:
-            try:_strict_result(task['task'],result,repo,request['commit'],request,raw,final)
+            try:_strict_result(task['task'],result,repo,request['commit'],request,raw,final,context)
             except RunError:raise
             except (KeyError,TypeError,ValueError):raise InvalidClaim('An analysis claim did not match the task schema') from None
     def invoke(payload):
@@ -926,7 +944,7 @@ def generate(value,task,request,executor,cancelled,deadline,check,blobs=None):
             fragment=_result(answer.get('result'))
             programs=answer.get('preview_programs',fragment.pop('preview_programs',None))
             try:
-                validate(fragment,False)
+                validate(fragment,False,context if task['task']=='analysis' else ())
             except InvalidClaim as error:
                 if claim_retry_used or task['task']!='analysis':raise
                 claim_retry_used=True
