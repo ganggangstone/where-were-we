@@ -67,17 +67,21 @@ class RefreshFirstWebKit(unittest.TestCase):
  index.package_imports=[];index.commit=pin;
  const client={file:'client.js',line:5,quote:'fetch("/items")'},server={file:'api.py',line:9,quote:'@router.get("/items")',function:'items'};
  const edge={id:1,method:'GET',path:'/items',client,server,data_steps:[{operation:'read',model:'Item',file:'api.py',line:11,evidence:[]}]};
- index.service_flow={connections:[edge],feature_groups:[{resource:'/items',connection_indexes:[0]}],coverage:{requests:1,routes:1,unresolved_requests:0}};
+ index.service_flow={connections:[edge,{...edge,path:'/profiles',data_steps:[]}],feature_groups:[{resource:'/items',connection_indexes:[0]},{resource:'/profiles',connection_indexes:[1]}],coverage:{requests:2,routes:2,unresolved_requests:0}};
  await doRefresh();check($('map').querySelector('[data-local-resource]'),'Local resource groups appear first');
  window.runningAnalysis={id:'saved',state:'completed',project:'First',repository:'',branch:'dev',lang:S.lang,intent:{task:'overview',targets:[]},completed_tasks:[],tasks:[],saved_overviews:[{
   repository:'web',configuration:'pin',commit:pin,format:'overview-v1',files:[client.file,server.file],
-  items:[{name:'Browse',description:'Read stored items.',...client}],connections:[edge],feature_groups:[{name:'Saved items',connection_ids:[1]}]}]};
+  scope_coverage:{selected:['/items'],total:2},items:[{name:'Browse',description:'Read stored items.',...client}],connections:[edge],feature_groups:[{name:'Saved items',connection_ids:[1]}]}]};
  Object.defineProperty(document,'hidden',{configurable:true,value:false});
  S.agentPurpose='analysis';S.agentPrompt='';renderAgentPrompt();await AnalysisRun.check();
  check(!$('automaticAnalysis').open && $('insp').innerText.includes('Saved items'),'Optional saved group appears without opening AI controls');
  const button=$('insp').querySelector('[data-overview-feature]');button.click();
  const storage=$('insp').querySelector('[data-flow-storage] details');check(storage,'Opening the saved feature shows its model step');
  storage.querySelector('summary').click();check(storage.open && storage.innerText.includes('api.py:11'),'Model citation remains discoverable');
+ const scopePicker=$('overviewLocalScope0');
+ check(scopePicker && scopePicker.options.length===1 && scopePicker.value==='/profiles' && $('insp').innerText.includes('1/2'),'Only unreviewed local scopes are offered');
+ $('overviewOpenScope0').click();
+ check(S.view==='sys' && $('map').querySelector('[data-local-resource="/profiles"]').getAttribute('aria-expanded')==='true','Open the exact local group from a sampled overview');
  check(!calls.some(c=>c.command==='analysis_run_start'),'Viewing saved evidence starts no AI');
  S.agentPrompt=null;
  const paths=['src/nested/<example name>.go','src/nested/worker.ts','src/nested/notes.md',...Array.from({length:80},(_,i)=>'src/item'+String(i).padStart(2,'0')+'.go')];

@@ -133,6 +133,16 @@ const AnalysisRun = (() => {
     });
   }
   const overviewKey = group => JSON.stringify([S.project,S.branch,S.lang,group.repository,group.commit,group.configuration]);
+  function overviewIndex(group) {
+    const map=S.maps?.[S.branch];
+    return group.repository ? map?.structure_indexes?.find(i=>i.repository===group.repository && i.commit===group.commit)
+      : map?.structure_index?.commit===group.commit ? map.structure_index : null;
+  }
+  function remainingScopes(group) {
+    if(!Array.isArray(group.scope_coverage?.selected))return [];
+    const sampled=new Set(group.scope_coverage.selected);
+    return (overviewIndex(group)?.service_flow?.feature_groups || []).map(row=>row.resource).filter(resource=>!sampled.has(resource));
+  }
   function overviewTree(group) {
     const files=group.files.map(file=>{
       const items=group.items.filter(item=>item.file===file);
@@ -142,9 +152,7 @@ const AnalysisRun = (() => {
         <div class="s"><code>${esc(file)}:${esc(item.line)}</code></div><pre>${esc(item.quote)}</pre></li>`).join('');
       return `<li><code>${esc(file)}</code>${nodes ? `<ul>${nodes}</ul>` : ''}</li>`;
     }).join('');
-    const map=S.maps?.[S.branch];
-    const index=group.repository ? map?.structure_indexes?.find(i=>i.repository===group.repository && i.commit===group.commit)
-      : map?.structure_index?.commit===group.commit ? map.structure_index : null;
+    const index=overviewIndex(group);
     const edgesInSource=index?.service_flow?.connections || [];
     const sameSite=(a,b)=>a?.file===b.file && a?.line===b.line;
     const edgeHtml=edge=>{
@@ -183,9 +191,11 @@ const AnalysisRun = (() => {
       const open=openedOverview===key || (openedOverview===null && group.format==='overview-v1');
       const coverage=group.scope_coverage;
       const scopeCounts=coverage?.total ? ' · '+text('로컬에서 확인한 요청 경로 묶음 중 ','Verified request scopes sampled: ')+coverage.selected.length+'/'+coverage.total : '';
+      const resources=open?remainingScopes(group):[];
+      const local=resources.length?`<div class="ctl"><label>${text('개요에 포함되지 않은 경로','Paths outside this overview')} <select id="overviewLocalScope${index}">${resources.map(resource=>`<option>${esc(resource)}</option>`).join('')}</select></label><button class="btn quiet" id="overviewOpenScope${index}">${text('지도에서 열기','Open in map')}</button></div>`:'';
       return `<section class="sect"><button class="btn plain" type="button" id="savedOverview${index}" aria-expanded="${open}">${text('저장된 첫 개요','Saved initial overview')} · ${esc(group.repository ? connectionDisplayName(group.repository) : S.project)}</button>
         <p class="s">${text('파일 '+group.files.length+'개의 일부 코드에서 확인한 항목 '+group.items.length+'개','Items verified: '+group.items.length+' · Files sampled: '+group.files.length)}${esc(scopeCounts)}</p>
-        ${open ? `<div><code>${esc(group.commit.slice(0,8))}</code>${overviewTree(group)}</div>` : ''}</section>`;
+        ${open ? `<div><code>${esc(group.commit.slice(0,8))}</code>${overviewTree(group)}${local}</div>` : ''}</section>`;
     }).join('');
   }
   function previewItems() {
@@ -266,6 +276,17 @@ const AnalysisRun = (() => {
       const key=button.dataset.overviewFeature;openedFeature=openedFeature===key?null:key;paint();
     });
     savedOverviews().forEach((group,i)=>{
+      const openScope=$('overviewOpenScope'+i);
+      if(openScope)openScope.onclick=()=>{
+        const resource=$('overviewLocalScope'+i)?.value;
+        if(!remainingScopes(group).includes(resource))return;
+        S.agentPrompt=null;S.controlTarget=null;S.view='sys';S.q='';render();
+        const repo=$('moduleRepository');
+        if(repo && repo.value!==group.repository){repo.value=group.repository;repo.dispatchEvent(new Event('change'));}
+        const target=[...$('moduleGraph').querySelectorAll('[data-local-resource]')].find(el=>el.dataset.localResource===resource);
+        if(target?.getAttribute('aria-expanded')==='false')target.click();
+        $('moduleGraph').scrollIntoView({block:'start'});
+      };
       const button=$('savedOverview'+i);
       if(button)button.onclick=()=>{
         const key=overviewKey(group);
