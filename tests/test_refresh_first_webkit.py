@@ -31,6 +31,14 @@ class RefreshFirstWebKit(unittest.TestCase):
  check(!calls.some(c=>['analysis_run_start','analysis_plan','analysis_providers'].includes(c.command)),'Refresh must not prepare AI');
  S.project=null;S.view='changes';await loadProject('First');
  check(S.view==='sys' && $('map').innerText.includes('worker.cjs'),'Opening a saved local map shows its structure');
+ const crossMap=M();const serverPin='bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',clientPin='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+ crossMap.repositories=[{id:'web',path:'/fictional/web'},{id:'api',path:'/fictional/service'}];
+ crossMap.cross_repository_connections=[{method:'GET',path:'/cross',basis:'configured',client:{repository:'web',commit:clientPin,file:'src/shared file.js',line:4},server:{repository:'api',commit:serverPin,file:'src/shared file.js',line:8,function:'serve'}}];
+ render();const cross=$('map').querySelector('[data-cross-connection]');cross.open=true;
+ const anchors=[...cross.querySelectorAll('a')];check(cross.querySelector('code[title="'+serverPin+'"]') && cross.querySelector('code[title="'+clientPin+'"]'),'Each side of a cross-repository match carries its own pin');
+ check(anchors[0].dataset.url==='zed://file/fictional/web/src/shared%20file.js:4' && anchors[1].dataset.url==='zed://file/fictional/service/src/shared%20file.js:8','Identically named paths resolve under their own repository');
+ anchors[1].dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));check(calls.at(-1).command==='open_url' && calls.at(-1).args.url===anchors[1].dataset.url,'Server proof opens its own working path');
+ delete crossMap.cross_repository_connections;
  index.files=Array.from({length:160},(_,i)=>({file:'module'+i+'.cjs',language:'javascript',declarations:[]}));
  index.imports=[{file:'module0.cjs',target:'module150.cjs',line:1},{file:'module45.cjs',target:'module150.cjs',line:3}];
  index.commit='bbbbbbbb2222';await doRefresh();
