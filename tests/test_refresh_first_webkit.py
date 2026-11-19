@@ -163,7 +163,12 @@ class RefreshFirstWebKit(unittest.TestCase):
  const detail=box().querySelector('[data-directory-detail]');check(detail.innerText.includes('locate') && detail.innerText.includes('outside.ts') && detail.innerText.includes('src/nested/worker.ts:3'),'Choosing a folder result exposes declarations and outgoing imports');
  detail.querySelector('[data-inventory-file$="/outside.ts"]').click();check(calls.at(-1).args.url==='zed://file/fictional/web/outside.ts','Folder import opens its actual destination without borrowing the importing line');
  const folderArgs=calls.filter(c=>c.command==='directory_structure').at(-1).args;check(folderArgs.commit===pin && folderArgs.directory==='src/nested' && folderArgs.repository==='web','Folder analysis is pinned to the selected repository and directory');
- box().querySelector('[data-inspect-directory]').click();
+ const nextPage=()=>box().querySelector('[data-directory-page="2"]').click();
+ nextPage();await new Promise(r=>setTimeout(r,20));
+ check(box().innerText.includes(tr('확인한 파일')+' 0/1') && box().querySelector('[data-directory-page="3"]').disabled,'Unparsed last page retains counts and navigation');
+ box().querySelector('[data-directory-page="1"]').click();await new Promise(r=>setTimeout(r,10));
+ nextPage();box().querySelector('[data-inspect-directory]').click();await new Promise(r=>setTimeout(r,20));
+ check(!box().querySelector('[data-directory-page]') && M()===globalMap,'Late page response cannot replace a closed folder or global map');
  const fileLink=box().querySelector('[data-inventory-file]');check(fileLink.textContent==='<example name>.go','Paths remain text');
  fileLink.click();check(calls.at(-1).command==='open_url' && calls.at(-1).args.url==='zed://file/fictional/web/src/nested/%3Cexample%20name%3E.go','Editor opens the qualified working file without inventing a line');
  const inspect=path=>box().querySelector('[data-inspect-path="'+path+'"]').click();
@@ -185,7 +190,10 @@ class RefreshFirstWebKit(unittest.TestCase):
 const originalNative=window.__TAURI__.core.invoke;
 window.__TAURI__.core.invoke=async(command,args)=>{
  if(command==='directory_structure'){
-   calls.push({command,args});return JSON.stringify({...args,status:'indexed',files:[{file:'src/nested/a.py',language:'python',declarations:[]},{file:'src/nested/worker.ts',language:'typescript',declarations:[{kind:'function',name:'locate',line:8}]}],imports:[{file:'src/nested/worker.ts',target:'outside.ts',line:3}],coverage:{candidate_files:3,indexed_files:2,skipped_files:1,truncated:true}});
+   calls.push({command,args});
+   const pagination={page:args.page,total_pages:2,selected_files:args.page===2?1:2};
+   if(args.page===2){await new Promise(r=>setTimeout(r,5));return JSON.stringify({...args,pagination,status:'indexed',files:[],coverage:{candidate_files:3,indexed_files:0}});}
+   return JSON.stringify({...args,pagination,status:'indexed',files:[{file:'src/nested/a.py',language:'python',declarations:[]},{file:'src/nested/worker.ts',language:'typescript',declarations:[{kind:'function',name:'locate',line:8}]}],imports:[{file:'src/nested/worker.ts',target:'outside.ts',line:3}],coverage:{candidate_files:3,indexed_files:2,skipped_files:1,truncated:true}});
  }
  if(command!=='file_structure')return originalNative(command,args);
  calls.push({command,args});

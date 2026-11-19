@@ -1409,13 +1409,13 @@ async function inspectInventoryFile(row,key,file){
   } catch(error){selection.error=String(error);}
   if(S.inventoryFile===selection && S.inventoryOpen===key)render();
 }
-async function inspectDirectory(row,key,directory) {
+async function inspectDirectory(row,key,directory,folderPage=1) {
   const selection={key,directory,page:0};
   S.inventoryDirectory=selection;render();
   try {
-    const raw=await invoke('directory_structure',{project:S.project,repository:row.repository || '',branch:S.branch,commit:row.commit,directory});
+    const raw=await invoke('directory_structure',{project:S.project,repository:row.repository || '',branch:S.branch,commit:row.commit,directory,page:folderPage});
     const result=typeof raw==='string'?JSON.parse(raw):raw;
-    if(result?.commit!==row.commit || result.directory!==directory || !['indexed','unavailable'].includes(result.status))throw Error('Directory revision mismatch');
+    if(result?.commit!==row.commit || result.directory!==directory || (result.pagination?.page ?? 1)!==folderPage || !['indexed','unavailable'].includes(result.status))throw Error('Directory revision mismatch');
     selection.result=result;
   } catch(error){selection.error=String(error);}
   if(S.inventoryDirectory===selection && S.inventoryOpen===key)render();
@@ -1425,11 +1425,12 @@ function directoryDetail(selection,fileUrl) {
   const result=selection.result;
   if(!result)return `<p role="status">${tr('폴더 구조 읽는 중…')}</p>`;
   const coverage=result.coverage || {},files=result.files || [],selected=files.find(row=>row.file===selection.file) || files[0];
-  const summary=`${tr('확인한 파일')} ${esc(coverage.indexed_files || 0)}/${esc(coverage.candidate_files || 0)}${coverage.truncated?' · '+tr('분석 한도 도달'):''}${coverage.unresolved_imports?' · '+tr('대상 미확인 import')+' '+esc(coverage.unresolved_imports):''}`;
-  if(!selected)return `<p class="s">${summary}</p>`;
+  const paging=result.pagination,summary=`${tr('확인한 파일')} ${esc(coverage.indexed_files || 0)}/${esc(paging?.selected_files ?? coverage.candidate_files ?? 0)}${coverage.truncated?' · '+tr('분석 한도 도달'):''}${coverage.unresolved_imports?' · '+tr('대상 미확인 import')+' '+esc(coverage.unresolved_imports):''}`;
+  const controls=paging?.total_pages>1?`<div class="ctl"><button class="btn quiet" data-directory-page="${paging.page-1}" ${paging.page===1?'disabled':''}>${tr('이전')}</button><span>${paging.page} / ${paging.total_pages}</span><button class="btn quiet" data-directory-page="${paging.page+1}" ${paging.page===paging.total_pages?'disabled':''}>${tr('다음')}</button></div>`:'';
+  if(!selected)return `<p class="s">${summary}</p>${controls}`;
   const menu=files.map(row=>`<option value="${esc(row.file)}" ${row===selected?'selected':''}>${esc(row.file.slice(selection.directory.length+1))}</option>`).join('');
   const detail={...selected,status:'indexed',imports:(result.imports || []).filter(row=>row.file===selected.file),package_imports:(result.package_imports || []).filter(row=>row.file===selected.file)};
-  return `<section class="sect" data-directory-detail><div class="s">${summary}</div><label>${tr('파일')} <select data-directory-file>${menu}</select></label>${fileStructureDetail({file:selected.file,page:selection.page,result:detail},fileUrl(selected.file),fileUrl)}</section>`;
+  return `<section class="sect" data-directory-detail><div class="s">${summary}</div>${controls}<label>${tr('파일')} <select data-directory-file>${menu}</select></label>${fileStructureDetail({file:selected.file,page:selection.page,result:detail},fileUrl(selected.file),fileUrl)}</section>`;
 }
 function inventoryBrowser(m,row,key,coverage) {
   const badge=directory=>{
@@ -2150,7 +2151,7 @@ function render() {
       if(e.target.matches('[data-directory-file]') && S.inventoryDirectory){S.inventoryDirectory.file=e.target.value;S.inventoryDirectory.page=0;render();}
     };
     box.onclick=e=>{
-      const control=e.target.closest('summary,[data-inventory-dir],[data-inventory-page],[data-inventory-file],[data-inspect-path],[data-structure-page],[data-inspect-directory]');
+      const control=e.target.closest('summary,[data-inventory-dir],[data-inventory-page],[data-inventory-file],[data-inspect-path],[data-structure-page],[data-inspect-directory],[data-directory-page]');
       if(!control || control.matches('summary') && control.parentElement!==box)return;
       e.preventDefault();
       const key=box.dataset.inventory;
@@ -2160,10 +2161,11 @@ function render() {
         if(selection){selection.page=Number(control.dataset.structurePage);render();}
         return;
       }
-      if((control.hasAttribute('data-inspect-path') || control.hasAttribute('data-inspect-directory')) && control.getAttribute('aria-expanded')!=='true'){
+      if((control.hasAttribute('data-inspect-path') || control.hasAttribute('data-inspect-directory') || control.hasAttribute('data-directory-page')) && control.getAttribute('aria-expanded')!=='true'){
         const rows=m.inventories || (m.inventory?[m.inventory]:[]);
         const row=rows.find(item=>JSON.stringify([S.project,item.repository || '',item.commit])===key);
-        if(row && control.hasAttribute('data-inspect-directory'))void inspectDirectory(row,key,control.dataset.inspectDirectory);
+        if(row && control.hasAttribute('data-directory-page'))void inspectDirectory(row,key,S.inventoryDirectory.directory,Number(control.dataset.directoryPage));
+        else if(row && control.hasAttribute('data-inspect-directory'))void inspectDirectory(row,key,control.dataset.inspectDirectory);
         else if(row)void inspectInventoryFile(row,key,control.dataset.inspectPath);
         return;
       }
