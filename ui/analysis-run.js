@@ -142,11 +142,27 @@ const AnalysisRun = (() => {
         <div class="s"><code>${esc(file)}:${esc(item.line)}</code></div><pre>${esc(item.quote)}</pre></li>`).join('');
       return `<li><code>${esc(file)}</code>${nodes ? `<ul>${nodes}</ul>` : ''}</li>`;
     }).join('');
-    const connections=(group.connections || []).map(edge=>`<li><b>${esc(edge.method)} ${esc(edge.path)}</b>${edge.basis==='path_template' ? ` · ${text('경로 패턴이 맞을 때','If the path pattern matches')} <code>${esc(edge.server_path)}</code>` : ''}<ul>${[
+    const edgeHtml=edge=>`<li><b>${esc(edge.method)} ${esc(edge.path)}</b>${edge.basis==='path_template' ? ` · ${text('경로 패턴이 맞을 때','If the path pattern matches')} <code>${esc(edge.server_path)}</code>` : ''}<ul>${[
       [text('요청 코드','Request code'),edge.client],[text('서버 함수','Server handler'),edge.server]
-    ].map(([label,side])=>`<li>${label} · <code>${esc(side.file)}:${esc(side.line)}</code><pre>${esc(side.quote)}</pre></li>`).join('')}</ul></li>`).join('');
-    const flow=connections ? `<figure class="overview-tree"><figcaption>${text('코드에서 확인한 요청 연결','Request connections in source')}</figcaption><ul>${connections}</ul></figure>` : '';
-    return `${flow}<figure class="overview-tree"><figcaption>${text('파일별 기능 구조도','Feature diagram by source file')}</figcaption><ul>${files}</ul></figure>`;
+    ].map(([label,side])=>`<li>${label} · <code>${esc(side.file)}:${esc(side.line)}</code><pre>${esc(side.quote)}</pre></li>`).join('')}</ul></li>`;
+    const edges=group.connections || [];
+    const byId=new Map(edges.filter(edge=>Number.isInteger(edge.id)).map(edge=>[edge.id,edge]));
+    const grouped=new Set();
+    const features=(group.feature_groups || []).map(feature=>{
+      const members=(feature.connection_ids || []).map(id=>byId.get(id)).filter(Boolean);
+      if(!members.length)return '';
+      members.forEach(edge=>grouped.add(edge.id));
+      const endpoints=members.flatMap(edge=>[edge.client,edge.server]);
+      const item=group.items.find(item=>item.description && endpoints.some(side=>side.file===item.file && side.line===item.line));
+      const description=item?.description || members.map(edge=>edge.method+' '+edge.path).join(' · ');
+      return `<details class="sect"><summary><strong>${esc(feature.name)}</strong><span class="s"> · ${esc(description)}</span></summary><ul>${members.map(edgeHtml).join('')}</ul></details>`;
+    }).join('');
+    const remaining=edges.filter(edge=>!grouped.has(edge.id));
+    const title=features?text('그 밖의 요청','Other requests'):text('코드에서 확인한 요청 연결','Request connections in source');
+    const remainingFlow=remaining.length?`<figure class="overview-tree"><figcaption>${title}</figcaption><ul>${remaining.map(edgeHtml).join('')}</ul></figure>`:'';
+    const flow=features && remaining.length?`<details><summary>${title} · ${remaining.length}</summary><ul>${remaining.map(edgeHtml).join('')}</ul></details>`:remainingFlow;
+    const sources=`<figure class="overview-tree"><figcaption>${text('파일별 기능 구조도','Feature diagram by source file')}</figcaption><ul>${files}</ul></figure>`;
+    return features?`<section class="overview-tree"><h4>${text('기능별 개요 (베타)','Feature overview (beta)')}</h4>${features}</section>${flow}<details><summary>${text('파일별 근거','Evidence by file')}</summary>${sources}</details>`:`${flow}${sources}`;
   }
   function overviewHtml() {
     return savedOverviews().map((group,index)=>{
@@ -215,19 +231,19 @@ const AnalysisRun = (() => {
       : choice.task==='analysis' ? text('상세 지도 분석 (베타)','Analyze detailed map (beta)')
       : text(names[choice.task]+' 분석 시작','Analyze '+names[choice.task]);
     return `<section class="sect" aria-label="${text('자동 분석 (베타)','Automatic analysis (beta)')}">
+      ${overviewHtml()}
       <p><strong>Claude Code</strong> · ${esc(identity || text('계정 미확인','Account not verified'))}${account?.subscription_type ? ' · '+esc(account.subscription_type) : ''}</p>
       <p class="s">${esc(scope().repository ? connectionDisplayName(scope().repository) : text('연결한 코드 전체','All connected repositories'))} · ${esc(S.branch)}${targets.length?' · '+targets.join(', '):''}</p>
       <p class="s">${text('선택한 코드가 Claude로 전송되며 구독 한도가 적용됩니다.','Claude receives the selected code. Subscription usage limits apply.')}</p>
       ${providerBusy ? `<p role="status">${text('Claude Code 계정 확인 중…','Checking the Claude Code account…')}</p>` : provider && !usable() ? `<p role="alert">${esc(message(provider))}</p>` : ''}
       ${run ? `${!sameScope() || (runAccount && runAccount!==identity) ? `<p class="s">${text('이 분석의 코드','This run analyzes')}: ${esc(runScope)} · ${esc(names[run.intent?.task || 'all'])}${(run.intent?.targets || []).map(t=>' · '+esc(t.repository)+' · '+esc(t.target)).join('')}${runAccount ? ' · '+esc(runAccount) : ''}</p>` : ''}${!sameScope() ? `<p class="s">${text('다른 분석입니다. 실행 중이면 완료 후 시작하거나 취소하세요.','Different analysis selected. Wait for the active run or cancel it.')}</p>` : ''}<div role="status" aria-live="polite"><strong>${esc(stateLabel())}</strong> · ${done}/${total} ${text('작업 저장됨','tasks saved')}${taskName ? '<div>'+esc(taskName)+'</div>' : ''}</div><progress max="${Math.max(total, 1)}" value="${done}" aria-label="${text('분석 진행률','Analysis progress')}"></progress>${run.blocked?.length ? `<p class="s">${text('먼저 확인할 분석','Analysis requiring attention')}: ${run.blocked.length}</p>` : ''}` : ''}
-      ${stats ? `<p class="s">${text('입력 호출','Input calls')}: ${stats.calls} · ${text('전송한 입력 바이트','Encoded input bytes')}: ${stats.bytes}${inputProgress ? ' · '+esc(inputProgress) : ''}</p>` : ''}
+      ${stats ? `<details><summary>${text('AI 사용량','AI usage')}</summary><p class="s">${text('입력 호출','Input calls')}: ${stats.calls} · ${text('전송한 입력 바이트','Encoded input bytes')}: ${stats.bytes}${inputProgress ? ' · '+esc(inputProgress) : ''}</p></details>` : ''}
       ${issue ? `<p role="alert">${esc(message(issue))}</p>` : ''}
       ${!active() && choice.task==='overview' ? `<p class="s" id="overviewLimits">${text('첫 개요 · 연결한 코드마다 최대 4개 파일, AI 1회 이내','Per repository: up to 4 files, 1 AI call maximum.')}</p>` : ''}
       <div class="ctl">${active() ? `<button class="btn" id="cancelAppAnalysis" ${busy || run.cancel_requested ? 'disabled' : ''}>${text('분석 취소','Cancel analysis')}</button>` : sameScope() && ['failed','cancelled'].includes(run?.state) ? `<button class="btn primary" id="retryAppAnalysis" ${canStart ? '' : 'disabled'}>${text('현재 코드로 다시 시도','Retry with current code')}</button>` : `<button class="btn primary" id="startAppAnalysis" ${choice.task==='overview' ? 'aria-describedby="overviewLimits"' : ''} ${canStart ? '' : 'disabled'}>${esc(startLabel)}</button>`}
       ${!active() && intent().task==='overview' ? `<button class="btn quiet" id="startFullAnalysis" ${canStart ? '' : 'disabled'}>${text('전체 코드 분석 (베타)','Analyze full codebase (beta)')}</button>` : ''}
       <button class="btn quiet" id="checkAppAnalysis" ${busy || providerBusy ? 'disabled' : ''}>${text('계정·상태 다시 확인','Check account and status')}</button>
       ${sameScope() && done > 0 && run.intent?.task!=='overview' ? `<button class="btn quiet" id="viewAppAnalysis">${text('저장된 결과 보기','View saved results')}</button>` : ''}</div>
-      ${overviewHtml()}
       ${previewHtml()}</section>`;
   }
   function bind() {

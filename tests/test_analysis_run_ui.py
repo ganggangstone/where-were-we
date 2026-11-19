@@ -277,6 +277,13 @@ assert(flow.includes('GET /runs') && flow.includes('client.ts:7') && flow.includ
 group.connections[0].basis='path_template';group.connections[0].server_path='/runs/:id';
 await AnalysisRun.check();
 assert($('insp').innerHTML.includes('If the path pattern matches') && $('insp').innerHTML.includes('/runs/:id'),'A parameterized match stays conditional when reopened');
+group.connections[0].id=1;
+group.connections.push({...group.connections[0],id:2,path:'/other'});
+group.feature_groups=[{name:'Manage <runs>',connection_ids:[1]}];
+group.items.push({description:'Fetch the current runs',file:'client.ts',line:7,name:'Load',quote:'fetch("/runs")'});
+await AnalysisRun.check();const grouped=$('insp').innerHTML;
+assert(grouped.includes('Manage &lt;runs>') && grouped.indexOf('Manage &lt;runs>')<grouped.indexOf('GET /runs') && grouped.indexOf('Other requests')<grouped.indexOf('GET /other'),'Named features precede both linked requests and ungrouped requests');
+assert(grouped.includes('Fetch the current runs') && grouped.includes('Evidence by file') && grouped.includes('If the path pattern matches'),'Grounded descriptions, original file evidence and conditions remain available');
 status.current_legacy_pin.configuration='changed';await AnalysisRun.check();
 assert(!$('savedOverview0'),'Configuration mismatch hides the sample');
 ''')
