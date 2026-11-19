@@ -1496,19 +1496,26 @@ function compactTrace(link,action) {
   ];
   return `<ol class="flow-trace" aria-label="${tr('호출 흐름')}">${nodes.map(([stage,label])=>`<li data-trace-stage="${stage}"><code>${esc(label)}</code></li>`).join('')}</ol>`;
 }
-function registeredRoutesView(flow,state,evidence) {
-  if(!flow?.registered_routes?.length)return '';
+function standaloneRoutes(flow) {
   const identity=(r,path)=>JSON.stringify([r.method,path,r.server.file,r.server.line]);
   const linked=new Set(flow.connections.map(row=>identity(row,row.server_path || row.path)));
-  const routes=flow.registered_routes.filter(row=>!linked.has(identity(row,row.path)));
+  return flow.registered_routes.filter(row=>!linked.has(identity(row,row.path)));
+}
+const ROUTES_PER_PAGE=8;
+function registeredRoutesView(flow,state,evidence) {
+  if(!flow?.registered_routes?.length)return '';
+  const routes=standaloneRoutes(flow);
+  const resourceFor=new Map((flow.registered_route_groups || []).flatMap(group=>group.registered_route_indexes.map(i=>[flow.registered_routes[i],group.resource])));
   const capped=flow.coverage.routes>flow.registered_routes.length;
   if(!routes.length && !capped)return '';
-  const size=8,pages=Math.ceil(routes.length/size),page=Math.max(0,Math.min(state.routePage || 0,pages-1));
+  const size=ROUTES_PER_PAGE,pages=Math.ceil(routes.length/size),page=Math.max(0,Math.min(state.routePage || 0,pages-1));
   const list=routes.slice(page*size,(page+1)*size).map(route=>{
     const defaults=route.basis==='declared_defaults'?`<small>${tr('설정 기본값')}</small>`:'';
     const sites=[route.server,...route.mounts || []];
     const unique=new Map(sites.map(site=>[JSON.stringify([site.file,site.line]),site]));
-    return `<details class="sect" data-registered-route><summary><strong class="mono">${esc(route.method+' '+route.path)}</strong> ${defaults}</summary>${compactTrace(route)}<details><summary>${tr('근거')}</summary>${[...unique.values()].map(site=>evidence(site.file,site.line)).join(' · ')}${flowDataSteps(route.data_steps,evidence)}</details></details>`;
+    const resource=resourceFor.get(route);
+    const explain=resource?`<button class="btn quiet" data-explain-route="${esc(resource)}">${tr('AI 설명 (베타)')}</button>`:'';
+    return `<details class="sect" data-registered-route="${esc(resource || '')}"><summary><strong class="mono">${esc(route.method+' '+route.path)}</strong> ${defaults}</summary>${compactTrace(route)}<details><summary>${tr('근거')}</summary>${[...unique.values()].map(site=>evidence(site.file,site.line)).join(' · ')}${flowDataSteps(route.data_steps,evidence)}</details>${explain}</details>`;
   }).join('');
   const controls=pages>1?`<div class="ctl"><button class="btn quiet" data-route-page="${page-1}" ${page===0?'disabled':''}>${tr('이전')}</button><span>${page+1} / ${pages}</span><button class="btn quiet" data-route-page="${page+1}" ${page+1===pages?'disabled':''}>${tr('다음')}</button></div>`:'';
   return `<details class="sect" id="registeredRoutes" ${(state.routesOpen ?? !flow.connections.length)?'open':''}><summary>${tr('서버 경로 (베타)')} · ${routes.length}</summary>${list}${controls}${capped?`<div class="s">${tr('저장된 경로')} ${flow.registered_routes.length}/${flow.coverage.routes}</div>`:''}</details>`;
@@ -1674,6 +1681,7 @@ function bindStructureIndex() {
     bindStructureIndex();
     if(focus)$(focus)?.focus();
   };
+  graph.querySelectorAll('[data-explain-route]').forEach(button=>button.onclick=()=>openAnalysisPanel('scope_overview',button.dataset.explainRoute,S.moduleGraph.repository || ''));
   if($('registeredRoutes'))$('registeredRoutes').ontoggle=e=>{S.moduleGraph.routesOpen=e.target.open;};
   graph.querySelectorAll('[data-route-page]').forEach(button=>button.onclick=()=>update({routePage:Number(button.dataset.routePage),routesOpen:true}));
   if($('flowSources'))$('flowSources').ontoggle=e=>{S.moduleGraph.sourcesOpen=e.target.open;};

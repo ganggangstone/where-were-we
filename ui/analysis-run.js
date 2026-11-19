@@ -141,10 +141,14 @@ const AnalysisRun = (() => {
     return group.repository ? map?.structure_indexes?.find(i=>i.repository===group.repository && i.commit===group.commit)
       : map?.structure_index?.commit===group.commit ? map.structure_index : null;
   }
+  function resourcesIn(index) {
+    const flow=index?.service_flow || {};
+    return [...new Set([...flow.feature_groups || [],...flow.registered_route_groups || []].map(group=>group.resource))];
+  }
   function remainingScopes(group) {
     if(group.resource || !Array.isArray(group.scope_coverage?.selected))return [];
     const sampled=new Set(group.scope_coverage.selected);
-    return (overviewIndex(group)?.service_flow?.feature_groups || []).map(row=>row.resource).filter(resource=>!sampled.has(resource));
+    return resourcesIn(overviewIndex(group)).filter(resource=>!sampled.has(resource));
   }
   function savedStages(details) {
     const rows=new Map();
@@ -171,19 +175,20 @@ const AnalysisRun = (() => {
     }).join('');
     const index=overviewIndex(group);
     const edgesInSource=index?.service_flow?.connections || [];
-    const sameSite=(a,b)=>a?.file===b.file && a?.line===b.line;
+    const sameSite=(a,b)=>!!a && !!b && a.file===b.file && a.line===b.line;
     const edgeHtml=edge=>{
       const matches=row=>row && row.method===edge.method && row.path===edge.path && sameSite(row.client,edge.client) && sameSite(row.server,edge.server);
-      const live=edgesInSource.find(matches);
+      const registration=edge.kind==='server_registration';
+      const live=registration?index?.service_flow?.registered_routes?.find(row=>row.method===edge.method && row.path===edge.path && sameSite(row.server,edge.server)):edgesInSource.find(matches);
       const match=live || (matches(edge.source_connection)?edge.source_connection:null);
       const evidence=(file,line)=>`<code>${esc(file)}:${esc(line)}</code>`;
       const stored=!live && savedStages(edge.details);
       const stages=stored || (match?flowActions(match.actions,evidence)+flowDataSteps(match.data_steps,evidence):'');
       const basis=edge.basis || match?.basis;
-      const condition=basis==='path_template'?` · ${text('경로 패턴이 맞을 때','If the path pattern matches')} <code>${esc(edge.server_path || match?.server_path)}</code>`:basis==='declared_defaults'?` · ${text('설정·클라이언트 기본값에서 일치','Matches configured client and server defaults')}`:'';
+      const condition=basis==='path_template'?` · ${text('경로 패턴이 맞을 때','If the path pattern matches')} <code>${esc(edge.server_path || match?.server_path)}</code>`:basis==='declared_defaults'?` · ${(registration?text('설정 기본값','Configuration defaults'):text('설정·클라이언트 기본값에서 일치','Matches configured client and server defaults'))}`:'';
       return `<li><b>${esc(edge.method)} ${esc(edge.path)}</b>${condition}<ul>${[
         [text('요청 코드','Request code'),edge.client],[text('서버 함수','Server handler'),edge.server]
-      ].map(([label,side])=>`<li>${label} · ${evidence(side.file,side.line)}<pre>${esc(side.quote)}</pre></li>`).join('')}</ul>${stages}</li>`;
+      ].filter(([,side])=>side).map(([label,side])=>`<li>${label} · ${evidence(side.file,side.line)}<pre>${esc(side.quote)}</pre></li>`).join('')}</ul>${stages}</li>`;
     };
     const edges=group.connections || [];
     const byId=new Map(edges.filter(edge=>Number.isInteger(edge.id)).map(edge=>[edge.id,edge]));
@@ -192,14 +197,14 @@ const AnalysisRun = (() => {
       const members=(feature.connection_ids || []).map(id=>byId.get(id)).filter(Boolean);
       if(!members.length)return '';
       members.forEach(edge=>grouped.add(edge.id));
-      const endpoints=members.flatMap(edge=>[edge.client,edge.server]);
+      const endpoints=members.flatMap(edge=>[edge.client,edge.server]).filter(Boolean);
       const item=group.items.find(item=>item.description && endpoints.some(side=>side.file===item.file && side.line===item.line));
       const description=item?.description || members.map(edge=>edge.method+' '+edge.path).join(' · ');
       const key=overviewKey(group)+i,open=openedFeature===key;
       return `<section class="sect"><button class="btn plain" data-overview-feature="${esc(key)}" aria-expanded="${open}"><strong>${esc(feature.name)}</strong> · ${esc(description)}</button>${open?`<ul>${members.map(edgeHtml).join('')}</ul>`:''}</section>`;
     }).join('');
     const remaining=edges.filter(edge=>!grouped.has(edge.id));
-    const title=features?text('그 밖의 요청','Other requests'):text('코드에서 확인한 요청 연결','Request connections in source');
+    const title=features?text('그 밖의 요청','Other requests'):(remaining.length && remaining.every(edge=>edge.kind==='server_registration')?text('서버 경로','Server routes'):text('코드에서 확인한 요청 연결','Request connections in source'));
     const remainingFlow=remaining.length?`<figure class="overview-tree"><figcaption>${title}</figcaption><ul>${remaining.map(edgeHtml).join('')}</ul></figure>`:'';
     const flow=features && remaining.length?`<details><summary>${title} · ${remaining.length}</summary><ul>${remaining.map(edgeHtml).join('')}</ul></details>`:remainingFlow;
     const sources=`<figure class="overview-tree"><figcaption>${text('파일별 기능 구조도','Feature diagram by source file')}</figcaption><ul>${files}</ul></figure>`;
@@ -253,7 +258,7 @@ const AnalysisRun = (() => {
   function localResourceCount() {
     const map=S.maps?.[S.branch],repo=scope().repository;
     const indexes=map?.structure_indexes || (map?.structure_index?[map.structure_index]:[]);
-    return indexes.filter(index=>!repo || index.repository===repo).reduce((n,index)=>n+new Set((index.service_flow?.feature_groups || []).map(row=>row.resource)).size,0);
+    return indexes.filter(index=>!repo || index.repository===repo).reduce((n,index)=>n+resourcesIn(index).length,0);
   }
   function html(includeOverview=true) {
     if(S.analysisChoice?.task==='scope_overview' && savedOverviews().length && !active())return overviewHtml();
@@ -323,6 +328,17 @@ const AnalysisRun = (() => {
         if(repo && repo.value!==group.repository){repo.value=group.repository;repo.dispatchEvent(new Event('change'));}
         const target=[...$('moduleGraph').querySelectorAll('[data-local-resource]')].find(el=>el.dataset.localResource===resource);
         if(target?.getAttribute('aria-expanded')==='false')target.click();
+        if(!target){
+          const flow=overviewIndex(group)?.service_flow;
+          const routeGroup=flow?.registered_route_groups?.find(row=>row.resource===resource);
+          const route=flow?.registered_routes?.[routeGroup?.registered_route_indexes[0]];
+          const position=route?standaloneRoutes(flow).indexOf(route):-1;
+          if(position>=0){
+            Object.assign(S.moduleGraph,{routePage:Math.floor(position/ROUTES_PER_PAGE),routesOpen:true});render();
+            const row=[...$('moduleGraph').querySelectorAll('[data-registered-route]')].find(el=>el.dataset.registeredRoute===resource);
+            if(row){row.open=true;row.scrollIntoView({block:'center'});return;}
+          }
+        }
         $('moduleGraph').scrollIntoView({block:'start'});
       };
       const button=$('savedOverview'+i);

@@ -120,6 +120,13 @@ class RefreshFirstWebKit(unittest.TestCase):
  check($('insp').innerText.includes('Profile evidence') && !$('startAppAnalysis') && !$('insp').innerText.includes('Saved items'),'Stored path reopens independently from the initial overview without another model turn');
  window.runningAnalysis.saved_scope_overviews=[{...record,commit:'different'}];await AnalysisRun.check();
  check(!$('insp').innerText.includes('Profile evidence') && $('startAppAnalysis'),'A changed pin hides stale path explanations');
+ index.service_flow.registered_route_groups=[{resource:'/internal/8',registered_route_indexes:[9]}];
+ S.agentPrompt=null;await doRefresh();const list=$('registeredRoutes');list.open=true;
+ if(!list.querySelector('[data-explain-route]'))list.querySelector('[data-route-page="1"]').click();
+ const standalone=$('registeredRoutes').querySelector('[data-explain-route]');standalone.closest('[data-registered-route]').open=true;
+ window.runningAnalysis.saved_scope_overviews=[{...record,resource:'/internal/8',feature_groups:[{name:'Internal route',connection_ids:[1]}],connections:[{id:1,kind:'server_registration',method:'GET',path:'/internal/8',server:{file:'api.py',line:28,quote:'def handler8():'}}]}];
+ standalone.click();await new Promise(r=>setTimeout(r,20));await AnalysisRun.check();$('insp').querySelector('[data-overview-feature]').click();
+ check($('insp').innerText.includes('api.py:28') && !$('insp').innerText.includes(S.lang==='en'?'Request code':'요청 코드') && !$('startAppAnalysis'),'Saved server registration opens without implying a request caller or another model turn');
  S.agentPrompt=null;
  const paths=['src/nested/<example name>.go','src/nested/worker.ts','src/nested/notes.md',...Array.from({length:80},(_,i)=>'src/item'+String(i).padStart(2,'0')+'.go')];
  window.mutateBundle=b=>{b.dev.structure_indexes=[{...index,files:[],imports:[],service_flow:null}];b.dev.inventories=[{repository:'web',commit:pin,files:82,paths,paths_truncated:true,directories:[['src',82]]}]};
