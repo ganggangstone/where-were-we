@@ -54,10 +54,14 @@ class Structure(unittest.TestCase):
             (repo/'.aws').mkdir()
             (repo/'.aws/key.py').write_text('class Private: pass')
             (repo/'alias.py').write_bytes((repo/'.aws/key.py').read_bytes())
+            (repo/'odd_alias.py').write_text('def private_alias(): pass')
             (repo/'note.md').write_text('note')
             (repo/'bad.py').write_text('def ?')
             os.symlink('target.py',repo/'link.py')
             git('add','.')
+            odd_oid=git('rev-parse',':odd_alias.py')
+            subprocess.run(['git','-C',root,'update-index','-z','--index-info'],check=True,
+                           input=b'100644 '+odd_oid.encode()+b'\t.aws/invalid-\xff.py\0')
             git('-c','user.name=Test','-c','user.email=test@example.invalid','commit','-qm','original')
             pin=git('rev-parse','HEAD')
             with patch.object(structure_index,'_blobs',wraps=structure_index._blobs) as blobs:
@@ -66,7 +70,7 @@ class Structure(unittest.TestCase):
             self.assertEqual(result['imports'],[{'file':'target.py','target':'peer.py','line':1}])
             self.assertEqual(result['declarations'],[{'name':'run','kind':'function','line':2}])
             for file,expected in [('note.md','unsupported'),('bad.py','unparsed'),('link.py','unavailable'),
-                                  ('.aws/key.py','unavailable'),('alias.py','unavailable'),('unknown.py','unavailable')]:
+                                  ('.aws/key.py','unavailable'),('alias.py','unavailable'),('odd_alias.py','unavailable'),('unknown.py','unavailable')]:
                 self.assertEqual(structure_index.build(root,pin,only_file=file)['status'],expected)
             with patch.object(structure_index,'MAX_FILE_BYTES',2):
                 self.assertEqual(structure_index.build(root,pin,only_file='target.py')['status'],'too_large')
@@ -78,6 +82,13 @@ class Structure(unittest.TestCase):
             cmd=[sys.executable,str(Path(structure_index.__file__).with_name('project.py')),'file-structure','demo','--','','dev']
             env={**os.environ,'WHERE_WERE_WE_ROOT':str(folder.parent)}
             self.assertEqual(json.loads(subprocess.check_output(cmd+[pin,'target.py'],env=env)),result)
+            (folder/'main.json').write_text(json.dumps({'repo':root,'ref':pin,'commit':pin,'inventory':{'commit':pin}}))
+            main_cmd=cmd[:-1]+['main']
+            self.assertEqual(json.loads(subprocess.check_output(main_cmd+[pin,'target.py'],env=env)),result)
+            git('-c','user.name=Test','-c','user.email=test@example.invalid','commit','--allow-empty','-qm','Advance dev')
+            different_branch=subprocess.run(cmd+[pin,'target.py'],env=env,capture_output=True)
+            self.assertNotEqual(different_branch.returncode,0)
+            self.assertEqual(json.loads(subprocess.check_output(main_cmd+[pin,'target.py'],env=env)),result)
             stale=subprocess.run(cmd+['0'*40,'target.py'],env=env,capture_output=True)
             self.assertNotEqual(stale.returncode,0)
             self.assertIn(b'Code changed',stale.stderr)

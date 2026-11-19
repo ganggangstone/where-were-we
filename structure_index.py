@@ -22,7 +22,7 @@ MAX_DECLARATIONS = 20_000
 MAX_IMPORTS = 20_000
 
 
-VERSION = 12
+VERSION = 13
 JS_EXTENSIONS = {'.js', '.jsx', '.mjs', '.cjs'}
 LANGUAGES = ('python', 'javascript', 'typescript', 'html')
 TS_EXTENSIONS = {'.ts', '.tsx', '.mts', '.cts'}
@@ -235,6 +235,11 @@ def build(repo, commit, excluded=None, *, only_file=None):
         try:
             file = raw_file.decode()
         except UnicodeDecodeError:
+            # Git permits arbitrary path bytes. A private directory can contain a
+            # non-UTF-8 filename whose blob also appears at an eligible path.
+            if excluded(os.fsdecode(raw_file)):
+                denied.add(oid)
+                continue
             unsupported += 1
             continue
         if excluded(file):

@@ -672,8 +672,10 @@ def file_structure(name, repository, branch, commit, file):
     import ai_extract
     import structure_index
     repo, raw, _, head = ai_extract.context(name,repository,branch)
-    index=(raw[branch].get('structure_index') or {})
-    if commit != head or index.get('commit') != commit:
+    snapshot=raw[branch]
+    inventory_pin=(snapshot.get('inventory') or {}).get('commit')
+    saved_pin=inventory_pin or (snapshot.get('structure_index') or {}).get('commit')
+    if commit != head or saved_pin != commit:
         raise ValueError('Code changed; refresh the map before opening this file')
     return structure_index.build(repo['path'],commit,only_file=file)
 
