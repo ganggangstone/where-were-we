@@ -710,7 +710,7 @@ class Flows(unittest.TestCase):
         self.check(r'''
  if($('guide').open)closeGuide('skipped');
  // One first entry: explore my code. Both ways are explained, and nothing runs AI by itself.
- assert(main().includes(tr('내 코드 살펴보기')) && main().includes(tr('어떤 코드를 살펴볼까요?')),'The empty workspace asks which code to explore: '+main());
+ assert(main().includes(tr('내 코드 살펴보기')) && !main().includes(tr('어떤 코드를 살펴볼까요?')),'Entry offers the two choices without a duplicate prompt: '+main());
  assert(main().includes(tr('AI 분석은 앱에서 시작을 누르거나 AI에게 요청할 때만 실행됩니다.')),'No automatic AI execution is stated');
  assert($('startWithAI').textContent===tr('작업하던 AI에게 맡기기') && $('startProject').textContent===tr('코드 위치를 직접 입력'),'The two ways name what each one does');
  assert($('newProject').title===tr('다른 서비스 추가'),'The header plus adds another service');
@@ -1615,6 +1615,10 @@ class FeatureContext(unittest.TestCase):
 
     def test_full_map_stays_and_only_member_screens_are_highlighted_while_structure_is_unchanged(self):
         self.check(r'''
+ for(const view of ['map','feat','focus']){
+  S.view=view;S.sel=null;S.feat=null;S.focus=null;render();
+  assert(getComputedStyle($('insp')).display==='none','Unselected '+view+' leaves the map at full width');
+ }
  S.view='sys';S.node=null;render();const sysBefore=$('map').innerHTML;
  await openFeature('Items');
  assert(S.feat===itemsId(),'Selection stores the stable feature ID, not an index: '+S.feat);

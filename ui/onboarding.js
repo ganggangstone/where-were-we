@@ -57,19 +57,19 @@ function guideReturnFocus(){const back=G.opener?.isConnected&&!G.opener.closest(
 function guideStep(step){G.run++;G.step=Math.max(0,Math.min(GUIDE_STEPS.length-1,step));renderGuide();$('guideTitle').focus();}
 function guideBody(){
   const m=guideHasMap();
-  if(G.step===0)return `<h2 id="guideTitle" tabindex="-1">${tr('코드 구조를 지도로 봅니다')}</h2><p>${tr('화면·서버·데이터가 어떻게 이어지는지, 무엇이 바뀌었는지 한눈에 봅니다.')}</p>
-    <div class="guide-visual" aria-hidden="true">${['화면','서버','데이터'].map((name,i)=>`${i?'<span class="arrow">→</span>':''}<div class="card" title="${esc(['/items','POST /items','items'][i])}"><div class="nm">${tr(name)}</div><div class="meta"><span class="dot ${['','strong','ok'][i]}"></span>${tr(['목록 화면','항목 저장','저장된 항목'][i])}</div></div>`).join('')}</div>
+  if(G.step===0)return `<h2 id="guideTitle" tabindex="-1">${tr('코드 구조를 지도로 봅니다')}</h2>
+    <div class="guide-visual">${['화면','서버','데이터'].map((name,i)=>`${i?'<span class="arrow">→</span>':''}<div class="card" title="${esc(['/items','POST /items','items'][i])}"><div class="nm">${tr(name)}</div><div class="meta"><span class="dot ${['','strong','ok'][i]}"></span>${tr(['목록 화면','항목 저장','저장된 항목'][i])}</div></div>`).join('')}</div>
     <div class="ctl"><button class="btn primary" id="guideNext">${tr('시작하기')}</button></div>`;
-  if(G.step===2)return `<h2 id="guideTitle" tabindex="-1">${tr('연결한 코드')}</h2><p>${tr('AI가 연결한 서비스와 코드가 맞는지 확인하세요.')}</p>
+  if(G.step===2)return `<h2 id="guideTitle" tabindex="-1">${tr('연결한 코드')}</h2>
     <p role="status" id="guideProjectState">${S.project?`<span class="dot ok"></span>${tr('연결한 서비스: ')}${esc(S.project)}`:tr('아직 연결된 서비스가 없습니다. AI 채팅에서 연결을 마친 뒤 돌아오세요.')}</p>
     ${S.project?`<ul>${guideCodes().map(guideCodeLine).join('')}</ul>`:''}
     <div class="ctl">${S.project?`<button class="btn primary" id="guideNext">${tr('다음')}</button>`:`<button class="btn primary" id="guideToAgent">${tr('AI에게 맡기기')}</button>`}${guideManual()}</div>`;
-  if(G.step===1)return `<h2 id="guideTitle" tabindex="-1">${tr('작업하던 AI에게 연결을 맡기세요')}</h2><p>${tr('요청을 복사해 AI 채팅에 붙여 넣으세요. AI가 연결할 코드를 찾아 확인을 요청합니다.')} ${tr('같은 요청 하나로 연결·코드 확인·첫 지도·첫 AI 분석까지 이어집니다.')}</p>
+  if(G.step===1)return `<h2 id="guideTitle" tabindex="-1">${tr('작업하던 AI에게 연결을 맡기세요')}</h2><p>${tr('같은 요청 하나로 연결·코드 확인·첫 지도·첫 AI 분석까지 이어집니다.')}</p>
     <p class="s">${tr('첫 AI 분석은 연결한 AI의 요금과 사용 한도를 씁니다.')} ${tr('분석 전에 AI가 먼저 묻고, 복사만으로는 아무것도 실행되지 않습니다.')}</p>
     <div class="ctl"><button class="btn ${G.connection?'quiet':'primary'}" id="guideCopySetup">${tr('AI에게 보낼 요청 복사')}</button><span id="guideCopyState" role="status">${G.copied?tr('복사했습니다. 작업하던 AI 채팅에 붙여 넣으세요.'):''}</span></div>
     ${G.setup?helpDetails(`<pre class="prompt mono">${esc(G.setup.text)}</pre>`,'연결 안내 보기'):''}
     <div class="ctl">${guideManual()}</div>
-    <h3>${tr('AI와 연결이 안 되나요?')}</h3>${G.connection?'':`<div class="ctl"><button class="btn" id="guideDiagnose">${tr('연결 진단')}</button></div>`}<div id="guideConnection"></div>
+    ${G.connection?'':`<div class="ctl"><button class="btn" id="guideDiagnose">${tr('연결 진단')}</button></div>`}<div id="guideConnection"></div>
 `;
   return guideAnalysisBody(m);
 }

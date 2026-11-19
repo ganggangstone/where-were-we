@@ -977,7 +977,7 @@ function githubErrorText(error) {
 }
 async function editGitHubAccount(repository) {
   const project=S.project,dialog=$('project-dialog');
-  dialog.innerHTML=`<h2>${tr('이 코드에 사용할 계정')}</h2><p>${tr('선택한 계정은 이 코드에만 사용합니다.')}</p><div id="githubChoices">${tr('계정 확인 중…')}</div><div id="githubError" role="alert"></div><div class="ctl"><button class="btn quiet" id="closeGithub">${tr('닫기')}</button><button class="btn primary" id="saveGithub" disabled>${tr('저장하고 다시 수집')}</button></div>`;
+  dialog.innerHTML=`<h2>${tr('이 코드에 사용할 계정')}</h2><div id="githubChoices">${tr('계정 확인 중…')}</div><div id="githubError" role="alert"></div><div class="ctl"><button class="btn quiet" id="closeGithub">${tr('닫기')}</button><button class="btn primary" id="saveGithub" disabled>${tr('저장하고 다시 수집')}</button></div>`;
   $('closeGithub').onclick=()=>dialog.close();dialog.showModal();
   const choices=$('githubChoices'),errorBox=$('githubError'),save=$('saveGithub'),viewRepository=S.repository;
   const isCurrent=()=>dialog.open && choices.isConnected && S.project===project && S.repository===viewRepository;
@@ -1102,7 +1102,7 @@ function editProject(create, focus=null) {
   const linkFrom=focus?.link && repos.find(r=>r.id===focus.link[0]);
   if (linkFrom && !linkFrom.api_targets.includes(focus.link[1])) linkFrom.api_targets=[...linkFrom.api_targets,focus.link[1]];
   dialog.innerHTML = `<h2>${tr(create ? '살펴볼 코드 추가' : '살펴보는 코드')}</h2>
-    <p class="s">${tr('서비스 이름은 함께 살펴볼 코드를 묶는 이름입니다.')} ${create ? tr('비워 두면 첫 코드의 이름을 씁니다.')+' ' : ''}${tr('코드는 GitHub 주소나 이 컴퓨터의 코드 폴더로 적습니다.')}</p>
+    <p class="s">${tr('서비스 이름은 함께 살펴볼 코드를 묶는 이름입니다.')} ${create ? tr('비워 두면 첫 코드의 이름을 씁니다.') : ''}</p>
     ${linkFrom ? `<p role="status">${tr('후보를 체크해 두었습니다. 저장해야 반영됩니다.')}</p>` : ''}<label>${tr('서비스 이름')} <input id="projectName" placeholder="Lumen Studio" value="${esc(create ? '' : S.project)}" ${create ? '' : 'disabled'}></label>
     <div id="repositoryRows"></div><button class="btn quiet" id="addRepository">${tr('다른 코드 추가')}</button>
     <details id="shared-data-options"><summary>${tr('같은 데이터베이스를 함께 쓸 때')}</summary><p class="s">${tr('같은 데이터베이스의 같은 테이블을 사용하는 경우에만 연결하세요. 이름이 같다는 이유만으로 연결하지 않습니다. 모르면 비워 두어도 됩니다.')}</p><div id="sharedRows"></div><button class="btn quiet" id="addSharedData">${tr('함께 쓰는 데이터 추가')}</button></details>
@@ -1207,7 +1207,7 @@ function editProject(create, focus=null) {
         if(box)try{
           const value=JSON.parse(await invoke('github_logins',{project:name}));
           if(!box.isConnected)return;
-          box.innerHTML=value.accounts.length?`<label>${tr('이 코드에 사용할 계정')}<select data-registration-login><option value="">${tr('계정 선택')}</option>${value.accounts.map(a=>`<option value="${esc(a)}">${esc(a)}</option>`).join('')}</select></label><p class="s">${tr('선택한 계정은 이 코드에만 사용합니다.')}</p>`:githubLoginHelp();
+          box.innerHTML=value.accounts.length?`<label>${tr('이 코드에 사용할 계정')}<select data-registration-login><option value="">${tr('계정 선택')}</option>${value.accounts.map(a=>`<option value="${esc(a)}">${esc(a)}</option>`).join('')}</select></label>`:githubLoginHelp();
           const select=box.querySelector('select');if(select)select.onchange=()=>{if(select.value)repos[index].github={host:'github.com',account:select.value};};
         }catch(error){box.innerHTML=errorHtml(githubErrorText(error),String(error));}
       }
@@ -1256,7 +1256,7 @@ function storyMap(m) {
     h += `</div>`;
   }
   const orphans = m.backend_routes_without_screen.length, unres = m.unresolved_calls.length;
-  h += ui`<div class="col"><h3>화면 밖</h3><p>어느 화면에도 이어지지 않은 것</p>
+  h += ui`<div class="col"><h3>화면 밖</h3>
     <div class="card ${S.sel === '!orphans' ? 'sel' : ''}" data-scr="!orphans"><div class="nm">연결된 화면을 찾지 못한 서버 기능</div><div class="meta"><span class="pill ${orphans ? 'warn' : ''}">${orphans}개</span></div></div>
     <div class="card ${S.sel === '!unres' ? 'sel' : ''}" data-scr="!unres"><div class="nm">받는 곳을 못 찾은 요청</div><div class="meta"><span class="pill ${unres ? 'warn' : ''}">${unres}개</span></div></div>
     ${S.status && S.status.issues ? ui`<div class="card ${S.sel === '!issues' ? 'sel' : ''}" data-scr="!issues"><div class="nm">어느 화면에도 연결 안 된 열린 이슈</div><div class="meta"><span class="pill warn">${S.status.issues.filter(i => !i.screens.length).length}개</span><span>열린 이슈 ${S.status.issues.length}개 중</span></div></div>` : ''}
@@ -1280,10 +1280,10 @@ function copyText(m, s, row) {
   L.push(baseLine(m)); return L.join('\n');
 }
 function inspector(m) {
-  if (!S.sel) return ui`<div class="hint">화면을 선택하세요.</div>`;
-  if (S.sel === '!orphans') return ui`<h2>연결된 화면을 찾지 못한 서버 기능</h2>${helpText('수집된 화면에서 이 서버 요청의 연결을 찾지 못했습니다.','연결 범위')}<div class="sect"><div class="group">` +
+  if (!S.sel) return '';
+  if (S.sel === '!orphans') return ui`<h2>연결된 화면을 찾지 못한 서버 기능</h2><div class="sect"><div class="group">` +
     m.backend_routes_without_screen.map(r => `<div class="row"><div class="grow"><div class="t"><span class="${flowOf(r)?.name || reqName(r) ? 'ai' : ''}">${esc(flowOf(r)?.name || reqName(r) || r.function)}</span></div><div class="s mono">${esc(r.method)} ${esc(r.path)}</div></div>${zed(m, r.file, r.line)}</div>`).join('') + `</div></div>`;
-  if (S.sel === '!unres') return ui`<h2>받는 곳을 못 찾은 요청</h2>${helpText('수집된 코드에서 요청을 받는 서버를 찾지 못했습니다.','연결 범위')}` + (m.connection_candidates?.length ? ui`<div class="sect"><h4>코드 사이 연결 후보</h4><p class="sub">주소가 같지만 요청을 받는 코드를 확인하지 못했습니다. 맞는 서버를 확인한 경우에만 연결하세요.</p><div class="group">${m.connection_candidates.map(c=>`<div class="row"><div class="grow">${esc(connectionDisplayName(c.repository))} → ${esc(c.targets.map(t=>connectionDisplayName(t.repository)).join(', '))}<div class="s mono">${esc(c.method)} ${esc(c.path)}</div></div>${c.targets.map(t=>`<button class="btn quiet" data-confirm-link="${esc(c.repository)}|${esc(t.repository)}">${tr('지도에 연결')}${c.targets.length>1?' · '+esc(connectionDisplayName(t.repository)):''}</button>`).join('')}</div>`).join('')}</div></div>` : '') + `<div class="sect"><div class="group">` +
+  if (S.sel === '!unres') return ui`<h2>받는 곳을 못 찾은 요청</h2>` + (m.connection_candidates?.length ? ui`<div class="sect"><h4>코드 사이 연결 후보</h4><p class="sub">주소가 같지만 요청을 받는 코드를 확인하지 못했습니다. 맞는 서버를 확인한 경우에만 연결하세요.</p><div class="group">${m.connection_candidates.map(c=>`<div class="row"><div class="grow">${esc(connectionDisplayName(c.repository))} → ${esc(c.targets.map(t=>connectionDisplayName(t.repository)).join(', '))}<div class="s mono">${esc(c.method)} ${esc(c.path)}</div></div>${c.targets.map(t=>`<button class="btn quiet" data-confirm-link="${esc(c.repository)}|${esc(t.repository)}">${tr('지도에 연결')}${c.targets.length>1?' · '+esc(connectionDisplayName(t.repository)):''}</button>`).join('')}</div>`).join('')}</div></div>` : '') + `<div class="sect"><div class="group">` +
     m.unresolved_calls.map(u => `<div class="row"><div class="grow"><div class="t mono">${esc(u.method)} ${esc(u.path ?? u.raw)}</div><div class="s mono">${esc(u.api_function.split('/').pop())}:${u.line}</div></div></div>`).join('') + `</div></div>`;
   if (S.sel === '!issues') { const un = (S.status.issues || []).filter(i => !i.screens.length);
     return ui`<h2>연결 안 된 열린 이슈 ${un.length}</h2>${helpText('이슈에서 화면·요청·파일과의 연결을 찾지 못했습니다.','연결 범위')}<div class="sect"><div class="group">${un.map(i => gh(i.number, i.title, i.url)).join('')}</div></div>`; }
@@ -1374,7 +1374,7 @@ function sysView(m) {
 function sysInspector(m) {
   const y = S.system; if (!y) return ''; const n = y.nodes.find(x => x.id === S.node);
   if (!n) { const all = [...y.nodes.flatMap(x => (x.unknown || []).map(u => ({ ...u, text: x.name + ': ' + u.text }))), ...(y.unknown || [])];
-    return ui`<h2>구조</h2><p class="sub">프로그램을 선택하세요.</p>
+    return ui`<h2>구조</h2>
       <div class="sect"><h4>아직 모르는 것 ${all.length}</h4><div class="group">${all.map(needHtml).join('') || tr('<div class="row"><div class="grow empty">없음</div></div>')}</div></div>`; }
   const ls = sysLinks(y).map((l, i) => ({ ...l, i })).filter(l => l.from === n.id || l.to === n.id); const nm = (id) => y.nodes.find(x => x.id === id).name;
   let h = `<div class="head"><div class="grow"><h2>${esc(n.name)}</h2><p class="sub">${esc(n.what)}</p></div>${n.detail === 'map' ? tr('<button class="btn" id="toMap">화면 지도 보기</button>') : ''}</div>`;
@@ -1586,7 +1586,7 @@ function featView(m) {
 }
 function featInspector(m) {
   const f = featureGraph(m); const sel = selectedFeature(m);
-  if (!sel) return ui`<h2>기능</h2><p class="sub">기능을 선택하세요.</p>`;
+  if (!sel) return '';
   const i = sel.i, g = sel.g, st = f.stat[i]; const ls = f.links.map((l, n) => ({ ...l, n })).filter(l => l.a === i || l.b === i);
   let h = featureOverview(m, sel) + ui`<div class="sect"><h4>다른 묶음과 이어진 것 ${ls.length}</h4><div class="group">`;
   for (const l of ls) { const o = l.a === i ? l.b : l.a; const out = l.ways.filter(e => g.list.some(s => s.path === e.from)), inn = l.ways.filter(e => !g.list.some(s => s.path === e.from)); const data = [...new Set([...l.ab, ...l.ba])];
@@ -1650,7 +1650,7 @@ function focusView(m) {
     <div class="fcol"><div class="zone">${d.kind}</div><div class="card node sel" data-w="C"><div class="nm"><span class="${d.ai ? 'ai' : ''}">${esc(d.name)}</span></div><div class="s mono">${esc(d.sub)}</div>${d.chips ? `<div class="meta">${d.chips.map(t => `<span class="pill click" data-f="table|${esc(t)}">${esc(tableName(t))}</span>`).join('')}</div>` : ''}</div></div>${col(d.rt, d.right, 'R')}</div>`;
 }
 function focusInspector(m) {
-  if (!S.focus) return ui`<div class="hint">데이터를 선택하세요.</div>`;
+  if (!S.focus) return '';
   const { t, id } = S.focus; if (t === 'screen') return inspector(m);
   if (t === 'route') { const u = (routeUse(m)[id] || [])[0]; return u ? ui`<h2><span class="${reqIsAi(u.r) ? 'ai' : ''}">${esc(reqLabel(u.r))}</span></h2><p class="sub">서버 기능</p><div class="sect"><div class="group">${detail(m, u.s, u.r)}</div></div>` : (()=>{const route=(m.backend_routes || []).find(r=>r.file+'::'+r.function===id);return route?`<h2>${esc(route.method)} ${esc(route.path)}</h2><p>${esc(route.function)}</p>`+detail(m,{path:''},{key:id,route,name:route.function,btns:[],fn:{file:route.file},call:{line:route.line}}):'';})(); }
   const u = tableUse(m)[id] || { w: new Map(), r: new Map() }; const list = (mp) => [...mp].flatMap(([p, rs]) => rs.map(r => ui`<div class="row click" data-f="route|${esc(r.key)}"><div class="grow"><div class="t"><span class="${reqIsAi(r) ? 'ai' : ''}">${esc(reqLabel(r))}</span></div><div class="s">${esc(label(m, p))}</div></div>${(r.route.tests || []).length ? ui`<span class="pill ok">테스트 연결 ${r.route.tests.length}</span>` : ''}</div>`)).join('') || tr('<div class="row"><div class="grow empty">없음</div></div>');
@@ -1687,8 +1687,8 @@ function render() {
   const press = (b, on) => { b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on)); };
   document.querySelectorAll('#view button').forEach(b => press(b, b.dataset.v === view || (b.dataset.v === 'work' && work)));
   $('subview').hidden = !work; document.querySelectorAll('#subview button').forEach(b => press(b, b.dataset.v === view));
-  if (!S.project) { $('map').innerHTML = ui`<div class="hint start"><h2>내 코드 살펴보기</h2><p>어떤 코드를 살펴볼까요? 작업하던 AI 채팅에 요청 하나를 붙여 넣으면 AI가 코드를 찾아 연결하고 첫 지도와 첫 AI 분석까지 이어 줍니다. AI 분석은 앱에서 시작을 누르거나 AI에게 요청할 때만 실행됩니다.</p><div class="ctl"><button class="btn primary" id="startWithAI">작업하던 AI에게 맡기기</button><button class="btn quiet" id="startProject">코드 위치를 직접 입력</button></div><p class="s">GitHub 주소나 이 컴퓨터의 코드 폴더를 알고 있다면 직접 입력할 수 있습니다.</p></div>`; $('insp').innerHTML = ''; $('startWithAI').onclick = () => { openGuide(); guideStep(1); }; $('startProject').onclick = () => editProject(true); return; }
-  if (!m) { $('map').innerHTML = ui`<div class="hint start"><h2>아직 지도를 가져오지 않았습니다.</h2><p>연결한 코드를 읽어 첫 지도를 만듭니다.</p><div class="ctl"><button class="btn primary" id="firstRefresh">↻ 지금 지도 가져오기</button><button class="btn quiet" id="openConnections">코드 추가·수정</button></div></div>`; $('insp').innerHTML = ''; $('firstRefresh').onclick = doRefresh; $('openConnections').onclick = () => editProject(false); return; }
+  if (!S.project) { $('map').innerHTML = ui`<div class="hint start"><h2>내 코드 살펴보기</h2><p>AI 분석은 앱에서 시작을 누르거나 AI에게 요청할 때만 실행됩니다.</p><div class="ctl"><button class="btn primary" id="startWithAI">작업하던 AI에게 맡기기</button><button class="btn quiet" id="startProject">코드 위치를 직접 입력</button></div></div>`; $('insp').innerHTML = ''; $('startWithAI').onclick = () => { openGuide(); guideStep(1); }; $('startProject').onclick = () => editProject(true); return; }
+  if (!m) { $('map').innerHTML = ui`<div class="hint start"><h2>아직 지도를 가져오지 않았습니다.</h2><div class="ctl"><button class="btn primary" id="firstRefresh">↻ 지금 지도 가져오기</button><button class="btn quiet" id="openConnections">코드 추가·수정</button></div></div>`; $('insp').innerHTML = ''; $('firstRefresh').onclick = doRefresh; $('openConnections').onclick = () => editProject(false); return; }
   // 다시 읽은 지도에 같은 화면 묶음이 없으면 고른 기능을 지운다. 같은 자리의 다른 기능으로 넘어가지 않는다.
   if (S.feat && !selectedFeature(m)) S.feat = null;
   const top = $('map').scrollTop, left = $('map').scrollLeft, itop = $('insp').scrollTop, refocus = focusKey(document.activeElement);
@@ -1767,7 +1767,7 @@ function renderSettings() {
   const dialog=$('settings-dialog'), st=S.settings;
   const radio=(value,label)=>`<label class="kv opt"><input type="radio" name="since" value="${value}" ${st.since===value?'checked':''}> ${tr(label)}</label>`;
   dialog.innerHTML=`${sectionHeading('설정',`<button class="btn quiet" id="closeSettings">${tr('닫기')}</button>`,`<span class="pill">${tr('모든 서비스')}</span>`,'settingsTitle')}<h3>${tr('언제부터 바뀐 내용을 볼까요?')}</h3>
-    <div class="setting-options"><div>${radio('last_refresh','지난 새로고침 이후')}<p class="s" id="baselineNotice" title="${esc(tr(BASELINE_NOTICE))}">${tr('새로고침마다 시작점 이동')}</p></div><div>${radio('my_commit','내 마지막 커밋 이후')}</div><div>${radio('time','지정한 시각 이후')}<p class="s">${tr('고정된 시작점')}</p></div></div>
+    <div class="setting-options"><div>${radio('last_refresh','지난 새로고침 이후')}<p class="s" id="baselineNotice" title="${esc(tr(BASELINE_NOTICE))}">${tr('새로고침마다 시작점 이동')}</p></div><div>${radio('my_commit','내 마지막 커밋 이후')}</div><div>${radio('time','지정한 시각 이후')}</div></div>
     <label>${tr('시작 시각')} <input type="datetime-local" id="sinceTime" value="${esc(st.since_time)}"></label>
     <h3>${tr('새로고침')}</h3><label class="kv opt"><input type="checkbox" id="openRefresh" ${st.open_refresh?'checked':''}> ${tr('서비스를 열 때 새로고침')}</label>
     <div class="ctl"><button class="btn primary" id="saveRefresh" ${S.project?'':'disabled'}>${tr('저장하고 새로고침')}</button><button class="btn" id="saveSt">${tr('저장')}</button></div><div id="settingsError" role="alert"></div>`;
