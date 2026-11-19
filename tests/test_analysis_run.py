@@ -493,6 +493,42 @@ class AnalysisRun(unittest.TestCase):
                     self.assertEqual(done['error']['code'],'invalid_result')
                     self.assertEqual(self.raw(),baseline)
 
+    def test_batched_citations_select_numbered_lines_without_transcribing_source(self):
+        (self.repo/'z-padding.txt').write_text('ordinary line\n'*6000)
+        self.git('add','.');self.git('commit','-qm','Force source batches')
+        replies=[]
+        def executor(prompt,**kwargs):
+            packet=json.loads(prompt.split('\n',1)[1])
+            batch=packet['batch']
+            self.assertNotIn('quote',packet['schema']['backend_routes'][0])
+            self.assertIn('Return file and line only',packet['prompt'])
+            files=[f['file'] for snap in packet.get('snapshots',[]) for f in snap['files']]
+            result={}
+            if 'server/items.go' in files:
+                route=copy.deepcopy(self.data['backend_routes'][0])
+                for citation in ai_extract.cited(route):citation.pop('quote')
+                result['backend_routes']=[route]
+                replies.append(batch['id'])
+            return {'batch':batch['id'],'covered':batch['units'],'result':result}
+        done=analysis_run.run(self.prepare(intent={'task':'analysis','targets':[]})['id'],executor)
+        self.assertEqual(done['state'],'completed',done.get('error'))
+        self.assertEqual(len(replies),len(set(replies)))
+        route=self.raw()['dev']['backend_routes'][0]
+        self.assertEqual(route['quote'],'router.POST("/items", SaveItem)')
+        self.assertEqual(route['table_evidence'][0]['quote'],'db.Table("items").Create(item)')
+
+    def test_coordinate_selection_is_bound_to_visible_commit_and_exact_segment(self):
+        commit=self.commit
+        units=[{'kind':'source','value':{'commit':pin,'file':'file','lines':lines}} for pin,lines in [
+            ('old',[{'line':1,'text':'old only'}]),
+            (commit,[{'line':2,'text':'actual source','offset':30}])]]
+        for fields in [{'line':1},{'line':2},{'line':2,'offset':31},{'line':2,'offset':30,'commit':'old'}]:
+            with self.subTest(fields=fields),self.assertRaises(analysis_run.InvalidClaim):
+                analysis_run._materialize_citations({'inspected':[dict(file='file',**fields)]},None,units,commit)
+        point={'file':'file','line':2,'offset':30}
+        analysis_run._materialize_citations({'inspected':[point]},None,units,commit)
+        self.assertEqual(point,{'file':'file','line':2,'quote':'actual source'})
+
     def test_batched_citation_uses_unique_visible_literal_when_number_is_wrong(self):
         (self.repo/'z-padding.txt').write_text('ordinary line\n'*6000)
         self.git('add','.');self.git('commit','-qm','Force source batches')

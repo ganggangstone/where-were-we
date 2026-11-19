@@ -228,13 +228,17 @@ def analysis_prompt(commit,lang,layout,sc=None,overview=False,partial=False):
         source_rule=f'Read only this immutable commit using git ls-tree -r --name-only {commit}, git show {commit}:<path>, and git grep -n <pattern> {commit}.'
         scope_rule=mode_text(commit,sc)
         response_rule='Return exactly one JSON object with this schema (examples are illustrative, do not copy them):\n'+json.dumps(analysis_schema(overview),ensure_ascii=False)
+    citation_rule=('For each claim select its supporting snapshots.files entry and numbered line from the current commit. '
+                   'Return file and line only. Copy offset too when the line has an offset. Choose text with at least six nonblank characters. '
+                   'The app fills the literal single-line quote from the selected source. If no supplied line supports the claim, request it or use unknown.'
+                   if partial else 'For each item and relationship provide a tracked file, exact one-based line and literal single-line quote (at least 6 characters).')
     return f'''Analyze the tracked source at commit {commit} of this repository, regardless of programming language or framework.
 {source_rule}
 Do not read working-tree files, credentials, or environment files. Do not modify any files or execute application code.
 Find screens, navigation actions, client HTTP calls, mounted backend endpoints, tables, external services{'' if overview else ', and request steps'}.
 Configured source roots: {json.dumps(layout)}. A null frontend/backend disables that area; other roots restrict that area to the configured directory.
 Trace actual registration and imports; do not assume a convention or identify two databases by table name alone.
-For each item and relationship provide a tracked file, exact one-based line and literal single-line quote (at least 6 characters).
+{citation_rule}
 Use repository-relative file paths. Normalize dynamic URL segments to {{}}. HTTP methods must be uppercase.
 Only include items and relations supported by code; list unresolved or omitted areas in unknown. An empty list is valid for an absent area.
 Labels, descriptions and unknown entries must be in {'English' if lang=='en' else 'Korean'}. Keep identifiers and paths unchanged.

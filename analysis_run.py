@@ -458,6 +458,31 @@ def _result(value):
     if not isinstance(value,dict):raise RunError('invalid_result','Analysis output must be an object')
     return value
 
+def _materialize_citations(fragment, programs, context, commit):
+    """Resolve selected coordinates from this packet before normal Git evidence checks."""
+    supplied={(unit['value']['file'],row['line'],row.get('offset',0)):row['text']
+              for unit in context if unit['kind']=='source' and unit['value']['commit']==commit
+              for row in unit['value']['lines']}
+    def visit(rows):
+        if not isinstance(rows,list):return
+        for row in rows:
+            if not isinstance(row,dict):continue
+            if 'quote' not in row:
+                file,line,offset=row.get('file'),row.get('line'),row.get('offset',0)
+                if (not isinstance(file,str) or type(line)!=int or type(offset)!=int
+                        or row.get('commit',commit)!=commit or (file,line,offset) not in supplied):
+                    raise InvalidClaim('A selected source coordinate was not supplied for the current commit')
+                row['quote']=supplied[file,line,offset].strip()
+                row.pop('offset',None)
+            for key in ('actions','calls','dependencies','tables','services','externals','steps'):
+                visit(row.get(key))
+    for key in ('screens','backend_routes','inspected'):
+        visit(fragment.get(key))
+    if isinstance(programs,list):
+        for program in programs[:8]:
+            try:visit([program])
+            except InvalidClaim:continue  # Optional observations still require a verified quote in _preview.
+
 def _strict_result(task,data,repo,commit,request=None,raw=None,final=True,context=()):
     """App replies cannot silently lose raw claims in the compatibility parsers."""
     def fail(reason='An analysis claim did not match the task schema'):raise InvalidClaim(reason)
@@ -803,13 +828,16 @@ def _preview(run,task,commit,settled,programs,context):
                 items.append(dict(kind=kind,name=name,**{k:evidence[k] for k in ('file','line','quote')}))
     if task['task']=='analysis' and isinstance(programs,list) and programs:
         # These optional entry points are independent of the web map schema.
-        supplied={(unit['value']['file'],line['line']):line['text'] for unit in context
-                  if unit['kind']=='source' and unit['value']['commit']==commit for line in unit['value']['lines']}
+        supplied={}
+        for unit in context:
+            if unit['kind']=='source' and unit['value']['commit']==commit:
+                for row in unit['value']['lines']:
+                    supplied.setdefault((unit['value']['file'],row['line']),[]).append(row['text'])
         for program in programs[:8]:
             if not isinstance(program,dict):continue
             name,file,line,quote=(program.get(k) for k in ('name','file','line','quote'))
             if (isinstance(name,str) and name.strip() and isinstance(file,str) and type(line)==int
-                    and isinstance(quote,str) and len(quote.strip())>=6 and quote in supplied.get((file,line),'')):
+                    and isinstance(quote,str) and len(quote.strip())>=6 and any(quote in text for text in supplied.get((file,line),[]))):
                 items.append(dict(kind='program',name=name,file=file,line=line,quote=quote))
     if items:
         with locked():
@@ -869,6 +897,9 @@ def generate(value,task,request,executor,cancelled,deadline,check,blobs=None):
         payload['provisional_result']=result
         provisional=result
     if task['task']=='analysis':
+        payload['schema']=copy.deepcopy(payload['schema'])
+        for example in ai_extract.cited(payload['schema']):
+            example.pop('quote')
         payload['prompt']=ai_extract.analysis_prompt(request['commit'],value['lang'],conf['layout'],
                                                     request,overview=True,partial=True)
     header,units=_units(payload)
@@ -924,7 +955,7 @@ def generate(value,task,request,executor,cancelled,deadline,check,blobs=None):
         for round in range(MAX_READ_ROUNDS):
             packet=_batch_payload(batch_header,context,batch_id,prior)
             if task['task']=='analysis':
-                packet['batch']['rules']+=' Optionally return top-level preview_programs: [{name,file,line,quote}] for entry points directly evidenced in this context, including CLI commands and workers.'
+                packet['batch']['rules']+=' Optionally return top-level preview_programs: [{name,file,line}] for entry points directly evidenced in this context, including CLI commands and workers.'
                 if len(_encoded(packet).encode())>MAX_PROMPT_BYTES:
                     packet=_batch_payload(batch_header,context,batch_id,prior)
             if satisfied_needs is not None:
@@ -944,13 +975,15 @@ def generate(value,task,request,executor,cancelled,deadline,check,blobs=None):
             fragment=_result(answer.get('result'))
             programs=answer.get('preview_programs',fragment.pop('preview_programs',None))
             try:
+                if task['task']=='analysis':
+                    _materialize_citations(fragment,programs,context,request['commit'])
                 validate(fragment,False,context if task['task']=='analysis' else ())
             except InvalidClaim as error:
                 if claim_retry_used or task['task']!='analysis':raise
                 claim_retry_used=True
                 claim_feedback=(f'Your previous fragment failed validation: {error}. '
                                 'Resubmit this batch with covered equal to units and only supported schema entries. '
-                                'Copy file, one-based line and a literal substring from a single supplied line. '
+                                'Select its supplied file and one-based line; include offset when shown. The app supplies the quote. '
                                 'Use unknown for unsupported facts. Return {batch,covered,result,needs}.')
                 continue
             accumulated=_combine(prior,fragment)
