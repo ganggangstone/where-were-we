@@ -383,6 +383,71 @@ def branch_bundle(raw,branch):
     outputs=(raw.get(branch) or {}).get('task_outputs',{})
     return {**raw,**{key:outputs.get(key,raw.get(key)) for key in DETAILS}}
 
+def _configured_connections(repositories, raws, role, selected, state):
+    """Join only fixed request paths and complete, explicitly configured destination maps."""
+    if not any(r['id'] in selected and r.get('api_targets') for r in repositories):
+        return []
+    import structure_index
+    maps = {}
+    for repo in repositories:
+        rid = repo['id']
+        snapshot = raws[rid].get(role) or {}
+        index = snapshot.get('structure_index') or {}
+        pin = index.get('commit') or ''
+        observed = (snapshot.get('inventory') or {}).get('commit') or snapshot.get('commit')
+        if (index.get('version') != structure_index.VERSION or not re.fullmatch(r'(?:[a-f0-9]{40}|[a-f0-9]{64})', pin)
+                or observed != pin
+                or state.get(rid, {}).get('fingerprint',fingerprint(repo)) != fingerprint(repo)):
+            continue
+        graph = index.get('service_flow') or {}
+        routes = graph.get('registered_routes', [])
+        coverage = index.get('coverage') or {}
+        if (coverage.get('truncated') or coverage.get('skipped_files') or coverage.get('unavailable_languages')
+                or (graph.get('coverage') or {}).get('routes') != len(routes)):
+            continue
+        maps[rid] = (pin, graph, repo.get('layout') or {})
+
+    def inside(path, layout, role):
+        return role not in layout or layout[role] is not None and path.startswith(layout[role].rstrip('/') + '/')
+
+    def matches(route, method, path):
+        if route['method'] != method:
+            return False
+        segments = route['path'].split('/')
+        request = path.split('/')
+        return len(segments) == len(request) and all(
+            a == b or bool(b) and (route.get('express_parameters') and a.startswith(':')
+                                   or route.get('fastapi_parameters') and a.startswith('{'))
+            for a,b in zip(segments, request))
+
+    connections = []
+    for repo in repositories:
+        source = repo['id']
+        targets = repo.get('api_targets', [])
+        if source not in selected or source not in maps or not targets or any(t not in maps for t in targets):
+            continue
+        pin, graph, layout = maps[source]
+        for request in graph.get('literal_requests', []):
+            method, path, client = request['method'], request['path'], request['client']
+            if not inside(client['file'],layout,'frontend') or any(matches(r,method,path) for r in graph['registered_routes']):
+                continue
+            hits = [(dest,route) for dest in targets for route in maps[dest][1]['registered_routes']
+                    if matches(route,method,path)]
+            if len(hits) != 1:
+                continue
+            dest, route = hits[0]
+            server = route['server']
+            if (route['path'] != path or route.get('basis') or route.get('express_parameters') or route.get('fastapi_parameters')
+                    or not inside(server['file'],maps[dest][2],'backend')):
+                continue
+            connections.append({'method':method,'path':path,'basis':'configured',
+                                'client':{**client,'repository':source,'commit':pin},
+                                'server':{**server,'repository':dest,'commit':maps[dest][0]}})
+            if len(connections) == 256:
+                return connections
+    return connections
+
+
 def _compose(name, conf, state, raws, repository='', branch='dev'):
     result_metadata={rid:{role:analysis_results(raw,role) for role in ('dev','main')} for rid,raw in raws.items()}
     raws={rid:branch_bundle(raw,branch) for rid,raw in raws.items()}
@@ -410,6 +475,7 @@ def _compose(name, conf, state, raws, repository='', branch='dev'):
         'jobs':{'nodes':{}},'changes':{'last_refresh':'','entries':[]}}
     for role in ('dev','main','dev.prev','main.prev'):
         result=empty_map();result['repositories']=metadata;result['multi_repo']=True;result['connection_candidates']=[]
+        result['cross_repository_connections'] = _configured_connections(conf['repositories'],raws,role,ids,state)
         qualified={r['id']:qualify_map(raws[r['id']].get(role) or (raws[r['id']].get(role.removesuffix('.prev')) if role.endswith('.prev') else None),r,tables) for r in conf['repositories']}
         for repo in conf['repositories']:
             rid=repo['id'];source=qualified[rid]

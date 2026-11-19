@@ -583,6 +583,49 @@ class Connections(TemporaryProject):
             project.publish('studio',rid,{'dev':value,'main':value},{})
         return web,api
 
+    def test_two_pinned_structures_only_join_unique_configured_literal_routes(self):
+        import subprocess
+        import structure_index
+        repos=[{'id':'web','api_targets':['api']},{'id':'api'},{'id':'other'}]
+        pin={}
+        snapshots={}
+        for repo in repos:
+            rid=repo['id']
+            path=self.root/rid
+            path.mkdir()
+            repo['path']=str(path)
+            git=lambda *a:subprocess.check_output(['git','-C',path,*a]).decode().strip()
+            git('init','-q')
+            if rid=='web':
+                (path/'client.js').write_text("fetch('/items');")
+            else:
+                (path/'main.py').write_text("from fastapi import FastAPI\napp=FastAPI()\n@app.get('/items')\ndef items(): pass")
+            git('add','.')
+            git('-c','user.name=Test','-c','user.email=test@example.invalid','commit','-qm',rid)
+            pin[rid]=git('rev-parse','HEAD')
+            snapshots[rid]={**sample(str(path),pin[rid][:8]),'inventory':{'commit':pin[rid]},
+                            'structure_index':structure_index.build(str(path),pin[rid])}
+        def publish():
+            project.configure('example',{'repositories':repos})
+            for rid,snapshot in snapshots.items():
+                project.publish('example',rid,{'dev':snapshot},{})
+        def read():
+            return project.read_bundle('example','web')['dev']['cross_repository_connections']
+        publish()
+        self.assertEqual(read(),[dict(method='GET',path='/items',basis='configured',
+                                      client=dict(repository='web',commit=pin['web'],file='client.js',line=1),
+                                      server=dict(repository='api',commit=pin['api'],file='main.py',line=3,function='items'))])
+        repos[0]['api_targets']=['api','other']
+        publish()
+        self.assertEqual(read(),[])
+        repos[0]['api_targets']=[]
+        publish()
+        self.assertEqual(read(),[])
+        repos[0]['api_targets']=['api']
+        snapshots['api']['inventory']['commit']=pin['web']
+        publish()
+        self.assertEqual(read(),[])
+
     def test_configured_target_and_unconfigured_candidates(self):
         self.inputs();m=mapcore.Map('studio')
         row=m.requests('/@web/settings')[0]

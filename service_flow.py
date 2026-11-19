@@ -326,5 +326,7 @@ def connect(routes, requests):
         if not route_order(route)[0]:
             standalone.setdefault(route['path'],[]).append(i)
     registered_groups=[{'resource':resource,'registered_route_indexes':indexes} for resource,indexes in standalone.items()]
-    return {'registered_route_groups':registered_groups,'registered_routes':registered,'connections': connections, 'feature_groups': groups, 'coverage': {'requests': len(requests), 'routes': len(routes),
+    literal_requests = [{'method':r['method'], 'path':r['path'], 'client':r['client']} for r in requests
+                        if not r.get('basis') and _path(r['path'])]
+    return {'literal_requests':literal_requests[:256],'registered_route_groups':registered_groups,'registered_routes':registered,'connections': connections, 'feature_groups': groups, 'coverage': {'requests': len(requests), 'routes': len(routes),
             'unresolved_requests': len(requests) - len(connections)}}
