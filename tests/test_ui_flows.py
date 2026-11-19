@@ -1293,6 +1293,9 @@ class AutoRead(unittest.TestCase):
         self.check(r"""
  await copied();const n=reads();done();
  assert(!$('automaticAnalysis').open && $('automaticAnalysis').contains($('startAppAnalysis')),'App execution is a separate collapsed option');
+ $('toggleAutomaticAnalysis').click();renderAgentPrompt();
+ assert($('automaticAnalysis').open,'A status repaint preserves the open automatic panel');
+ $('toggleAutomaticAnalysis').click();
  const refresh=$('checkAnalysisResults');
  assert(refresh.getClientRects().length && refresh.classList.contains('primary') && refresh.textContent===tr('저장된 결과 새로고침'),'After copying the visible next action refreshes saved results');
  assert($('cpAgent').compareDocumentPosition($('automaticAnalysis')) & Node.DOCUMENT_POSITION_FOLLOWING,'Existing AI request comes before automatic execution');
