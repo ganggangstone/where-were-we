@@ -688,8 +688,16 @@ sources=json.load(open(os.environ['FAKE_SOURCES']));files={os.path.realpath(k):v
 if args[0]=='fetch':
  if os.environ.get('FAKE_GITHUB') and os.environ.get('GH_TOKEN')!='test-token-alice':print('wrong Git credential',file=sys.stderr);sys.exit(1)
  if Path(repo).name=='broken':print('fetch denied',file=sys.stderr);sys.exit(1)
+elif args[0]=='cat-file' and '--batch' in args:
+ blobs={hashlib.sha1(body.encode()).hexdigest():body.encode() for body in files.values()}
+ for line in sys.stdin.buffer:
+  oid=line.strip().decode();body=blobs[oid]
+  sys.stdout.buffer.write((oid+' blob '+str(len(body))+'\n').encode()+body+b'\n');sys.stdout.buffer.flush()
 elif args[0]=='ls-tree':
- if '-rz' in args:
+ if '-rlz' in args:
+  for file,body in files.items():
+   print('100644 blob '+hashlib.sha1(body.encode()).hexdigest()+' '+str(len(body.encode()))+'\t'+file,end='\0')
+ elif '-rz' in args:
   for file,body in files.items():
    print('100644 blob '+hashlib.sha1(body.encode()).hexdigest()+'\t'+file,end='\0')
  else:print('\n'.join(files))
@@ -703,6 +711,28 @@ elif args[0]=='remote':print('https://github.com/example/studio.git' if os.envir
 '''
 
 class Collection(TemporaryProject):
+    def test_real_git_without_origin_publishes_pinned_structure_without_gh(self):
+        import subprocess
+        repo=self.root/'plain';repo.mkdir()
+        subprocess.run(['git','init','-q',str(repo)],check=True)
+        (repo/'worker.py').write_text('def run():\n    return True\n')
+        subprocess.run(['git','-C',str(repo),'add','worker.py'],check=True)
+        subprocess.run(['git','-C',str(repo),'-c','user.name=Test','-c','user.email=test@example.invalid','commit','-qm','initial'],check=True)
+        commit=subprocess.check_output(['git','-C',str(repo),'rev-parse','HEAD'],text=True).strip()
+        marker=self.root/'unexpected-gh';bindir=self.root/'bin';bindir.mkdir()
+        gh=bindir/'gh';gh.write_text('#!/bin/sh\ntouch "$GH_MARKER"\nexit 1\n');gh.chmod(0o755)
+        env=dict(os.environ,PATH=str(bindir)+os.pathsep+os.environ['PATH'],GH_MARKER=str(marker),WHERE_WERE_WE_ROOT=str(self.root/'maps'))
+        conf={'repositories':[{'id':'local','path':str(repo),'refs':{'dev':'HEAD','main':None}}]}
+        self.assertEqual(self.run_cli(env,'configure','plain',json.dumps(conf)).returncode,0)
+        result=self.run_cli(env,'refresh','plain')
+        self.assertIn('local: refreshed',result.stdout,result.stderr)
+        bundle=json.loads(self.run_cli(env,'read','plain','--repository','local').stdout)
+        health=bundle['project']['repositories'][0]
+        self.assertEqual(health['github_collection']['state'],'not_configured')
+        self.assertTrue(commit.startswith(health['commits']['dev']))
+        self.assertEqual(bundle['dev']['structure_indexes'][0]['commit'],commit)
+        self.assertFalse(marker.exists())
+
     def test_real_collection_preserves_pr_and_closed_issue_evidence_for_briefing(self):
         from datetime import datetime,timedelta,timezone
         env=self.environment();now=datetime.now(timezone.utc);merged=(now-timedelta(hours=1)).isoformat()
@@ -714,6 +744,8 @@ class Collection(TemporaryProject):
             'closingIssuesReferences':[{'number':9,'title':'Retry creates duplicates','url':issue_url}]}
         payload=self.root/'github-data.json';payload.write_text(json.dumps({'merged':[pr],'linked':{issue_url:{'number':9,'title':'Retry creates duplicates','url':issue_url,'body':'Repeating a request creates duplicate jobs.','state':'CLOSED'}}}))
         env['FAKE_GITHUB_DATA']=str(payload)
+        active=self.root/'active-account';active.write_text('alice')
+        env.update(FAKE_GITHUB='1',FAKE_ACTIVE=str(active))
         configured=self.run_cli(env,'configure','studio',json.dumps({'repositories':[{'id':'web','path':str(self.root/'web')}]}))
         self.assertEqual(configured.returncode,0,configured.stderr)
         (Path(env['WHERE_WERE_WE_ROOT'])/'settings.json').write_text(json.dumps({'since':'time','since_time':(now-timedelta(hours=2)).isoformat(),'open_refresh':False}))
@@ -730,6 +762,16 @@ class Collection(TemporaryProject):
         request=json.loads(result.stdout)
         self.assertEqual(request['input']['prs'][0]['number'],7)
         self.assertTrue(any(w['code']=='collection_limited' for w in request['input']['warnings']))
+
+        cached=json.loads((folder/'status.json').read_text())
+        denied=self.run_cli(dict(env,FAKE_GH_FAIL='1'),'refresh','studio')
+        self.assertIn('web: refreshed',denied.stdout)
+        generation=project.read(Path(env['WHERE_WERE_WE_ROOT'])/'studio/repository-state.json')['web']['generation']
+        current=project.read(folder.parent/generation/'status.json')
+        self.assertEqual(current['merged_prs'],cached['merged_prs'])
+        self.assertEqual(current['linked_issues'],cached['linked_issues'])
+        self.assertEqual(current['collection']['github']['last_success_at'],cached['generated_at'])
+        self.assertEqual(current['collection']['github']['state'],'unavailable')
 
     def test_real_git_credential_protocol_uses_child_account(self):
         import shutil,subprocess
@@ -761,9 +803,11 @@ class Collection(TemporaryProject):
         before=json.loads(self.run_cli(env,'read','studio').stdout)['project']['repositories'][0]
         self.assertTrue(before['collected'])
         denied=self.run_cli(dict(env,FAKE_GH_DENY='1'),'refresh','studio')
-        self.assertIn('GITHUB_ACCESS|github.com|alice|repository',denied.stdout)
+        self.assertIn('web: refreshed',denied.stdout)
         after=json.loads(self.run_cli(env,'read','studio').stdout)['project']['repositories'][0]
-        self.assertEqual(before['generation'],after['generation'])
+        self.assertNotEqual(before['generation'],after['generation'])
+        current=project.read(Path(env['WHERE_WERE_WE_ROOT'])/'studio/repositories/web/snapshots'/after['generation']/'status.json')
+        self.assertEqual(current['collection']['github']['state'],'unavailable')
         self.assertNotIn('test-token',json.dumps(after))
         self.assertEqual(active.read_text(),'bob')
         self.assertEqual(json.loads(self.run_cli(env,'github-accounts','studio','--repository','web').stdout)['accounts'],['alice','bob'])
@@ -781,14 +825,21 @@ class Collection(TemporaryProject):
         second=refresh();self.assertEqual(second.returncode,0,second.stderr)
         previous={n:(folder/n).read_bytes() for n in ('dev.json','main.json','status.json','changes.json')}
         denied=refresh({'FAKE_GH_DENY':'1'})
-        self.assertNotEqual(denied.returncode,0);self.assertIn('GITHUB_ACCESS|github.com|alice|repository',denied.stderr)
-        self.assertEqual(previous,{n:(folder/n).read_bytes() for n in previous})
+        self.assertEqual(denied.returncode,0,denied.stderr)
+        def check_cached():
+            status=json.loads((folder/'status.json').read_text())
+            old=json.loads(previous['status.json'])
+            for field in ('merged_prs','open_prs','issues','linked_issues'):
+                self.assertEqual(status[field],old[field])
+            self.assertEqual(status['collection']['github'],{'state':'unavailable','last_success_at':old['generated_at'],'repository':'example/studio'})
+        check_cached()
         sources=Path(env['FAKE_SOURCES']);changed=json.loads(sources.read_text())
         changed[str(self.root/'web')]['src/Settings.tsx']+='\n// changed after successful collection\n'
         sources.write_text(json.dumps(changed))
         late_failure=refresh({'FAKE_GH_FAIL':'1'})
-        self.assertNotEqual(late_failure.returncode,0);self.assertIn('GITHUB_ACCESS',late_failure.stderr)
-        self.assertEqual(previous,{n:(folder/n).read_bytes() for n in previous})
+        self.assertEqual(late_failure.returncode,0,late_failure.stderr)
+        check_cached()
+        self.assertNotEqual(json.loads(previous['dev.json'])['commit'],json.loads((folder/'dev.json').read_text())['commit'])
         self.assertEqual(active.read_text(),'bob')
 
     def environment(self):
@@ -922,10 +973,10 @@ class Collection(TemporaryProject):
         self.assertFalse(health['broken']['collected']);self.assertIn('fetch denied',health['broken']['error'])
         before=health['web']['generation']
         failed=self.run_cli(dict(env,FAKE_GH_FAIL='1'),'refresh','studio','--repository','web')
-        self.assertIn('FAILED',failed.stdout)
+        self.assertIn('web: refreshed',failed.stdout)
         health={r['id']:r for r in json.loads(self.run_cli(env,'read','studio').stdout)['project']['repositories']}
-        self.assertEqual(health['web']['generation'],before)
-        self.assertIn('GitHub denied',health['web']['error'])
+        self.assertNotEqual(health['web']['generation'],before)
+        self.assertIsNone(health['web']['error'])
         worker=json.loads(self.run_cli(env,'read','studio','--repository','worker').stdout)
         self.assertIsNone(worker['dev']);self.assertTrue(worker['main'])
 

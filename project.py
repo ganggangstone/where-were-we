@@ -111,6 +111,16 @@ def github_environment(repo,check_access=True,origin=None):
     env['WHERE_WERE_WE_GITHUB']=json.dumps(identity)
     return env
 
+def refresh_environment(repo):
+    origin=github_origin(repo['path'])
+    if not origin:
+        return dict(os.environ,WHERE_WERE_WE_GITHUB='',WHERE_WERE_WE_REMOTE_STATUS='not_configured')
+    try:
+        return dict(github_environment(repo,origin=origin),WHERE_WERE_WE_REMOTE_STATUS='available',WHERE_WERE_WE_REMOTE_REPOSITORY=origin['repository'])
+    except ValueError as error:
+        if repo.get('managed') or not str(error).startswith('GITHUB_ACCESS|'):raise
+        return dict(os.environ,WHERE_WERE_WE_GITHUB='',WHERE_WERE_WE_REMOTE_STATUS='unavailable',WHERE_WERE_WE_REMOTE_REPOSITORY=origin['repository'])
+
 def capture_github(repo):
     if repo.get('github'):return repo
     try:
@@ -150,7 +160,7 @@ def refresh_legacy(name,path,since):
         repo=github_repository(name,'')
         if os.path.realpath(repo['path'])!=os.path.realpath(path):raise ValueError('Repository path does not match this project')
         remember_github(name,repo)
-        env=github_environment(repo)
+        env=refresh_environment(repo)
         with tempfile.TemporaryDirectory(prefix='.collect-',dir=home(name)) as temp:
             stage=Path(temp)/name;stage.mkdir()
             for key in NAMES:
@@ -388,6 +398,7 @@ def _compose(name, conf, state, raws, repository='', branch='dev'):
         if interrupted:st={**st,'error':'Previous collection was interrupted; last successful snapshot retained','in_progress':False}
         metadata.append({**repo,**st,'configured_path':repo['path'],'path':(raw.get('dev') or raw.get('main') or {}).get('repo',repo['path']),'collected':bool(raw.get('dev') or raw.get('main')),
             'results':result_metadata[repo['id']],
+            'github_collection':((raw.get('status') or {}).get('collection') or {}).get('github'),
             'analysis':{role:(raw.get(role) or {}).get('analysis') for role in ('dev','main')},
             'analysis_scope':{role:analysis_scope(raw.get(role),repo['layout']) for role in ('dev','main')},
             'config_changed':bool(st.get('fingerprint') and st['fingerprint']!=fingerprint(repo)),
@@ -564,9 +575,9 @@ def read_bundle(name, repository='', branch='dev'):
     result['briefings']=briefing.project_views(name,repository)
     return result
 
-def child_environment(root,repo):
+def child_environment(root,repo,refresh=False):
     import mapcore
-    env=dict(github_environment(repo),WHERE_WERE_WE_MANAGED_CODE='1' if repo.get('managed') else '',WHERE_WERE_WE_ROOT=str(root),WHERE_WERE_WE_REFS=json.dumps(repo['refs']),WHERE_WERE_WE_LAYOUT=json.dumps(repo['layout']),WHERE_WERE_WE_SETTINGS=mapcore.settings_path(),WHERE_WERE_WE_COLLECTION_STAGE='1')
+    env=dict(refresh_environment(repo) if refresh else github_environment(repo),WHERE_WERE_WE_MANAGED_CODE='1' if repo.get('managed') else '',WHERE_WERE_WE_ROOT=str(root),WHERE_WERE_WE_REFS=json.dumps(repo['refs']),WHERE_WERE_WE_LAYOUT=json.dumps(repo['layout']),WHERE_WERE_WE_SETTINGS=mapcore.settings_path(),WHERE_WERE_WE_COLLECTION_STAGE='1')
     return env
 
 def _transaction(name,repo,command, reset=False):
@@ -582,7 +593,7 @@ def _transaction(name,repo,command, reset=False):
             for key in ('dev','main','dev.prev','main.prev','status','changes'):
                 (stage/(key+'.json')).unlink(missing_ok=True)
         result=subprocess.run(mapcore.python_command(Path(__file__).with_name(command[0]),repo['id'],*command[1:]),
-            env=child_environment(childroot,repo),capture_output=True,text=True,timeout=1800)
+            env=child_environment(childroot,repo,refresh=command[0]=='refresh.py'),capture_output=True,text=True,timeout=1800)
         if result.returncode:raise ValueError((result.stderr or result.stdout)[-1600:] or 'Collection failed')
         _publish(name,repo['id'],raw_bundle(stage),{'fingerprint':fingerprint(repo)} if command[0]=='refresh.py' else {},collection=command[0]=='refresh.py')
         return result.stdout

@@ -43,7 +43,11 @@ def git(*args):
             sys.exit(str(project.github_error(json.loads(os.environ['WHERE_WERE_WE_GITHUB']),'fetch')))
         sys.exit(result.stderr.strip() or "Git command failed")
     return result.stdout.strip()
-git("fetch", "-q", "origin")
+if 'WHERE_WERE_WE_REMOTE_STATUS' not in os.environ and not project_store.github_origin(REPO):
+    os.environ['WHERE_WERE_WE_REMOTE_STATUS']='not_configured'
+has_origin=subprocess.run(['git','-C',REPO,'remote','get-url','origin'],capture_output=True).returncode==0
+if has_origin and os.environ.get('WHERE_WERE_WE_REMOTE_STATUS')!='unavailable':
+    git("fetch", "-q", "origin")
 if os.environ.get("WHERE_WERE_WE_MANAGED_CODE")=="1":git("remote", "set-head", "origin", "-a")
 PINNED = {role: git("rev-parse", "--verify", ref + "^{commit}") for role,ref in mapcore.configured_refs().items() if ref}
 os.environ["WHERE_WERE_WE_COMMITS"] = json.dumps(PINNED)

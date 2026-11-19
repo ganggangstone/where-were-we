@@ -76,7 +76,12 @@ def common_of(files):
     return sorted(f for f in files if f in COMMON)
 
 
-if not PINNED: git("fetch", "-q", "origin")
+remote_state=os.environ.get('WHERE_WERE_WE_REMOTE_STATUS')
+if remote_state is None:
+    import project
+    remote_state='available' if project.github_origin(REPO) else 'not_configured'
+if not PINNED and remote_state!='unavailable' and 'origin' in git('remote').splitlines():
+    git("fetch", "-q", "origin")
 
 # --- PR ---
 def pr_row(pr):
@@ -87,11 +92,23 @@ def pr_row(pr):
             "issues": [{"number": i["number"], "title": i.get("title"), "url":i.get("url")} for i in pr.get("closingIssuesReferences") or []],
             "refs": sorted({int(n) for n in re.findall(r"(?<![\w/])#(\d+)\b", (pr.get("title") or "") + " " + (pr.get("body") or ""))})}
 
-merged_input = gh("pr", "list", "--state", "merged", "--limit", "200", "--search", f"merged:>={SINCE.date().isoformat()}")
-merged = [pr_row(p) for p in merged_input if SINCE <= iso(p["mergedAt"]) <= NOW]
-open_input=gh("pr", "list", "--state", "open", "--limit", "100")
-open_prs = [pr_row(p) for p in open_input]
-for p in open_prs:
+merged_input,open_input,issue_input=[],[],[]
+if remote_state=='available':
+    try:
+        merged_input=gh("pr", "list", "--state", "merged", "--limit", "200", "--search", f"merged:>={SINCE.date().isoformat()}")
+        open_input=gh("pr", "list", "--state", "open", "--limit", "100")
+        issue_input=github_json("issue","list","--state","open","--limit","300",fields="number,title,body,url")
+    except (SystemExit,OSError,json.JSONDecodeError):
+        remote_state='unavailable'
+previous={}
+if remote_state=='unavailable':
+    previous=mapcore._read(PROJECT,'status') or {}
+    prior_repo=((previous.get('collection') or {}).get('github') or {}).get('repository')
+    if prior_repo and prior_repo!=os.environ.get('WHERE_WERE_WE_REMOTE_REPOSITORY'):
+        previous={}
+merged = previous.get('merged_prs',[]) if remote_state!='available' else [pr_row(p) for p in merged_input if SINCE <= iso(p["mergedAt"]) <= NOW]
+open_prs = previous.get('open_prs',[]) if remote_state!='available' else [pr_row(p) for p in open_input]
+for p in open_prs if remote_state=='available' else []:
     p["stale"] = (NOW - iso(p["updated_at"])).days >= STALE_DAYS
 
 # --- 원격 브랜치 ---
@@ -231,8 +248,8 @@ by_issue = defaultdict(list)
 for p in open_prs + merged:
     for n in {i["number"] for i in p["issues"]} | set(p["refs"]):
         by_issue[n].append(p)
-issues = []
-issue_input=github_json("issue","list","--state","open","--limit","300",fields="number,title,body,url")
+issues = previous.get("issues",[])
+if remote_state!="available":issue_input=[]
 for i in issue_input:
     prs = [p for p in by_issue.get(i["number"], []) if p["number"] != i["number"]]
     if prs:
@@ -244,19 +261,24 @@ for i in issue_input:
     issues.append({"number": i["number"], "title": i["title"], "body":i.get("body", ""), "state":"OPEN", "url": i["url"], "via": via, "hits": hits[:6], "screens": scr})
 print(f"열린 이슈 {len(issues)}: PR로 이어짐 {sum(i['via'] == 'pr' for i in issues)}, 글로 후보 {sum(i['via'] == 'text' for i in issues)}, 연결 안 됨 {sum(i['via'] is None for i in issues)}")
 
-linked_issues=[]
+linked_issues=previous.get("linked_issues",[])
 known_urls={i['url'] for i in issues}
-for pr in merged:
+for pr in merged if remote_state=="available" else []:
     for issue in pr['issues']:
         url=issue.get('url')
         if not url or url in known_urls or not re.fullmatch(r'https://github\.com/[^/\s]+/[^/\s]+/issues/[0-9]+',url):continue
         known_urls.add(url)
         try:linked_issues.append(github_json('issue','view',url,fields='number,title,body,url,state'))
-        except SystemExit:linked_issues.append({**issue,'body':'','unavailable':True})
+        except (SystemExit,OSError,json.JSONDecodeError):linked_issues.append({**issue,'body':'','unavailable':True})
 collection={key:{'limit':limit,'count':len(rows),'possibly_truncated':len(rows)>=limit}
             for key,limit,rows in [('merged_prs',200,merged_input),('open_prs',100,open_input),('issues',300,issue_input)]}
 collection['pr_files']={'limit':100,'possibly_truncated':any(len(p.get('files',[]))>=100 for p in merged_input)}
 collection['linked_issues']={'unavailable':sum(bool(i.get('unavailable')) for i in linked_issues)}
+if remote_state!='available':collection=dict(previous.get('collection',{}))
+last_success=collection.get('github',{}).get('last_success_at',previous.get('generated_at'))
+collection['github']={'state':remote_state,'last_success_at':NOW.isoformat() if remote_state=='available' else last_success}
+if os.environ.get('WHERE_WERE_WE_REMOTE_REPOSITORY') and remote_state!='not_configured':
+    collection['github']['repository']=os.environ['WHERE_WERE_WE_REMOTE_REPOSITORY']
 out = {"generated_at": NOW.isoformat(), "since": SINCE.isoformat(), "stale_days": STALE_DAYS,
        "merged_prs": merged, "open_prs": open_prs, "issues": issues, "linked_issues":linked_issues, "collection":collection, "branches": branches, "worktrees": worktrees, "overlaps": overlaps}
 os.makedirs(HOME, exist_ok=True)
