@@ -1,5 +1,6 @@
 """Local, commit-bound declarations and statically resolvable module imports."""
 import ast
+import json
 import os
 import posixpath
 from collections import defaultdict, deque
@@ -22,7 +23,7 @@ MAX_DECLARATIONS = 20_000
 MAX_IMPORTS = 20_000
 
 
-VERSION = 13
+VERSION = 14
 JS_EXTENSIONS = {'.js', '.jsx', '.mjs', '.cjs'}
 LANGUAGES = ('python', 'javascript', 'typescript', 'html')
 TS_EXTENSIONS = {'.ts', '.tsx', '.mts', '.cts'}
@@ -207,6 +208,84 @@ def _bounded_order(items):
         yield item
 
 
+def _manifest_lines(raw):
+    # Record literal, single-line values only. Repeated values link to the manifest as a whole.
+    literals = {}
+    for line, text in enumerate(raw.splitlines(), 1):
+        for match in re.finditer(rb"""(?:[:=]\s*)("[^"\\]*"|'[^'\\]*')""", text):
+            value = match[1][1:-1]
+            literals[value] = None if value in literals else line
+    return literals
+
+
+def _cli_entries(git, env, manifests, tracked, files):
+    """Resolve tracked package commands without running an installer or importing code."""
+    declarations = {row['file']: row['declarations'] for row in files}
+    eligible = [(f, entry) for f, entry in manifests.items() if entry[1] <= 64 * 1024]
+    selected = sorted(eligible, key=lambda item: (item[0].count('/'), item[0]))[:64]
+    result = []
+    for file, raw in _blobs(git, env, selected):
+        folder = posixpath.dirname(file)
+        lines_by_value = _manifest_lines(raw)
+        if posixpath.basename(file) == 'package.json':
+            try:
+                package = json.loads(raw)
+            except (ValueError, UnicodeError, RecursionError):
+                continue
+            if not isinstance(package, dict):
+                continue
+            bins = package.get('bin')
+            if isinstance(bins, str) and isinstance(package.get('name'), str):
+                bins = {package['name'].rsplit('/', 1)[-1]: bins}
+            if not isinstance(bins, dict):
+                continue
+            for command, path in bins.items():
+                if not command or not isinstance(path, str):
+                    continue
+                relative = path.removeprefix('./')
+                if any(part in ('', '.', '..') for part in relative.split('/')) or chr(92) in relative:
+                    continue
+                target = posixpath.join(folder, relative)
+                if target in tracked:
+                    row = dict(command=command, kind='npm_bin', file=file, target=target)
+                    line = lines_by_value.get(path.encode()) if path.isascii() else None
+                    if line:
+                        row['line'] = line
+                    result.append(row)
+        else:
+            try:
+                import tomllib
+                project = tomllib.loads(raw.decode()).get('project')
+            except (ImportError, ValueError, UnicodeError, RecursionError):
+                continue
+            scripts = project.get('scripts') if isinstance(project, dict) else None
+            if not isinstance(scripts, dict):
+                continue
+            for command, spec in scripts.items():
+                if not command or not isinstance(spec, str):
+                    continue
+                parts = spec.split(':')
+                if len(parts) != 2 or not all(p.isidentifier() for s in parts for p in s.split('.')):
+                    continue
+                module, symbol = parts
+                stem = module.replace('.', '/')
+                matches = [path for base in (folder, posixpath.join(folder, 'src'))
+                           for tail in (stem + '.py', stem + '/__init__.py')
+                           if (path := posixpath.join(base, tail)) in tracked]
+                if len(matches) != 1:
+                    continue
+                target = matches[0]
+                row = dict(command=command, kind='python_script', file=file, target=target, symbol=symbol)
+                line = lines_by_value.get(spec.encode())
+                if line:
+                    row['line'] = line
+                lines = [d['line'] for d in declarations.get(target, []) if d['name'] == symbol]
+                if len(lines) == 1:
+                    row['target_line'] = lines[0]
+                result.append(row)
+    return result, len(selected)
+
+
 def build(repo, commit, excluded=None, *, only_file=None):
     if not re.fullmatch(r'(?:[a-f0-9]{40}|[a-f0-9]{64})', commit):
         raise ValueError('Structure indexing requires a full commit ID')
@@ -224,6 +303,8 @@ def build(repo, commit, excluded=None, *, only_file=None):
     languages = {}
     unsupported = 0
     denied = set()
+    tracked = {}
+    manifests = {}
     unsupported_oid = None
     for entry in tree.split(b'\0'):
         if not entry:
@@ -245,6 +326,10 @@ def build(repo, commit, excluded=None, *, only_file=None):
         if excluded(file):
             denied.add(oid)
             continue
+        if only_file is None:
+            tracked[file] = oid
+            if posixpath.basename(file) in ('package.json', 'pyproject.toml'):
+                manifests[file] = (oid, int(size))
         suffix = PurePosixPath(file).suffix
         lang = 'python' if suffix == '.py' else 'javascript' if suffix in JS_EXTENSIONS else 'typescript' if suffix in TS_EXTENSIONS else 'html' if suffix in ('.html','.htm') else None
         if lang:
@@ -413,5 +498,9 @@ def build(repo, commit, excluded=None, *, only_file=None):
                              for lang in LANGUAGES}
     coverage['unavailable_languages'] = sorted(unavailable)
     if bounded:coverage['selection']='bounded_directory_sample'
-    return {'version':VERSION,'commit': commit, 'files': files, 'imports': resolved, 'coverage': coverage,
+    eligible_manifests = {path: entry for path, entry in manifests.items() if entry[0] not in denied}
+    cli_entries, manifests_read = _cli_entries(git, env, eligible_manifests, {f for f, oid in tracked.items() if oid not in denied}, files)
+    coverage['cli_manifests_read'] = manifests_read
+    coverage['cli_manifests_total'] = len(eligible_manifests)
+    return {'version':VERSION,'commit': commit,'cli_entries':cli_entries, 'files': files, 'imports': resolved, 'coverage': coverage,
             'service_flow':service_flow.connect(routes, requests)}

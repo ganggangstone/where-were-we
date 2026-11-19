@@ -93,6 +93,34 @@ class Structure(unittest.TestCase):
             self.assertNotEqual(stale.returncode,0)
             self.assertIn(b'Code changed',stale.stderr)
 
+    def test_cli_manifests_resolve_only_tracked_local_targets_at_pin(self):
+        with tempfile.TemporaryDirectory() as root:
+            repo=Path(root)
+            git=lambda *args:subprocess.check_output(['git','-C',root,*args]).decode().strip()
+            git('init','-q')
+            sources={'package.json':'{"bin":{"launch":"./tool","linked":"link","missing":"dist/tool"}}',
+                     'tool':'#!/usr/bin/env node', 'nested/package.json':'{"name":"@org/other","bin":"../tool"}',
+                     'pyproject.toml':'[project.scripts]\nstart = "app:run"\nbad = "dup:run"\n',
+                     'src/app.py':'def run(): pass','dup.py':'','src/dup.py':''}
+            for file,content in sources.items():
+                path=repo/file
+                path.parent.mkdir(parents=True,exist_ok=True)
+                path.write_text(content)
+            os.symlink('tool',repo/'link')
+            git('add','.')
+            git('-c','user.name=Test','-c','user.email=test@example.invalid','commit','-qm','commands')
+            pin=git('rev-parse','HEAD')
+            (repo/'package.json').write_text('{}')
+            result=structure_index.build(root,pin)
+            by_command={r['command']:r for r in result['cli_entries']}
+            self.assertEqual(set(by_command),{'launch','start'})
+            self.assertEqual(by_command['launch'],dict(command='launch',kind='npm_bin',file='package.json',target='tool',line=1))
+            self.assertEqual(by_command['start'],dict(command='start',kind='python_script',file='pyproject.toml',
+                                                       target='src/app.py',symbol='run',line=2,target_line=1))
+            self.assertEqual(result['coverage']['cli_manifests_read'],3)
+            private=structure_index.build(root,pin,excluded=lambda file:file=='tool')
+            self.assertEqual([r['command'] for r in private['cli_entries']],['start'])
+
     def test_bounded_selection_visits_sibling_code_and_keeps_auxiliary_evidence(self):
         paths=['aaa/examples/case'+str(i)+'.py' for i in range(30)]
         paths+=['services/a/worker'+str(i)+'.py' for i in range(30)]
