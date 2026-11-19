@@ -1357,7 +1357,8 @@ function inventoryView(m) {
   const rows=m.inventories || (m.inventory ? [m.inventory] : []);
   return rows.map(row=>{
     const label=row.repository ? connectionDisplayName(row.repository) : '';
-    return `<details class="sect"><summary>${esc([label,tr('Git 추적 파일'),row.files].filter(x=>x!=='').join(' · '))}</summary><p class="mono">${esc(row.commit.slice(0,12))}</p><table><thead><tr><th>${tr('최상위 폴더')}</th><th>${tr('파일 수')}</th></tr></thead><tbody>${row.directories.map(([dir,count])=>`<tr><td>${dir?esc(dir):tr('루트 디렉터리')}</td><td>${esc(count)}</td></tr>`).join('')}</tbody></table></details>`;
+    const key=JSON.stringify([S.project,row.repository || '',row.commit]);
+    return `<details class="sect" data-inventory="${esc(key)}" ${S.inventoryOpen===key?'open':''}><summary>${esc([label,tr('Git 추적 파일'),row.files].filter(x=>x!=='').join(' · '))}</summary><p class="mono">${esc(row.commit.slice(0,12))}</p><table><thead><tr><th>${tr('최상위 폴더')}</th><th>${tr('파일 수')}</th></tr></thead><tbody>${row.directories.map(([dir,count])=>`<tr><td>${dir?esc(dir):tr('루트 디렉터리')}</td><td>${esc(count)}</td></tr>`).join('')}</tbody></table></details>`;
   }).join('');
 }
 function sysView(m) {
@@ -1719,6 +1720,12 @@ function render() {
   document.querySelectorAll('[data-proposal]').forEach(b => b.onclick = () => { S.showProposal = b.dataset.proposal === '1'; S.node = null; render(); });
   if ($('remakeSys')) $('remakeSys').onclick=()=>openAnalysisPanel('make_system');
   if ($('requestBriefing')) $('requestBriefing').onclick=()=>openAnalysisPanel('briefing_request');
+  if (sys) document.querySelectorAll('[data-inventory] > summary').forEach(summary=>summary.onclick=e=>{
+    e.preventDefault();
+    const details=summary.parentElement;
+    S.inventoryOpen=details.open ? null : details.dataset.inventory;
+    document.querySelectorAll('[data-inventory]').forEach(box=>{box.open=box.dataset.inventory===S.inventoryOpen;});
+  });
   if (sys && S.system) { S._wires = sysLinks(S.system).map((l, i) => ({ ...l, n: i + 1, dim: !!S.node && l.from !== S.node && l.to !== S.node })); drawWires(); document.querySelectorAll('.card[data-node], .row[data-node]').forEach(el => el.onclick = () => { selectProgram(el.dataset.node); });
     if ($('toMap')) $('toMap').onclick = () => { S.view = 'map'; render(); } }
   const pick=p=>selectScreen(p,view==='focus');

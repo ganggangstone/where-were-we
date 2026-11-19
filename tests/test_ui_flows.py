@@ -1188,9 +1188,10 @@ class Flows(unittest.TestCase):
  M().inventories=[{repository:'web',commit:'aaaaaaaa1111',files:2,directories:[['',1],['<sample>',1]]}];render();
  const box=$('map').querySelector('details');
  assert(box.querySelector('summary').textContent.includes(tr('Git 추적 파일')+' · 2'),'Tracked file count is visible');
- box.open=true;
- assert(box.innerText.includes('aaaaaaaa1111') && box.innerText.includes(tr('루트 디렉터리')),'The tree is pinned and root files are counted');
- assert(box.innerText.includes('<sample>') && !box.querySelector('sample'),'Names are escaped');
+ box.querySelector('summary').click();render();
+ const expanded=$('map').querySelector('details[open]');assert(expanded,'Opening survives a renderer update');
+ assert(expanded.innerText.includes('aaaaaaaa1111') && expanded.innerText.includes(tr('루트 디렉터리')),'The tree is pinned and root files are counted');
+ assert(expanded.innerText.includes('<sample>') && !expanded.querySelector('sample'),'Names are escaped');
  assert(!window.calls.some(c=>c.command==='analysis_run_start'),'Inventory needs no model turn');
 ''')
 
