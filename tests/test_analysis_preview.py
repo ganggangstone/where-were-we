@@ -38,6 +38,32 @@ class Preview(unittest.TestCase):
         self.assertEqual(analysis_run.status(run_id=run['id'],view='progress')['state'],'cancelled')
         self.assertEqual(analysis_run.status(run_id=run['id'])['tasks'],raw['tasks'])
 
+    def test_lost_inflight_worker_cannot_replay_same_run_before_recovery(self):
+        import subprocess
+        import sys
+        job=self.prepare(intent={'task':'overview','targets':[]})
+        marker=self.repo.parent/'fake-invocations'
+        script="""import analysis_run as a, os, sys
+from pathlib import Path
+a.mapcore.ROOT=sys.argv[1]
+def fake(prompt,**kwargs):
+    Path(sys.argv[3]).write_text('submitted')
+    os._exit(17)
+a.run(sys.argv[2],fake)
+"""
+        child=subprocess.run([sys.executable,'-c',script,str(analysis_run.mapcore.ROOT),job['id'],str(marker)],
+                             capture_output=True)
+        self.assertEqual(child.returncode,17,child.stderr)
+        self.assertEqual(marker.read_text(),'submitted')
+        restarted=analysis_run.run(job['id'],lambda *a,**k:self.fail('replayed in-flight model request'))
+        self.assertEqual(restarted['error']['code'],'interrupted')
+        for view in ('progress','catalog'):
+            kwargs={'run_id':job['id']} if view=='progress' else {'project':'demo','lang':'en'}
+            self.assertEqual(analysis_run.status(**kwargs,view=view)['state'],'failed')
+        retry=analysis_run.retry(job['id'])
+        self.assertNotEqual(retry['id'],job['id'])
+        self.assertEqual(analysis_run.run(retry['id'],lambda *a,**k:{'items':[]})['state'],'completed')
+
     def test_verified_preview_precedes_final_map_and_cancel_preserves_baseline(self):
         # Keep a real route beyond line 500 in an unrecognized file type and use
         # distinct filler lines so that compression of repeated text cannot pass.

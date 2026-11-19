@@ -1752,6 +1752,12 @@ def run(run_id, executor=None):
         with locked():
             value=read(run_id)
             if value['state'] in TERMINAL: return value
+            if value['state']!='preparing':
+                # Acquiring this lock means the previous worker has gone.
+                # Its last model request may already have reached the provider.
+                if value.get('cancel_requested'):
+                    value.update(state='cancelled',finished_at=store.now());return write(value)
+                return failure(value,'interrupted','Analysis worker stopped. Retry to finish missing tasks; saved results were retained')
             value.update(state='running',started_at=store.now(),launch_epoch=time.time());write(value)
         started=time.monotonic();blobs={}
         cancelled=_cancellation_probe(run_id)
