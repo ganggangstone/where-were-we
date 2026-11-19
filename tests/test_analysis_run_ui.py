@@ -266,6 +266,10 @@ status=runRecord('completed',{intent:{task:'overview',targets:[]},saved_overview
 await AnalysisRun.check();assert(!$('savedOverview0'),'Missing live pin hides results');
 status.current_legacy_pin={commit:group.commit,configuration:group.configuration};
 await AnalysisRun.check();assert($('savedOverview0') && $('insp').innerHTML.includes('Runs the app'),'Verified current legacy result opens despite an old basic map');
+const html=$('insp').innerHTML;
+assert(html.includes('Feature diagram by source file') && /<li><code>app<\/code><ul><li><b>Start<\/b>/.test(html),'Verified feature is a child of its cited file');
+assert(html.includes('app:2') && html.includes('run_command()'),'Diagram node retains the pinned evidence');
+
 status.current_legacy_pin.configuration='changed';await AnalysisRun.check();
 assert(!$('savedOverview0'),'Configuration mismatch hides the sample');
 ''')

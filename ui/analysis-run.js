@@ -133,14 +133,24 @@ const AnalysisRun = (() => {
     });
   }
   const overviewKey = group => JSON.stringify([S.project,S.branch,S.lang,group.repository,group.commit,group.configuration]);
+  function overviewTree(group) {
+    const files=group.files.map(file=>{
+      const items=group.items.filter(item=>item.file===file);
+      const nodes=items.map(item=>`<li><b>${esc(item.name)}</b>
+        ${item.description ? `<p>${esc(item.description)}</p>` : ''}
+        ${esc([item.method,item.path,item.function].filter(Boolean).join(' '))}
+        <div class="s"><code>${esc(file)}:${esc(item.line)}</code></div><pre>${esc(item.quote)}</pre></li>`).join('');
+      return `<li><code>${esc(file)}</code>${nodes ? `<ul>${nodes}</ul>` : ''}</li>`;
+    }).join('');
+    return `<figure class="overview-tree"><figcaption>${text('파일별 기능 구조도','Feature diagram by source file')}</figcaption><ul>${files}</ul></figure>`;
+  }
   function overviewHtml() {
     return savedOverviews().map((group,index)=>{
       const key=overviewKey(group);
       const open=openedOverview===key || (openedOverview===null && group.format==='overview-v1');
-      const rows=group.items.map(item=>`<div><b>${esc(item.name)}</b> ${esc(item.description || '')} ${esc([item.method,item.path,item.function].filter(Boolean).join(' '))} · <code>${esc(item.file)}:${esc(item.line)}</code><pre>${esc(item.quote)}</pre></div>`).join('');
       return `<section class="sect"><button class="btn plain" type="button" id="savedOverview${index}" aria-expanded="${open}">${text('저장된 첫 개요','Saved initial overview')} · ${esc(group.repository ? connectionDisplayName(group.repository) : S.project)}</button>
         <p class="s">${text('파일 '+group.files.length+'개의 일부 코드에서 확인한 항목 '+group.items.length+'개','Items verified: '+group.items.length+' · Files sampled: '+group.files.length)}</p>
-        ${open ? `<div><code>${esc(group.commit.slice(0,8))}</code><p>${group.files.map(esc).join(', ')}</p>${rows}</div>` : ''}</section>`;
+        ${open ? `<div><code>${esc(group.commit.slice(0,8))}</code>${overviewTree(group)}</div>` : ''}</section>`;
     }).join('');
   }
   function previewItems() {

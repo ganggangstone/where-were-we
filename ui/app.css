@@ -232,3 +232,11 @@ details .kv { margin:var(--space-3) var(--space-0) var(--space-0); word-break:br
 .guide-visual { display:flex; flex-wrap:wrap; align-items:center; gap:var(--space-3); margin:var(--space-5) var(--space-0) }
 .guide-visual .card { flex:1; min-width:var(--size-bar-inline); margin:var(--space-0) }
 .guide-nav { margin-top:var(--space-6); padding-top:var(--space-4); border-top:var(--border-hairline) }
+
+.overview-tree { margin:var(--space-4) var(--space-0) }
+.overview-tree figcaption { font:var(--font-secondary); color:var(--color-text-secondary) }
+.overview-tree ul { list-style:none; margin:var(--space-3) var(--space-0); padding:var(--space-0) }
+.overview-tree ul ul { margin-left:var(--space-3); border-left:var(--border-hairline) }
+.overview-tree ul ul li { position:relative; padding-left:var(--space-5); margin-bottom:var(--space-4) }
+.overview-tree ul ul li::before { content:""; position:absolute; left:var(--space-0); top:var(--space-3); width:var(--space-4); border-top:var(--border-hairline) }
+.overview-tree pre { white-space:pre-wrap; overflow-wrap:anywhere }
