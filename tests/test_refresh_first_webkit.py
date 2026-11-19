@@ -96,6 +96,8 @@ class RefreshFirstWebKit(unittest.TestCase):
  $('overviewOpenScope0').click();
  check(S.view==='sys' && $('map').querySelector('[data-local-resource="/profiles"]').getAttribute('aria-expanded')==='true','Open the exact local group from a sampled overview');
  check(!calls.some(c=>c.command==='analysis_run_start'),'Viewing saved evidence starts no AI');
+ check(!$('flowFeature') && !$('flowProof').open && $('map').querySelector('[data-flow-operation]'),'Operations precede closed technical evidence');
+ $('flowProof').querySelector('summary').click();check($('flowProof').open && $('flowProof').innerText.includes('client.js:5'),'Endpoint evidence opens on demand');
  $('explainLocalScope').click();await new Promise(r=>setTimeout(r,30));
  check($('insp').innerText.includes('/profiles') && $('overviewLimits') && $('startAppAnalysis') && !$('startFullAnalysis'),'Scope has an explicit generation control and bounded disclosure');
  check(!calls.some(c=>c.command==='analysis_run_start'),'Opening scoped AI details is free');
