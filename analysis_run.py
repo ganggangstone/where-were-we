@@ -25,7 +25,7 @@ import project as store
 
 ACTIVE = {'preparing', 'running', 'saving'}
 TERMINAL = {'completed', 'failed', 'cancelled'}
-OVERVIEW_VERSION = 4
+OVERVIEW_VERSION = 5
 MAX_FILE_BYTES = 300_000
 MAX_PROMPT_BYTES = 128 * 1024
 UNIT_BYTES = 16 * 1024
@@ -1161,6 +1161,25 @@ def _feature_groups(groups, connections):
     return result
 
 
+def _overview_cli(index):
+    entries=[];families=set();alternate=None
+    for entry in index.get('cli_entries',[]):
+        if not entry.get('line') or len(entry['command'])>160 or any(_secret(entry[k]) for k in ('file','target')):continue
+        sites={'registration':(entry['file'],entry['line'])}
+        for key,path_key,line_key in [('parent_evidence','file','parent_line'),('target_evidence','target','target_line'),
+                                      ('description_evidence','target','description_line'),('handler_evidence','target','handler_line')]:
+            if entry.get(line_key):sites[key]=(entry[path_key],entry[line_key])
+        family=entry['command'].split()[0]
+        if family in families:
+            if alternate is None:alternate=(entry,sites)
+            continue
+        families.add(family)
+        entries.append((entry,sites))
+        if len(entries)==2:break
+    if len(entries)==1 and alternate:entries.append(alternate)
+    return entries
+
+
 def _quick_overview(repo,request,language,invoke,cancelled,deadline,raw,resource=None,ref_offset=0):
     """One bounded call per repository. A reference selects an actual pinned line."""
     commit=request['commit']
@@ -1169,6 +1188,15 @@ def _quick_overview(repo,request,language,invoke,cancelled,deadline,raw,resource
     if index.get('commit')!=commit or index.get('version')!=structure_index.VERSION:
         index=structure_index.build(repo,commit,excluded=_secret)
     anchors,flows,total_scopes=_overview_anchors(index,resource)
+    cli=_overview_cli(index) if resource is None and not flows else []
+    if cli:
+        pinned={}
+        for entry,sites in cli:
+            for file,line in sites.values():pinned.setdefault(file,{})[line]={}
+            pinned.setdefault(entry['target'],{})
+        for file,rows in anchors.items():
+            if file in pinned or len(pinned)<4:pinned.setdefault(file,{}).update(rows)
+        anchors=pinned
     selected=list(anchors)
     if resource is None and len(selected)<4:
         fallback=sorted(_first_files(repo,commit,request,overview=True)-set(selected))
@@ -1203,6 +1231,17 @@ def _quick_overview(repo,request,language,invoke,cancelled,deadline,raw,resource
                      'Return at most 12 items. Skip unsupported claims. Empty items are valid. Do not request further reads.',
             'schema':{'items':[{'name':'feature or component','description':'what it does','ref':ref_offset+1}]}}
     by_line={(row['file'],row['line']):ref for ref,row in references.items()}
+    for entry,sites in cli:
+        refs={key:by_line[site] for key,site in sites.items() if site in by_line}
+        if 'registration' not in refs or entry['kind']=='cobra_subcommand' and not {'parent_evidence','target_evidence'}<=refs.keys():continue
+        cli_entry={'kind':entry['kind'],'command':entry['command'],'target_file':entry['target']}
+        if entry.get('symbol'):cli_entry['symbol']=entry['symbol']
+        if 'description_evidence' in refs and entry.get('description') in references[refs['description_evidence']]['quote']:
+            cli_entry['description']=entry['description']
+        packet.setdefault('cli_entries',[]).append({**cli_entry,**{key+'_ref':ref for key,ref in refs.items()}})
+        result.setdefault('cli_entries',[]).append({**cli_entry,**{key:references[ref] for key,ref in refs.items()}})
+    if 'cli_entries' in packet:
+        packet['prompt']+=' Describe the supplied CLI commands and cite their refs. A registered command or handler alone does not establish its runtime effects.'
     connections=[];source_flows=[]
     for scope,flow in flows:
         refs=[by_line.get((side['file'],side['line'])) for side in _endpoints(flow)]
@@ -1254,7 +1293,7 @@ def _quick_overview(repo,request,language,invoke,cancelled,deadline,raw,resource
                     or any(not isinstance(item.get(k),str) or not 0<len(item[k].strip())<=500 for k in ('name','description'))):
                 raise InvalidClaim('An initial overview item lacked a supported source reference or description')
             result['items'].append({k:item[k] for k in ('name','description')} | references[item['ref']])
-        _strict_result('analysis',{'inspected':result['items'],'connections':result.get('connections',[])},repo,commit)
+        _strict_result('analysis',{'inspected':result['items'],'connections':result.get('connections',[]),'cli_entries':result.get('cli_entries',[])},repo,commit)
         return result
     return (packet,finalize) if invoke is None else finalize(invoke(packet))
 

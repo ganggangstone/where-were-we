@@ -427,6 +427,27 @@ def users(): pass
             self.assertIn(path,overview['items'][0]['quote'])
             self.assertEqual(overview['connections'][0]['id'],1)
 
+    def test_first_overview_cites_cli_registration_and_entrypoint_without_http(self):
+        (self.repo/'pyproject.toml').write_text('[project]\nname="example"\n[project.scripts]\nreports="reports:main"\n')
+        (self.repo/'reports.py').write_text('# implementation\n'*80+'def main():\n    return 0\n')
+        self.git('add','.');self.git('commit','-qm','Register report command')
+        run=self.prepare(intent={'task':'overview','targets':[]})
+        def executor(prompt,**kwargs):
+            packet=json.loads(prompt.split('\n',1)[1])
+            self.assertNotIn('connections',packet)
+            command,=packet['cli_entries']
+            self.assertEqual((command['command'],command['symbol']),('reports','main'))
+            refs={r['ref']:r for f in packet['sources'] for r in f['lines']}
+            self.assertEqual(refs[command['target_evidence_ref']]['line'],81)
+            return {'items':[{'name':'reports','description':'Runs the declared entry point.','ref':command['registration_ref']}]}
+        done=analysis_run.run(run['id'],executor)
+        self.assertEqual(done['state'],'completed',done.get('error'))
+        cmd,=analysis_run.status(project='demo',lang='en')['saved_overviews'][0]['cli_entries']
+        self.assertEqual(cmd['registration'],{'file':'pyproject.toml','line':4,'quote':'reports="reports:main"'})
+        self.assertEqual(cmd['target_evidence']['quote'],'def main():')
+        self.assertNotIn('handler_evidence',cmd)
+        self.assertEqual(done['input_stats']['calls'],1)
+
     def test_resource_batch_includes_standalone_registration_without_inventing_a_client(self):
         import structure_index
         (self.repo/'api.py').write_text("from fastapi import FastAPI\napp=FastAPI()\n@app.get('/catalog')\ndef list_items():pass\n@app.post('/catalog')\ndef add_item():pass\n@app.get('/health')\ndef health():pass")

@@ -276,7 +276,7 @@ func New() *cobra.Command {
             (repo/'child/commands.go').write_text("""package child
 import c "github.com/spf13/cobra"
 func New() *c.Command {
- cmd := &c.Command{Use:"show [file]", Short:"Show the file"}
+ cmd := &c.Command{Use:"show [file]", Short:"Show the file", RunE:func(cmd *c.Command,args []string)error{return nil}}
  return cmd
 }
 func Dynamic() *c.Command {
@@ -293,7 +293,7 @@ func Ignored() *c.Command {
             pin=git('rev-parse','HEAD')
             rows=structure_index.build(root,pin)['cli_entries']
             self.assertEqual(rows,[dict(kind='cobra_subcommand',command='root show',description='Show the file',
-                                        file='main.go',line=5,target='child/commands.go',target_line=4,description_line=4)])
+                                        file='main.go',line=5,parent_line=4,target='child/commands.go',target_line=4,description_line=4,handler_line=4)])
             (repo/'child/other.go').write_text((repo/'child/commands.go').read_text())
             git('add','.')
             git('-c','user.name=Test','-c','user.email=test@example.invalid','commit','-qm','ambiguous constructor')

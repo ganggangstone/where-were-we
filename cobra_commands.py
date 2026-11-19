@@ -26,6 +26,8 @@ def _fields(literal):
     for row in literal.child_by_field_name('body').named_children:
         key = _text(_single(row.child_by_field_name('key')))
         value = _single(row.child_by_field_name('value'))
+        if key in ('Run','RunE') and value and value.type=='func_literal':
+            values[key]=(key,value.start_point.row+1)
         if key in ('Use', 'Short') and value and value.type in ('interpreted_string_literal', 'raw_string_literal'):
             text = _text(value)[1:-1]
             if key in values or not text.strip() or len(text) > 320 or not text.isprintable() or chr(92) in text:
@@ -104,7 +106,9 @@ def facts(root, file, import_paths):
                     if alias in imports and not bound[alias] and imports[alias][0] is not None:
                         folder, explicit = imports[alias]
                         calls.append((folder, '' if explicit else alias, _text(func.child_by_field_name('field')), stmt.start_point.row+1))
-        if set(fields) == {'Use','Short'} and not any(bound[returned + '.' + key] for key in fields):
+        if {'Use','Short'} <= fields.keys() and not any(bound[returned + '.' + key] for key in ('Use','Short')):
+            if bound[returned+'.Run'] or bound[returned+'.RunE'] or 'Run' in fields and 'RunE' in fields:
+                for key in ('Run','RunE'):fields.pop(key,None)
             token = fields['Use'][0].split()[0]
             if re.fullmatch(r'[\w][\w-]*', token):
                 constructors[symbol][-1] = (file, token, fields, calls)
@@ -121,7 +125,7 @@ def connect(facts_by_file, directories, limit):
     for _, constructors in facts_by_file.values():
         for rows in constructors.values():
             for row in filter(None, rows):
-                file, parent, _, calls = row
+                file, parent, parent_fields, calls = row
                 for folder, default_alias, name, line in calls:
                     members = directories.get(folder, [])
                     if not members or not all(f in facts_by_file for f in members):
@@ -135,7 +139,8 @@ def connect(facts_by_file, directories, limit):
                     target, token, fields, _ = child
                     result.append({'kind':'cobra_subcommand','command':parent+' '+token,'description':fields['Short'][0],
                                    'file':file,'line':line,'target':target,'target_line':fields['Use'][1],
-                                   'description_line':fields['Short'][1]})
+                                   'parent_line':parent_fields['Use'][1],'description_line':fields['Short'][1],
+                                   **({'handler_line':fields['RunE'][1]} if 'RunE' in fields else {'handler_line':fields['Run'][1]} if 'Run' in fields else {})})
                     if len(result) >= limit:
                         return result
     return result
