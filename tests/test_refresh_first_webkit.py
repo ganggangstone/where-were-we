@@ -52,7 +52,7 @@ class RefreshFirstWebKit(unittest.TestCase):
  storage.querySelector('summary').click();check(storage.open && storage.innerText.includes('api.py:11'),'Model citation remains discoverable');
  check(!calls.some(c=>c.command==='analysis_run_start'),'Viewing saved evidence starts no AI');
  S.agentPrompt=null;
- const paths=['src/nested/<example name>.go',...Array.from({length:80},(_,i)=>'src/item'+String(i).padStart(2,'0')+'.go')];
+ const paths=['src/nested/<example name>.go','src/nested/worker.ts',...Array.from({length:80},(_,i)=>'src/item'+String(i).padStart(2,'0')+'.go')];
  window.mutateBundle=b=>{b.dev.structure_indexes=[{...index,files:[],imports:[],service_flow:null}];b.dev.inventories=[{repository:'web',commit:pin,files:82,paths,paths_truncated:true,directories:[['src',82]]}]};
  await doRefresh();
  const box=()=>$('map').querySelector('[data-inventory]');
@@ -65,10 +65,28 @@ class RefreshFirstWebKit(unittest.TestCase):
  box().querySelector('[data-inventory-dir="src/nested"]').click();
  const fileLink=box().querySelector('[data-inventory-file]');check(fileLink.textContent==='<example name>.go','Paths remain text');
  fileLink.click();check(calls.at(-1).command==='open_url' && calls.at(-1).args.url==='zed://file/fictional/web/src/nested/%3Cexample%20name%3E.go','Editor opens the qualified working file without inventing a line');
+ const inspect=path=>box().querySelector('[data-inspect-path="'+path+'"]').click();
+ inspect('src/nested/<example name>.go');await new Promise(r=>setTimeout(r,10));check(box().innerText.includes(tr('지원하지 않는 파일 형식')),'Unsupported paths do not invent declarations');
+ inspect('src/nested/worker.ts');await new Promise(r=>setTimeout(r,10));
+ const args=calls.filter(c=>c.command==='file_structure').at(-1).args;
+ check(args.commit===pin && args.repository==='web' && args.file==='src/nested/worker.ts','Detail reads only the selected file and full commit');
+ check(box().innerText.includes('doWork0') && box().innerText.includes(tr('대상 미확인 import')) && box().innerText.includes(tr('분석 한도 도달')),'Declarations and coverage limits appear together');
+ box().querySelector('[data-structure-page="1"]').click();
+ check(box().innerText.includes('import → utility.ts') && box().innerText.includes('src/nested/worker.ts:33'),'Bounded paging retains outgoing import evidence');
  box().querySelector('[data-inventory-dir="src"]').click();check(box().querySelector('[data-inventory-dir="src/nested"]'),'Parent navigation is reversible');
 })().then(()=>window.uiSystemResult='[]').catch(e=>window.uiSystemResult=JSON.stringify([String(e)]));
 """
-        source = (ROOT / 'ui/index.html').read_text().replace('<script>', '<script>' + BOOTSTRAP, 1)
+        fake_file = r'''
+const originalNative=window.__TAURI__.core.invoke;
+window.__TAURI__.core.invoke=async(command,args)=>{
+ if(command!=='file_structure')return originalNative(command,args);
+ calls.push({command,args});
+ return JSON.stringify({...args,status:args.file.endsWith('.go')?'unsupported':'indexed',language:'typescript',
+   declarations:Array.from({length:21},(_,i)=>({name:'doWork'+i,kind:'function',line:i+1})),imports:[{target:'utility.ts',line:33}],
+   coverage:{indexed_files:1,unresolved_imports:1,truncated:true}});
+};
+'''
+        source = (ROOT / 'ui/index.html').read_text().replace('<script>', '<script>' + BOOTSTRAP + fake_file, 1)
         for name in ('tokens.css', 'app.css', 'vendor/dagre.min.js', 'connection.js', 'onboarding.js', 'control.js', 'analysis-run.js'):
             source = source.replace(f'"{name}"', f'"{(ROOT / "ui" / name).as_uri()}"')
         with tempfile.TemporaryDirectory() as directory:
