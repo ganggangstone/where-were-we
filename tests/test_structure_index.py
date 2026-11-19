@@ -347,6 +347,37 @@ func Ignored() *c.Command {
             self.assertNotEqual(stale.returncode,0)
             self.assertEqual((folder/'dev.json').read_text(),saved)
 
+    def test_next_routes_require_project_ownership_static_config_and_named_exports(self):
+        with tempfile.TemporaryDirectory() as root:
+            repo=Path(root)
+            git=lambda *a:subprocess.check_output(['git','-C',root,*a]).decode().strip()
+            git('init','-q')
+            code="export async function GET() {}\nexport const POST = () => {};\nexport default function DELETE() {}"
+            sources={'package.json':'{"dependencies":{"next":"^15.0"}}','next.config.ts':'export default {images:{}}',
+                     'app/api/notes/route.ts':code,'src/app/api/shadow/route.ts':code,
+                     'tests/fixtures/app/api/nested/route.ts':code,'app/fixtures/unused/route.ts':code,
+                     'app/api/[id]/route.ts':code,'app/(group)/route.ts':code,'app/api/conflict/route.ts':code,
+                     'app/api/conflict/page.tsx':'export default function View() { return null }'}
+            for file,text in sources.items():
+                path=repo/file
+                path.parent.mkdir(parents=True,exist_ok=True)
+                path.write_text(text)
+            def commit():
+                git('add','.')
+                git('-c','user.name=Test','-c','user.email=test@example.invalid','commit','-qm','route files')
+                return git('rev-parse','HEAD')
+            pin=commit()
+            def routes(pin,**opts):
+                return structure_index.build(root,pin,**opts)['service_flow']['registered_routes']
+            self.assertEqual([(r['method'],r['path'],r['server']['line']) for r in routes(pin)],
+                             [('GET','/api/notes',1),('POST','/api/notes',2)])
+            self.assertEqual(routes(pin,excluded=lambda f:f=='package.json'),[])
+            (repo/'next.config.ts').write_text("export default {basePath:'/base'}")
+            self.assertEqual(routes(commit()),[])
+            (repo/'next.config.ts').unlink()
+            (repo/'package.json').write_text('{}')
+            self.assertEqual(routes(commit()),[])
+
     def test_bounded_selection_visits_sibling_code_and_keeps_auxiliary_evidence(self):
         paths=['aaa/examples/case'+str(i)+'.py' for i in range(30)]
         paths+=['services/a/worker'+str(i)+'.py' for i in range(30)]

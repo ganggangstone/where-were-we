@@ -10,6 +10,7 @@ import re
 import subprocess
 import warnings
 
+import next_routes
 import cobra_commands
 import service_flow
 import default_flow
@@ -26,7 +27,7 @@ MAX_DECLARATIONS = 20_000
 MAX_IMPORTS = 20_000
 
 
-VERSION = 23
+VERSION = 24
 JS_EXTENSIONS = {'.js', '.jsx', '.mjs', '.cjs'}
 LANGUAGES = ('python', 'javascript', 'typescript', 'html', 'go')
 TS_EXTENSIONS = {'.ts', '.tsx', '.mts', '.cts'}
@@ -47,7 +48,7 @@ def _parser(grammar):
     return Parser(Language(language()))
 
 
-def _script(file, raw, candidates):
+def _script(file, raw, candidates, next_context=None):
     suffix = PurePosixPath(file).suffix
     grammar = 'javascript' if suffix in JS_EXTENSIONS else 'tsx' if suffix == '.tsx' else 'typescript'
     try:
@@ -118,7 +119,10 @@ def _script(file, raw, candidates):
             elif target != file:
                 edges.append({'file':file,'line':argument.start_point.row+1,'target':target})
     requests=service_flow.javascript_requests(root,file)
-    return rows, edges, unresolved, requests, default_flow.sdk_facts(root,file), express_routes(root,file), app_factories(root,file), react_actions.facts(root,requests)
+    routes = express_routes(root,file)
+    if next_context:
+        routes.extend(next_routes.handlers(root, file, next_context))
+    return rows, edges, unresolved, requests, default_flow.sdk_facts(root,file), routes, app_factories(root,file), react_actions.facts(root,requests)
 
 
 def _go_structure(file, raw, module, directories, blocked):
@@ -465,6 +469,9 @@ def build(repo, commit, excluded=None, *, only_file=None, directory=None):
     go_modules = set()
     go_files = defaultdict(list)
     go_config = None
+    next_files = set()
+    next_config_names = []
+    next_sources = {}
     workspace = False
     for entry in tree.split(b'\0'):
         if not entry:
@@ -475,6 +482,11 @@ def build(repo, commit, excluded=None, *, only_file=None, directory=None):
         # contents are excluded. Use names only and never open an excluded blob.
         go_path = os.fsdecode(raw_file)
         folder, name = posixpath.split(go_path)
+        if scope is None:
+            if go_path.startswith(('app/','src/app/')) or go_path == 'app':
+                next_files.add(go_path)
+            if not folder and name.startswith('next.config.'):
+                next_config_names.append(name)
         if name == 'go.mod' and folder:
             go_modules.add(folder)
         if go_path == 'go.work':
@@ -498,6 +510,8 @@ def build(repo, commit, excluded=None, *, only_file=None, directory=None):
             continue
         if scope is None:
             tracked[file] = oid
+            if (file == 'package.json' or file in next_config_names) and int(size) <= 64 * 1024:
+                next_sources[file] = (oid, int(size))
             if file.lower() in ('readme.md','readme.rst','readme.txt','readme') or file in ('package.json','pyproject.toml'):
                 if int(size) <= 64 * 1024:
                     descriptions[file] = (oid, int(size))
@@ -576,6 +590,11 @@ def build(repo, commit, excluded=None, *, only_file=None, directory=None):
             # A dependency with a matching prefix can override root-module ownership.
             for path in re.findall(rb'(?:^|\s)' + re.escape(modules[0]) + rb'/([\w./~-]+)', config):
                 go_modules.add(path.decode('ascii'))
+    try:
+        next_contexts = next_routes.context(next_files, next_config_names, next_sources, denied,
+                                          lambda entries:_blobs(git, env, entries), _parser) if scope is None else {}
+    except ImportError:
+        next_contexts = {}
     unavailable = set()
     for file, raw in _blobs(git, env, selected):
         language = languages[file]
@@ -614,7 +633,7 @@ def build(repo, commit, excluded=None, *, only_file=None, directory=None):
             continue
         if language != 'python':
             try:
-                script = _script(file, raw, candidates)
+                script = _script(file, raw, candidates, next_contexts.get(file))
             except ImportError:
                 unavailable.add(language)
                 continue
