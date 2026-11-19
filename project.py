@@ -669,6 +669,10 @@ def record_test(name,rid,route,file,line,quote):
     return mutate_tests(name,rid,update)
 
 def file_structure(name, repository, branch, commit, file):
+    return selected_structure(name,repository,branch,commit,only_file=file)
+
+
+def selected_structure(name, repository, branch, commit, **scope):
     import ai_extract
     import structure_index
     repo, raw, _, head = ai_extract.context(name,repository,branch)
@@ -677,20 +681,21 @@ def file_structure(name, repository, branch, commit, file):
     saved_pin=inventory_pin or (snapshot.get('structure_index') or {}).get('commit')
     if commit != head or saved_pin != commit:
         raise ValueError('Code changed; refresh the map before opening this file')
-    return structure_index.build(repo['path'],commit,only_file=file)
+    return structure_index.build(repo['path'],commit,**scope)
 
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command',choices=['read','configure','refresh','action','github-accounts','github-account','github-logins','file-structure']);parser.add_argument('project')
+    parser.add_argument('command',choices=['read','configure','refresh','action','github-accounts','github-account','github-logins','file-structure','directory-structure']);parser.add_argument('project')
     parser.add_argument('--repository',default='');parser.add_argument('args',nargs='*')
     args,remaining=parser.parse_known_args()
     if remaining and args.command!='action':parser.error('unrecognized arguments: '+' '.join(remaining))
     if args.command=='action':args.args.extend(remaining)
     if args.command=='read':print(json.dumps(read_bundle(args.project,args.repository),ensure_ascii=False))
-    elif args.command=='file-structure':
-        if len(args.args)!=4:raise ValueError('Expected repository, branch, commit and file')
-        print(json.dumps(file_structure(args.project,*args.args),ensure_ascii=False))
+    elif args.command in ('file-structure','directory-structure'):
+        if len(args.args)!=4:raise ValueError('Expected repository, branch, commit and path')
+        key = 'directory' if args.command=='directory-structure' else 'only_file'
+        print(json.dumps(selected_structure(args.project,*args.args[:3],**{key:args.args[3]}),ensure_ascii=False))
     elif args.command=='configure':print(json.dumps(configure(args.project,json.loads(args.args[0]) if args.args else json.load(sys.stdin)),ensure_ascii=False))
     elif args.command=='refresh':print(refresh_project(args.project,args.repository))
     elif args.command=='github-logins':

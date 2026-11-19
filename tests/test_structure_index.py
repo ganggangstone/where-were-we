@@ -299,6 +299,45 @@ func Ignored() *c.Command {
             git('-c','user.name=Test','-c','user.email=test@example.invalid','commit','-qm','ambiguous constructor')
             self.assertEqual(structure_index.build(root,git('rev-parse','HEAD'))['cli_entries'],[])
 
+    def test_directory_reads_only_descendants_and_resolves_root_imports(self):
+        import json
+        import sys
+        with tempfile.TemporaryDirectory() as root:
+            repo=Path(root)
+            git=lambda *a:subprocess.check_output(['git','-C',root,*a]).decode().strip()
+            git('init','-q')
+            sources={'pkg/main.py':'import peer\ndef run(): pass','pkg/nested/work.py':'def inner(): pass',
+                     'pkg/leak.py':'class Secret: pass','.aws/private.py':'class Secret: pass',
+                     'pkg2/outside.py':'def outside(): pass','peer.py':'class Peer: pass'}
+            for file,source in sources.items():
+                path=repo/file
+                path.parent.mkdir(parents=True,exist_ok=True)
+                path.write_text(source)
+            git('add','.')
+            git('-c','user.name=Test','-c','user.email=test@example.invalid','commit','-qm','folder sample')
+            pin=git('rev-parse','HEAD')
+            with patch.object(structure_index,'_blobs',wraps=structure_index._blobs) as blobs:
+                result=structure_index.build(root,pin,directory='pkg')
+                self.assertEqual([p for call in blobs.call_args_list for p,_ in call.args[2]],['pkg/main.py','pkg/nested/work.py'])
+            self.assertEqual(result['imports'],[{'file':'pkg/main.py','line':1,'target':'peer.py'}])
+            self.assertEqual(result['coverage']['candidate_files'],2)
+            with patch.object(structure_index,'MAX_DIRECTORY_FILES',1):
+                limited=structure_index.build(root,pin,directory='pkg')
+            self.assertTrue(limited['coverage']['truncated'])
+            self.assertEqual(limited['coverage']['indexed_files'],1)
+            with self.assertRaises(ValueError):
+                structure_index.build(root,pin,directory='pkg/../pkg2')
+            folder=repo/'maps/demo'
+            folder.mkdir(parents=True)
+            saved=json.dumps({'repo':root,'ref':'HEAD','commit':pin,'inventory':{'commit':pin}})
+            (folder/'dev.json').write_text(saved)
+            cmd=[sys.executable,str(Path(structure_index.__file__).with_name('project.py')),'directory-structure','demo','--','','dev']
+            env={**os.environ,'WHERE_WERE_WE_ROOT':str(folder.parent)}
+            self.assertEqual(json.loads(subprocess.check_output(cmd+[pin,'pkg'],env=env)),result)
+            stale=subprocess.run(cmd+['0'*40,'pkg'],env=env,capture_output=True)
+            self.assertNotEqual(stale.returncode,0)
+            self.assertEqual((folder/'dev.json').read_text(),saved)
+
     def test_bounded_selection_visits_sibling_code_and_keeps_auxiliary_evidence(self):
         paths=['aaa/examples/case'+str(i)+'.py' for i in range(30)]
         paths+=['services/a/worker'+str(i)+'.py' for i in range(30)]

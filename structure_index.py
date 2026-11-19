@@ -17,6 +17,8 @@ import react_actions
 import sqlmodel_steps
 from express_routes import app_factories, express_routes, factory_routes
 
+MAX_DIRECTORY_FILES = 128
+MAX_DIRECTORY_BYTES = 4 * 1024 * 1024
 MAX_FILES = 2048
 MAX_BYTES = 64 * 1024 * 1024
 MAX_FILE_BYTES = 512 * 1024
@@ -436,12 +438,15 @@ def _cli_entries(git, env, manifests, tracked, files):
     return result, len(selected)
 
 
-def build(repo, commit, excluded=None, *, only_file=None):
+def build(repo, commit, excluded=None, *, only_file=None, directory=None):
     if not re.fullmatch(r'(?:[a-f0-9]{40}|[a-f0-9]{64})', commit):
         raise ValueError('Structure indexing requires a full commit ID')
+    if only_file is not None and directory is not None:
+        raise ValueError('Choose either one file or one directory')
+    scope = only_file if only_file is not None else directory
+    if scope is not None and (not isinstance(scope,str) or any(x in ('','.','..') for x in scope.split('/')) or '\x00' in scope):
+        raise ValueError('Choose a repository-relative tracked path')
     if only_file is not None:
-        if not isinstance(only_file,str) or any(x in ('','.','..') for x in only_file.split('/')) or '\x00' in only_file:
-            raise ValueError('Choose a repository-relative tracked file')
         file_result={'commit':commit,'file':only_file,'language':None,'declarations':[],'imports':[],
                      'package_imports':[],'status':'unavailable','coverage':{'indexed_files':0,'unresolved_imports':0,'truncated':False}}
     if excluded is None:
@@ -491,7 +496,7 @@ def build(repo, commit, excluded=None, *, only_file=None):
         if excluded(file):
             denied.add(oid)
             continue
-        if only_file is None:
+        if scope is None:
             tracked[file] = oid
             if file.lower() in ('readme.md','readme.rst','readme.txt','readme') or file in ('package.json','pyproject.toml'):
                 if int(size) <= 64 * 1024:
@@ -532,9 +537,12 @@ def build(repo, commit, excluded=None, *, only_file=None):
     selected = []
     truncated = False
     # A large repository can exhaust the file limit within a single language.
-    groups = [[(f, e) for f, e in candidates.items() if languages[f] == lang]
+    scoped = candidates if directory is None else {f:e for f,e in candidates.items() if f.startswith(directory + '/')}
+    file_limit = MAX_FILES if directory is None else min(MAX_DIRECTORY_FILES, MAX_FILES)
+    byte_limit = MAX_BYTES if directory is None else min(MAX_DIRECTORY_BYTES, MAX_BYTES)
+    groups = [[(f, e) for f, e in scoped.items() if languages[f] == lang]
               for lang in LANGUAGES]
-    bounded = len(candidates)>MAX_FILES or sum(size for _,size in candidates.values())>MAX_BYTES
+    bounded = len(scoped)>file_limit or sum(size for _,size in scoped.values())>byte_limit
     if only_file is not None:
         if only_file not in candidates:
             if unsupported_oid and unsupported_oid not in denied:
@@ -551,7 +559,7 @@ def build(repo, commit, excluded=None, *, only_file=None):
         ordered=_interleave(groups)
     for file, entry in ordered:
         size = entry[1]
-        if size > MAX_FILE_BYTES or consumed + size > MAX_BYTES or len(selected) >= MAX_FILES:
+        if size > MAX_FILE_BYTES or consumed + size > byte_limit or len(selected) >= file_limit:
             truncated = True
             continue
         selected.append((file, entry))
@@ -693,6 +701,12 @@ def build(repo, commit, excluded=None, *, only_file=None):
         file_result['package_imports'] = package_imports
         file_result['coverage']={'indexed_files':len(files),'unresolved_imports':unresolved,'truncated':truncated}
         return file_result
+    if directory is not None:
+        return {'directory':directory, 'commit':commit, 'status':'indexed' if files else 'unavailable',
+                'files':files, 'imports':imports, 'package_imports':package_imports,
+                'coverage':{'candidate_files':len(scoped), 'indexed_files':len(files),
+                            'skipped_files':len(scoped)-len(files), 'unresolved_imports':unresolved,
+                            'truncated':truncated, 'unavailable_languages':sorted(unavailable)}}
     resolved = [edge for edge in imports if edge['target'] in parsed]
     routes.extend(factory_routes(factory_modules,resolved))
     routes.extend(service_flow.mounted_routes(external,resolved))
