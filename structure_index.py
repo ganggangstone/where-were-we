@@ -2,8 +2,8 @@
 import ast
 import os
 import posixpath
+from collections import defaultdict, deque
 from functools import lru_cache
-from itertools import zip_longest
 from pathlib import PurePosixPath
 import re
 import subprocess
@@ -22,7 +22,7 @@ MAX_DECLARATIONS = 20_000
 MAX_IMPORTS = 20_000
 
 
-VERSION = 11
+VERSION = 12
 JS_EXTENSIONS = {'.js', '.jsx', '.mjs', '.cjs'}
 LANGUAGES = ('python', 'javascript', 'typescript', 'html')
 TS_EXTENSIONS = {'.ts', '.tsx', '.mts', '.cts'}
@@ -151,6 +151,62 @@ def _blobs(git, env, selected):
             reader.stdout.close()
 
 
+_SUPPORT_DIRS = frozenset({
+    'test','tests','__tests__','fixture','fixtures','__fixtures__','testdata','__snapshots__',
+    'example','examples','demo','demos','docs','bench','benchmark','benchmarks','evals',
+    'node_modules','vendor','dist','build','coverage','generated','compiled',
+})
+
+
+def _interleave(groups):
+    queue=deque(iter(group) for group in groups)
+    while queue:
+        group=queue.popleft()
+        try:
+            yield next(group)
+        except StopIteration:
+            continue
+        queue.append(group)
+
+
+def _spread_paths(items, depth=0):
+    # Round-robin through directory levels. A giant early package or fixture
+    # cannot take all the slots before a sibling package contributes a file.
+    if depth==8 or len(items)<2:return items
+    local=[]
+    buckets=defaultdict(list)
+    for item in items:
+        parts=item[0].split('/',depth+1)
+        if len(parts)<=depth+1:local.append(item)
+        else:buckets[parts[depth]].append(item)
+    return _interleave([local,*(_spread_paths(buckets[k],depth+1) for k in sorted(buckets))])
+
+
+def _bounded_order(items):
+    primary=[]
+    support=[]
+    for file,entry in sorted(items):
+        parts=file.lower().split('/')
+        auxiliary=any(p.startswith('.') or p in _SUPPORT_DIRS for p in parts[:-1])
+        auxiliary |= bool(re.search(r'(?:^test_|_test\.|\.(?:spec|test)\.)',parts[-1]))
+        (support if auxiliary else primary).append((file,entry))
+    # Reserve a slot for supporting examples and tests in each group of eight.
+    main_iter=iter(_spread_paths(primary))
+    aux_iter=iter(_spread_paths(support))
+    while True:
+        for _ in range(7):
+            item=next(main_iter,None)
+            if item is None:
+                yield from aux_iter
+                return
+            yield item
+        item=next(aux_iter,None)
+        if item is None:
+            yield from main_iter
+            return
+        yield item
+
+
 def build(repo, commit, excluded=None):
     if not re.fullmatch(r'(?:[a-f0-9]{40}|[a-f0-9]{64})', commit):
         raise ValueError('Structure indexing requires a full commit ID')
@@ -210,7 +266,10 @@ def build(repo, commit, excluded=None):
     # A large repository can exhaust the file limit within a single language.
     groups = [[(f, e) for f, e in candidates.items() if languages[f] == lang]
               for lang in LANGUAGES]
-    ordered = (pair for group in zip_longest(*groups) for pair in group if pair is not None)
+    bounded = len(candidates)>MAX_FILES or sum(size for _,size in candidates.values())>MAX_BYTES
+    if bounded:
+        groups=[_bounded_order(items) for items in groups]
+    ordered = _interleave(groups)
     for file, entry in ordered:
         size = entry[1]
         if size > MAX_FILE_BYTES or consumed + size > MAX_BYTES or len(selected) >= MAX_FILES:
@@ -321,5 +380,6 @@ def build(repo, commit, excluded=None):
                                    'indexed_files':sum(languages[f]==lang for f in parsed)}
                              for lang in LANGUAGES}
     coverage['unavailable_languages'] = sorted(unavailable)
+    if bounded:coverage['selection']='bounded_directory_sample'
     return {'version':VERSION,'commit': commit, 'files': files, 'imports': resolved, 'coverage': coverage,
             'service_flow':service_flow.connect(routes, requests)}

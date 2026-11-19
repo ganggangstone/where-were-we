@@ -42,6 +42,19 @@ class Structure(unittest.TestCase):
             self.assertTrue(limited['coverage']['truncated'])
             self.assertLessEqual(limited['coverage']['indexed_files'],1)
 
+    def test_bounded_selection_visits_sibling_code_and_keeps_auxiliary_evidence(self):
+        paths=['aaa/examples/case'+str(i)+'.py' for i in range(30)]
+        paths+=['services/a/worker'+str(i)+'.py' for i in range(30)]
+        paths+=['services/z/entry.py','web/ui/index.py']
+        entries=[(path,(b'blob',10)) for path in paths]
+        sample=[p for p,_ in structure_index._bounded_order(entries)]
+        self.assertEqual(sample,[p for p,_ in structure_index._bounded_order(entries[::-1])])
+        self.assertEqual(set(sample),set(paths))
+        self.assertEqual(len(sample),len(paths))
+        self.assertIn('services/z/entry.py',sample[:7])
+        self.assertIn('web/ui/index.py',sample[:7])
+        self.assertTrue(any('/examples/' in path for path in sample[:8]))
+
     def test_standalone_commonjs_cli_connects_explicit_local_modules(self):
         with tempfile.TemporaryDirectory() as root:
             repo=Path(root)
