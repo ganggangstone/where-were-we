@@ -117,7 +117,7 @@ def _scope(project, repository, branch, lang):
 
 def _intent(intent,repository):
     intent={'task':'all','targets':[]} if intent is None else intent
-    if not isinstance(intent,dict) or intent.get('task') not in ('all','overview','analysis','system','groups','steps','jobs','briefing'):
+    if not isinstance(intent,dict) or intent.get('task') not in ('all','overview','resources','analysis','system','groups','steps','jobs','briefing'):
         raise ValueError('Choose a known analysis task')
     task=intent['task'];targets=intent.get('targets',[])
     if not isinstance(targets,list) or any(not isinstance(t,dict) or set(t)!={'repository','target'} or
@@ -126,12 +126,34 @@ def _intent(intent,repository):
     if task=='overview':
         if len(targets)>1 or targets and not targets[0]['target'].startswith('/'):raise ValueError('Choose one verified resource scope')
     elif bool(targets)!=(task in ('steps','jobs')):raise ValueError('Detail tasks require explicit targets')
+    if task=='resources':
+        limit=intent.get('max_calls')
+        if type(limit)!=int or limit<0:raise ValueError('Confirm the maximum number of resource analysis calls')
+        return {'task':task,'targets':targets,'max_calls':limit}
     return {'task':task,'targets':targets}
 
 def _plan(value):
     name,branch,lang,repository=(value[k] for k in ('project','branch','lang','repository'))
     intent=value.get('intent',{'task':'all','targets':[]});chosen=intent['task']
     plan=ai_extract.plan(name,branch,lang,repository,overview=True)
+    if chosen=='resources':
+        if 'expected_pins' in value:_check_pins({'pins':value['expected_pins']},plan)
+        import structure_index
+        targets=value.get('resource_targets')
+        if targets is None:
+            targets=[]
+            for rid,pin in plan['pins'].items():
+                _,raw,_,head=ai_extract.context(name,rid,branch)
+                index=raw[branch].get('structure_index') or {}
+                if head!=pin['commit'] or index.get('commit')!=head or index.get('version')!=structure_index.VERSION:
+                    raise ValueError('Refresh the local structure before analyzing its verified resources')
+                targets.extend({'repository':rid,'target':g['resource']} for g in index['service_flow']['feature_groups'])
+        done={(t['repository'],t.get('target')) for t in value.get('completed_tasks',[])}
+        plan['resource_targets']=targets
+        plan['tasks']=[{**t,'task':'overview',**plan['pins'][t['repository']]} for t in targets
+                       if t['repository'] in plan['pins'] and (t['repository'],t['target']) not in done]
+        plan['blocked']=[t for t in plan['blocked'] if t['task']=='analysis']
+        return plan
     if chosen=='overview':
         finished={t['repository'] for t in value.get('completed_tasks',[])}
         target=next(iter(intent['targets']),None)
@@ -179,7 +201,7 @@ def _check_pins(value, plan):
     if plan['pins'] != value['pins']:
         raise RunError('pins_changed','Code, repository configuration or collected evidence changed. Start a new analysis')
 
-def prepare(project, branch='dev', lang='ko', repository='', executor='claude', launch_intended=False, intent=None, resume_from=None):
+def prepare(project, branch='dev', lang='ko', repository='', executor='claude', launch_intended=False, intent=None, resume_from=None, expected_pins=None):
     if executor != 'claude': raise ValueError('Choose the Claude CLI executor')
     scope = _scope(project,repository,branch,lang)
     scope['intent']=_intent(intent,scope['repository'])
@@ -188,29 +210,39 @@ def prepare(project, branch='dev', lang='ko', repository='', executor='claude', 
         for current in history:
             if current['state'] in ACTIVE and current['project']==project:
                 raise RunError('already_running','Analysis is already prepared or running for this code. Continue or cancel that run')
+        if expected_pins is not None:scope['expected_pins']=expected_pins
         plan = _plan(scope)
+        scope.pop('expected_pins',None)
         value = {'id':uuid.uuid4().hex,**scope,'executor':executor,'state':'preparing','created_at':store.now(),
                  'started_at':None,'finished_at':None,'launch_epoch':None,'prepare_epoch':time.time(),'launch_intended':launch_intended,'pins':plan['pins'],'tasks':plan['tasks'],
                  'blocked':plan['blocked'],'skipped':plan['skipped'],'current_task':None,'completed_tasks':[],
                  'cancel_requested':False,'error':None,'account':None}
         if resume_from is not None:value['resume_from']=resume_from
-        if scope['intent']['task']=='overview':
-            target=next(iter(scope['intent']['targets']),None)
+        resource_run=scope['intent']['task']=='resources'
+        if resource_run:value['resource_targets']=plan['resource_targets']
+        if scope['intent']['task']=='overview' or resource_run:
             contexts={}
             for old in sorted(history,key=lambda record:record['created_at']):
                 if any(old[key]!=scope[key] for key in ('project','lang','branch')):continue
                 for task in value['tasks']:
-                    rid=task['repository'];pin=plan['pins'][rid]
-                    overview=(old.get('scope_overviews',{}).get(rid,{}).get(target['target']) if target else old.get('overviews',{}).get(rid))
+                    rid=task['repository'];pin=plan['pins'][rid];target=task.get('target')
+                    overview=(old.get('scope_overviews',{}).get(rid,{}).get(target) if target else old.get('overviews',{}).get(rid))
                     if not overview or overview.get('format')!='overview-v1' or overview.get('version')!=OVERVIEW_VERSION:continue
                     if not all(overview.get(k)==v for k,v in pin.items()):
                         overview=_reuse_scope(overview,pin,scope,rid,contexts) if target else None
                         if not overview:continue
-                    if target:value.setdefault('scope_overviews',{}).setdefault(rid,{})[target['target']]=overview
+                    if target:value.setdefault('scope_overviews',{}).setdefault(rid,{})[target]=overview
                     else:value.setdefault('overviews',{})[rid]=overview
-            cached=value.get('scope_overviews' if target else 'overviews',{})
-            value['completed_tasks']=[{'task':'overview','repository':rid,'target':target['target'] if target else None} for rid in cached]
-            value['tasks']=[t for t in value['tasks'] if t['repository'] not in cached]
+            remaining=[]
+            for task in value['tasks']:
+                rid=task['repository'];target=task.get('target')
+                cached=target in value.get('scope_overviews',{}).get(rid,{}) if target else rid in value.get('overviews',{})
+                if cached:value['completed_tasks'].append({'task':'overview','repository':rid,'target':target})
+                else:remaining.append(task)
+            value['tasks']=remaining
+            if resource_run:
+                if len(remaining)>scope['intent']['max_calls']:raise ValueError('The resource count changed; confirm the new maximum call count')
+                value['resource_estimate']={'total':len(plan['resource_targets']),'cached':len(value['completed_tasks']),'max_calls':len(remaining)}
         return write(value)
 
 def status(run_id=None, project=None, repository='', branch='dev', lang='ko'):
@@ -275,11 +307,12 @@ def retry(run_id, launch_intended=False):
     previous = status(run_id)
     if previous['state'] not in ('failed','cancelled'):
         raise RunError('not_retryable','Only failed or cancelled analysis can be retried')
+    expected_pins=previous['pins'] if (previous.get('intent') or {}).get('task')=='resources' else None
     resume=previous.get('resume_from',previous['id'])
     if (previous.get('error') or {}).get('code') in ('invalid_result','analysis_failed'):
         resume=None  # A conflicting final merge may need new findings.
     return prepare(previous['project'],previous['branch'],previous['lang'],previous['repository'],previous['executor'],
-                   launch_intended=launch_intended,intent=previous.get('intent'),resume_from=resume)
+                   launch_intended=launch_intended,intent=previous.get('intent'),resume_from=resume,expected_pins=expected_pins)
 
 def start(run_id, expected_account=None):
     import cli_executor
@@ -1460,9 +1493,12 @@ def run(run_id, executor=None):
                 import cli_executor
                 if not value.get('account'): raise RunError('CLI_ACCOUNT_CHANGED','Check the Claude connection and start analysis from the app')
                 executor=lambda prompt,**kwargs:cli_executor.execute(prompt,expected_account=value['account'],**kwargs)
-            for _ in range(MAX_TASKS):
+            resource_run=(value.get('intent') or {}).get('task')=='resources'
+            task_limit=len(value['tasks'])+1 if resource_run else MAX_TASKS
+            deadline=started+(max(MAX_SECONDS,task_limit*TASK_SECONDS) if resource_run else MAX_SECONDS)
+            for _ in range(task_limit):
                 if cancelled(): raise Cancelled()
-                if time.monotonic()-started>MAX_SECONDS: raise RunError('timeout','Analysis reached its time limit. Retry to finish remaining tasks')
+                if time.monotonic()>deadline: raise RunError('timeout','Analysis reached its time limit. Retry to finish remaining tasks')
                 plan=_plan(value);_check_pins(value,plan)
                 with locked():
                     value=read(run_id)
@@ -1489,12 +1525,12 @@ def run(run_id, executor=None):
                     _check_pins(value,_plan(value))
                     value.update(state='running',current_task=task,batch_progress=None);write(value)
                 def check():
-                    _checkpoint(cancelled,started+MAX_SECONDS)
+                    _checkpoint(cancelled,deadline)
                     _check_pins(value,_plan(value))
                     current=_request(value,task)['record_arguments']
                     if current!=request['record_arguments']:raise RunError('pins_changed','The analysis input or saved base changed')
-                result=generate(value,task,request,executor,cancelled,started+MAX_SECONDS,check,blobs)
-                if time.monotonic()-started>MAX_SECONDS: raise RunError('timeout','Analysis reached its time limit; late output was not saved')
+                result=generate(value,task,request,executor,cancelled,deadline,check,blobs)
+                if time.monotonic()>deadline: raise RunError('timeout','Analysis reached its time limit; late output was not saved')
                 if isinstance(result,dict): result=json.dumps(result,ensure_ascii=False)
                 if not isinstance(result,str) or len(result)>8_000_000: raise RunError('invalid_result','The analysis executor returned invalid output; saved results were retained')
                 with locked():

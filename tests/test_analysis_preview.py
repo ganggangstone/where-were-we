@@ -346,6 +346,47 @@ def users(): pass
             return {'items':[]}
         analysis_run._quick_overview(str(self.repo),{'commit':pin},'en',data_reply,None,None,{'structure_index':index})
 
+    def test_resource_wide_beta_confirms_budget_and_resumes_missing_scopes(self):
+        import structure_index
+        from unittest.mock import patch
+        paths=['/orders','/reports','/users']
+        (self.repo/'ui.ts').write_text('\n'.join(f"export function {p[1:]}(){{return fetch('{p}')}}" for p in paths))
+        (self.repo/'api.py').write_text('from fastapi import FastAPI\napp=FastAPI()\n'+'\n'.join(f"@app.get('{p}')\ndef {p[1:]}():pass" for p in paths))
+        self.git('add','.');self.git('commit','-qm','Register three resources')
+        repo=analysis_run.store.config('demo')['repositories'][0];raw=self.raw()
+        raw['dev']['structure_index']=structure_index.build(str(self.repo),self.git('rev-parse','HEAD').strip())
+        analysis_run.store.publish('demo','service',raw,{'fingerprint':analysis_run.store.fingerprint(repo)})
+        intent={'task':'resources','targets':[],'max_calls':3}
+        with self.assertRaisesRegex(ValueError,'maximum call count'):self.prepare(intent={**intent,'max_calls':2})
+        job=self.prepare(intent=intent)
+        self.assertEqual(job['resource_estimate'],{'total':3,'cached':0,'max_calls':3})
+        called=[]
+        def interrupt(prompt,**kwargs):
+            packet=json.loads(prompt.split('\n',1)[1]);called.append(packet['resource'])
+            if len(called)==2:raise RuntimeError('simulated provider interruption')
+            return {'items':[]}
+        failed=analysis_run.run(job['id'],interrupt)
+        self.assertEqual(failed['state'],'failed')
+        self.assertEqual(set(failed['scope_overviews']['service']),{called[0]})
+        retry=analysis_run.retry(job['id'])
+        self.assertEqual(retry['resource_estimate'],{'total':3,'cached':1,'max_calls':2})
+        pending=[]
+        def finish(prompt,**kwargs):
+            packet=json.loads(prompt.split('\n',1)[1]);pending.append(packet['resource'])
+            self.assertLessEqual(len(packet['sources']),4)
+            return {'items':[]}
+        with patch.object(analysis_run,'MAX_TASKS',1):
+            done=analysis_run.run(retry['id'],finish)
+        self.assertEqual(done['state'],'completed',done.get('error'))
+        self.assertEqual(set(pending),set(paths)-{called[0]})
+        self.assertEqual(set(done['scope_overviews']['service']),set(paths))
+        self.assertNotIn('overviews',done)
+        cached=self.prepare(intent={**intent,'max_calls':0})
+        self.assertEqual(cached['resource_estimate'],{'total':3,'cached':3,'max_calls':0})
+        self.assertEqual(analysis_run.run(cached['id'],lambda *a,**k:self.fail('unexpected cached call'))['state'],'completed')
+        self.git('commit','--allow-empty','-qm','Change pin')
+        with self.assertRaises(analysis_run.RunError):analysis_run.retry(job['id'])
+
     def test_overview_preserves_conditional_url_match_in_prompt_and_saved_evidence(self):
         (self.repo/'app.js').write_text("import express from 'express';\nconst app=express();\napp.patch('/items/:id',()=>null);\napp.listen(3000);\n")
         (self.repo/'view.js').write_text("function update(id){fetch(`/items/${id}`,{method:'PATCH'})}\n")
