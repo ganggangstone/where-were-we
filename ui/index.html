@@ -385,7 +385,7 @@ Object.assign(UI_EN,{'마지막 새로고침':'Last refresh'});
 Object.assign(UI_EN,{'선택한 기능':'Selected feature','‹ 기능 개요':'‹ Feature overview','기능 선택 해제':'Clear feature','이 기능에 속한 화면입니다.':'This screen belongs to this feature.','선택한 기능 밖의 화면입니다.':'This screen is outside the selected feature.','이 화면의 기능으로 바꾸기':'Switch to this screen’s feature','화면 지도에서 보기':'Show on the screen map','이 기능이 서버에 하는 일 ':'Feature requests: ','이 기능과 이어진 작업 ':'Linked work for this feature: ',"작업 정보 미수집":"Work data not collected","연결된 작업 없음":"No linked work",'기능 복사':'Copy feature','대상 ID: ':'Target ID: ','기능: ':'Feature: ','이어진 작업: ':'Linked work: ','AI가 붙인 이름':'AI-suggested name','선택한 기능의 화면이 쓰는 대상입니다.':'Used by the selected feature’s screens.','선택한 기능의 화면에서 이어진 것을 찾지 못했습니다.':'No link from the selected feature’s screens was found.'});
 Object.assign(UI_EN,{'기존 AI 채팅에 요청':'Use your existing AI chat','저장된 결과 새로고침':'Refresh saved results',"앱에서 자동 분석 (베타)":"Automatic analysis in the app (beta)",'요청 내용·다른 분석':'Request text and other analyses','요청 준비됨':'Request ready','일부 결과 저장됨':'Partial results saved','이전에 저장된 결과':'Previously saved results'});
 Object.assign(UI_EN,{'Git 추적 파일':'Git-tracked files','최상위 폴더':'Top-level folder','파일 수':'File count','루트 디렉터리':'Root directory'});
-Object.assign(UI_EN,{'모듈 연결 (베타)':'Module connections (beta)','확인한 파일':'Files indexed','건너뛴 파일':'Files skipped','Python import · JS/TS 상대 경로 import·재내보내기':'Python imports · JS/TS relative imports and re-exports','로컬 Python import':'Local Python imports','인터페이스':'Interface','타입 별칭':'Type alias','열거형':'Enum','메서드':'Method','미지원 파일':'Unsupported files','대상 미확인 import':'Unresolved imports','분석 한도 도달':'Index limit reached','선택한 모듈':'Selected module','작업 폴더에서 열기':'Open working copy','이 모듈을 가져오는 쪽':'Imported by','이 모듈이 가져오는 쪽':'Imports','모듈 선언':'Declarations','클래스':'Class','함수':'Function','비동기 함수':'Async function'});
+Object.assign(UI_EN,{'모듈 연결 (베타)':'Module connections (beta)','로컬 .cjs require':'Local .cjs require','확인한 파일':'Files indexed','건너뛴 파일':'Files skipped','Python import · JS/TS 상대 경로 import·재내보내기':'Python imports · JS/TS relative imports and re-exports','로컬 Python import':'Local Python imports','인터페이스':'Interface','타입 별칭':'Type alias','열거형':'Enum','메서드':'Method','미지원 파일':'Unsupported files','대상 미확인 import':'Unresolved imports','분석 한도 도달':'Index limit reached','선택한 모듈':'Selected module','작업 폴더에서 열기':'Open working copy','이 모듈을 가져오는 쪽':'Imported by','이 모듈이 가져오는 쪽':'Imports','모듈 선언':'Declarations','클래스':'Class','함수':'Function','비동기 함수':'Async function'});
 Object.assign(UI_EN,{'코드에서 확인한 기능 (베타)':'Features found in source (beta)','기능 흐름 (베타)':'Feature flows (beta)','기능 선택':'Select feature','화면 문구':'Interface label','서버의 데이터 접근':'Server data access','모델 읽기':'Read model','모델 쓰기':'Write model','요청을 시작하는 화면 동작':'UI actions that trigger this request','양식 제출':'Form submission','버튼 클릭':'Button click','입력 변경':'Input change','이벤트 처리 함수':'Event handler','클라이언트 호출':'Client invocation','클라이언트 정의':'Client definition','매개변수가 한 경로 구간일 때 일치':'Matches when the parameter occupies one URL segment','GitHub 작업 정보 미확인':'GitHub work data unavailable','최근 확인':'Last verified','설정·클라이언트 기본값에서 일치':'Matches configured client and server defaults','기본값 근거':'Default value evidence','HTTP 요청 흐름 (베타)':'HTTP request flow (beta)','고정 fetch 주소 · 서버 경로 대조':'Literal fetch URLs matched to server routes','요청을 보내는 코드':'Client call site','받는 서버 함수':'Server handler','경로 등록·실행 근거':'Route registration and startup evidence','주소 선언':'URL declaration','연결된 요청':'Matched requests','대상 미확인 요청':'Unresolved requests','확인한 요청':'Requests detected','서버 경로':'Server routes','연결 선택':'Select connection'});
 const UI_PATTERN = new RegExp(Object.keys(UI_EN).sort((a, b) => b.length - a.length).map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'g');
 function tr(text) { return S.lang === 'en' ? String(text).replace(UI_PATTERN, match => UI_EN[match]) : String(text); }
@@ -927,6 +927,7 @@ async function loadProject(p, first = true, repository = S.project === p ? S.rep
     if (!S.maps[S.branch] && (S.maps.dev || S.maps.main)) S.branch = S.maps.dev ? 'dev' : 'main';
     if (!(M()?.screens || []).some(x => x.path === S.sel)) { S.sel = null; S.open = null; S.focus = null; }
     S.node = null; if (!sameScope) S.feat = null; S.chi = 0;
+    if(first && !sameScope && (M()?.structure_index || M()?.structure_indexes?.length))S.view='sys';
     setStatus(''); render();
     if (S.prepareAfterLoad === p) { S.prepareAfterLoad = null; prepareAfterRefresh(p, repository); }
     if (first && S.settings.open_refresh) await doRefresh();
@@ -948,12 +949,11 @@ async function refreshConnectedCode(project,repository) {
   if(S.desiredProject===project && S.desiredRepository===repository)prepareAfterRefresh(project,repository);
   return output;
 }
-// Every refresh path (button, settings, app control, new connection) prepares the request once, quietly.
-// Preparation is separate from collection: its failure must not read as a refresh failure.
+// Current snapshots open locally. Older maps keep their existing request-preparation flow.
 function prepareAfterRefresh(project,repository) {
   if(S.project!==project || S.repository!==repository)return;
   const map=M(),indexes=map?.structure_indexes || (map?.structure_index?[map.structure_index]:[]);
-  if(indexes.some(index=>index.service_flow?.feature_groups?.length)) {
+  if(indexes.length) {
     S.agentPrompt=null;S.view='sys';S.q='';render();setStatus('');return;
   }
   const waiting=S.openRequestFor?.project===project?S.openRequestFor.ids:[];
@@ -1407,6 +1407,7 @@ function flowDataSteps(steps,evidence) {
 function serviceFlowView(flow,state,evidence) {
   if(!flow)return '';
   const {connections,coverage:counts}=flow;
+  if(!connections.length && !counts.requests && !counts.routes)return '';
   const features=[];
   connections.forEach((link,http)=>{
     if(link.actions?.length) {
@@ -1475,7 +1476,7 @@ function structureIndexView(m) {
   const heading=`${status}${http}${hasGroups?`<details id="moduleDetails" ${state.moduleOpen?'open':''}><summary>${tr('모듈 연결 (베타)')}</summary>`:`<h2>${tr('모듈 연결 (베타)')}</h2>`}`;
   const end=hasGroups?'</details>':'';
   const boundary=coverage.languages ? 'Python import · JS/TS 상대 경로 import·재내보내기' : '로컬 Python import';
-  const scopeNote=`<div class="sect s" data-module-coverage><strong>${tr('확인 범위')}</strong> · ${tr(boundary)}${languageCounts.length?`<div>${languageCounts.join(' · ')}</div>`:''}${gaps.length?`<div role="status">${gaps.join(' · ')}</div>`:''}</div>`;
+  const scopeNote=`<div class="sect s" data-module-coverage><strong>${tr('확인 범위')}</strong> · ${tr(boundary)}${index.version>=11?' · '+tr('로컬 .cjs require'):''}${languageCounts.length?`<div>${languageCounts.join(' · ')}</div>`:''}${gaps.length?`<div role="status">${gaps.join(' · ')}</div>`:''}</div>`;
   if (!selected) return `<section class="sect" id="moduleGraph">${heading}${scopeNote}${end}</section>`;
   const fileControl=`<label>${tr('선택한 모듈')} · ${esc(languages[selected.language || 'python'] || selected.language)} <select id="moduleFile">${files.map(f=>`<option value="${esc(f.file)}" ${f===selected?'selected':''}>${esc(f.file)}</option>`).join('')}</select></label>`;
   const page=(key,rows,renderRow)=>{
