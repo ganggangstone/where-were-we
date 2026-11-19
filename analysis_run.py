@@ -26,7 +26,7 @@ import project as store
 
 ACTIVE = {'preparing', 'running', 'saving'}
 TERMINAL = {'completed', 'failed', 'cancelled'}
-OVERVIEW_VERSION = 6
+OVERVIEW_VERSION = 7
 SCOPED_OVERVIEW_VERSION = 5
 MAX_FILE_BYTES = 300_000
 MAX_PROMPT_BYTES = 128 * 1024
@@ -1098,6 +1098,16 @@ def _overview_anchors(index,resource=None):
                 selected.append(candidate)
             if len(selected)==4:break
         if len(selected)==4:break
+    if resource is None and flows:
+        # Existing endpoint and action evidence has first choice of files. Spend
+        # remaining route slots on those same files, one per scope before repeats.
+        extras=first[2:]+[(scope,row) for scope,_ in first for row in scopes[scope][1:]]
+        for scope,row in extras:
+            if len(flows)>=4:break
+            if ('client' in flows[0][1] and 'client' not in row
+                    or (scope,row) in flows
+                    or any(site['file'] not in selected for site in _endpoints(row))):continue
+            flows.append((scope,row))
     anchors={}
     for file in selected:
         rows={side['line']:{} for _,flow in flows for side in _endpoints(flow) if side['file']==file}
@@ -1213,7 +1223,7 @@ def _quick_overview(repo,request,language,invoke,cancelled,deadline,raw,resource
         for file,rows in anchors.items():
             if file in pinned or len(pinned)<4:pinned.setdefault(file,{}).update(rows)
         anchors=pinned
-    members,dependency=_overview_workspace(index) if resource is None else ([],None)
+    members,dependency=_overview_workspace(index) if resource is None and not flows else ([],None)
     if members:
         pinned={}
         for p in members:

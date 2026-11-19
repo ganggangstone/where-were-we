@@ -236,6 +236,11 @@ def reports(): pass
 @app.get('/users')
 def users(): pass
 """)
+        (self.repo/'package.json').write_text(json.dumps({'workspaces':['packages/*']},indent=2))
+        for package in ('core','frontend'):
+            folder=self.repo/'packages'/package
+            folder.mkdir(parents=True)
+            (folder/'package.json').write_text(json.dumps({'name':package},indent=2))
         self.git('add','.');self.git('commit','-qm','Register three feature scopes')
         intent={'task':'overview','targets':[]}
         run=self.prepare(intent=intent)
@@ -244,7 +249,8 @@ def users(): pass
             packet=json.loads(prompt.split('\n',1)[1])
             paths={edge['path'] for edge in packet['connections']}
             calls.append(paths)
-            self.assertEqual(len(paths),2)
+            self.assertEqual(len(paths),3)
+            self.assertEqual(len(packet['connections']),4)
             self.assertLessEqual(len(packet['sources']),4)
             return {'items':[]}
         done=analysis_run.run(run['id'],answer)
