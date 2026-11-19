@@ -89,11 +89,53 @@ def _cancellation_probe(run_id):
         return stopped
     return cancelled
 
+def _progress(value):
+    excluded={'scope_overviews','overviews','program_observations','resource_targets','saved_overviews','saved_scope_overviews'}
+    result={k:v for k,v in value.items() if k not in excluded}
+    completed=value.get('completed_tasks',[])
+    tasks=value.get('tasks',[])
+    if value.get('intent',{}).get('task')=='resources':
+        done={(t['repository'],t.get('target')) for t in completed}
+        tasks=[t for t in tasks if (t['repository'],t.get('target')) not in done]
+    result.update(completed_tasks=len(completed),tasks=len(tasks))
+    return result
+
+def _progress_revision(record):
+    info=record.stat()
+    return [info.st_ino,info.st_mtime_ns,info.st_size]
+
+def _save_progress(value,record):
+    summary=_progress(value)
+    try:store.atomic(record.with_suffix('.progress'),{'revision':_progress_revision(record),'value':summary})
+    except OSError:pass  # The canonical record can always regenerate this read cache.
+    return summary
+
+def _read_progress(run_id):
+    record=path(run_id)
+    cached=store.read(record.with_suffix('.progress')) or {}
+    if cached.get('revision')==_progress_revision(record):
+        value=cached['value']
+        if value['state'] in TERMINAL:return value
+        # Recovery can write a terminal state. Always recover the original
+        # record rather than overwriting it with an abbreviated projection.
+        launched=value.get('launch_epoch')
+        if launched is None:
+            if not value.get('launch_intended') or time.time()-value.get('prepare_epoch',time.time())<=60:return value
+        elif time.time()-launched<10:return value
+        else:
+            with (root()/(run_id+'.worker.lock')).open('a') as stream:
+                try:fcntl.flock(stream,fcntl.LOCK_EX|fcntl.LOCK_NB)
+                except BlockingIOError:return value
+                fcntl.flock(stream,fcntl.LOCK_UN)
+    return _save_progress(_recover(read(run_id)),record)
+
 def write(value):
     if value['state'] in TERMINAL or value.get('cancel_requested') or not value.get('current_task'):
         value.pop('preview',None)
     value['updated_at'] = store.now()
-    store.atomic(path(value['id']), value)
+    record=path(value['id'])
+    store.atomic(record,value)
+    _save_progress(value,record)
     return value
 
 def failure(value, code, message):
@@ -295,13 +337,18 @@ def prepare(project, branch='dev', lang='ko', repository='', executor='claude', 
                 value['resource_estimate']={'total':len(plan['resource_targets']),'cached':len(value['completed_tasks']),'max_calls':len(remaining)}
         return write(value)
 
-def status(run_id=None, project=None, repository='', branch='dev', lang='ko'):
+def status(run_id=None, project=None, repository='', branch='dev', lang='ko',view=None,resource=None):
     with locked():
+        if view=='progress':return _read_progress(run_id)
+        if view=='resource' and (not isinstance(resource,str) or not resource.startswith('/')):raise ValueError('Choose a resource path')
         if run_id: return _recover(read(run_id))
         scope = _scope(project,repository,branch,lang)
         values=_runs()
         active_project=[v for v in values if v['project']==project and v['state'] in ACTIVE]
         matches=active_project or [v for v in values if all(v[k]==scope[k] for k in scope)]
+        if not matches and view in ('catalog','resource'):
+            matches=[v for v in values if all(v[k]==scope[k] for k in ('project','branch','lang')) and
+                     (repository in v.get('scope_overviews',{}) or repository in v.get('overviews',{}))]
         if not matches:return None
         selected=max(matches,key=lambda v:v['created_at'])
         # A later attempt can fail before it produces its own overview. Keep the
@@ -331,11 +378,16 @@ def status(run_id=None, project=None, repository='', branch='dev', lang='ko'):
                             scope_pins[rid]={'commit':commit,'configuration':store.fingerprint(repo)} if commit else None
                         except ai_extract.READ_ERRORS:scope_pins[rid]=None
                 pin=scope_pins[rid]
-                for resource,overview in groups.items():
+                entries=([(resource,groups[resource])] if resource in groups else []) if view=='resource' else groups.items()
+                for target,overview in entries:
                     if not pin:continue
                     if not all(overview.get(k)==v for k,v in pin.items()):
                         overview=_reuse_scope(overview,pin,scope,rid,contexts)
-                    if overview:scoped[rid,resource]=overview
+                    if overview:scoped[rid,target]=overview
+        if view=='resource':return scoped.get((scope['repository'],resource))
+        if view=='catalog':
+            selected={**_progress(selected),**({'program_observations':selected['program_observations']} if selected.get('program_observations') else {})}
+            scoped={key:{k:v[k] for k in ('repository','resource','commit','configuration','format','version') if k in v} for key,v in scoped.items()}
         return {**selected,'saved_overviews':list(saved.values()),'saved_scope_overviews':list(scoped.values()),'current_legacy_pin':legacy_pin}
 
 def active():
@@ -1797,6 +1849,7 @@ def main():
     parser.add_argument('command',choices=('prepare','start','status','cancel','retry','worker','providers','active'))
     parser.add_argument('value',nargs='?');parser.add_argument('--project');parser.add_argument('--run-id')
     parser.add_argument('--repository',default='');parser.add_argument('--branch',default='dev');parser.add_argument('--lang',default='ko')
+    parser.add_argument('--view',choices=('progress','catalog','resource'));parser.add_argument('--resource')
     parser.add_argument('--intent',type=json.loads);parser.add_argument('--executor',default='claude');parser.add_argument('--expected-account')
     args=parser.parse_args()
     if args.command=='providers': result=providers()
@@ -1805,7 +1858,7 @@ def main():
         prepared=prepare(args.value or args.project,args.branch,args.lang,args.repository,args.executor,launch_intended=args.command=='start',intent=args.intent)
         result=start(prepared['id'],json.loads(args.expected_account) if args.expected_account else None) if args.command=='start' else prepared
     elif args.command=='status':
-        result=status(args.run_id or args.value,project=args.project,repository=args.repository,branch=args.branch,lang=args.lang)
+        result=status(args.run_id or args.value,project=args.project,repository=args.repository,branch=args.branch,lang=args.lang,view=args.view,resource=args.resource)
     elif args.command=='retry': result=start(retry(args.run_id or args.value,launch_intended=True)['id'],json.loads(args.expected_account) if args.expected_account else None)
     else: result={'cancel':cancel,'worker':run}[args.command](args.run_id or args.value)
     print(json.dumps(result,ensure_ascii=False))

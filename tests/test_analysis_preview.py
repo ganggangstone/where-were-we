@@ -23,6 +23,21 @@ class Preview(unittest.TestCase):
         analysis_run.cancel(run['id'])
         self.assertTrue(probe())
 
+    def test_progress_cache_never_decodes_unchanged_record_and_recovers_legacy(self):
+        from unittest.mock import patch
+        run=self.prepare(intent={'task':'overview','targets':[]})
+        record=analysis_run.path(run['id'])
+        with patch.object(analysis_run,'read',side_effect=AssertionError('decoded full result')):
+            compact=analysis_run.status(run_id=run['id'],view='progress')
+        self.assertEqual(compact['tasks'],1)
+        record.with_suffix('.progress').unlink()
+        self.assertEqual(analysis_run.status(run_id=run['id'],view='progress'),compact)
+        raw=analysis_run.read(run['id'])
+        raw['state']='cancelled'
+        analysis_run.store.atomic(record,raw)
+        self.assertEqual(analysis_run.status(run_id=run['id'],view='progress')['state'],'cancelled')
+        self.assertEqual(analysis_run.status(run_id=run['id'])['tasks'],raw['tasks'])
+
     def test_verified_preview_precedes_final_map_and_cancel_preserves_baseline(self):
         # Keep a real route beyond line 500 in an unrecognized file type and use
         # distinct filler lines so that compression of repeated text cannot pass.
@@ -564,6 +579,11 @@ def users(): pass
         self.assertEqual({t['target'] for t in job['tasks']},set(paths[:2]))
         done=analysis_run.run(job['id'],lambda *args,**kwargs:{'items':[]})
         self.assertEqual(done['state'],'completed',done.get('error'))
+        catalog=analysis_run.status(project='demo',lang='en',repository='service',view='catalog')
+        self.assertEqual({g['resource'] for g in catalog['saved_scope_overviews']},set(paths[:2]))
+        self.assertFalse(any('items' in g for g in catalog['saved_scope_overviews']))
+        self.assertEqual(analysis_run.status(project='demo',lang='en',repository='service',view='resource',resource=paths[0]),
+                         done['scope_overviews']['service'][paths[0]])
         again=self.prepare(intent={'task':'resources','targets':[],'max_calls':1})
         self.assertEqual(again['resource_estimate'],{'total':3,'cached':2,'max_calls':1})
 

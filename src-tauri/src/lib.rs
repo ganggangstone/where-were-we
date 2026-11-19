@@ -277,13 +277,15 @@ async fn analysis_run_start(app: tauri::AppHandle, scope: AnalysisScope, expecte
 }
 
 #[tauri::command]
-async fn analysis_run_status(app: tauri::AppHandle, scope: Option<AnalysisScope>, run_id: Option<String>) -> Result<String, String> {
+async fn analysis_run_status(app: tauri::AppHandle, scope: Option<AnalysisScope>, run_id: Option<String>, view: Option<String>, resource: Option<String>) -> Result<String, String> {
     let mut args = vec!["status".into()];
     if let Some(id) = run_id { args.extend(["--run-id".into(), id]); }
     else if let Some(scope) = scope {
         args.extend(["--project".into(), scope.project, "--repository".into(), scope.repository,
             "--branch".into(), scope.branch, "--lang".into(), scope.lang]);
     } else { return Err("Choose code or an analysis run".into()); }
+    if let Some(view) = view { args.extend(["--view".into(), view]); }
+    if let Some(resource) = resource { args.extend(["--resource".into(), resource]); }
     analysis_command(app, args).await
 }
 
