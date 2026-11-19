@@ -211,7 +211,10 @@ const AnalysisRun = (() => {
       const basis=edge.basis || match?.basis;
       const condition=basis==='path_template'?` · ${text('경로 패턴이 맞을 때','If the path pattern matches')} <code>${esc(edge.server_path || match?.server_path)}</code>`:basis==='declared_defaults'?` · ${(registration?text('설정 기본값','Configuration defaults'):text('설정·클라이언트 기본값에서 일치','Matches configured client and server defaults'))}`:'';
       const filters=(edge.details || []).filter(d=>d.kind==='conditional_filter' && typeof d.when==='boolean' && d.evidence?.length>=2);
-      const filterHtml=filters.map(d=>`<details class="sect" data-saved-filter><summary>${text('조회 필터','Query filter')} · ${esc(d.model)} · ${d.when?text('조건이 참일 때','When true'):text('조건이 거짓일 때','When false')}</summary>${d.evidence.map(site=>`<div class="s"><code>${esc(site.file)}:${esc(site.line)}</code></div><pre>${esc(site.quote)}</pre>`).join('')}</details>`).join('');
+      const filterHtml=filters.map(d=>{
+        const claim=group.items.find(item=>d.evidence.every(site=>[item,...item.evidence || []].some(proof=>sameSite(proof,site))));
+        return `<details class="sect" data-saved-filter><summary>${text('조회 필터','Query filter')} · ${esc(d.model)} · ${d.when?text('조건이 참일 때','When true'):text('조건이 거짓일 때','When false')}</summary>${claim?`<p>${esc(claim.description)}</p>${claimEvidence(claim)}`:d.evidence.map(site=>`<div class="s"><code>${esc(site.file)}:${esc(site.line)}</code></div><pre>${esc(site.quote)}</pre>`).join('')}</details>`;
+      }).join('');
       return `<li><b>${esc(edge.method)} ${esc(edge.path)}</b>${condition}<ul>${[
         [text('요청 코드','Request code'),edge.client],[text('서버 함수','Server handler'),edge.server]
       ].filter(([,side])=>side).map(([label,side])=>`<li>${label} · ${evidence(side.file,side.line)}<pre>${esc(side.quote)}</pre></li>`).join('')}</ul>${stages}${filterHtml}</li>`;
