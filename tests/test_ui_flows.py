@@ -1210,10 +1210,10 @@ class Flows(unittest.TestCase):
  M().structure_indexes=[mixed];render();
  const http=()=>graph().querySelector('[data-http-flow]');
  assert(http().innerText.includes('GET /users') && http().innerText.includes('app.js:3') && http().innerText.includes('server.py:8') && http().innerText.includes('server.py:2'),'Matched HTTP flow exposes client, mount and handler evidence');
- assert(http().innerText.includes(tr('고정 fetch 주소 · FastAPI 경로 대조')) && !http().innerText.includes(tr('설정·클라이언트 기본값에서 일치')),'Literal match shows its basis');
+ assert(http().innerText.includes(tr('고정 fetch 주소 · 서버 경로 대조')) && !http().innerText.includes(tr('설정·클라이언트 기본값에서 일치')),'Literal match shows its basis');
  assert(http().compareDocumentPosition(graph().querySelector('.module-neighbors:not(.http-flow)')) & Node.DOCUMENT_POSITION_FOLLOWING,'HTTP flow precedes module connections');
  $('httpConnection').value='1';$('httpConnection').dispatchEvent(new Event('change'));
- assert(http().innerText.includes(tr('설정·클라이언트 기본값에서 일치')) && http().innerText.includes('settings.py:18') && !http().innerText.includes(tr('고정 fetch 주소 · FastAPI 경로 대조')),'Default-based link shows its condition and evidence');
+ assert(http().innerText.includes(tr('설정·클라이언트 기본값에서 일치')) && http().innerText.includes('settings.py:18') && !http().innerText.includes(tr('고정 fetch 주소 · 서버 경로 대조')),'Default-based link shows its condition and evidence');
  assert(http().innerText.includes('server.py:10') && !http().innerText.includes('server.py:8') && http().innerText.includes(tr('대상 미확인 요청')+' 1'),'Changing the selected flow refreshes all evidence without hiding unresolved requests');
  assert(graph().innerText.includes('JavaScript 1/1') && graph().innerText.includes('TypeScript 1/1') && label('Python import · JS/TS 상대 경로 import·재내보내기'),'Mixed-language coverage carries its actual support boundary');
  assert(graph().querySelector('.module-neighbors').compareDocumentPosition(graph().querySelector('[data-module-coverage]')) & Node.DOCUMENT_POSITION_FOLLOWING,'Connections precede coverage detail');
