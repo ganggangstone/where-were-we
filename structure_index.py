@@ -531,7 +531,11 @@ def build(repo, commit, excluded=None, *, only_file=None):
                             imports.append({'file': file, 'line': node.lineno, 'target': target})
                         else:
                             truncated = True
-            stack.extend((child, prefix) for child in reversed(list(ast.iter_child_nodes(node))))
+            # Definitions and imports occur in statement suites, never inside expressions.
+            # Preserve statement order, including exception handlers and match cases.
+            for field in reversed(node._fields):
+                if field in ('body', 'handlers', 'orelse', 'finalbody', 'cases'):
+                    stack.extend((child, prefix) for child in reversed(getattr(node, field)))
         files.append({'file': file, 'language':'python', 'declarations': rows})
     if only_file is not None:
         # Imports point to unique eligible paths in the same tree. Their blobs are not read.

@@ -146,6 +146,33 @@ class Structure(unittest.TestCase):
             pin=git('rev-parse','HEAD')
             self.assertIsNone(description('alias','pyproject.toml'))
 
+    def test_declarations_inside_statement_suites_keep_source_order(self):
+        with tempfile.TemporaryDirectory() as root:
+            repo=Path(root)
+            git=lambda *a:subprocess.check_output(['git','-C',root,*a]).decode().strip()
+            git('init','-q')
+            (repo/'example.py').write_text("""def main():
+    try:
+        def first(): pass
+    except Exception:
+        def recovered(): pass
+    else:
+        def success(): pass
+    finally:
+        def last(): pass
+    match 1:
+        case 1:
+            import peer
+            def matched(): pass
+""")
+            (repo/'peer.py').touch()
+            git('add','.')
+            git('-c','user.name=Test','-c','user.email=test@example.invalid','commit','-qm','suites')
+            result=structure_index.build(root,git('rev-parse','HEAD'),only_file='example.py')
+            self.assertEqual([d['name'] for d in result['declarations']],
+                             ['main','main.first','main.recovered','main.success','main.last','main.matched'])
+            self.assertEqual(result['imports'],[{'file':'example.py','line':12,'target':'peer.py'}])
+
     def test_bounded_selection_visits_sibling_code_and_keeps_auxiliary_evidence(self):
         paths=['aaa/examples/case'+str(i)+'.py' for i in range(30)]
         paths+=['services/a/worker'+str(i)+'.py' for i in range(30)]

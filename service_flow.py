@@ -33,6 +33,9 @@ def python_routes(tree, file, external=None):
             for alias in node.names:
                 if alias.name in ('FastAPI', 'APIRouter'):
                     aliases[alias.asname or alias.name] = alias.name
+    if not aliases:
+        return []
+    for node in tree.body:
         for child in ast.walk(node):
             if isinstance(child, ast.Name) and isinstance(child.ctx, (ast.Store, ast.Del)):
                 assignments[child.id] += 1
