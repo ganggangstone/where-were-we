@@ -159,6 +159,24 @@ class Preview(unittest.TestCase):
         self.assertEqual(cached['overviews']['service'],group)
         self.assertEqual(len(packets),1)
 
+    def test_overview_prioritizes_imports_and_declarations_over_evenly_sampled_lines(self):
+        (self.repo/'entry.py').write_text('from worker import dispatch\n')
+        (self.repo/'worker.py').write_text('# background information\n'*73+
+                                          'def dispatch():\n    return "completed"\n'+'# another detail\n'*98)
+        self.git('add','.');self.git('commit','-qm','Connect a Python entry point')
+        run=self.prepare(intent={'task':'overview','targets':[]})
+        def executor(prompt,**kwargs):
+            packet=json.loads(prompt.split('\n',1)[1])
+            sources={source['file']:source['lines'] for source in packet['sources']}
+            self.assertTrue(any(row.get('imports')=='worker.py' for row in sources['entry.py']))
+            row=next(row for row in sources['worker.py'] if row.get('name')=='dispatch')
+            self.assertEqual(row['line'],74)
+            return {'items':[{'name':'Dispatch','description':'Defines the dispatch function.','ref':row['ref']}]}
+        done=analysis_run.run(run['id'],executor)
+        self.assertEqual(done['state'],'completed',done.get('error'))
+        item=done['overviews']['service']['items'][0]
+        self.assertEqual((item['file'],item['line'],item['quote']),('worker.py',74,'def dispatch():'))
+
     def test_legacy_overview_uses_current_git_and_config_pins_despite_an_older_basic_map(self):
         name='legacy'
         home=analysis_run.store.home(name)
