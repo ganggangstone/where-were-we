@@ -85,6 +85,58 @@ def _exported_wrappers(root, lines):
     return exports
 
 
+def _label(opening, event):
+    """Read a literal label on the control or on its explicit form submit button."""
+    def props(node):
+        data={}
+        for child in node.named_children:
+            if child.type=='jsx_expression':return None
+            if child.type!='jsx_attribute':continue
+            parts=child.named_children
+            key=_name(parts[0])
+            if key in data:return None
+            value=parts[1] if len(parts)==2 and parts[1].type=='string' else None
+            data[key]=(value.text[1:-1].decode() if value else None,child)
+        return data
+
+    attrs=props(opening)
+    if attrs is None or any(k in attrs for k in ('aria-labelledby','hidden','disabled','aria-hidden')):return None
+    tag=_name(opening.child_by_field_name('name'))
+    if 'aria-label' in attrs:
+        label,site=attrs['aria-label']
+    elif tag=='button' and opening.type=='jsx_opening_element':
+        body=opening.parent.named_children[1:-1]
+        if len(body)!=1 or body[0].type!='jsx_text':return None
+        site=body[0]
+        label=site.text.decode()
+    elif tag=='form' and event=='onSubmit' and opening.type=='jsx_opening_element':
+        submit=[]
+        for child in opening.parent.named_children[1:-1]:
+            if child.type=='jsx_text':continue
+            if child.type not in ('jsx_element','jsx_self_closing_element'):return None
+            control=child.named_children[0] if child.type=='jsx_element' else child
+            kind=_name(control.child_by_field_name('name'))
+            if not kind.islower():return None
+            if kind not in ('button','input'):
+                for nested in _walk(child):
+                    if nested==control or nested.type not in ('jsx_self_closing_element','jsx_opening_element'):continue
+                    nested_tag=_name(nested.child_by_field_name('name'))
+                    if not nested_tag.islower() or nested_tag in ('button','input','form'):return None
+                continue
+            options=props(control)
+            if options is None:return None
+            typ=options.get('type',(None,None))[0]
+            if kind=='button' and typ not in ('button','reset','submit'):return None
+            if 'type' in options and typ is None:return None
+            if typ=='submit':
+                if kind!='button' or any(k in options for k in ('form','formAction','onClick')):return None
+                submit.append(control)
+        return _label(submit[0],'') if len(submit)==1 else None
+    else:return None
+    if not label or '&' in label or '\n' in label or not 0<len(label.strip())<=200:return None
+    return label.strip(),_line(site)
+
+
 def facts(root, requests):
     lines={r['client']['line'] for r in requests}
     exports=_exported_wrappers(root,lines) if lines else {}
@@ -125,13 +177,15 @@ def facts(root, requests):
         if not handler or handler.parent.type!='statement_block':continue
         scope=handler.parent
         if not scope.start_byte<=attr.start_byte<scope.end_byte:continue
+        label=_label(attr.parent,event)
         for call in _walk(handler,FUNCTIONS):
             callee=_callee(call)
             local,_,member=callee.partition('.')
             if local not in imports or counts[local]!=1:continue
             symbol,imp=imports[local]
             events.append((symbol+('.'+member if member else ''),imp,{'event':event,'element':tag,'line':_line(attr),
-                'handler':name,'handler_line':_line(handler),'call_line':_line(call),'import_line':imp}))
+                'handler':name,'handler_line':_line(handler),'call_line':_line(call),'import_line':imp,
+                **({'label':label[0],'label_line':label[1]} if label else {})}))
     return exports,events
 
 
@@ -150,4 +204,5 @@ def attach(modules, edges, requests):
                 matches=routed[target,line]
                 if len(matches)==1:
                     action={**event,'file':file,'client_definition':{'file':target,'line':definition}}
+                    if 'label_line' in action:action['label_source']={'file':file,'line':action.pop('label_line')}
                     if action not in matches[0].setdefault('actions',[]):matches[0]['actions'].append(action)

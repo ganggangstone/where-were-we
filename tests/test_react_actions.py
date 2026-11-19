@@ -41,3 +41,20 @@ function Editor() {
 }"""
         action,=self.resolve(code,wrapper="export function save(){return fetch('/save')}")
         self.assertEqual(action['event'],'onClick')
+
+    def test_literal_label_and_form_submitter_preserve_source_line(self):
+        def event(markup):
+            code="import {api} from './api.js';\nfunction App(){\nfunction go(){api.save()}\nreturn "+markup+";\n}"
+            return self.resolve(code)[0]
+        button=event('<button onClick={go}>Save</button>')
+        self.assertEqual((button['label'],button['label_source']),('Save',{'file':'App.jsx','line':4}))
+        self.assertEqual(event('<button onClick={go} aria-label="Delete">×</button>')['label'],'Delete')
+        form=event('<form onSubmit={go}>\n<button type="submit">Add</button></form>')
+        self.assertEqual((form['label'],form['label_source']['line']),('Add',5))
+        for markup in ('<button onClick={go} aria-label={name}>×</button>',
+                       '<button onClick={go}>{computed}</button>',
+                       '<form onSubmit={go}><button type="submit">A</button><button type="submit">B</button></form>',
+                       '<form onSubmit={go}><button type="submit" form="other">Elsewhere</button></form>',
+                       '<form onSubmit={go}><button type="submit">A</button><div><button>B</button></div></form>',
+                       '<input aria-labelledby="other" onChange={go}/>'):
+            self.assertNotIn('label',event(markup))
