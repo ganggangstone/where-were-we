@@ -41,7 +41,7 @@ class RefreshFirstWebKit(unittest.TestCase):
  check($('moduleFile').value==='module150.cjs' && $('moduleRange').selectedIndex===2,'Import navigation crosses ranges without losing the destination');
  index.commit=pin;
  index.cli_entries=[{command:'alpha',kind:'python_script',file:'pyproject.toml',line:8,target:'tool/cli.py',symbol:'main',target_line:14},
-    ...Array.from({length:12},(_,i)=>({command:'tool-'+i,kind:'npm_bin',file:'package.json',target:'bin/tool.js'}))];
+    ...Array.from({length:12},(_,i)=>({command:'tool-'+i,kind:'npm_bin',file:'package.json',target:'bin/tool.js'})),{command:'alpha run',kind:'cobra_subcommand',description:'Run <task>',description_line:17,file:'parent.go',line:9,target:'child.go',target_line:16}];
  await doRefresh();
  const cli=()=>$('map').querySelector('[data-cli-entries]');
  check(cli().querySelectorAll('details').length===12 && !$('moduleDetails').open,'CLI commands precede module internals');
@@ -54,6 +54,8 @@ class RefreshFirstWebKit(unittest.TestCase):
  check(firstCommand.innerText.includes('pyproject.toml:8') && firstCommand.innerText.includes('tool/cli.py:14') && firstCommand.innerText.includes('main'),'Python command shows actual registration and callable');
  cli().querySelector('[data-cli-page="1"]').click();const npm=cli().querySelector('details');npm.querySelector('summary').click();
  check(npm.innerText.includes('tool-11') && npm.querySelectorAll('a')[1].dataset.url.endsWith('/bin/tool.js') && !npm.innerText.includes('undefined'),'Missing locations remain file-only');
+ const cobra=cli().querySelectorAll('details')[1];cobra.open=true;
+ check(cobra.innerText.includes('Run <task>') && !cobra.querySelector('task') && ['parent.go:9','child.go:16','child.go:17'].every(p=>cobra.innerText.includes(p)),'Cobra source, child declaration and literal description have independent evidence');
  check(!calls.some(c=>c.command==='analysis_run_start'),'Command inspection has no model call');
  index.cli_entries=[];
  index.cli_entries=[];index.files=[{file:'main.go',language:'go',declarations:[]},{file:'pkg/a.go',language:'go',declarations:[]}];index.imports=[];index.commit='go-edges';
