@@ -236,9 +236,25 @@ func main() {}
             self.assertEqual([(d['kind'],d['name'],d['line']) for d in result['declarations']],
                              [('type','Item',8),('type','Alias',8),('method','Run',9),('function','main',10)])
             self.assertEqual(result['imports'],[{'file':'cmd/main.go','line':3,'target':'one/file.go'}])
-            self.assertEqual(result['coverage']['unresolved_imports'],3)
+            self.assertEqual(result['package_imports'],[{'file':'cmd/main.go','line':4,'package':'example.org/demo/many',
+                                                        'directory':'many','member_count':2,'members':['many/a.go','many/b.go']}])
+            self.assertEqual(result['coverage']['unresolved_imports'],2)
+            full=structure_index.build(root,pin)
+            self.assertEqual(full['package_imports'],result['package_imports'])
+            hidden=structure_index.build(root,pin,only_file='cmd/main.go',excluded=lambda f:f=='many/b.go')
+            self.assertEqual(hidden['package_imports'],[])
+            self.assertEqual(hidden['imports'],result['imports'])
             private=structure_index.build(root,pin,only_file='cmd/main.go',excluded=lambda f:f=='one/file.go')
             self.assertEqual(private['imports'],[])
+            for n in range(9):
+                (repo/f'many/extra{n}.go').write_text('package many')
+            git('add','many')
+            git('-c','user.name=Test','-c','user.email=test@example.invalid','commit','-qm','more package files')
+            updated=structure_index.build(root,git('rev-parse','HEAD'),only_file='cmd/main.go')
+            package=updated['package_imports'][0]
+            self.assertEqual(package['member_count'],11)
+            self.assertEqual(len(package['members']),8)
+            self.assertEqual(updated['imports'],result['imports'])
 
     def test_bounded_selection_visits_sibling_code_and_keeps_auxiliary_evidence(self):
         paths=['aaa/examples/case'+str(i)+'.py' for i in range(30)]

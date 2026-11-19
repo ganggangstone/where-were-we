@@ -23,7 +23,7 @@ MAX_DECLARATIONS = 20_000
 MAX_IMPORTS = 20_000
 
 
-VERSION = 17
+VERSION = 18
 JS_EXTENSIONS = {'.js', '.jsx', '.mjs', '.cjs'}
 LANGUAGES = ('python', 'javascript', 'typescript', 'html', 'go')
 TS_EXTENSIONS = {'.ts', '.tsx', '.mts', '.cts'}
@@ -122,7 +122,7 @@ def _go_structure(file, raw, module, directories, blocked):
     root = _parser('go').parse(raw).root_node
     if root.has_error or not any(n.type == 'package_clause' for n in root.named_children):
         return None
-    rows, edges, missing = [], [], 0
+    rows, edges, packages, missing = [], [], [], 0
     for decl in root.named_children:
         if decl.type == 'import_declaration':
             specs = [node for child in decl.named_children
@@ -131,15 +131,18 @@ def _go_structure(file, raw, module, directories, blocked):
             for spec in specs:
                 path = spec.child_by_field_name('path')
                 name = path.text[1:-1].decode('utf-8', 'replace')
-                target = None
+                members = ()
                 if module and (name == module or name.startswith(module + '/')) and chr(92) not in name:
                     folder = '' if name == module else name[len(module) + 1:]
                     if (not folder or all(part not in ('', '.', '..') for part in folder.split('/'))) and not any(base == folder or folder.startswith(base + '/') for base in blocked):
-                        target = directories.get(folder)
-                if target and posixpath.dirname(file) != posixpath.dirname(target):
-                    edges.append({'file':file,'line':path.start_point.row + 1,'target':target})
-                else:
+                        members = directories.get(folder, ())
+                if not members or posixpath.dirname(file) == folder:
                     missing += 1
+                elif len(members) == 1:
+                    edges.append({'file':file,'line':path.start_point.row + 1,'target':members[0]})
+                else:
+                    packages.append({'file':file,'line':path.start_point.row + 1,'package':name,
+                                     'directory':folder or '.', 'member_count':len(members),'members':members[:8]})
             continue
         nodes = decl.named_children if decl.type == 'type_declaration' else [decl]
         for node in nodes:
@@ -149,7 +152,7 @@ def _go_structure(file, raw, module, directories, blocked):
                 name = node.child_by_field_name('name')
                 if name:
                     rows.append({'kind':kind,'name':name.text.decode('utf-8','replace'),'line':name.start_point.row+1})
-    return rows, edges, missing
+    return rows, edges, packages, missing
 
 
 def _python_tree(raw):
@@ -436,7 +439,7 @@ def build(repo, commit, excluded=None, *, only_file=None):
         if not isinstance(only_file,str) or any(x in ('','.','..') for x in only_file.split('/')) or '\x00' in only_file:
             raise ValueError('Choose a repository-relative tracked file')
         file_result={'commit':commit,'file':only_file,'language':None,'declarations':[],'imports':[],
-                     'status':'unavailable','coverage':{'indexed_files':0,'unresolved_imports':0,'truncated':False}}
+                     'package_imports':[],'status':'unavailable','coverage':{'indexed_files':0,'unresolved_imports':0,'truncated':False}}
     if excluded is None:
         from analysis_run import _secret as excluded
     env = {**os.environ, 'GIT_NO_LAZY_FETCH': '1'}
@@ -550,7 +553,8 @@ def build(repo, commit, excluded=None, *, only_file=None):
         selected.append((file, entry))
         consumed += size
     module = None
-    go_targets = {folder:paths[0] for folder, paths in go_files.items() if len(paths)==1 and paths[0] in candidates}
+    package_imports = []
+    go_targets = {folder:paths for folder, paths in go_files.items() if all(path in candidates for path in paths)}
     if any(languages[f] == 'go' for f, _ in selected) and go_config and go_config[0] not in denied and not workspace:
         config = next(_blobs(git, env, [('go.mod', go_config)]))[1]
         modules = re.findall(rb'^module[ \t]+([\w./~-]+)[ \t]*(?://[^\n]*)?$', config, re.M)
@@ -571,7 +575,10 @@ def build(repo, commit, excluded=None, *, only_file=None):
                 continue
             if result is None:
                 continue
-            rows, edges, missing = result
+            rows, edges, packages, missing = result
+            limited_packages = packages[:MAX_IMPORTS - len(package_imports)]
+            truncated |= len(limited_packages) != len(packages)
+            package_imports.extend(limited_packages)
             limited_rows = rows[:MAX_DECLARATIONS - declarations]
             limited_edges = edges[:MAX_IMPORTS - len(imports)]
             truncated |= len(rows) != len(limited_rows) or len(edges) != len(limited_edges)
@@ -676,6 +683,7 @@ def build(repo, commit, excluded=None, *, only_file=None):
             file_result.update(status='indexed',declarations=files[0]['declarations'],imports=imports)
         elif not unavailable:
             file_result['status']='unparsed'
+        file_result['package_imports'] = package_imports
         file_result['coverage']={'indexed_files':len(files),'unresolved_imports':unresolved,'truncated':truncated}
         return file_result
     resolved = [edge for edge in imports if edge['target'] in parsed]
@@ -703,5 +711,5 @@ def build(repo, commit, excluded=None, *, only_file=None):
                      key=lambda item:(preferred.index(item[0].lower()),item[0]))
     description = _project_description(git, env, sources)
     features = _documented_features(git, env, [item for item in sources if item[0].lower() == 'readme.md'])
-    return {'version':VERSION,'commit': commit,'project_description':description,'documented_features':features,'cli_entries':cli_entries, 'files': files, 'imports': resolved, 'coverage': coverage,
+    return {'version':VERSION,'commit': commit,'project_description':description,'documented_features':features,'cli_entries':cli_entries, 'files': files, 'imports': resolved, 'package_imports':package_imports, 'coverage': coverage,
             'service_flow':service_flow.connect(routes, requests)}
