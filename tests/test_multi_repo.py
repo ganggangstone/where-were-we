@@ -186,7 +186,7 @@ S.jobs.nodes={};view=sysInspector({});assert.ok(view.includes('Program jobs have
                 output=''
                 if 'rev-parse' in args:output='bbbbbbbb' if '--short' in args else 'b'*40
                 if 'rev-list' in args:output='a'*40
-                if 'ls-tree' in args and '-rz' in args:output=b''
+                if 'ls-tree' in args and not kwargs.get('text'):output=b''
             else:
                 output=''
                 if any(a.endswith('extract.py') for a in args):
