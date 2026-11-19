@@ -6,6 +6,29 @@ import structure_index
 
 
 class ServiceFlow(unittest.TestCase):
+    def test_explicit_namespace_child_router_requires_unique_module_below_own_package(self):
+        app="""from fastapi import FastAPI
+from myapp.routers import (
+    items as inventory,
+)
+app=FastAPI()
+app.include_router(inventory.router,prefix='/v1')
+"""
+        target="""from fastapi import APIRouter
+router=APIRouter()
+@router.get('/items')
+def list_items(): pass
+"""
+        external={'routers':{},'mounts':[]}
+        files={'backend/myapp/__init__.py':'','backend/myapp/main.py':app,'backend/myapp/routers/items.py':target}
+        for path, source in files.items():service_flow.python_routes(ast.parse(source),path,external)
+        rows=service_flow.mounted_routes(external,[],set(files),set(files))
+        self.assertEqual([(r['method'],r['path'],r['server']['function']) for r in rows],[('GET','/v1/items','list_items')])
+        self.assertEqual([m['line'] for m in rows[0]['mounts']],[2,3,6])
+        for extra in ('backend/myapp/routers/__init__.py','backend/myapp/routers.py','other/myapp/routers/items.py','other/myapp/__init__.py'):
+            self.assertEqual(service_flow.mounted_routes(external,[],set(files)|{extra},set(files)),[])
+        self.assertEqual(service_flow.mounted_routes(external,[],set(files),set(files)-{'backend/myapp/routers/items.py'}),[])
+
     def test_backend_only_registrations_keep_handlers_parameters_and_existing_data_evidence(self):
         raw="""from fastapi import FastAPI, APIRouter
 app = FastAPI()

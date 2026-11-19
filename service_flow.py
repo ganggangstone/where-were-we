@@ -1,6 +1,7 @@
 """Static same-repository HTTP matches from literal browser requests and FastAPI registrations."""
 import ast
 import re
+import posixpath
 from collections import Counter, defaultdict
 from html.parser import HTMLParser
 
@@ -52,12 +53,15 @@ def python_routes(tree, file, external=None):
     handlers = defaultdict(list)
     routes = []
     import_lines = {}
+    import_modules = {}
     for node in tree.body:
         if isinstance(node, ast.ImportFrom) and node.module:
             for alias in node.names:
                 local = alias.asname or alias.name
                 if imported[local] == 1 and not assignments[local]:
                     import_lines[local] = (node.lineno, alias.name)
+                    if not node.level:
+                        import_modules[local] = (node.module,alias.name,node.lineno,alias.lineno)
         if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
             name, value = node.targets[0].id, node.value
             if assignments[name] != 1 or not isinstance(value, ast.Call) or not isinstance(value.func, ast.Name):
@@ -92,12 +96,20 @@ def python_routes(tree, file, external=None):
             call = node.value
             if not isinstance(call.func, ast.Attribute) or call.func.attr != 'include_router' or not isinstance(call.func.value, ast.Name) or call.func.value.id not in apps:
                 continue
-            if len(call.args) != 1 or not isinstance(call.args[0], ast.Name):
+            if len(call.args) != 1:
                 continue
-            name = call.args[0].id
+            receiver = call.args[0]
             prefix = _literal(call, 'prefix', '')
             if prefix != '' and not _path(prefix):
                 continue
+            if (external is not None and isinstance(receiver, ast.Attribute)
+                    and isinstance(receiver.value, ast.Name) and receiver.value.id in import_modules):
+                external.setdefault('module_mounts',[]).append(
+                    (file, *import_modules[receiver.value.id], receiver.attr, prefix, node.lineno))
+                continue
+            if not isinstance(receiver,ast.Name):
+                continue
+            name = receiver.id
             if name not in routers:
                 if external is not None and name in import_lines:
                     line, symbol = import_lines[name]
@@ -264,7 +276,7 @@ def html_requests(raw, file, parse):
     return requests
 
 
-def mounted_routes(external, imports):
+def mounted_routes(external, imports, python_paths=(), parsed=()):
     targets = {(edge['file'],edge['line']):edge['target'] for edge in imports}
     result = []
     for file, line, symbol, prefix, mount_line in external['mounts']:
@@ -272,6 +284,37 @@ def mounted_routes(external, imports):
         for route in external['routers'].get((target, symbol), []):
             result.append({**route, 'path':prefix+route['path'],
                            'mounts':[{'file': file, 'line': line}, {'file':file, 'line':mount_line}]})
+    module_mounts = external.get('module_mounts',[])
+    if not module_mounts:
+        return result
+    by_name = defaultdict(list)
+    for path in python_paths:
+        by_name[posixpath.basename(path)].append(path)
+    for file, package, child, imp, binding, symbol, prefix, mount in module_mounts:
+        # Anchor the absolute import to the importing app's own top-level package.
+        parts = package.split('.')
+        owner = file.split('/')[:-1]
+        if owner.count(parts[0]) != 1:
+            continue
+        base = '/'.join(owner[:owner.index(parts[0])])
+        package_root = posixpath.join(base, parts[0])
+        root_initializers = [f for f in by_name['__init__.py'] if f.endswith('/'+parts[0]+'/__init__.py')
+                             or f == parts[0]+'/__init__.py']
+        if root_initializers != [package_root+'/__init__.py'] or root_initializers[0] not in parsed:
+            continue
+        directory = posixpath.join(base,*parts)
+        target = posixpath.join(directory,child+'.py')
+        suffix = '/'.join([*parts,child])
+        matches = [path for path in by_name[child+'.py'] if ('/'+path).endswith('/'+suffix+'.py')]
+        if any(('/'+p).endswith('/'+suffix+'/__init__.py') for p in by_name['__init__.py']):
+            continue
+        # A namespace directory without an initializer cannot re-export a different child.
+        if (matches != [target] or target not in parsed or directory+'/__init__.py' in python_paths
+                or any(posixpath.join(base,*parts[:i])+'.py' in python_paths for i in range(1,len(parts)+1))):
+            continue
+        for route in external['routers'].get((target,symbol),[]):
+            proof = [{'file':file,'line':n} for n in dict.fromkeys((imp,binding,mount))]
+            result.append({**route,'path':prefix+route['path'],'mounts':proof})
     return result
 
 

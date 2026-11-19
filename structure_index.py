@@ -27,7 +27,7 @@ MAX_DECLARATIONS = 20_000
 MAX_IMPORTS = 20_000
 
 
-VERSION = 29
+VERSION = 30
 JS_EXTENSIONS = {'.js', '.jsx', '.mjs', '.cjs'}
 LANGUAGES = ('python', 'javascript', 'typescript', 'html', 'go')
 TS_EXTENSIONS = {'.ts', '.tsx', '.mts', '.cts'}
@@ -652,6 +652,7 @@ def build(repo, commit, excluded=None, *, only_file=None, directory=None, page=1
     descriptions = {}
     unsupported_oid = None
     go_modules = set()
+    python_paths = set()
     go_files = defaultdict(list)
     go_config = None
     next_files = set()
@@ -669,6 +670,8 @@ def build(repo, commit, excluded=None, *, only_file=None, directory=None, page=1
         # contents are excluded. Use names only and never open an excluded blob.
         go_path = os.fsdecode(raw_file)
         folder, name = posixpath.split(go_path)
+        if go_path.endswith('.py'):
+            python_paths.add(go_path)
         if scope is None:
             if go_path.startswith(('app/','src/app/')) or go_path == 'app':
                 next_files.add(go_path)
@@ -924,7 +927,7 @@ def build(repo, commit, excluded=None, *, only_file=None, directory=None, page=1
                             'truncated':truncated, 'unavailable_languages':sorted(unavailable)}}
     resolved = [edge for edge in imports if edge['target'] in parsed]
     routes.extend(factory_routes(factory_modules,resolved))
-    routes.extend(service_flow.mounted_routes(external,resolved))
+    routes.extend(service_flow.mounted_routes(external,resolved,python_paths,parsed))
     routes.extend(default_flow.default_routes(python_modules,external['routers']))
     requests.extend(default_flow.sdk_requests(sdk_modules))
     react_actions.attach(action_modules,resolved,requests)
