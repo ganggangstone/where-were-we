@@ -1255,8 +1255,8 @@ def _quick_overview(repo,request,language,invoke,cancelled,deadline,raw,resource
     packet={'lang':language,'sources':sources,
             'prompt':'Describe directly evidenced features and structure in the selected language. '
                      'Use supplied declaration and import metadata when describing relationships. An import alone does not establish a runtime call. Each item names one feature, component or relationship, explains its role in one sentence and selects its supporting ref. '
-                     'Return at most 12 items. Skip unsupported claims. Empty items are valid. Do not request further reads.',
-            'schema':{'items':[{'name':'feature or component','description':'what it does','ref':ref_offset+1}]}}
+                     'Select a primary ref and up to three additional evidence_refs for claims spanning multiple lines. Each factual step needs a supporting line. Return at most 12 items. Skip unsupported claims. Empty items are valid. Do not request further reads.',
+            'schema':{'items':[{'name':'feature or component','description':'what it does','ref':ref_offset+1,'evidence_refs':[]}]}}
     by_line={(row['file'],row['line']):ref for ref,row in references.items()}
     for member in members:
         site=member['workspace']
@@ -1340,7 +1340,14 @@ def _quick_overview(repo,request,language,invoke,cancelled,deadline,raw,resource
             if (not isinstance(item,dict) or type(item.get('ref'))!=int or item['ref'] not in references
                     or any(not isinstance(item.get(k),str) or not 0<len(item[k].strip())<=500 for k in ('name','description'))):
                 raise InvalidClaim('An initial overview item lacked a supported source reference or description')
-            result['items'].append({k:item[k] for k in ('name','description')} | references[item['ref']])
+            extra=item.get('evidence_refs',[])
+            if (not isinstance(extra,list) or len(extra)>3
+                    or any(type(ref)!=int or ref not in references for ref in extra)
+                    or len(set([item['ref'],*extra]))!=1+len(extra)):
+                raise InvalidClaim('An initial overview item cited invalid additional source references')
+            claim={k:item[k] for k in ('name','description')} | references[item['ref']]
+            if extra:claim['evidence']=[references[ref] for ref in extra]
+            result['items'].append(claim)
         _strict_result('analysis',{'inspected':result['items'],'connections':result.get('connections',[]),'cli_entries':result.get('cli_entries',[])},repo,commit)
         return result
     return (packet,finalize) if invoke is None else finalize(invoke(packet))

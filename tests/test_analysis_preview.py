@@ -427,6 +427,22 @@ def users(): pass
             self.assertIn(path,overview['items'][0]['quote'])
             self.assertEqual(overview['connections'][0]['id'],1)
 
+    def test_overview_additional_refs_are_unique_and_local_to_the_packet(self):
+        pin=self.git('rev-parse','HEAD').strip()
+        packet,finish=analysis_run._quick_overview(str(self.repo),{'commit':pin},'en',None,None,None,{},ref_offset=100)
+        refs=[r['ref'] for s in packet['sources'] for r in s['lines']]
+        primary,secondary=refs[:2]
+        def answer(extra):
+            return {'items':[{'name':'Component','description':'A grounded description.',
+                              'ref':primary,'evidence_refs':extra}]}
+        for extra in ([1],[False],[primary],[secondary,secondary],refs[:4],None):
+            with self.subTest(extra=extra),self.assertRaises(analysis_run.InvalidClaim):
+                finish(answer(extra))
+        result=finish(answer([secondary]))
+        evidence,=result['items'][0]['evidence']
+        original=self.git('show',pin+':'+evidence['file']).splitlines()
+        self.assertIn(evidence['quote'],original[evidence['line']-1])
+
     def test_first_overview_pins_workspace_members_and_a_declared_dependency(self):
         (self.repo/'pnpm-workspace.yaml').write_text("packages:\n  - 'packages/*'\n")
         for name in ['engine','store','extra']:
