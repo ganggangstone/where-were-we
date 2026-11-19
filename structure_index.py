@@ -11,6 +11,7 @@ import warnings
 
 import service_flow
 import default_flow
+import react_actions
 from express_routes import app_factories, express_routes, factory_routes
 
 MAX_FILES = 2048
@@ -20,7 +21,7 @@ MAX_DECLARATIONS = 20_000
 MAX_IMPORTS = 20_000
 
 
-VERSION = 6
+VERSION = 7
 JS_EXTENSIONS = {'.js', '.jsx', '.mjs', '.cjs'}
 LANGUAGES = ('python', 'javascript', 'typescript', 'html')
 TS_EXTENSIONS = {'.ts', '.tsx', '.mts', '.cts'}
@@ -88,7 +89,8 @@ def _script(file, raw, candidates):
                 else:
                     unresolved += 1
         stack.extend((child, prefix) for child in reversed(node.named_children))
-    return rows, edges, unresolved, service_flow.javascript_requests(root, file), default_flow.sdk_facts(root,file), express_routes(root,file), app_factories(root,file)
+    requests=service_flow.javascript_requests(root,file)
+    return rows, edges, unresolved, requests, default_flow.sdk_facts(root,file), express_routes(root,file), app_factories(root,file), react_actions.facts(root,requests)
 
 
 def _blobs(git, env, selected):
@@ -159,6 +161,7 @@ def build(repo, commit, excluded=None):
     external = {'routers':{}, 'mounts':[]}
     python_modules = {}
     sdk_modules = {}
+    action_modules = {}
     factory_modules = {}
     imports = []
     parsed = set()
@@ -196,7 +199,8 @@ def build(repo, commit, excluded=None):
                 continue
             if script is None:
                 continue
-            rows, edges, missing, file_requests, sdk, server_routes, factories = script
+            rows, edges, missing, file_requests, sdk, server_routes, factories, actions = script
+            if any(actions):action_modules[file]=actions
             if any(factories):factory_modules[file]=factories
             routes.extend(server_routes)
             if sdk:sdk_modules[file]=sdk
@@ -267,6 +271,7 @@ def build(repo, commit, excluded=None):
     routes.extend(service_flow.mounted_routes(external,resolved))
     routes.extend(default_flow.default_routes(python_modules,external['routers']))
     requests.extend(default_flow.sdk_requests(sdk_modules))
+    react_actions.attach(action_modules,resolved,requests)
     unresolved += len(imports) - len(resolved)
     coverage = {'candidate_files': len(candidates), 'indexed_files': len(files),
                 'skipped_files': len(candidates) - len(files), 'unsupported_files': unsupported,
