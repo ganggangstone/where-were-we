@@ -132,6 +132,7 @@ class Analysis(unittest.TestCase):
         m,_=self.normalize()
         folder=self.home/'stage';folder.mkdir();(folder/'dev.json').write_text(json.dumps(m))
         (self.repo/'server/items.go').write_text((self.repo/'server/items.go').read_text()+'// changed\n')
+        (self.repo/'worker.py').write_text('def run_worker(): pass\n')
         self.git('add','.');self.git('commit','-qm','Synthetic change')
         real_run=subprocess.run;commands=[]
         def run(command,**kwargs):
@@ -145,6 +146,8 @@ class Analysis(unittest.TestCase):
         self.assertTrue(refreshed['analysis']['stale'])
         self.assertEqual(refreshed['inventory']['commit'], refreshed['analysis']['observed_commit'])
         self.assertNotEqual(refreshed['analysis']['observed_commit'],self.commit)
+        self.assertEqual(refreshed['structure_index']['commit'],refreshed['analysis']['observed_commit'])
+        self.assertEqual(refreshed['structure_index']['files'],[{'file':'worker.py','declarations':[{'name':'run_worker','kind':'function','line':1}]}])
         self.assertFalse(any(command[0]=='claude' for command in commands))
 
     def test_isolated_cli_action_and_split_repo_composition(self):

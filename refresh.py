@@ -61,6 +61,9 @@ for b in ("dev", "main"):
         if ai_extract.carry_unchanged(cur,REPO,ref):have=ref  # identical tree: every saved input is proven unchanged
         if (cur.get('inventory') or {}).get('commit') != ref:
             cur['inventory'] = mapcore.tree_inventory(mapcore.git_tree_entries(REPO, ref), ref)
+        if (cur.get('structure_index') or {}).get('commit') != ref:
+            import structure_index
+            cur['structure_index'] = structure_index.build(REPO, ref)
         cur['analysis']['observed_commit']=ref
         cur['analysis']['stale']=have not in (now,ref)
         ai_extract.refresh_test_links(cur,mapcore.tests_conf(HOME))
