@@ -142,9 +142,21 @@ const AnalysisRun = (() => {
         <div class="s"><code>${esc(file)}:${esc(item.line)}</code></div><pre>${esc(item.quote)}</pre></li>`).join('');
       return `<li><code>${esc(file)}</code>${nodes ? `<ul>${nodes}</ul>` : ''}</li>`;
     }).join('');
-    const edgeHtml=edge=>`<li><b>${esc(edge.method)} ${esc(edge.path)}</b>${edge.basis==='path_template' ? ` · ${text('경로 패턴이 맞을 때','If the path pattern matches')} <code>${esc(edge.server_path)}</code>` : ''}<ul>${[
-      [text('요청 코드','Request code'),edge.client],[text('서버 함수','Server handler'),edge.server]
-    ].map(([label,side])=>`<li>${label} · <code>${esc(side.file)}:${esc(side.line)}</code><pre>${esc(side.quote)}</pre></li>`).join('')}</ul></li>`;
+    const map=S.maps?.[S.branch];
+    const index=group.repository ? map?.structure_indexes?.find(i=>i.repository===group.repository && i.commit===group.commit)
+      : map?.structure_index?.commit===group.commit ? map.structure_index : null;
+    const edgesInSource=index?.service_flow?.connections || [];
+    const sameSite=(a,b)=>a?.file===b.file && a?.line===b.line;
+    const edgeHtml=edge=>{
+      const match=edgesInSource.find(row=>row.method===edge.method && row.path===edge.path && sameSite(row.client,edge.client) && sameSite(row.server,edge.server));
+      const evidence=(file,line)=>`<code>${esc(file)}:${esc(line)}</code>`;
+      const stages=match?flowActions(match.actions,evidence)+flowDataSteps(match.data_steps,evidence):'';
+      const basis=edge.basis || match?.basis;
+      const condition=basis==='path_template'?` · ${text('경로 패턴이 맞을 때','If the path pattern matches')} <code>${esc(edge.server_path || match?.server_path)}</code>`:basis==='declared_defaults'?` · ${text('설정·클라이언트 기본값에서 일치','Matches configured client and server defaults')}`:'';
+      return `<li><b>${esc(edge.method)} ${esc(edge.path)}</b>${condition}<ul>${[
+        [text('요청 코드','Request code'),edge.client],[text('서버 함수','Server handler'),edge.server]
+      ].map(([label,side])=>`<li>${label} · ${evidence(side.file,side.line)}<pre>${esc(side.quote)}</pre></li>`).join('')}</ul>${stages}</li>`;
+    };
     const edges=group.connections || [];
     const byId=new Map(edges.filter(edge=>Number.isInteger(edge.id)).map(edge=>[edge.id,edge]));
     const grouped=new Set();

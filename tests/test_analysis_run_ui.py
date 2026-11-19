@@ -284,6 +284,12 @@ group.items.push({description:'Fetch the current runs',file:'client.ts',line:7,n
 await AnalysisRun.check();const grouped=$('insp').innerHTML;
 assert(grouped.includes('Manage &lt;runs>') && grouped.indexOf('Manage &lt;runs>')<grouped.indexOf('GET /runs') && grouped.indexOf('Other requests')<grouped.indexOf('GET /other'),'Named features precede both linked requests and ungrouped requests');
 assert(grouped.includes('Fetch the current runs') && grouped.includes('Evidence by file') && grouped.includes('If the path pattern matches'),'Grounded descriptions, original file evidence and conditions remain available');
+globalThis.flowActions=()=>'';
+globalThis.flowDataSteps=(steps,evidence)=>steps ? evidence('models.py',9) : '';
+const step={...group.connections[0],data_steps:[{operation:'read',model:'Run'}]};
+S.maps.dev.structure_index={commit:group.commit,service_flow:{connections:[step]}};
+await AnalysisRun.check();assert($('insp').innerHTML.includes('models.py:9'),'Matching pinned endpoints add storage evidence to saved features');
+S.maps.dev.structure_index.commit='moved';await AnalysisRun.check();assert(!$('insp').innerHTML.includes('models.py:9'),'Never join data stages from a different snapshot');
 status.current_legacy_pin.configuration='changed';await AnalysisRun.check();
 assert(!$('savedOverview0'),'Configuration mismatch hides the sample');
 ''')
