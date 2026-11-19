@@ -389,6 +389,7 @@ Object.assign(UI_EN,{'모듈 연결 (베타)':'Module connections (beta)','로�
 Object.assign(UI_EN,{'파일 범위':'File range','코드에서 확인한 기능 (베타)':'Features found in source (beta)','기능 흐름 (베타)':'Feature flows (beta)','기능 선택':'Select feature','화면 문구':'Interface label','서버의 데이터 접근':'Server data access','모델 읽기':'Read model','모델 쓰기':'Write model','요청을 시작하는 화면 동작':'UI actions that trigger this request','양식 제출':'Form submission','버튼 클릭':'Button click','입력 변경':'Input change','이벤트 처리 함수':'Event handler','클라이언트 호출':'Client invocation','클라이언트 정의':'Client definition','매개변수가 한 경로 구간일 때 일치':'Matches when the parameter occupies one URL segment','GitHub 작업 정보 미확인':'GitHub work data unavailable','최근 확인':'Last verified','설정·클라이언트 기본값에서 일치':'Matches configured client and server defaults','기본값 근거':'Default value evidence','HTTP 요청 흐름 (베타)':'HTTP request flow (beta)','고정 fetch 주소 · 서버 경로 대조':'Literal fetch URLs matched to server routes','요청을 보내는 코드':'Client call site','받는 서버 함수':'Server handler','경로 등록·실행 근거':'Route registration and startup evidence','주소 선언':'URL declaration','연결된 요청':'Matched requests','대상 미확인 요청':'Unresolved requests','확인한 요청':'Requests detected','서버 경로':'Server routes','연결 선택':'Select connection'});
 Object.assign(UI_EN,{'저장된 페이지':'Saved pages','미저장 페이지로':'Go to unsaved page'});
 Object.assign(UI_EN,{'워크스페이스 패키지':'Workspace packages','내부 패키지 의존성':'Workspace dependencies'});
+Object.assign(UI_EN,{'경로 영역':'Path area','모든 경로':'All paths'});
 const UI_PATTERN = new RegExp(Object.keys(UI_EN).sort((a, b) => b.length - a.length).map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'g');
 function tr(text) { return S.lang === 'en' ? String(text).replace(UI_PATTERN, match => UI_EN[match]) : String(text); }
 function ui(parts, ...values) { return parts.reduce((out, part, i) => out + tr(part) + (i < values.length ? values[i] : ''), ''); }
@@ -1562,8 +1563,23 @@ function registeredRoutesView(flow,state,evidence) {
   const resourceFor=new Map((flow.registered_route_groups || []).flatMap(group=>group.registered_route_indexes.map(i=>[flow.registered_routes[i],group.resource])));
   const capped=flow.coverage.routes>flow.registered_routes.length;
   if(!routes.length && !capped)return '';
-  const size=ROUTES_PER_PAGE,pages=Math.ceil(routes.length/size),page=Math.max(0,Math.min(state.routePage || 0,pages-1));
-  const list=routes.slice(page*size,(page+1)*size).map(route=>{
+  const size=ROUTES_PER_PAGE;
+  const areas=new Map();
+  if(routes.length>size*2){
+    for(const route of routes){
+      const parts=(resourceFor.get(route) || route.path).split('/').filter(Boolean);
+      let depth=parts[0]==='api'?1:0;
+      if(/^v[0-9]+$/i.test(parts[depth] || ''))depth++;
+      const prefix='/'+parts.slice(0,depth+1).join('/');
+      if(!areas.has(prefix))areas.set(prefix,[]);
+      areas.get(prefix).push(route);
+    }
+  }
+  const area=areas.size>1 && areas.has(state.routeArea)?state.routeArea:'';
+  const visible=area?areas.get(area):routes;
+  const picker=areas.size>1?`<label class="ctl">${tr('경로 영역')} <select id="routeArea"><option value="">${tr('모든 경로')} · ${routes.length}</option>${[...areas.keys()].sort().map(prefix=>`<option value="${esc(prefix)}" ${prefix===area?'selected':''}>${esc(prefix)} · ${areas.get(prefix).length}</option>`).join('')}</select></label>`:'';
+  const pages=Math.ceil(visible.length/size),page=Math.max(0,Math.min(state.routePage || 0,pages-1));
+  const list=visible.slice(page*size,(page+1)*size).map(route=>{
     const defaults=route.basis==='declared_defaults'?`<small>${tr('설정 기본값')}</small>`:'';
     const filesystem=route.framework==='next_app_router';
     const sites=[...(filesystem?[]:[route.server]),...route.mounts || []];
@@ -1575,7 +1591,7 @@ function registeredRoutesView(flow,state,evidence) {
     return `<details class="sect" data-registered-route="${esc(resource || '')}"><summary><strong class="mono">${esc(route.method+' '+route.path)}</strong> ${defaults}</summary>${compactTrace(route)}<details><summary>${tr('근거')}</summary>${proof}${flowDataSteps(route.data_steps,evidence)}</details>${explain}</details>`;
   }).join('');
   const controls=pages>1?`<div class="ctl"><button class="btn quiet" data-route-page="${page-1}" ${page===0?'disabled':''}>${tr('이전')}</button><span>${page+1} / ${pages}</span><button class="btn quiet" data-route-page="${page+1}" ${page+1===pages?'disabled':''}>${tr('다음')}</button></div>`:'';
-  return `<details class="sect" id="registeredRoutes" ${(state.routesOpen ?? !flow.connections.length)?'open':''}><summary>${tr('서버 경로 (베타)')} · ${routes.length}</summary>${list}${controls}${capped?`<div class="s">${tr('저장된 경로')} ${flow.registered_routes.length}/${flow.coverage.routes}</div>`:''}</details>`;
+  return `<details class="sect" id="registeredRoutes" ${(state.routesOpen ?? !flow.connections.length)?'open':''}><summary>${tr('서버 경로 (베타)')} · ${routes.length}</summary>${picker}${list}${controls}${capped?`<div class="s">${tr('저장된 경로')} ${flow.registered_routes.length}/${flow.coverage.routes}</div>`:''}</details>`;
 }
 function serviceFlowView(flow,state,evidence) {
   if(!flow)return '';
@@ -1768,6 +1784,7 @@ function bindStructureIndex() {
   graph.querySelectorAll('[data-explain-route]').forEach(button=>button.onclick=()=>openAnalysisPanel('scope_overview',button.dataset.explainRoute,S.moduleGraph.repository || ''));
   if($('registeredRoutes'))$('registeredRoutes').ontoggle=e=>{S.moduleGraph.routesOpen=e.target.open;};
   graph.querySelectorAll('[data-cross-page]').forEach(button=>button.onclick=()=>update({crossPage:Number(button.dataset.crossPage)}));
+  if($('routeArea'))$('routeArea').onchange=e=>update({routeArea:e.target.value,routePage:0,routesOpen:true},'routeArea');
   graph.querySelectorAll('[data-route-page]').forEach(button=>button.onclick=()=>update({routePage:Number(button.dataset.routePage),routesOpen:true}));
   if($('flowSources'))$('flowSources').ontoggle=e=>{S.moduleGraph.sourcesOpen=e.target.open;};
   if($('moduleDetails'))$('moduleDetails').ontoggle=e=>{S.moduleGraph.moduleOpen=e.target.open;};
@@ -1786,7 +1803,7 @@ function bindStructureIndex() {
     box?.querySelector('[data-inspect-directory]')?.focus();
   });
   graph.querySelectorAll('[data-cli-page]').forEach(button=>button.onclick=()=>update({cliPage:Number(button.dataset.cliPage)}));
-  if($('moduleRepository'))$('moduleRepository').onchange=e=>update({repository:e.target.value,file:'',page:{},http:undefined,action:0,resource:null,cliPage:0,workspacePage:0,routePage:0,crossPage:0,routesOpen:undefined},'moduleRepository');
+  if($('moduleRepository'))$('moduleRepository').onchange=e=>update({repository:e.target.value,file:'',page:{},http:undefined,action:0,resource:null,cliPage:0,workspacePage:0,routeArea:'',routePage:0,crossPage:0,routesOpen:undefined},'moduleRepository');
   graph.querySelectorAll('[data-local-resource]').forEach(button=>button.onclick=()=>update({resource:button.getAttribute('aria-expanded')==='true'?null:button.dataset.localResource,http:undefined,action:0}));
   if($('explainLocalScope'))$('explainLocalScope').onclick=()=>openAnalysisPanel('scope_overview',S.moduleGraph.resource,S.moduleGraph.repository || '');
   graph.querySelectorAll('[data-flow-operation]').forEach(button=>button.onclick=()=>{

@@ -96,6 +96,14 @@ class RefreshFirstWebKit(unittest.TestCase):
  index.service_flow.registered_routes=[{...edge},...Array.from({length:9},(_,i)=>({method:'GET',path:'/internal/'+i,framework:i===8?'next_app_router':undefined,server:{file:i===8?'app/api/internal/route.ts':'api.py',function:'handler'+i,line:20+i},mounts:i===8?[{file:'package.json',line:26}]:[]}))];
  index.service_flow.coverage.routes=10;await doRefresh();
  const routes=()=>$('registeredRoutes');routes().open=true;
+ check(!$('routeArea'),'Short route lists omit the area picker');
+ const registered=index.service_flow.registered_routes;
+ index.service_flow.registered_routes=[...registered,...Array.from({length:10},(_,i)=>({method:'GET',path:'/api/v2/teams/'+i,server:{file:'teams.py',line:i+5,function:'list'}}))];
+ await doRefresh();const chooseArea=value=>{const menu=$('routeArea');menu.value=value;menu.dispatchEvent(new Event('change'));};
+ check($('routeArea').value==='' && [...$('routeArea').options].some(o=>o.text.endsWith('/api/v2/teams · 10')),'Versioned prefix and distinct standalone count');
+ chooseArea('/api/v2/teams');routes().querySelector('[data-route-page="1"]').click();check(routes().querySelectorAll('[data-registered-route]').length===2 && routes().innerText.includes('/api/v2/teams/9'),'Page within one path area');
+ chooseArea('');check(routes().innerText.includes('/internal/0'),'All areas restore the first page');
+ index.service_flow.registered_routes=registered;await doRefresh();routes().open=true;
  check(routes().querySelectorAll('[data-registered-route]').length===8 && !routes().innerText.includes('/items'),'Registered routes page omits already connected endpoints');
  routes().querySelector('[data-route-page="1"]').click();const route=routes().querySelector('[data-registered-route]');route.open=true;route.querySelector('details').open=true;
  check(route.querySelector('[data-trace-stage="server"]').textContent==='handler8' && !route.querySelector('[data-trace-stage="client"]') && route.innerText.includes('app/api/internal/route.ts:28'),'A standalone server handler has its own source and no invented client');
@@ -147,7 +155,7 @@ class RefreshFirstWebKit(unittest.TestCase):
  check(!calls.some(c=>c.command==='analysis_run_start'),'Viewing saved evidence starts no AI');
  check(!$('flowFeature') && !$('flowProof').open && $('map').querySelector('[data-flow-operation]'),'Operations precede closed technical evidence');
  check($('flowSources') && !$('flowSources').open && $('map').querySelector('.flow-trace').innerText.includes('client.js'),'Group shows connected code while documentation and module counts stay closed');
- for(const [ko,en] of [['기능 (베타)','Features (beta)'],['AI 설명 (베타)','AI explanation (beta)'],['문서·모듈','Docs and modules'],['워크스페이스 패키지','Workspace packages'],['저장된 페이지','Saved pages'],['미저장 페이지로','Go to unsaved page'],['호출 흐름','Request flow'],['구성 요소','Components']]){
+ for(const [ko,en] of [['기능 (베타)','Features (beta)'],['AI 설명 (베타)','AI explanation (beta)'],['문서·모듈','Docs and modules'],['워크스페이스 패키지','Workspace packages'],['경로 영역','Path area'],['모든 경로','All paths'],['저장된 페이지','Saved pages'],['미저장 페이지로','Go to unsaved page'],['호출 흐름','Request flow'],['구성 요소','Components']]){
    const old=S.lang;S.lang='en';check(tr(ko)===en,'English '+ko);S.lang=old;
  }
  $('flowProof').querySelector('summary').click();check($('flowProof').open && $('flowProof').innerText.includes('client.js:5'),'Endpoint evidence opens on demand');
