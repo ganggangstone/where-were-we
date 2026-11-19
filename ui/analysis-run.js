@@ -205,7 +205,7 @@ const AnalysisRun = (() => {
     });
     return `<section class="sect"><h3>${active() ? text('분석 중 확인한 기능','Features verified so far') : text('확인한 프로그램','Verified programs')}</h3>${rows.join('')}</section>`;
   }
-  function html() {
+  function html(includeOverview=true) {
     const account = provider?.account, identity = typeof account === 'string' ? account : account?.email || account?.id;
     const done = Array.isArray(run?.completed_tasks) ? run.completed_tasks.length : Number(run?.completed_tasks || 0);
     const total = done + (run?.tasks?.length || 0);
@@ -231,7 +231,7 @@ const AnalysisRun = (() => {
       : choice.task==='analysis' ? text('상세 지도 분석 (베타)','Analyze detailed map (beta)')
       : text(names[choice.task]+' 분석 시작','Analyze '+names[choice.task]);
     return `<section class="sect" aria-label="${text('자동 분석 (베타)','Automatic analysis (beta)')}">
-      ${overviewHtml()}
+      ${includeOverview?overviewHtml():''}
       <p><strong>Claude Code</strong> · ${esc(identity || text('계정 미확인','Account not verified'))}${account?.subscription_type ? ' · '+esc(account.subscription_type) : ''}</p>
       <p class="s">${esc(scope().repository ? connectionDisplayName(scope().repository) : text('연결한 코드 전체','All connected repositories'))} · ${esc(S.branch)}${targets.length?' · '+targets.join(', '):''}</p>
       <p class="s">${text('선택한 코드가 Claude로 전송되며 구독 한도가 적용됩니다.','Claude receives the selected code. Subscription usage limits apply.')}</p>
@@ -284,6 +284,6 @@ const AnalysisRun = (() => {
   function open() { syncScope(); if (!provider && !providerBusy) void providers(); else void check(); }
   window.addEventListener('focus', () => { syncScope(); void check(); });
   document.addEventListener('visibilitychange', () => { clearTimeout(timer); if (!document.hidden) { syncScope(); void check(); } });
-  return {syncScope, open, html, bind, stateLabel, check};
+  return {syncScope, open, html, overviewHtml, bind, stateLabel, check};
 })();
 AnalysisRun.syncScope();

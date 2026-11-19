@@ -304,7 +304,7 @@ assert(!$('analysisPreview0'),'Program from a previous commit is hidden');
     def test_entry_points_offer_both_app_run_and_existing_mcp_copy(self):
         self.assertIn('<script src="analysis-run.js"></script>', UI)
         self.assertIn('id="automaticAnalysis"', UI)
-        self.assertIn("AnalysisRun.html()", UI)
+        self.assertLess(UI.index("AnalysisRun.overviewHtml()"),UI.index("AnalysisRun.html(false)"))
         self.assertIn('id="cpAgent"', UI)
         self.assertIn('data-analysis-task=', UI)
         for entry in ('remakeSys', 'requestBriefing', 'mk', 'regroup'):
