@@ -786,7 +786,9 @@ class Flows(unittest.TestCase):
     def test_reanalysis_server_only_detail_and_result_destinations(self):
         self.check(r'''
  window.appAnalysisFixture=true;window.completeAppAnalysis=true;
+ S.projectInfo.repositories.find(r=>r.id==='api').github_collection={state:'unavailable',last_success_at:'2026-01-01T00:00:00Z'};
  S.projectInfo.repositories.find(r=>r.id==='api').analysis={dev:{stale:true}};renderRepositories();
+ assert($('repository-bar').innerText.includes(tr('GitHub 작업 정보 미확인')) && $('repository-bar').innerText.includes(tr('최근 확인')),'Unavailable GitHub data remains separate from the local map status');
  document.querySelector('[data-reanalyze="api"]').click();await wait();
  await $('startAppAnalysis').onclick();await wait();
  let sent=calls.filter(c=>c.command==='analysis_run_start').at(-1).args.scope;
