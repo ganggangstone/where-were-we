@@ -2,6 +2,7 @@
 import ast
 import re
 from collections import Counter, defaultdict
+from html.parser import HTMLParser
 
 METHODS = {'GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'}
 
@@ -20,7 +21,7 @@ def _literal(call, key, default):
     return arg.value if isinstance(arg, ast.Constant) and isinstance(arg.value, str) else None
 
 
-def python_routes(tree, file):
+def python_routes(tree, file, external=None):
     """Recognize module-level FastAPI apps and routers included in the same module."""
     aliases = {}
     assignments = Counter()
@@ -39,7 +40,13 @@ def python_routes(tree, file):
     routers = {}
     handlers = defaultdict(list)
     routes = []
+    import_lines = {}
     for node in tree.body:
+        if isinstance(node, ast.ImportFrom) and node.module:
+            for alias in node.names:
+                local = alias.asname or alias.name
+                if imported[local] == 1 and not assignments[local]:
+                    import_lines[local] = (node.lineno, alias.name)
         if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
             name, value = node.targets[0].id, node.value
             if assignments[name] != 1 or not isinstance(value, ast.Call) or not isinstance(value.func, ast.Name):
@@ -72,14 +79,22 @@ def python_routes(tree, file):
             call = node.value
             if not isinstance(call.func, ast.Attribute) or call.func.attr != 'include_router' or not isinstance(call.func.value, ast.Name) or call.func.value.id not in apps:
                 continue
-            if len(call.args) != 1 or not isinstance(call.args[0], ast.Name) or call.args[0].id not in routers:
+            if len(call.args) != 1 or not isinstance(call.args[0], ast.Name):
                 continue
             name = call.args[0].id
             prefix = _literal(call, 'prefix', '')
             if prefix != '' and not _path(prefix):
                 continue
+            if name not in routers:
+                if external is not None and name in import_lines:
+                    line, symbol = import_lines[name]
+                    external['mounts'].append((file, line, symbol, prefix, node.lineno))
+                continue
             for route in handlers[name]:
                 routes.append({**route, 'path': prefix + routers[name] + route['path'], 'mounts': [{'file': file, 'line': node.lineno}]})
+    if external is not None:
+        for name, prefix in routers.items():
+            external['routers'][file, name] = [{**r, 'path':prefix+r['path']} for r in handlers[name]]
     return routes
 
 
@@ -133,6 +148,63 @@ def javascript_requests(root, file):
         if method and method.upper() in METHODS:
             requests.append({'method': method.upper(), 'path': path, 'client': {'file': file, 'line': call.start_point[0] + 1}})
     return requests
+
+
+class _InlineScripts(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=False)
+        self.inert = []
+        self.script = False
+        self.sources = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag in ('template', 'noscript', 'textarea', 'style', 'title', 'iframe'):
+            self.inert.append(tag)
+        if tag == 'script':
+            attrs = dict(attrs)
+            kind = (attrs.get('type') or '').strip().lower()
+            self.script = not self.inert and 'src' not in attrs and kind in ('', 'module', 'application/javascript', 'text/javascript')
+
+    def handle_endtag(self, tag):
+        if tag == 'script':
+            self.script = False
+        if self.inert and tag == self.inert[-1]:
+            self.inert.pop()
+
+    def handle_data(self, data):
+        if self.script:
+            self.sources.append((self.getpos()[0]-1, data))
+
+
+def html_requests(raw, file, parse):
+    try:
+        text = raw.decode('utf-8')
+    except UnicodeError:
+        return []
+    html = _InlineScripts()
+    try:
+        html.feed(text)
+        html.close()
+    except (ValueError, AssertionError):
+        # HTMLParser rejects unknown marked sections; keep malformed inputs unresolved.
+        return []
+    requests = []
+    for offset, source in html.sources:
+        for request in javascript_requests(parse(source.encode()).root_node, file):
+            request['client']['line'] += offset
+            requests.append(request)
+    return requests
+
+
+def mounted_routes(external, imports):
+    targets = {(edge['file'],edge['line']):edge['target'] for edge in imports}
+    result = []
+    for file, line, symbol, prefix, mount_line in external['mounts']:
+        target = targets.get((file, line))
+        for route in external['routers'].get((target, symbol), []):
+            result.append({**route, 'path':prefix+route['path'],
+                           'mounts':[{'file': file, 'line': line}, {'file':file, 'line':mount_line}]})
+    return result
 
 
 def connect(routes, requests):

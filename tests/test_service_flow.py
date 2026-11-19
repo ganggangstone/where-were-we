@@ -44,3 +44,22 @@ app.include_router(router, prefix=runtime_prefix)
                        b"function go(fetch){fetch('/x')}", b"fetch('//other/x')", b"fetch('/x',{method:compute()})"):
             root = structure_index._parser('javascript').parse(sample).root_node
             self.assertEqual(service_flow.javascript_requests(root, 'ui.js'), [], sample)
+
+    def test_inline_script_and_explicit_import_mount_keep_three_source_sites(self):
+        source = b"""<script src="/remote.js">fetch('/external')</script>
+<template><script>fetch('/inert')</script></template>
+<script>
+  fetch('/todos');
+</script>"""
+        requests = service_flow.html_requests(source, 'index.html', structure_index._parser('javascript').parse)
+        self.assertEqual(requests, [{'method':'GET', 'path':'/todos', 'client':{'file':'index.html','line':4}}])
+        external = {'mounts':[], 'routers':{}}
+        server = "from fastapi import APIRouter\nrouter = APIRouter()\n@router.get('/todos')\ndef todos(): pass"
+        app = "from fastapi import FastAPI\nfrom api import router as jobs\napp = FastAPI()\napp.include_router(jobs)"
+        for tree, file in [(app, 'main.py'), (server, 'api.py')]:
+            self.assertEqual(service_flow.python_routes(ast.parse(tree), file, external), [])
+        self.assertEqual(service_flow.mounted_routes(external, []), [])
+        routes = service_flow.mounted_routes(external, [{'file':'main.py','line':2,'target':'api.py'}])
+        connection = service_flow.connect(routes, requests)['connections'][0]
+        self.assertEqual(connection['mounts'], [{'file':'main.py','line':2},{'file':'main.py','line':4}])
+        self.assertEqual(connection['server'], {'file':'api.py','line':3,'function':'todos'})

@@ -18,8 +18,9 @@ MAX_DECLARATIONS = 20_000
 MAX_IMPORTS = 20_000
 
 
-VERSION = 2
+VERSION = 3
 JS_EXTENSIONS = {'.js', '.jsx', '.mjs', '.cjs'}
+LANGUAGES = ('python', 'javascript', 'typescript', 'html')
 TS_EXTENSIONS = {'.ts', '.tsx', '.mts', '.cts'}
 SUFFIXES = JS_EXTENSIONS | TS_EXTENSIONS
 
@@ -136,7 +137,7 @@ def build(repo, commit, excluded=None):
             denied.add(oid)
             continue
         suffix = PurePosixPath(file).suffix
-        lang = 'python' if suffix == '.py' else 'javascript' if suffix in JS_EXTENSIONS else 'typescript' if suffix in TS_EXTENSIONS else None
+        lang = 'python' if suffix == '.py' else 'javascript' if suffix in JS_EXTENSIONS else 'typescript' if suffix in TS_EXTENSIONS else 'html' if suffix in ('.html','.htm') else None
         if lang:
             languages[file] = lang
             candidates[file] = (oid, int(size))
@@ -153,6 +154,7 @@ def build(repo, commit, excluded=None):
     files = []
     routes = []
     requests = []
+    external = {'routers':{}, 'mounts':[]}
     imports = []
     parsed = set()
     consumed = declarations = unresolved = 0
@@ -160,7 +162,7 @@ def build(repo, commit, excluded=None):
     truncated = False
     # A large repository can exhaust the file limit within a single language.
     groups = [[(f, e) for f, e in candidates.items() if languages[f] == lang]
-              for lang in ('python', 'javascript', 'typescript')]
+              for lang in LANGUAGES]
     ordered = (pair for group in zip_longest(*groups) for pair in group if pair is not None)
     for file, entry in ordered:
         size = entry[1]
@@ -172,6 +174,15 @@ def build(repo, commit, excluded=None):
     unavailable = set()
     for file, raw in _blobs(git, env, selected):
         language = languages[file]
+        if language == 'html':
+            try:
+                requests.extend(service_flow.html_requests(raw,file,_parser('javascript').parse))
+            except ImportError:
+                unavailable.add(language)
+                continue
+            files.append({'file':file, 'language':'html', 'declarations':[]})
+            parsed.add(file)
+            continue
         if language != 'python':
             try:
                 script = _script(file, raw, candidates)
@@ -198,7 +209,7 @@ def build(repo, commit, excluded=None):
         except (SyntaxError, ValueError, UnicodeError, RecursionError):
             continue
         parsed.add(file)
-        routes.extend(service_flow.python_routes(tree, file))
+        routes.extend(service_flow.python_routes(tree, file, external))
         rows = []
         stack = [(tree, '')]
         while stack:
@@ -243,13 +254,14 @@ def build(repo, commit, excluded=None):
             stack.extend((child, prefix) for child in reversed(list(ast.iter_child_nodes(node))))
         files.append({'file': file, 'language':'python', 'declarations': rows})
     resolved = [edge for edge in imports if edge['target'] in parsed]
+    routes.extend(service_flow.mounted_routes(external,resolved))
     unresolved += len(imports) - len(resolved)
     coverage = {'candidate_files': len(candidates), 'indexed_files': len(files),
                 'skipped_files': len(candidates) - len(files), 'unsupported_files': unsupported,
                 'unresolved_imports': unresolved, 'truncated': truncated}
     coverage['languages'] = {lang:{'candidate_files':sum(languages[f]==lang for f in candidates),
                                    'indexed_files':sum(languages[f]==lang for f in parsed)}
-                             for lang in ('python','javascript','typescript')}
+                             for lang in LANGUAGES}
     coverage['unavailable_languages'] = sorted(unavailable)
     return {'version':VERSION,'commit': commit, 'files': files, 'imports': resolved, 'coverage': coverage,
             'service_flow':service_flow.connect(routes, requests)}
