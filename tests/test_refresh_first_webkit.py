@@ -45,6 +45,11 @@ class RefreshFirstWebKit(unittest.TestCase):
  await doRefresh();
  const cli=()=>$('map').querySelector('[data-cli-entries]');
  check(cli().querySelectorAll('details').length===12 && !$('moduleDetails').open,'CLI commands precede module internals');
+ check(!$('map').querySelector('[data-readme-features]'),'No empty section on snapshots without feature documentation');
+ index.documented_features=[{text:'Lists <entries>.',file:'README.md',line:12}];await doRefresh();
+ const documented=$('map').querySelector('[data-readme-features]');
+ check(documented && !documented.open && cli().compareDocumentPosition(documented) & Node.DOCUMENT_POSITION_FOLLOWING,'Documented features come after verified CLI commands');
+ documented.querySelector('summary').click();check(documented.innerText.includes('Lists <entries>.') && !documented.querySelector('entries') && documented.innerText.includes('README.md:12') && documented.innerText.includes(index.commit.slice(0,12)),'README wording, exact source and commit remain available');
  const firstCommand=cli().querySelector('details');firstCommand.querySelector('summary').click();
  check(firstCommand.innerText.includes('pyproject.toml:8') && firstCommand.innerText.includes('tool/cli.py:14') && firstCommand.innerText.includes('main'),'Python command shows actual registration and callable');
  cli().querySelector('[data-cli-page="1"]').click();const npm=cli().querySelector('details');npm.querySelector('summary').click();
