@@ -404,7 +404,7 @@ def extractor_id(home):
     c = tests_conf(home)
     from pathlib import Path
     base=Path(__file__).resolve().parent
-    raw = (base/'extract.py').read_bytes() + (base/'structure_index.py').read_bytes() + (base/'service_flow.py').read_bytes() + Path(__file__).read_bytes() + json.dumps(c,sort_keys=True,ensure_ascii=False).encode() + os.environ.get('WHERE_WERE_WE_LAYOUT','').encode()
+    raw = (base/'extract.py').read_bytes() + (base/'structure_index.py').read_bytes() + (base/'service_flow.py').read_bytes() + (base/'default_flow.py').read_bytes() + (base/'express_routes.py').read_bytes() + Path(__file__).read_bytes() + json.dumps(c,sort_keys=True,ensure_ascii=False).encode() + os.environ.get('WHERE_WERE_WE_LAYOUT','').encode()
     return hashlib.sha1(raw).hexdigest()[:10]
 
 
