@@ -256,6 +256,49 @@ func main() {}
             self.assertEqual(len(package['members']),8)
             self.assertEqual(updated['imports'],result['imports'])
 
+    def test_cobra_requires_returned_literal_and_direct_registered_constructor(self):
+        with tempfile.TemporaryDirectory() as root:
+            repo=Path(root)
+            git=lambda *a:subprocess.check_output(['git','-C',root,*a]).decode().strip()
+            git('init','-q')
+            (repo/'go.mod').write_text('module example.org/cli')
+            (repo/'main.go').write_text("""package main
+import ("github.com/spf13/cobra"; child "example.org/cli/child")
+func New() *cobra.Command {
+ cmd := &cobra.Command{Use:"root",Short:"Root command"}
+ cmd.AddCommand(child.New())
+ if enabled {cmd.AddCommand(child.Ignored())}
+ cmd.AddCommand(child.Dynamic())
+ return cmd
+}
+""")
+            (repo/'child').mkdir()
+            (repo/'child/commands.go').write_text("""package child
+import c "github.com/spf13/cobra"
+func New() *c.Command {
+ cmd := &c.Command{Use:"show [file]", Short:"Show the file"}
+ return cmd
+}
+func Dynamic() *c.Command {
+ cmd := &c.Command{Use:"maybe", Short:makeHelp()}
+ return cmd
+}
+func Ignored() *c.Command {
+ cmd := &c.Command{Use:"hidden",Short:"Hidden"}
+ return cmd
+}
+""")
+            git('add','.')
+            git('-c','user.name=Test','-c','user.email=test@example.invalid','commit','-qm','commands')
+            pin=git('rev-parse','HEAD')
+            rows=structure_index.build(root,pin)['cli_entries']
+            self.assertEqual(rows,[dict(kind='cobra_subcommand',command='root show',description='Show the file',
+                                        file='main.go',line=5,target='child/commands.go',target_line=4,description_line=4)])
+            (repo/'child/other.go').write_text((repo/'child/commands.go').read_text())
+            git('add','.')
+            git('-c','user.name=Test','-c','user.email=test@example.invalid','commit','-qm','ambiguous constructor')
+            self.assertEqual(structure_index.build(root,git('rev-parse','HEAD'))['cli_entries'],[])
+
     def test_bounded_selection_visits_sibling_code_and_keeps_auxiliary_evidence(self):
         paths=['aaa/examples/case'+str(i)+'.py' for i in range(30)]
         paths+=['services/a/worker'+str(i)+'.py' for i in range(30)]

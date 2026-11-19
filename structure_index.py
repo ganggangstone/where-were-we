@@ -10,6 +10,7 @@ import re
 import subprocess
 import warnings
 
+import cobra_commands
 import service_flow
 import default_flow
 import react_actions
@@ -23,7 +24,7 @@ MAX_DECLARATIONS = 20_000
 MAX_IMPORTS = 20_000
 
 
-VERSION = 18
+VERSION = 19
 JS_EXTENSIONS = {'.js', '.jsx', '.mjs', '.cjs'}
 LANGUAGES = ('python', 'javascript', 'typescript', 'html', 'go')
 TS_EXTENSIONS = {'.ts', '.tsx', '.mts', '.cts'}
@@ -123,6 +124,7 @@ def _go_structure(file, raw, module, directories, blocked):
     if root.has_error or not any(n.type == 'package_clause' for n in root.named_children):
         return None
     rows, edges, packages, missing = [], [], [], 0
+    paths = {}
     for decl in root.named_children:
         if decl.type == 'import_declaration':
             specs = [node for child in decl.named_children
@@ -139,8 +141,10 @@ def _go_structure(file, raw, module, directories, blocked):
                 if not members or posixpath.dirname(file) == folder:
                     missing += 1
                 elif len(members) == 1:
+                    paths[path.start_point.row + 1, name] = folder
                     edges.append({'file':file,'line':path.start_point.row + 1,'target':members[0]})
                 else:
+                    paths[path.start_point.row + 1, name] = folder
                     packages.append({'file':file,'line':path.start_point.row + 1,'package':name,
                                      'directory':folder or '.', 'member_count':len(members),'members':members[:8]})
             continue
@@ -152,7 +156,7 @@ def _go_structure(file, raw, module, directories, blocked):
                 name = node.child_by_field_name('name')
                 if name:
                     rows.append({'kind':kind,'name':name.text.decode('utf-8','replace'),'line':name.start_point.row+1})
-    return rows, edges, packages, missing
+    return rows, edges, packages, missing, cobra_commands.facts(root, file, paths)
 
 
 def _python_tree(raw):
@@ -554,6 +558,7 @@ def build(repo, commit, excluded=None, *, only_file=None):
         consumed += size
     module = None
     package_imports = []
+    cobra_facts = {}
     go_targets = {folder:paths for folder, paths in go_files.items() if all(path in candidates for path in paths)}
     if any(languages[f] == 'go' for f, _ in selected) and go_config and go_config[0] not in denied and not workspace:
         config = next(_blobs(git, env, [('go.mod', go_config)]))[1]
@@ -575,7 +580,9 @@ def build(repo, commit, excluded=None, *, only_file=None):
                 continue
             if result is None:
                 continue
-            rows, edges, packages, missing = result
+            rows, edges, packages, missing, facts = result
+            if inside_module and module and not file.endswith('_test.go'):
+                cobra_facts[file] = facts
             limited_packages = packages[:MAX_IMPORTS - len(package_imports)]
             truncated |= len(limited_packages) != len(packages)
             package_imports.extend(limited_packages)
@@ -704,6 +711,7 @@ def build(repo, commit, excluded=None, *, only_file=None):
     if bounded:coverage['selection']='bounded_directory_sample'
     eligible_manifests = {path: entry for path, entry in manifests.items() if entry[0] not in denied}
     cli_entries, manifests_read = _cli_entries(git, env, eligible_manifests, {f for f, oid in tracked.items() if oid not in denied}, files)
+    cli_entries.extend(cobra_commands.connect(cobra_facts, go_targets, 1024))
     coverage['cli_manifests_read'] = manifests_read
     coverage['cli_manifests_total'] = len(eligible_manifests)
     preferred = ['package.json','pyproject.toml','readme.md','readme.rst','readme.txt','readme']
