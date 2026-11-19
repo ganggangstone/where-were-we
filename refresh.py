@@ -52,6 +52,25 @@ if os.environ.get("WHERE_WERE_WE_MANAGED_CODE")=="1":git("remote", "set-head", "
 PINNED = {role: git("rev-parse", "--verify", ref + "^{commit}") for role,ref in mapcore.configured_refs().items() if ref}
 os.environ["WHERE_WERE_WE_COMMITS"] = json.dumps(PINNED)
 log, moved = "", {}
+extracted = {}
+refs = mapcore.configured_refs()
+
+def extract_basic(commit, destination):
+    """Multiple roles and comparisons can point at one immutable tree in this refresh."""
+    previous = extracted.get(commit)
+    if previous and previous != destination:
+        basic = project_store.read(Path(previous))
+        if basic and (basic.get('inventory') or {}).get('commit') == commit:
+            target = Path(destination)
+            old = project_store.read(target)
+            if old and old.get('commit') != basic['commit']:
+                project_store.atomic(target.with_suffix('.prev.json'),old)
+            project_store.atomic(target,{**basic,'ref':refs.get(target.stem,commit)})
+            return f'{target.stem}: reused basic map for {commit[:8]}\n'
+    output = run(os.path.join(HERE,'extract.py'),REPO,commit,destination)
+    extracted[commit] = destination
+    return output
+
 for b in ("dev", "main"):
     ref = PINNED.get(b)
     if not ref: continue
@@ -77,9 +96,9 @@ for b in ("dev", "main"):
         log += f"{b}: AI map retained; " + ("AI analysis required\n" if cur['analysis']['stale'] else "current\n")
         continue
     if have != now:
-        log += run(os.path.join(HERE, "extract.py"), REPO, ref, path); moved[b] = (have, now)
+        log += extract_basic(ref,path); moved[b] = (have, now)
     elif cur.get("extractor") != mapcore.extractor_id(HOME):  # 테스트 규칙 등 뽑는 방법만 바뀌었으면 같은 커밋을 다시 뽑는다
-        log += run(os.path.join(HERE, "extract.py"), REPO, ref, path)
+        log += extract_basic(ref,path)
     else:
         log += f"origin/{b} ({now}) 그대로\n"
 # --- 설정에서 고른 기준 시각 뒤에 달라진 것 ---
@@ -97,7 +116,7 @@ def base_map(branch, commit):
             value=json.loads(Path(path).read_text())
             if value.get('commit') and commit.startswith(value['commit']) and value.get('extractor')==mapcore.extractor_id(HOME) and (value.get('analysis') or {}).get('source')!='ai':return value
     path=os.path.join(HOME,branch+'.base.json')
-    run(os.path.join(HERE,'extract.py'),REPO,commit,path)
+    extract_basic(commit,path)
     return json.loads(Path(path).read_text())
 
 bases={}
@@ -109,7 +128,7 @@ for branch, pinned in PINNED.items():
     if (cur.get('analysis') or {}).get('source')=='ai':
         # Compare like extractors without overwriting the saved AI map or calling AI.
         path=os.path.join(HOME,branch+'.current-basic.json')
-        run(os.path.join(HERE,'extract.py'),REPO,pinned,path)
+        extract_basic(pinned,path)
         cur=json.loads(Path(path).read_text())
         log += branch+': structural comparison uses basic collection; AI-only details require agent analysis\n'
     delta=mapcore.diff(mapcore.Map(PROJECT,branch,base_map(branch,base)),mapcore.Map(PROJECT,branch,cur))
