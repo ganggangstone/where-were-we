@@ -225,6 +225,16 @@ releaseStatus(null);await flush();
 assert(!calls.some(c=>c.command==='refresh'),'Switching scopes never collects');
 ''')
 
+    def test_interruption_distinguishes_possible_redelivery_before_explicit_retry(self):
+        self.check_js(r'''
+status=runRecord('failed',{error:{code:'interrupted'},input_stats:{calls:1}});
+await flush();await AnalysisRun.check();await open();assert($('retryDeliveryWarning') && $('retryAppAnalysis') && $('insp').innerHTML.includes('aria-describedby="retryDeliveryWarning"') && $('insp').innerHTML.includes('Retrying may send it again.'),'Provider delivery uncertainty accompanies retry');
+S.lang='ko';status.lang=S.lang;AnalysisRun.syncScope();await flush();assert($('insp').innerHTML.includes('같은 요청이 재전송될 수 있습니다.'),'Korean warning');
+status.state='cancelled';status.error=null;await AnalysisRun.check();assert(!$('retryDeliveryWarning'),'Manual cancellation has no lost-worker warning');
+status.state='failed';status.error={code:'interrupted'};status.input_stats.calls=0;await AnalysisRun.check();assert(!$('retryDeliveryWarning'),'Startup before a model attempt has no duplicate-delivery warning');
+status.error={code:'invalid_result'};status.input_stats.calls=1;await AnalysisRun.check();assert(!$('retryDeliveryWarning') && !count('analysis_run_retry'),'A different error or viewing warnings cannot retry');
+''')
+
     def test_cancel_retry_interrupted_recovery_and_new_account_snapshot(self):
         self.check_js(r'''
 status=runRecord('failed',{error:{code:'interrupted',message:'stopped'},tasks:[],completed_tasks:[{task:'analysis'}]});
