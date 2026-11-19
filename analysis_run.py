@@ -998,6 +998,22 @@ def _overview_anchors(index):
         anchors[file]=rows
     return anchors,flows
 
+def _feature_groups(groups, connections):
+    # Labels are optional. A malformed label must not discard verified source evidence.
+    valid={edge['id'] for edge in connections}
+    if not isinstance(groups,list) or len(groups)>len(valid):return []
+    assigned=set();names=set();result=[]
+    for group in groups:
+        if not isinstance(group,dict):continue
+        name=group.get('name');ids=group.get('connection_ids')
+        if not isinstance(name,str) or not 1<=len(name.strip())<=120 or name.strip().casefold() in names:continue
+        if not isinstance(ids,list) or not 1<=len(ids)<=len(valid):continue
+        if any(type(n)!=int or n not in valid or n in assigned for n in ids) or len(set(ids))!=len(ids):continue
+        assigned.update(ids);names.add(name.strip().casefold())
+        result.append({'name':name.strip(),'connection_ids':ids})
+    return result
+
+
 def _quick_overview(repo,request,language,invoke,cancelled,deadline,raw):
     """One bounded call per repository. A reference selects an actual pinned line."""
     commit=request['commit']
@@ -1040,17 +1056,20 @@ def _quick_overview(repo,request,language,invoke,cancelled,deadline,raw):
     for flow in flows:
         refs=[by_line.get((side['file'],side['line'])) for side in (flow['client'],flow['server'])]
         if all(refs):
-            connection={'method':flow['method'],'path':flow['path'],'client_ref':refs[0],'server_ref':refs[1]}
+            connection={'id':len(connections)+1,'method':flow['method'],'path':flow['path'],'client_ref':refs[0],'server_ref':refs[1]}
             if flow.get('basis')=='path_template':
                 connection.update(basis='path_template',server_path=flow['server_path'])
             connections.append(connection)
     if connections:
         packet['connections']=connections
+        packet['schema']['feature_groups']=[{'name':'short feature name','connection_ids':[connections[0]['id']]}]
+        packet['prompt']+=' Group related connections by directly evidenced user or service function. Use each supplied connection id at most once. Leave unclassified connections out of feature_groups.'
         packet['prompt']+=' Describe the evidenced request and matching handler together. Connections are static evidence, not observed traffic. For path_template, describe only a possible match when the parameter is one path segment; do not claim an exact URL or guaranteed delivery.'
         result['connections']=[{k:v for k,v in edge.items() if k not in ('client_ref','server_ref')} |
                                {'client':references[edge['client_ref']],'server':references[edge['server_ref']]}
                                for edge in connections]
     answer=invoke(packet)
+    if connections:result['feature_groups']=_feature_groups(answer.get('feature_groups'),connections)
     items=answer.get('items')
     if not isinstance(items,list) or len(items)>12 or answer.get('needs'):raise InvalidClaim('Invalid initial overview response')
     for item in items:

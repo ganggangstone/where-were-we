@@ -205,12 +205,15 @@ class Preview(unittest.TestCase):
                 self.assertEqual((server,row['line']),(feature+'.py',3))
                 self.assertIn('@app.get',row['text'])
                 items.append({'name':feature,'description':'Loads '+feature,'ref':edge['server_ref']})
-            return {'items':items}
+            reports=next(edge for edge in packet['connections'] if edge['path']=='/reports')
+            return {'items':items,'feature_groups':[{'name':'Reporting','connection_ids':[reports['id']]}]}
         done=analysis_run.run(run['id'],executor)
         self.assertEqual(done['state'],'completed',done.get('error'))
         self.assertEqual(len(packets),1)
         saved=analysis_run.status(project='demo',lang='en')['saved_overviews'][0]
         self.assertEqual(len(saved['items']),2)
+        reports=next(edge for edge in saved['connections'] if edge['path']=='/reports')
+        self.assertEqual(saved['feature_groups'],[{'name':'Reporting','connection_ids':[reports['id']]}])
         self.assertEqual({edge['path'] for edge in saved['connections']},{'/orders','/reports'})
         for edge in saved['connections']:
             for side in (edge['client'],edge['server']):
@@ -226,12 +229,28 @@ class Preview(unittest.TestCase):
             self.assertEqual(edge['basis'],'path_template')
             self.assertEqual(edge['server_path'],'/items/:id')
             self.assertIn('one path segment',packet['prompt'])
-            return {'items':[{'name':'Edit item','description':'May reach the item handler.','ref':edge['client_ref']}]}
+            return {'items':[{'name':'Edit item','description':'May reach the item handler.','ref':edge['client_ref']}],
+                    'feature_groups':[{'name':'Item editing','connection_ids':[edge['id']]}]}
         run=self.prepare(intent={'task':'overview','targets':[]})
         done=analysis_run.run(run['id'],executor)
         self.assertEqual(done['state'],'completed',done.get('error'))
         edge,=done['overviews']['service']['connections']
+        self.assertEqual(done['overviews']['service']['feature_groups'],[{'name':'Item editing','connection_ids':[edge['id']]}])
         self.assertEqual((edge['basis'],edge['path'],edge['server_path']),('path_template','/items/{id}','/items/:id'))
+
+    def test_feature_groups_only_accept_unique_known_ids_and_bounded_labels(self):
+        edges=[{'id':1},{'id':2}]
+        group=lambda name,ids:{'name':name,'connection_ids':ids}
+        valid=group('Orders',[1])
+        for ids in ([1,1],[3],[True],[{}],[],[1,2,3],'1'):
+            self.assertEqual(analysis_run._feature_groups([group('Orders',ids)],edges),[])
+        for name in ('',' '*4,'long'*31,None):
+            self.assertEqual(analysis_run._feature_groups([group(name,[1])],edges),[])
+        self.assertEqual(analysis_run._feature_groups([valid,group('Orders',[2])],edges),[valid])
+        self.assertEqual(analysis_run._feature_groups([valid,group('Other',[1])],edges),[valid])
+        self.assertEqual(analysis_run._feature_groups([valid]*3,edges),[])
+        self.assertEqual(analysis_run._feature_groups(None,edges),[])
+        self.assertEqual(analysis_run._feature_groups([group('Fulfillment',[1,2])],edges),[group('Fulfillment',[1,2])])
 
     def test_legacy_overview_uses_current_git_and_config_pins_despite_an_older_basic_map(self):
         name='legacy'
