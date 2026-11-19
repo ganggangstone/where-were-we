@@ -18,11 +18,14 @@ class RefreshFirstWebKit(unittest.TestCase):
  const check=(value,why)=>{if(!value)throw Error(why)};
  for(let i=0;i<100&&!window.appControlReady;i++)await new Promise(r=>setTimeout(r,20));
  const pin='aaaaaaaa1111', file='worker.cjs';
- const index={repository:'web',commit:pin,version:11,coverage:{indexed_files:1,candidate_files:1,languages:{javascript:{indexed_files:1,candidate_files:1}}},
+ const index={repository:'web',commit:pin,version:11,project_description:{text:'Build <small> modules.',file:'README.md',line:3},coverage:{indexed_files:1,candidate_files:1,languages:{javascript:{indexed_files:1,candidate_files:1}}},
    files:[{file,language:'javascript',declarations:[{kind:'function',name:'work',line:1}]}],imports:[],
    service_flow:{connections:[],coverage:{requests:0,routes:0},feature_groups:[]}};
  window.mutateBundle=b=>{b.dev.structure_indexes=[index];b.project.repositories[0].fingerprint='pin'};
  await doRefresh();
+ const purpose=()=>$('map').querySelector('[data-project-purpose]');
+ check(purpose().querySelector('summary').textContent==='Build <small> modules.' && !purpose().querySelector('small') && !purpose().open,'Document text is shown verbatim before source details');
+ purpose().querySelector('summary').click();check(purpose().innerText.includes('README.md:3') && purpose().innerText.includes(pin),'The literal description retains its pinned citation');
  check(S.view==='sys' && $('map').innerText.includes('work'),'A CLI refresh must open local declarations');
  check(!$('map').querySelector('[data-http-flow]') && !$('automaticAnalysis'),'Empty HTTP graph and optional AI stay hidden');
  check(!calls.some(c=>['analysis_run_start','analysis_plan','analysis_providers'].includes(c.command)),'Refresh must not prepare AI');
@@ -67,6 +70,7 @@ class RefreshFirstWebKit(unittest.TestCase):
  window.mutateBundle=b=>{b.dev.structure_indexes=[{...index,files:[],imports:[],service_flow:null}];b.dev.inventories=[{repository:'web',commit:pin,files:82,paths,paths_truncated:true,directories:[['src',82]]}]};
  await doRefresh();
  const box=()=>$('map').querySelector('[data-inventory]');
+ check(purpose().compareDocumentPosition(box()) & Node.DOCUMENT_POSITION_FOLLOWING,'The source description precedes an unsupported-language inventory');
  check(box().open && box().innerText.includes(pin) && box().innerText.includes(tr('파일 경로 표시 한도 도달')),'Unsupported repositories open a pinned, explicitly partial path inventory');
  box().querySelector('[data-inventory-dir="src"]').click();
  check(box().querySelectorAll('li').length===40 && !box().innerText.includes('item79.go'),'Directory pages have a bounded DOM');

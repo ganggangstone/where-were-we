@@ -1516,7 +1516,14 @@ function cliEntriesView(entries,state,evidence) {
   const controls=pages>1?`<div class="ctl"><button class="btn quiet" data-cli-page="${page-1}" ${page===0?'disabled':''}>${tr('이전')}</button><span>${page+1} / ${pages}</span><button class="btn quiet" data-cli-page="${page+1}" ${page+1===pages?'disabled':''}>${tr('다음')}</button></div>`:'';
   return `<section class="sect" data-cli-entries><h2>${tr('실행 명령 (베타)')}</h2>${rows.join('')}${controls}</section>`;
 }
-function structureIndexView(m) {
+function purposeView(m,index) {
+  const description=index?.project_description;
+  if(!description?.text || !description.file || !Number.isInteger(description.line) || description.line<1)return '';
+  const file=index.repository?index.repository+'/'+description.file:description.file;
+  const url='zed://file'+codeLocation(m,file).split('/').map(encodeURIComponent).join('/')+':'+description.line;
+  return `<details class="sect" data-project-purpose><summary>${esc(description.text)}</summary><div class="module-scope s"><code title="${esc(index.commit)}">${esc(index.commit.slice(0,12))}</code> <a class="lnk mono" href="${esc(url)}" data-url="${esc(url)}" title="${esc(tr('작업 폴더에서 열기'))}">${esc(description.file)}:${description.line}</a></div></details>`;
+}
+function structureIndexView(m,includePurpose=true) {
   const indexes=m.structure_indexes || (m.structure_index ? [m.structure_index] : []);
   if (!indexes.length) return '';
   const scope=JSON.stringify([S.project,S.repository,S.branch,indexes.map(index=>[index.repository,index.commit])]);
@@ -1557,7 +1564,7 @@ function structureIndexView(m) {
   const cli=cliEntriesView(index.cli_entries,state,evidence);
   const http=serviceFlowView(index.service_flow,state,evidence);
   const hasGroups=!!cli || !!index.service_flow?.feature_groups?.length;
-  const heading=`${status}${cli}${http}${hasGroups?`<details id="moduleDetails" ${state.moduleOpen?'open':''}><summary>${tr('모듈 연결 (베타)')}</summary>`:`<h2>${tr('모듈 연결 (베타)')}</h2>`}`;
+  const heading=`${includePurpose?purposeView(m,index):''}${status}${cli}${http}${hasGroups?`<details id="moduleDetails" ${state.moduleOpen?'open':''}><summary>${tr('모듈 연결 (베타)')}</summary>`:`<h2>${tr('모듈 연결 (베타)')}</h2>`}`;
   const end=hasGroups?'</details>':'';
   const boundary=coverage.languages ? 'Python import · JS/TS 상대 경로 import·재내보내기' : '로컬 Python import';
   const scopeNote=`<div class="sect s" data-module-coverage><strong>${tr('확인 범위')}</strong> · ${tr(boundary)}${index.version>=11?' · '+tr('로컬 .cjs require'):''}${languageCounts.length?`<div>${languageCounts.join(' · ')}</div>`:''}${gaps.length?`<div role="status">${gaps.join(' · ')}</div>`:''}</div>`;
@@ -1973,8 +1980,8 @@ function render() {
   if(sys){
     const indexes=m.structure_indexes || (m.structure_index?[m.structure_index]:[]);
     const hasPaths=(m.inventories || [m.inventory]).some(row=>row?.paths?.length);
-    structure=hasPaths && !indexes.some(index=>index.files?.length || index.cli_entries?.length)
-      ? inventoryView(m)+structureIndexView(m) : structureIndexView(m)+inventoryView(m);
+    structure=hasPaths && indexes.length<=1 && !indexes.some(index=>index.files?.length || index.cli_entries?.length)
+      ? purposeView(m,indexes[0])+inventoryView(m)+structureIndexView(m,false) : structureIndexView(m)+inventoryView(m);
   }
   $('map').innerHTML = searchPanel(m) + (view === 'changes' ? changesView(m) : sys ? structure+sysView(m) : view === 'focus' ? focusView(m) : view === 'feat' ? featView(m) : storyMap(m)); $('insp').innerHTML = view === 'changes' ? changesInspector(m) : sys ? sysInspector(m) : view === 'focus' ? focusFeatureInspector(m) : view === 'feat' ? featInspector(m) : mapInspector(m);
   S._wires = null;
