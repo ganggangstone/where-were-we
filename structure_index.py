@@ -12,6 +12,7 @@ import warnings
 import service_flow
 import default_flow
 import react_actions
+import sqlmodel_steps
 from express_routes import app_factories, express_routes, factory_routes
 
 MAX_FILES = 2048
@@ -21,7 +22,7 @@ MAX_DECLARATIONS = 20_000
 MAX_IMPORTS = 20_000
 
 
-VERSION = 7
+VERSION = 8
 JS_EXTENSIONS = {'.js', '.jsx', '.mjs', '.cjs'}
 LANGUAGES = ('python', 'javascript', 'typescript', 'html')
 TS_EXTENSIONS = {'.ts', '.tsx', '.mts', '.cts'}
@@ -93,6 +94,22 @@ def _script(file, raw, candidates):
     return rows, edges, unresolved, requests, default_flow.sdk_facts(root,file), express_routes(root,file), app_factories(root,file), react_actions.facts(root,requests)
 
 
+def _python_tree(raw):
+    try:
+        return ast.parse(raw)
+    except SyntaxError as error:
+        # The bundled 3.13 parser predates PEP 758. Add the optional parentheses
+        # only to the simple exception list on the line rejected by that parser.
+        if 'multiple exception types' not in error.msg or not error.lineno:raise
+        lines=raw.splitlines(keepends=True)
+        index=error.lineno-1
+        pattern=rb'^([ \t]*except\*?[ \t]+)([A-Za-z_]\w*(?:[ \t]*,[ \t]*[A-Za-z_]\w*)+)([ \t]*:)'
+        revised,n=re.subn(pattern,rb'\1(\2)\3',lines[index],count=1)
+        if not n:raise
+        lines[index]=revised
+        return ast.parse(b''.join(lines))
+
+
 def _blobs(git, env, selected):
     if not selected:
         return
@@ -160,6 +177,7 @@ def build(repo, commit, excluded=None):
     requests = []
     external = {'routers':{}, 'mounts':[]}
     python_modules = {}
+    sql_modules = {}
     sdk_modules = {}
     action_modules = {}
     factory_modules = {}
@@ -217,11 +235,12 @@ def build(repo, commit, excluded=None):
         try:
             with warnings.catch_warnings():
                 warnings.simplefilter('ignore', SyntaxWarning)
-                tree = ast.parse(raw)
+                tree = _python_tree(raw)
         except (SyntaxError, ValueError, UnicodeError, RecursionError):
             continue
         parsed.add(file)
         python_modules[file]=default_flow.python_facts(tree)
+        sql_modules[file]=sqlmodel_steps.facts(tree)
         routes.extend(service_flow.python_routes(tree, file, external))
         rows = []
         stack = [(tree, '')]
@@ -272,6 +291,7 @@ def build(repo, commit, excluded=None):
     routes.extend(default_flow.default_routes(python_modules,external['routers']))
     requests.extend(default_flow.sdk_requests(sdk_modules))
     react_actions.attach(action_modules,resolved,requests)
+    sqlmodel_steps.attach(sql_modules,routes)
     unresolved += len(imports) - len(resolved)
     coverage = {'candidate_files': len(candidates), 'indexed_files': len(files),
                 'skipped_files': len(candidates) - len(files), 'unsupported_files': unsupported,
