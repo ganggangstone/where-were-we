@@ -114,8 +114,8 @@ async fn file_structure(app: tauri::AppHandle, project: String, repository: Stri
 }
 
 #[tauri::command]
-async fn directory_structure(app: tauri::AppHandle, project: String, repository: String, branch: String, commit: String, directory: String) -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(move || run_py(&app, "project.py", &["directory-structure", &project, "--", &repository, &branch, &commit, &directory]))
+async fn directory_structure(app: tauri::AppHandle, project: String, repository: String, branch: String, commit: String, directory: String, page: Option<u32>) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || run_py(&app, "project.py", &["directory-structure", &project, "--", &repository, &branch, &commit, &directory, &page.unwrap_or(1).to_string()]))
         .await.map_err(|e| e.to_string())?
 }
 

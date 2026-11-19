@@ -455,7 +455,34 @@ def _cli_entries(git, env, manifests, tracked, files):
     return result, len(selected)
 
 
-def build(repo, commit, excluded=None, *, only_file=None, directory=None):
+def _directory_page(ordered, page, file_limit, byte_limit):
+    """Partition pinned tree metadata first, then read only the requested page's blobs."""
+    if type(page) is not int or page < 1:
+        raise ValueError('Choose a positive directory page')
+    current, count, size, oversized, eligible = 1, 0, 0, 0, 0
+    selected = []
+    for file, entry in ordered:
+        length = entry[1]
+        if length > min(MAX_FILE_BYTES, byte_limit):
+            oversized += 1
+            continue
+        if count >= file_limit or size + length > byte_limit:
+            current += 1
+            count = size = 0
+        if current == page:
+            selected.append((file,entry))
+        count += 1
+        eligible += 1
+        size += length
+    if page > current:
+        raise ValueError('Directory page is out of range')
+    return selected, {'page':page, 'total_pages':current, 'selected_files':len(selected),
+                      'total_eligible_files':eligible, 'oversized_files':oversized, 'file_limit':file_limit,
+                      'byte_limit':byte_limit, 'per_file_byte_limit':MAX_FILE_BYTES,
+                      'selected_bytes':sum(entry[1] for _,entry in selected)}
+
+
+def build(repo, commit, excluded=None, *, only_file=None, directory=None, page=1):
     if not re.fullmatch(r'(?:[a-f0-9]{40}|[a-f0-9]{64})', commit):
         raise ValueError('Structure indexing requires a full commit ID')
     if only_file is not None and directory is not None:
@@ -584,13 +611,17 @@ def build(repo, commit, excluded=None, *, only_file=None, directory=None):
     else:
         if bounded:groups=[_bounded_order(items) for items in groups]
         ordered=_interleave(groups)
-    for file, entry in ordered:
-        size = entry[1]
-        if size > MAX_FILE_BYTES or consumed + size > byte_limit or len(selected) >= file_limit:
-            truncated = True
-            continue
-        selected.append((file, entry))
-        consumed += size
+    if directory is not None:
+        selected, pagination = _directory_page(ordered,page,file_limit,byte_limit)
+        truncated = len(selected) < len(scoped)
+    else:
+        for file, entry in ordered:
+            size = entry[1]
+            if size > MAX_FILE_BYTES or consumed + size > byte_limit or len(selected) >= file_limit:
+                truncated = True
+                continue
+            selected.append((file, entry))
+            consumed += size
     module = None
     package_imports = []
     cobra_facts = {}
@@ -734,7 +765,8 @@ def build(repo, commit, excluded=None, *, only_file=None, directory=None):
         file_result['coverage']={'indexed_files':len(files),'unresolved_imports':unresolved,'truncated':truncated}
         return file_result
     if directory is not None:
-        return {'directory':directory, 'commit':commit, 'status':'indexed' if files else 'unavailable',
+        pagination['unparsed_files'] = len(selected) - len(files)
+        return {'directory':directory, 'commit':commit, 'pagination':pagination, 'status':'indexed' if files else 'unavailable',
                 'files':files, 'imports':imports, 'package_imports':package_imports,
                 'coverage':{'candidate_files':len(scoped), 'indexed_files':len(files),
                             'skipped_files':len(scoped)-len(files), 'unresolved_imports':unresolved,

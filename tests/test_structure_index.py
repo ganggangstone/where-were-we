@@ -343,6 +343,14 @@ func Ignored() *c.Command {
             import project
             with patch('mapcore.ROOT',folder.parent),patch.object(structure_index,'build',side_effect=AssertionError('cache miss')):
                 self.assertEqual(project.selected_structure('demo','','dev',pin,directory='pkg'),result)
+            with patch('mapcore.ROOT',folder.parent),patch.object(structure_index,'MAX_DIRECTORY_FILES',1),patch.object(structure_index,'_blobs',wraps=structure_index._blobs) as blobs:
+                second=project.selected_structure('demo','','dev',pin,directory='pkg',page=2)
+                self.assertEqual(second['pagination']['page'],2)
+                self.assertEqual(second['pagination']['selected_files'],1)
+                self.assertEqual([p for call in blobs.call_args_list for p,_ in call.args[2]],
+                                 [f['file'] for f in second['files']])
+                with patch.object(structure_index,'build',side_effect=AssertionError('cache miss')):
+                    self.assertEqual(project.selected_structure('demo','','dev',pin,directory='pkg',page=2),second)
             import analysis_run
             policy=analysis_run._secret
             with patch('mapcore.ROOT',folder.parent),patch.object(analysis_run,'_secret',side_effect=lambda f:policy(f) or f=='pkg/main.py'):
@@ -393,6 +401,16 @@ func Ignored() *c.Command {
             (repo/'next.config.ts').unlink()
             (repo/'package.json').write_text('{}')
             self.assertEqual(routes(commit()),[])
+
+    def test_directory_pages_partition_files_at_both_limits(self):
+        entries=[(f'area/{i}.py',(b'oid',size)) for i,size in enumerate([6,5,3,0,12,2])]
+        pages=[structure_index._directory_page(entries,page,2,10) for page in (1,2,3)]
+        self.assertEqual([[p for p,_ in rows] for rows,_ in pages],
+                         [['area/0.py'],['area/1.py','area/2.py'],['area/3.py','area/5.py']])
+        self.assertEqual([meta['selected_bytes'] for _,meta in pages],[6,8,2])
+        self.assertTrue(all(meta['oversized_files']==1 and meta['total_eligible_files']==5 for _,meta in pages))
+        for invalid in (0,-1,4,True):
+            with self.assertRaises(ValueError):structure_index._directory_page(entries,invalid,2,10)
 
     def test_coverage_limits_directory_rows_but_preserves_the_total(self):
         candidates=[f'area{i}/source.py' for i in range(31)]+['backend/first.py','backend/second.py']

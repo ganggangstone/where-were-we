@@ -738,7 +738,7 @@ def file_structure(name, repository, branch, commit, file):
     return selected_structure(name,repository,branch,commit,only_file=file)
 
 
-def _directory_cache(name, repo, repository, branch, commit, directory):
+def _directory_cache(name, repo, repository, branch, commit, directory, page):
     import analysis_run
     import structure_index
     from importlib import metadata
@@ -754,8 +754,10 @@ def _directory_cache(name, repo, repository, branch, commit, directory):
     for package in ('tree-sitter','tree-sitter-go','tree-sitter-javascript','tree-sitter-typescript'):
         try:versions.append(metadata.version(package))
         except metadata.PackageNotFoundError:versions.append(None)
-    identity = [structure_index.VERSION, sys.version, versions, fingerprint(repo), repository,
-                os.path.realpath(repo['path']), branch, commit, directory, denied.hexdigest()]
+    limits = [structure_index.MAX_DIRECTORY_FILES, structure_index.MAX_DIRECTORY_BYTES, structure_index.MAX_FILE_BYTES,
+              structure_index.MAX_FILES, structure_index.MAX_BYTES, structure_index.MAX_DECLARATIONS, structure_index.MAX_IMPORTS]
+    identity = [structure_index.VERSION, limits, sys.version, versions, fingerprint(repo), repository,
+                os.path.realpath(repo['path']), branch, commit, directory, page, denied.hexdigest()]
     key = hashlib.sha256(json.dumps(identity).encode()).hexdigest()
     # Fixed slots bound storage without races between eviction and another writer.
     return home(name)/'.directory-cache'/f'{int(key[:2],16) % 16:02d}.json', key
@@ -772,8 +774,9 @@ def selected_structure(name, repository, branch, commit, **scope):
         raise ValueError('Code changed; refresh the map before opening this file')
     cache_path = None
     result = None
-    if set(scope) == {'directory'}:
-        cache_path, key = _directory_cache(name,repo,repository,branch,commit,scope['directory'])
+    if 'directory' in scope:
+        page = scope.get('page',1)
+        cache_path, key = _directory_cache(name,repo,repository,branch,commit,scope['directory'],page)
         try:
             cached = read(cache_path)
         except (ValueError, OSError):
@@ -807,9 +810,12 @@ def main():
     if args.command=='action':args.args.extend(remaining)
     if args.command=='read':print(json.dumps(read_bundle(args.project,args.repository),ensure_ascii=False))
     elif args.command in ('file-structure','directory-structure'):
-        if len(args.args)!=4:raise ValueError('Expected repository, branch, commit and path')
-        key = 'directory' if args.command=='directory-structure' else 'only_file'
-        print(json.dumps(selected_structure(args.project,*args.args[:3],**{key:args.args[3]}),ensure_ascii=False))
+        directory = args.command == 'directory-structure'
+        if len(args.args) not in ((4,5) if directory else (4,)):
+            raise ValueError('Expected repository, branch, commit, path and optional directory page')
+        scope = {'directory' if directory else 'only_file':args.args[3]}
+        if len(args.args)==5:scope['page']=int(args.args[4])
+        print(json.dumps(selected_structure(args.project,*args.args[:3],**scope),ensure_ascii=False))
     elif args.command=='configure':print(json.dumps(configure(args.project,json.loads(args.args[0]) if args.args else json.load(sys.stdin)),ensure_ascii=False))
     elif args.command=='refresh':print(refresh_project(args.project,args.repository))
     elif args.command=='github-logins':
