@@ -466,6 +466,31 @@ func Ignored() *c.Command {
             self.assertEqual(structure_index._pnpm_patterns(b'packages:\n  - packages/*\n  - "!**/secret"'),[])
             self.assertEqual(structure_index._pnpm_patterns(b'packages:\n  - apps/*\npackages: []'),[])
 
+    def test_workspace_dependencies_require_unique_members_and_explicit_same_name_protocol(self):
+        with tempfile.TemporaryDirectory() as root:
+            repo=Path(root)
+            git=lambda *a:subprocess.check_output(['git','-C',root,*a]).decode().strip()
+            git('init','-q')
+            (repo/'pnpm-workspace.yaml').write_text('packages:\n  - packages/*')
+            for name in ('one','two','three'):
+                folder=repo/'packages'/name
+                folder.mkdir(parents=True)
+                (folder/'package.json').write_text('{"name":"'+name+'"}')
+            (repo/'packages/one/package.json').write_text("""{
+"name":"one",
+"devDependencies":{"two":"workspace:^"},
+"dependencies":{"three":"~1.0","unknown":"workspace:*","alias":"workspace:two@*"}
+}""")
+            def commit():
+                git('add','.')
+                git('-c','user.name=Test','-c','user.email=test@example.invalid','commit','-qm','links')
+                return git('rev-parse','HEAD')
+            first=structure_index.build(root,commit())['workspace_dependencies']
+            self.assertEqual(first,[dict(source='one',target='two',kind='devDependencies',specifier='workspace:^',
+                                         file='packages/one/package.json',line=3)])
+            (repo/'packages/three/package.json').write_text('{"name":"two"}')
+            self.assertEqual(structure_index.build(root,commit())['workspace_dependencies'],[])
+
     def test_bounded_selection_visits_sibling_code_and_keeps_auxiliary_evidence(self):
         paths=['aaa/examples/case'+str(i)+'.py' for i in range(30)]
         paths+=['services/a/worker'+str(i)+'.py' for i in range(30)]

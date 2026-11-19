@@ -27,7 +27,7 @@ MAX_DECLARATIONS = 20_000
 MAX_IMPORTS = 20_000
 
 
-VERSION = 26
+VERSION = 27
 JS_EXTENSIONS = {'.js', '.jsx', '.mjs', '.cjs'}
 LANGUAGES = ('python', 'javascript', 'typescript', 'html', 'go')
 TS_EXTENSIONS = {'.ts', '.tsx', '.mts', '.cts'}
@@ -416,7 +416,7 @@ def _pnpm_patterns(raw):
 
 def _workspace_packages(git,env,config,manifests):
     if not config:
-        return [],0
+        return [],0,[]
     patterns = _pnpm_patterns(next(_blobs(git,env,[('pnpm-workspace.yaml',config)]))[1])
     matched = {}
     for file,entry in manifests.items():
@@ -431,6 +431,7 @@ def _workspace_packages(git,env,config,manifests):
             matched[file] = (entry,hits[0][1])
     selected = [(file,matched[file][0]) for file in sorted(matched) if matched[file][0][1]<=64*1024][:64]
     packages = []
+    declared = []
     for file,raw in _blobs(git,env,selected):
         try:
             text = raw.decode('utf-8-sig')
@@ -443,7 +444,7 @@ def _workspace_packages(git,env,config,manifests):
         if not isinstance(name,str) or not re.fullmatch(r'(?:@[a-z0-9_.-]+/)?[a-z0-9][a-z0-9._-]{0,213}',name):
             continue
         def field_line(key,value):
-            literal = '"' + key + r'"\s*:\s*' + re.escape(json.dumps(value,ensure_ascii=False))
+            literal = re.escape(json.dumps(key,ensure_ascii=False)) + r'\s*:\s*' + re.escape(json.dumps(value,ensure_ascii=False))
             rows = [n for n,line in enumerate(text.splitlines(),1) if re.search(literal,line)]
             return rows[0] if len(rows)==1 else None
         line = field_line('name',name)
@@ -455,7 +456,28 @@ def _workspace_packages(git,env,config,manifests):
         if _plain_description(description) and (where := field_line('description',description)):
             row.update(description=description,description_line=where)
         packages.append(row)
-    return packages,len(matched)
+        coordinates = {}
+        for number,source in enumerate(text.splitlines(),1):
+            for hit in re.finditer(r'"([a-z0-9_@./-]+)"\s*:\s*"(workspace:[^"\\]*)"',source):
+                key = hit.groups()
+                coordinates[key] = number if key not in coordinates else None
+        for kind in ('dependencies','devDependencies','peerDependencies','optionalDependencies'):
+            group = manifest.get(kind)
+            if not isinstance(group,dict):
+                continue
+            for target,spec in group.items():
+                # Aliases and relative paths name a different resolution mechanism.
+                if (target == name or not isinstance(spec,str) or
+                        not re.fullmatch(r'workspace:(?:[~^*]|[~^]?\d+(?:\.\d+){0,2}(?:-[0-9A-Za-z.-]+)?)',spec)):
+                    continue
+                if (where := coordinates.get((target,spec))):
+                    declared.append({'source':name,'target':target,'kind':kind,'specifier':spec,
+                                     'file':file,'line':where})
+    names = Counter(p['name'] for p in packages)
+    links = []
+    if len(packages) == len(matched):
+        links = [d for d in declared if names[d['source']] == names[d['target']] == 1][:512]
+    return packages,len(matched),links
 
 
 def _cli_entries(git, env, manifests, tracked, files):
@@ -866,7 +888,7 @@ def build(repo, commit, excluded=None, *, only_file=None, directory=None, page=1
     eligible_manifests = {path: entry for path, entry in manifests.items() if entry[0] not in denied}
     cli_entries, manifests_read = _cli_entries(git, env, eligible_manifests, {f for f, oid in tracked.items() if oid not in denied}, files)
     cli_entries.extend(cobra_commands.connect(cobra_facts, go_targets, 1024))
-    workspace_packages,workspace_total = _workspace_packages(git,env,pnpm_workspace if pnpm_workspace and pnpm_workspace[0] not in denied else None,eligible_manifests)
+    workspace_packages,workspace_total,workspace_dependencies = _workspace_packages(git,env,pnpm_workspace if pnpm_workspace and pnpm_workspace[0] not in denied else None,eligible_manifests)
     coverage['workspace_manifests_matched'] = workspace_total
     coverage['cli_manifests_read'] = manifests_read
     coverage['cli_manifests_total'] = len(eligible_manifests)
@@ -875,5 +897,5 @@ def build(repo, commit, excluded=None, *, only_file=None, directory=None, page=1
                      key=lambda item:(preferred.index(item[0].lower()),item[0]))
     description = _project_description(git, env, sources)
     features = _documented_features(git, env, [item for item in sources if item[0].lower() == 'readme.md'])
-    return {'version':VERSION,'commit': commit,'project_description':description,'workspace_packages':workspace_packages,'documented_features':features,'cli_entries':cli_entries, 'files': files, 'imports': resolved, 'package_imports':package_imports, 'coverage': coverage,
+    return {'version':VERSION,'commit': commit,'project_description':description,'workspace_packages':workspace_packages,'workspace_dependencies':workspace_dependencies,'documented_features':features,'cli_entries':cli_entries, 'files': files, 'imports': resolved, 'package_imports':package_imports, 'coverage': coverage,
             'service_flow':service_flow.connect(routes, requests)}
