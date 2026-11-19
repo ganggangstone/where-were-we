@@ -386,7 +386,7 @@ Object.assign(UI_EN,{'선택한 기능':'Selected feature','‹ 기능 개요':'
 Object.assign(UI_EN,{'기존 AI 채팅에 요청':'Use your existing AI chat','저장된 결과 새로고침':'Refresh saved results',"앱에서 자동 분석 (베타)":"Automatic analysis in the app (beta)",'요청 내용·다른 분석':'Request text and other analyses','요청 준비됨':'Request ready','일부 결과 저장됨':'Partial results saved','이전에 저장된 결과':'Previously saved results'});
 Object.assign(UI_EN,{'Git 추적 파일':'Git-tracked files','최상위 폴더':'Top-level folder','파일 수':'File count','루트 디렉터리':'Root directory'});
 Object.assign(UI_EN,{'모듈 연결 (베타)':'Module connections (beta)','로컬 .cjs require':'Local .cjs require','확인한 파일':'Files indexed','건너뛴 파일':'Files skipped','Python import · JS/TS 상대 경로 import·재내보내기':'Python imports · JS/TS relative imports and re-exports','로컬 Python import':'Local Python imports','인터페이스':'Interface','타입 별칭':'Type alias','열거형':'Enum','메서드':'Method','미지원 파일':'Unsupported files','대상 미확인 import':'Unresolved imports','분석 한도 도달':'Index limit reached','선택한 모듈':'Selected module','작업 폴더에서 열기':'Open working copy','이 모듈을 가져오는 쪽':'Imported by','이 모듈이 가져오는 쪽':'Imports','모듈 선언':'Declarations','클래스':'Class','함수':'Function','비동기 함수':'Async function'});
-Object.assign(UI_EN,{'코드에서 확인한 기능 (베타)':'Features found in source (beta)','기능 흐름 (베타)':'Feature flows (beta)','기능 선택':'Select feature','화면 문구':'Interface label','서버의 데이터 접근':'Server data access','모델 읽기':'Read model','모델 쓰기':'Write model','요청을 시작하는 화면 동작':'UI actions that trigger this request','양식 제출':'Form submission','버튼 클릭':'Button click','입력 변경':'Input change','이벤트 처리 함수':'Event handler','클라이언트 호출':'Client invocation','클라이언트 정의':'Client definition','매개변수가 한 경로 구간일 때 일치':'Matches when the parameter occupies one URL segment','GitHub 작업 정보 미확인':'GitHub work data unavailable','최근 확인':'Last verified','설정·클라이언트 기본값에서 일치':'Matches configured client and server defaults','기본값 근거':'Default value evidence','HTTP 요청 흐름 (베타)':'HTTP request flow (beta)','고정 fetch 주소 · 서버 경로 대조':'Literal fetch URLs matched to server routes','요청을 보내는 코드':'Client call site','받는 서버 함수':'Server handler','경로 등록·실행 근거':'Route registration and startup evidence','주소 선언':'URL declaration','연결된 요청':'Matched requests','대상 미확인 요청':'Unresolved requests','확인한 요청':'Requests detected','서버 경로':'Server routes','연결 선택':'Select connection'});
+Object.assign(UI_EN,{'파일 범위':'File range','코드에서 확인한 기능 (베타)':'Features found in source (beta)','기능 흐름 (베타)':'Feature flows (beta)','기능 선택':'Select feature','화면 문구':'Interface label','서버의 데이터 접근':'Server data access','모델 읽기':'Read model','모델 쓰기':'Write model','요청을 시작하는 화면 동작':'UI actions that trigger this request','양식 제출':'Form submission','버튼 클릭':'Button click','입력 변경':'Input change','이벤트 처리 함수':'Event handler','클라이언트 호출':'Client invocation','클라이언트 정의':'Client definition','매개변수가 한 경로 구간일 때 일치':'Matches when the parameter occupies one URL segment','GitHub 작업 정보 미확인':'GitHub work data unavailable','최근 확인':'Last verified','설정·클라이언트 기본값에서 일치':'Matches configured client and server defaults','기본값 근거':'Default value evidence','HTTP 요청 흐름 (베타)':'HTTP request flow (beta)','고정 fetch 주소 · 서버 경로 대조':'Literal fetch URLs matched to server routes','요청을 보내는 코드':'Client call site','받는 서버 함수':'Server handler','경로 등록·실행 근거':'Route registration and startup evidence','주소 선언':'URL declaration','연결된 요청':'Matched requests','대상 미확인 요청':'Unresolved requests','확인한 요청':'Requests detected','서버 경로':'Server routes','연결 선택':'Select connection'});
 const UI_PATTERN = new RegExp(Object.keys(UI_EN).sort((a, b) => b.length - a.length).map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'g');
 function tr(text) { return S.lang === 'en' ? String(text).replace(UI_PATTERN, match => UI_EN[match]) : String(text); }
 function ui(parts, ...values) { return parts.reduce((out, part, i) => out + tr(part) + (i < values.length ? values[i] : ''), ''); }
@@ -1451,7 +1451,15 @@ function structureIndexView(m) {
   const {coverage,files,imports}=index;
   const repoLabel=id=>id?connectionDisplayName(id):S.project;
   const firstLink=imports[0];
-  const selected=files.find(f=>f.file===state.file) || files.find(f=>f.file===firstLink?.file) || files[0];
+  const pageSize=64;
+  const large=files.length>pageSize*2;
+  let selected=files.find(f=>f.file===state.file);
+  if(!selected && large && imports.length){
+    const incoming=new Map();
+    for(const link of imports)incoming.set(link.target,(incoming.get(link.target) || 0)+1);
+    selected=files.reduce((best,file)=>(incoming.get(file.file) || 0)>(incoming.get(best.file) || 0)?file:best,files[0]);
+  }
+  selected=selected || files.find(f=>f.file===firstLink?.file) || files[0];
   state.file=selected?.file || '';
   const repoControl=indexes.length>1?`<label>${tr('연결한 코드')} <select id="moduleRepository">${indexes.map(i=>`<option value="${esc(i.repository)}" ${i===index?'selected':''}>${esc(repoLabel(i.repository))}</option>`).join('')}</select></label>`:`<span>${esc(repoLabel(index.repository))}</span>`;
   const commit=`<code class="mono" title="${esc(index.commit)}">${esc(index.commit.slice(0,12))}</code>`;
@@ -1478,7 +1486,14 @@ function structureIndexView(m) {
   const boundary=coverage.languages ? 'Python import · JS/TS 상대 경로 import·재내보내기' : '로컬 Python import';
   const scopeNote=`<div class="sect s" data-module-coverage><strong>${tr('확인 범위')}</strong> · ${tr(boundary)}${index.version>=11?' · '+tr('로컬 .cjs require'):''}${languageCounts.length?`<div>${languageCounts.join(' · ')}</div>`:''}${gaps.length?`<div role="status">${gaps.join(' · ')}</div>`:''}</div>`;
   if (!selected) return `<section class="sect" id="moduleGraph">${heading}${scopeNote}${end}</section>`;
-  const fileControl=`<label>${tr('선택한 모듈')} · ${esc(languages[selected.language || 'python'] || selected.language)} <select id="moduleFile">${files.map(f=>`<option value="${esc(f.file)}" ${f===selected?'selected':''}>${esc(f.file)}</option>`).join('')}</select></label>`;
+  const filePage=large?Math.floor(files.indexOf(selected)/pageSize):0;
+  const subset=large?files.slice(filePage*pageSize,(filePage+1)*pageSize):files;
+  const ranges=large?Array.from({length:Math.ceil(files.length/pageSize)},(_,i)=>{
+    const first=files[i*pageSize].file,last=files[Math.min((i+1)*pageSize,files.length)-1].file;
+    return `<option value="${esc(first)}" ${i===filePage?'selected':''}>${esc(first)} … ${esc(last)}</option>`;
+  }).join(''):'';
+  const rangeControl=large?`<label>${tr('파일 범위')} <select id="moduleRange">${ranges}</select></label>`:'';
+  const fileControl=`${rangeControl}<label>${tr('선택한 모듈')} · ${esc(languages[selected.language || 'python'] || selected.language)} <select id="moduleFile">${subset.map(f=>`<option value="${esc(f.file)}" ${f===selected?'selected':''}>${esc(f.file)}</option>`).join('')}</select></label>`;
   const page=(key,rows,renderRow)=>{
     if(!rows.length)return `<div class="s">${tr('없음')}</div>`;
     const size=8,current=Math.min(state.page[key] || 0,Math.floor((rows.length-1)/size));
@@ -1521,6 +1536,7 @@ function bindStructureIndex() {
     const group=index?.service_flow?.feature_groups?.find(row=>row.connection_indexes.includes(http));
     update({http,action:0,resource:group?.resource},'httpConnection');
   };
+  if($('moduleRange'))$('moduleRange').onchange=e=>update({file:e.target.value,page:{}},'moduleRange');
   if($('moduleFile'))$('moduleFile').onchange=e=>update({file:e.target.value,page:{}},'moduleFile');
   graph.querySelectorAll('[data-module-neighbor]').forEach(button=>button.onclick=()=>update({file:button.dataset.moduleNeighbor,page:{}},'moduleFile'));
   graph.querySelectorAll('[data-module-page]').forEach(button=>button.onclick=()=>{

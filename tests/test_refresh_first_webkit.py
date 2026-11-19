@@ -28,6 +28,15 @@ class RefreshFirstWebKit(unittest.TestCase):
  check(!calls.some(c=>['analysis_run_start','analysis_plan','analysis_providers'].includes(c.command)),'Refresh must not prepare AI');
  S.project=null;S.view='changes';await loadProject('First');
  check(S.view==='sys' && $('map').innerText.includes('worker.cjs'),'Opening a saved local map shows its structure');
+ index.files=Array.from({length:160},(_,i)=>({file:'module'+i+'.cjs',language:'javascript',declarations:[]}));
+ index.imports=[{file:'module0.cjs',target:'module150.cjs',line:1},{file:'module45.cjs',target:'module150.cjs',line:3}];
+ index.commit='bbbbbbbb2222';await doRefresh();
+ check($('moduleFile').value==='module150.cjs' && $('moduleFile').options.length<=64,'Large maps open a highly referenced module with a bounded picker');
+ $('moduleRange').selectedIndex=0;$('moduleRange').dispatchEvent(new Event('change'));
+ check($('moduleFile').value==='module0.cjs','Other ranges remain reachable');
+ $('map').querySelector('[data-module-neighbor]').click();
+ check($('moduleFile').value==='module150.cjs' && $('moduleRange').selectedIndex===2,'Import navigation crosses ranges without losing the destination');
+ index.commit=pin;
  const client={file:'client.js',line:5,quote:'fetch("/items")'},server={file:'api.py',line:9,quote:'@router.get("/items")',function:'items'};
  const edge={id:1,method:'GET',path:'/items',client,server,data_steps:[{operation:'read',model:'Item',file:'api.py',line:11,evidence:[]}]};
  index.service_flow={connections:[edge],feature_groups:[{resource:'/items',connection_indexes:[0]}],coverage:{requests:1,routes:1,unresolved_requests:0}};
