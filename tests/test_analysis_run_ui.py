@@ -36,6 +36,10 @@ const esc = value => String(value).replaceAll('&','&amp;').replaceAll('<','&lt;'
 const PLAN_NAMES = {analysis:'상세 지도',system:'서비스 구성 보기'};
 const connectionDisplayName = id => 'Repository '+id;
 const analysisButtonText = () => AnalysisRun.stateLabel();
+elements.insp.querySelectorAll=selector=>{
+ const hits=[...elements.insp.innerHTML.matchAll(/data-overview-feature="([^"]+)"/g)];
+ globalThis.featureButtons=hits.map(hit=>({dataset:{overviewFeature:hit[1].replaceAll('&quot;','"')}}));return featureButtons;
+};
 function renderAgentPrompt(){elements.insp.innerHTML=AnalysisRun.html();AnalysisRun.bind();}
 function render(){AnalysisRun.syncScope();if(S.agentPrompt!=null && S.agentPurpose==='analysis')renderAgentPrompt();}
 const account = {auth_method:'claude.ai',email:'fictional@example.invalid',subscription_type:'pro'};
@@ -281,7 +285,7 @@ group.connections[0].id=1;
 group.connections.push({...group.connections[0],id:2,path:'/other'});
 group.feature_groups=[{name:'Manage <runs>',connection_ids:[1]}];
 group.items.push({description:'Fetch the current runs',file:'client.ts',line:7,name:'Load',quote:'fetch("/runs")'});
-await AnalysisRun.check();const grouped=$('insp').innerHTML;
+await AnalysisRun.check();assert(!$('insp').innerHTML.includes('GET /runs'),'Grouped evidence starts collapsed');featureButtons[0].onclick();const grouped=$('insp').innerHTML;
 assert(grouped.includes('Manage &lt;runs>') && grouped.indexOf('Manage &lt;runs>')<grouped.indexOf('GET /runs') && grouped.indexOf('Other requests')<grouped.indexOf('GET /other'),'Named features precede both linked requests and ungrouped requests');
 assert(grouped.includes('Fetch the current runs') && grouped.includes('Evidence by file') && grouped.includes('If the path pattern matches'),'Grounded descriptions, original file evidence and conditions remain available');
 globalThis.flowActions=()=>'';

@@ -1233,6 +1233,10 @@ class Flows(unittest.TestCase):
  assert(graph().innerText.includes('JavaScript 1/1') && graph().innerText.includes('TypeScript 1/1') && label('Python import · JS/TS 상대 경로 import·재내보내기'),'Mixed-language coverage carries its actual support boundary');
  assert(graph().querySelector('.module-neighbors').compareDocumentPosition(graph().querySelector('[data-module-coverage]')) & Node.DOCUMENT_POSITION_FOLLOWING,'Connections precede coverage detail');
  graph().querySelector('[data-module-neighbor]').click();assert(label('인터페이스') && $('moduleFile').value==='types.ts','Static JS to TS connection and TypeScript declaration');
+ mixed.service_flow.feature_groups=[{resource:'/jobs',connection_indexes:[1,2]},{resource:'/users',connection_indexes:[0]}];render();
+ assert(!$('httpConnection') && !$('moduleDetails').open && graph().innerText.includes('/jobs'),'Refresh-only resource summaries precede collapsed details');
+ graph().querySelector('[data-local-resource="/jobs"]').click();assert($('httpConnection').value==='2','Opening a resource selects its first evidenced UI action');
+ $('httpConnection').value='0';$('httpConnection').dispatchEvent(new Event('change'));assert(graph().querySelector('[data-local-resource="/users"]').getAttribute('aria-expanded')==='true','Endpoint navigation switches resource and retains evidence');
  assert(!window.calls.some(c=>c.command==='analysis_run_start'),'Opening and navigating the structure never executes a model');
 ''')
 

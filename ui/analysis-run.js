@@ -4,7 +4,7 @@ const AnalysisRun = (() => {
   let scopeKey = '', epoch = 0, revision = 0, timer = null, checking = null;
   let run = null, provider = null, providerBusy = false, busy = false, error = null;
   const loaded = new Set();
-  let openedPreview = null, openedOverview = null;
+  let openedPreview = null, openedOverview = null, openedFeature = null;
   const text = (ko, en) => S.lang === 'en' ? en : ko;
   const scope = () => ({project:S.project, repository:['make_steps','make_jobs'].includes(S.analysisChoice?.task) ? '' : (S.analysisChoice?.target || S.repository || '').replace(/^\*$/, ''), branch:S.branch, lang:S.lang});
   function intent() {
@@ -160,14 +160,15 @@ const AnalysisRun = (() => {
     const edges=group.connections || [];
     const byId=new Map(edges.filter(edge=>Number.isInteger(edge.id)).map(edge=>[edge.id,edge]));
     const grouped=new Set();
-    const features=(group.feature_groups || []).map(feature=>{
+    const features=(group.feature_groups || []).map((feature,i)=>{
       const members=(feature.connection_ids || []).map(id=>byId.get(id)).filter(Boolean);
       if(!members.length)return '';
       members.forEach(edge=>grouped.add(edge.id));
       const endpoints=members.flatMap(edge=>[edge.client,edge.server]);
       const item=group.items.find(item=>item.description && endpoints.some(side=>side.file===item.file && side.line===item.line));
       const description=item?.description || members.map(edge=>edge.method+' '+edge.path).join(' · ');
-      return `<details class="sect"><summary><strong>${esc(feature.name)}</strong><span class="s"> · ${esc(description)}</span></summary><ul>${members.map(edgeHtml).join('')}</ul></details>`;
+      const key=overviewKey(group)+i,open=openedFeature===key;
+      return `<section class="sect"><button class="btn plain" data-overview-feature="${esc(key)}" aria-expanded="${open}"><strong>${esc(feature.name)}</strong> · ${esc(description)}</button>${open?`<ul>${members.map(edgeHtml).join('')}</ul>`:''}</section>`;
     }).join('');
     const remaining=edges.filter(edge=>!grouped.has(edge.id));
     const title=features?text('그 밖의 요청','Other requests'):text('코드에서 확인한 요청 연결','Request connections in source');
@@ -259,6 +260,9 @@ const AnalysisRun = (() => {
       ${previewHtml()}</section>`;
   }
   function bind() {
+    $('insp')?.querySelectorAll?.('[data-overview-feature]').forEach(button=>button.onclick=()=>{
+      const key=button.dataset.overviewFeature;openedFeature=openedFeature===key?null:key;paint();
+    });
     savedOverviews().forEach((group,i)=>{
       const button=$('savedOverview'+i);
       if(button)button.onclick=()=>{
