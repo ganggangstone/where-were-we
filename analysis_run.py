@@ -33,6 +33,7 @@ MAX_PROMPT_BYTES = 128 * 1024
 UNIT_BYTES = 16 * 1024
 MAX_READ_ROUNDS = 32
 RESOURCE_PACK_SIZE = 4
+SIMPLE_RESOURCE_PACK_SIZE = 8
 MAX_TASKS = 100
 MAX_SECONDS = 3600
 TASK_SECONDS = 600
@@ -1504,6 +1505,14 @@ def generate(value,task,request,executor,cancelled,deadline,check,blobs=None):
                 if not prepared or error.code!='scope_unavailable':raise
                 break
             candidate=[p for _,p,_ in prepared]+[packet]
+            if len(candidate)>RESOURCE_PACK_SIZE:
+                # An ordinary four-scope packet can carry eight endpoint pairs
+                # and 384 source rows. Extend only one-endpoint registrations
+                # without action/data traces, within the same evidence budget.
+                if any(len(p.get('connections',[]))!=1 or
+                       p['connections'][0].get('kind')!='server_registration' or
+                       p['connections'][0].get('details') for p in candidate):break
+                if sum(len(f['lines']) for p in candidate for f in p['sources'])>4*4*24:break
             envelope={'resources':candidate,'schema':{'results':[{'resource':'exact resource','items':[],'feature_groups':[]}]},
                       'prompt':'Answer each independent resource using only its own evidence and IDs. Return one result per resource.'}
             if len(_encoded(envelope).encode())>MAX_PROMPT_BYTES and prepared:break
@@ -1775,7 +1784,7 @@ def run(run_id, executor=None):
                         return value
                 task=plan['tasks'][0]
                 if resource_run and len(value['resource_targets'])>=RESOURCE_PACK_SIZE:
-                    targets=[t['target'] for t in plan['tasks'][:RESOURCE_PACK_SIZE] if t['repository']==task['repository']]
+                    targets=[t['target'] for t in plan['tasks'][:SIMPLE_RESOURCE_PACK_SIZE] if t['repository']==task['repository']]
                     if len(targets)>1:task={**task,'pack_targets':targets}
                 request=_request(value,task)
                 args=request['record_arguments']

@@ -418,6 +418,35 @@ def users(): pass
         self.git('commit','--allow-empty','-qm','Change pin')
         with self.assertRaises(analysis_run.RunError):analysis_run.retry(job['id'])
 
+    def test_eight_simple_registrations_checkpoint_only_independent_valid_answers(self):
+        import structure_index
+        paths=[f'/registered/{i}' for i in range(10)]
+        (self.repo/'api.py').write_text('from fastapi import FastAPI\napp=FastAPI()\n'+'\n'.join(
+            f"@app.get('{path}')\ndef read{i}(): pass" for i,path in enumerate(paths)))
+        self.git('add','.');self.git('commit','-qm','Register independent handlers')
+        repo=analysis_run.store.config('demo')['repositories'][0];raw=self.raw()
+        raw['dev']['structure_index']=structure_index.build(str(self.repo),self.git('rev-parse','HEAD').strip())
+        analysis_run.store.publish('demo','service',raw,{'fingerprint':analysis_run.store.fingerprint(repo)})
+        job=self.prepare(intent={'task':'resources','targets':[],'max_calls':len(paths)})
+        sizes=[]
+        def answer(prompt,**kwargs):
+            pack=json.loads(prompt.split('\n',1)[1])['resources']
+            self.assertLessEqual(len(prompt.encode()),analysis_run.MAX_PROMPT_BYTES)
+            sizes.append(len(pack))
+            rows=[{'resource':p['resource'],'items':[{'name':'Handler','description':'Registers an endpoint.',
+                   'ref':p['connections'][0]['server_ref']}]} for p in pack]
+            if len(sizes)==1:
+                rows.pop()
+                rows[0]['items'][0]['ref']=rows[1]['items'][0]['ref']
+            return {'results':rows}
+        failed=analysis_run.run(job['id'],answer)
+        self.assertEqual(failed['state'],'failed')
+        self.assertEqual(len(failed['scope_overviews']['service']),6)
+        done=analysis_run.run(analysis_run.retry(job['id'])['id'],answer)
+        self.assertEqual(done['state'],'completed',done.get('error'))
+        self.assertEqual(sizes,[8,4])
+        self.assertEqual(set(done['scope_overviews']['service']),set(paths))
+
     def test_packed_resources_isolate_citations_and_resume_only_unsaved_results(self):
         import structure_index
         paths=[f'/resource{i}' for i in range(12)]
