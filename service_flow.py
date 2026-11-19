@@ -12,6 +12,14 @@ def _path(value):
     return isinstance(value, str) and re.fullmatch(r'/[A-Za-z0-9_~/.-]*', value) and '//' not in value and not any(part in ('.', '..') for part in value.split('/'))
 
 
+def _fastapi_path(path):
+    if not isinstance(path, str):
+        return False
+    normalized = '/'.join('param' if re.fullmatch(r'\{[A-Za-z_]\w*\}', segment) else segment
+                          for segment in path.split('/'))
+    return _path(normalized)
+
+
 def _literal(call, key, default):
     if any(k.arg is None for k in call.keywords):
         return None
@@ -71,9 +79,11 @@ def python_routes(tree, file, external=None):
                 path = _literal(deco, 'path', None)
                 if len(deco.args) == 1 and isinstance(deco.args[0], ast.Constant):
                     path = deco.args[0].value
-                if deco.func.attr != method.lower() or method not in METHODS or not _path(path) or (name not in apps and name not in routers):
+                if deco.func.attr != method.lower() or method not in METHODS or not _fastapi_path(path) or (name not in apps and name not in routers):
                     continue
                 route = {'method': method, 'path': path, 'server': {'file': file, 'line': deco.lineno, 'function': node.name}, 'mounts': []}
+                if '{' in path:
+                    route['fastapi_parameters'] = True
                 if name in apps:
                     routes.append(route)
                 else:
@@ -271,6 +281,8 @@ def connect(routes, requests):
     by_shape = defaultdict(list)
     parameter_routes = defaultdict(list)
     for route in routes:
+        if route.get('fastapi_parameters'):
+            continue  # Registration evidence only; matching depends on router order.
         by_endpoint[route['method'], route['path']].append(route)
         segments = route['path'].split('/')
         key = route['method'], segments[1], len(segments)
@@ -302,5 +314,12 @@ def connect(routes, requests):
         resource = parent if connection.get('express_parameters') and last.startswith(':') and parent else path
         resources.setdefault(resource, []).append(index)
     groups = [{'resource':resource, 'connection_indexes':indexes} for resource,indexes in resources.items()]
-    return {'connections': connections, 'feature_groups': groups, 'coverage': {'requests': len(requests), 'routes': len(routes),
+    # Keep the registration and its own evidence independently of client matching.
+    # Unmatched handlers come first so the bounded list adds information to connections.
+    linked = {(c['method'],c.get('server_path',c['path']),c['server']['file'],c['server']['line']) for c in connections}
+    def route_order(route):
+        signature = (route['method'],route['path'],route['server']['file'],route['server']['line'])
+        return (signature in linked, *signature)
+    registered = sorted(routes,key=route_order)[:256]
+    return {'registered_routes':registered,'connections': connections, 'feature_groups': groups, 'coverage': {'requests': len(requests), 'routes': len(routes),
             'unresolved_requests': len(requests) - len(connections)}}

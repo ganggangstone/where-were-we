@@ -6,6 +6,31 @@ import structure_index
 
 
 class ServiceFlow(unittest.TestCase):
+    def test_backend_only_registrations_keep_handlers_parameters_and_existing_data_evidence(self):
+        raw="""from fastapi import FastAPI, APIRouter
+app = FastAPI()
+other = APIRouter()
+@app.get('/items/{item_id}')
+def detail(): pass
+@app.get('/items')
+def list_items(): pass
+@other.get('/unmounted')
+def hidden(): pass
+"""
+        routes=service_flow.python_routes(ast.parse(raw),'main.py')
+        routes[1]['data_steps']=[{'operation':'read','model':'Item','file':'main.py','line':7}]
+        graph=service_flow.connect(routes,[])
+        self.assertEqual(graph['connections'],[])
+        self.assertEqual(graph['coverage']['routes'],2)
+        rows={r['path']:r for r in graph['registered_routes']}
+        self.assertEqual(set(rows),{'/items','/items/{item_id}'})
+        self.assertEqual(rows['/items/{item_id}']['server'],{'file':'main.py','function':'detail','line':4})
+        self.assertEqual(rows['/items']['data_steps'],routes[1]['data_steps'])
+        many=[dict(routes[1],path='/items/'+str(i)) for i in range(260)]
+        capped=service_flow.connect(many,[])
+        self.assertEqual(len(capped['registered_routes']),256)
+        self.assertEqual(capped['coverage']['routes'],260)
+
     def test_resource_groups_preserve_each_verified_action_and_keep_nested_paths_distinct(self):
         def route(method,path,**more):
             return {'method':method,'path':path,'server':{'file':'server.js','line':3},**more}
