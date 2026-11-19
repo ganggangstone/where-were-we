@@ -334,6 +334,15 @@ func Ignored() *c.Command {
             cmd=[sys.executable,str(Path(structure_index.__file__).with_name('project.py')),'directory-structure','demo','--','','dev']
             env={**os.environ,'WHERE_WERE_WE_ROOT':str(folder.parent)}
             self.assertEqual(json.loads(subprocess.check_output(cmd+[pin,'pkg'],env=env)),result)
+            import project
+            build=structure_index.build
+            def advance_during_read(*args,**kwargs):
+                result=build(*args,**kwargs)
+                git('-c','user.name=Test','-c','user.email=test@example.invalid','commit','--allow-empty','-qm','advance')
+                return result
+            with patch('mapcore.ROOT',folder.parent),patch.object(structure_index,'build',side_effect=advance_during_read):
+                with self.assertRaisesRegex(ValueError,'Code changed'):
+                    project.selected_structure('demo','','dev',pin,directory='pkg')
             stale=subprocess.run(cmd+['0'*40,'pkg'],env=env,capture_output=True)
             self.assertNotEqual(stale.returncode,0)
             self.assertEqual((folder/'dev.json').read_text(),saved)

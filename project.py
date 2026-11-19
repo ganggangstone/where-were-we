@@ -681,7 +681,12 @@ def selected_structure(name, repository, branch, commit, **scope):
     saved_pin=inventory_pin or (snapshot.get('structure_index') or {}).get('commit')
     if commit != head or saved_pin != commit:
         raise ValueError('Code changed; refresh the map before opening this file')
-    return structure_index.build(repo['path'],commit,**scope)
+    result=structure_index.build(repo['path'],commit,**scope)
+    # A branch can move while a directory's sources are being parsed.
+    current_head=ai_extract.git(repo['path'],'rev-parse','--verify',repo['refs'][branch]+'^{commit}').strip()
+    if current_head != commit:
+        raise ValueError('Code changed; refresh the map before opening this file')
+    return result
 
 
 def main():
