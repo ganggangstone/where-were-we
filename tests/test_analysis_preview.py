@@ -216,6 +216,23 @@ class Preview(unittest.TestCase):
             for side in (edge['client'],edge['server']):
                 self.assertIn(side['quote'],(self.repo/side['file']).read_text().splitlines()[side['line']-1])
 
+    def test_overview_preserves_conditional_url_match_in_prompt_and_saved_evidence(self):
+        (self.repo/'app.js').write_text("import express from 'express';\nconst app=express();\napp.patch('/items/:id',()=>null);\napp.listen(3000);\n")
+        (self.repo/'view.js').write_text("function update(id){fetch(`/items/${id}`,{method:'PATCH'})}\n")
+        self.git('add','.');self.git('commit','-qm','Add a variable URL request')
+        def executor(prompt,**kwargs):
+            packet=json.loads(prompt.split('\n',1)[1])
+            edge,=packet['connections']
+            self.assertEqual(edge['basis'],'path_template')
+            self.assertEqual(edge['server_path'],'/items/:id')
+            self.assertIn('one path segment',packet['prompt'])
+            return {'items':[{'name':'Edit item','description':'May reach the item handler.','ref':edge['client_ref']}]}
+        run=self.prepare(intent={'task':'overview','targets':[]})
+        done=analysis_run.run(run['id'],executor)
+        self.assertEqual(done['state'],'completed',done.get('error'))
+        edge,=done['overviews']['service']['connections']
+        self.assertEqual((edge['basis'],edge['path'],edge['server_path']),('path_template','/items/{id}','/items/:id'))
+
     def test_legacy_overview_uses_current_git_and_config_pins_despite_an_older_basic_map(self):
         name='legacy'
         home=analysis_run.store.home(name)

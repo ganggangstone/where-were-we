@@ -274,6 +274,9 @@ group.connections=[{method:'GET',path:'/runs',client:{file:'client.ts',line:7,qu
 await AnalysisRun.check();
 const flow=$('insp').innerHTML;
 assert(flow.includes('GET /runs') && flow.includes('client.ts:7') && flow.includes('app.py:21'),'Both pinned sides reopen with the request');
+group.connections[0].basis='path_template';group.connections[0].server_path='/runs/:id';
+await AnalysisRun.check();
+assert($('insp').innerHTML.includes('If the path pattern matches') && $('insp').innerHTML.includes('/runs/:id'),'A parameterized match stays conditional when reopened');
 status.current_legacy_pin.configuration='changed';await AnalysisRun.check();
 assert(!$('savedOverview0'),'Configuration mismatch hides the sample');
 ''')

@@ -1040,12 +1040,15 @@ def _quick_overview(repo,request,language,invoke,cancelled,deadline,raw):
     for flow in flows:
         refs=[by_line.get((side['file'],side['line'])) for side in (flow['client'],flow['server'])]
         if all(refs):
-            connections.append({'method':flow['method'],'path':flow['path'],'client_ref':refs[0],'server_ref':refs[1]})
+            connection={'method':flow['method'],'path':flow['path'],'client_ref':refs[0],'server_ref':refs[1]}
+            if flow.get('basis')=='path_template':
+                connection.update(basis='path_template',server_path=flow['server_path'])
+            connections.append(connection)
     if connections:
         packet['connections']=connections
-        packet['prompt']+=' Describe the evidenced request and matching handler together. Connections are static method/path matches, not observed traffic.'
-        result['connections']=[{'method':edge['method'],'path':edge['path'],
-                                'client':references[edge['client_ref']],'server':references[edge['server_ref']]}
+        packet['prompt']+=' Describe the evidenced request and matching handler together. Connections are static evidence, not observed traffic. For path_template, describe only a possible match when the parameter is one path segment; do not claim an exact URL or guaranteed delivery.'
+        result['connections']=[{k:v for k,v in edge.items() if k not in ('client_ref','server_ref')} |
+                               {'client':references[edge['client_ref']],'server':references[edge['server_ref']]}
                                for edge in connections]
     answer=invoke(packet)
     items=answer.get('items')
