@@ -4,6 +4,7 @@ const AnalysisRun = (() => {
   let scopeKey = '', epoch = 0, revision = 0, timer = null, checking = null;
   let run = null, provider = null, providerBusy = false, busy = false, error = null;
   const loaded = new Set();
+  let mapResults=null;
   let openedPreview = null, openedOverview = null, openedFeature = null;
   const text = (ko, en) => S.lang === 'en' ? en : ko;
   const scope = () => ({project:S.project, repository:['make_steps','make_jobs'].includes(S.analysisChoice?.task) ? '' : (S.analysisChoice?.target || S.repository || '').replace(/^\*$/, ''), branch:S.branch, lang:S.lang});
@@ -74,7 +75,11 @@ const AnalysisRun = (() => {
   }
   async function accept(value, token) {
     if (!current(token)) return;
-    run = value; error = null; paint();
+    run = value; error = null;
+    if(value && mapResults && mapResults.pin.project===scope().project && mapResults.pin.branch===scope().branch && mapResults.pin.lang===scope().lang && (!scope().repository || scope().repository===mapResults.pin.repository)){
+      rememberScopes(mapResults,value);showMapBadges();
+    }
+    paint();
     // Use the existing analysis-only read: never collect or move change history.
     if (run?.intent?.task!=='overview' && sameScope() && !active() && (run.state === 'completed' || run.completed_tasks?.length) && !loaded.has(run.id)) {
       const id = run.id; loaded.add(id);
@@ -83,12 +88,18 @@ const AnalysisRun = (() => {
     }
     schedule(token);
   }
+  const pendingStatus=new Map();
+  function readStatus(requested) {
+    const key=JSON.stringify([S.loadToken,requested.project,requested.repository,requested.branch,requested.lang]);
+    if(!pendingStatus.has(key))pendingStatus.set(key,invoke('analysis_run_status',{scope:requested}).then(decode).finally(()=>pendingStatus.delete(key)));
+    return pendingStatus.get(key);
+  }
   async function check() {
     const token = epoch, version = revision;
     if (!S.project || document.hidden || !current(token) || checking === token) return;
     checking = token;
     try {
-      const value = decode(await invoke('analysis_run_status', {scope:scope()}));
+      const value = await readStatus(scope());
       if (current(token) && version === revision) await accept(value, token);
     } catch (value) { if (current(token) && version === revision) { error = value; paint(); schedule(token); } }
     finally { if (checking === token) checking = null; schedule(token); }
@@ -120,7 +131,62 @@ const AnalysisRun = (() => {
     catch (value) { if (current(token)) { error = value; paint(); } }
     finally { if (current(token)) { busy = false; paint(); schedule(token); } }
   }
+  function mapPin() {
+    const m=M(),repository=S.moduleGraph?.repository || '';
+    const index=(m?.structure_indexes || [m?.structure_index]).find(i=>i && (i.repository || '')===repository);
+    if(!index)return null;
+    const repo=S.projectInfo?.repositories?.find(r=>r.id===repository);
+    if(repo?.config_changed)return null;
+    return {project:S.project,repository,branch:S.branch,lang:S.lang,commit:index.commit,configuration:repo?.fingerprint,loadToken:S.loadToken};
+  }
+  function rememberScopes(cache,value) {
+    if(!value || cache!==mapResults)return;
+    const pin=cache.pin,configuration=pin.configuration || value.current_legacy_pin?.configuration;
+    cache.groups.clear();
+    if(!configuration)return;
+    for(const group of value.saved_scope_overviews || []){
+      if(group.repository===pin.repository && group.commit===pin.commit && group.configuration===configuration)cache.groups.set(group.resource,group);
+    }
+  }
+  function showMapBadges() {
+    const cache=mapResults;
+    for(const button of document.querySelectorAll('#moduleGraph [data-saved-scope]')){
+      button.hidden=!cache?.groups.has(button.dataset.savedScope);
+      button.onclick=e=>{
+        e.preventDefault();e.stopPropagation();
+        if(cache!==mapResults || cache.key!==JSON.stringify(mapPin()) || !cache.groups.has(button.dataset.savedScope))return;
+        const group=cache.groups.get(button.dataset.savedScope);
+        openAnalysisPanel('saved_scope',group.resource,cache.pin.repository);
+        if(group.feature_groups?.length){openedFeature=overviewKey(group)+0;paint();}
+      };
+    }
+  }
+  function bindMapResults() {
+    if(!document.querySelector('#moduleGraph [data-saved-scope]'))return;
+    const pin=mapPin();if(!pin){mapResults=null;showMapBadges();return;}
+    const key=JSON.stringify(pin);
+    if(mapResults?.key===key){showMapBadges();return;}
+    const cache={pin,key,groups:new Map()};mapResults=cache;
+    const requested={project:pin.project,repository:pin.repository,branch:pin.branch,lang:pin.lang};
+    (async()=>{
+      const value=await readStatus(requested);
+      rememberScopes(cache,value);
+      if(!value && requested.repository && cache===mapResults){
+        rememberScopes(cache,await readStatus({...requested,repository:''}));
+      }
+      if(cache===mapResults && JSON.stringify(mapPin())===key)showMapBadges();
+    })().catch(()=>{if(cache===mapResults)mapResults=null;});
+  }
+  function savedScopeHtml() {
+    const group=savedOverviews()[0];
+    if(!group)return '';
+    return `<code>${esc(group.commit.slice(0,8))}</code>${overviewTree(group)}`;
+  }
   function savedOverviews() {
+    if(S.analysisChoice?.task==='saved_scope'){
+      const group=mapResults?.key===JSON.stringify(mapPin()) && mapResults.groups.get(S.analysisChoice.detailTarget);
+      return group?[group]:[];
+    }
     const scoped=S.analysisChoice?.task==='scope_overview';
     const groups=scoped?(run?.saved_scope_overviews || []):(run?.saved_overviews || (run?.branch===S.branch && run?.lang===S.lang ? Object.values(run.overviews || {}) : []));
     return groups.filter(group=>{
@@ -434,6 +500,6 @@ const AnalysisRun = (() => {
   function open() { syncScope(); if (!provider && !providerBusy) void providers(); else void check(); }
   window.addEventListener('focus', () => { syncScope(); void check(); });
   document.addEventListener('visibilitychange', () => { clearTimeout(timer); if (!document.hidden) { syncScope(); void check(); } });
-  return {syncScope, open, html, overviewHtml, bind, stateLabel, check};
+  return {syncScope, open, html, overviewHtml, savedScopeHtml, bind, bindMapResults, stateLabel, check};
 })();
 AnalysisRun.syncScope();

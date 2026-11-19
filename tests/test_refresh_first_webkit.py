@@ -170,7 +170,10 @@ class RefreshFirstWebKit(unittest.TestCase):
  window.runningAnalysis.saved_scope_overviews=[{...record,resource:'/items'},record];
  await AnalysisRun.check();
  check($('insp').innerText.includes('Profile evidence') && !$('startAppAnalysis') && !$('insp').innerText.includes('Saved items'),'Stored path reopens independently from the initial overview without another model turn');
- window.runningAnalysis.saved_scope_overviews=[{...record,commit:'different'}];await AnalysisRun.check();
+ const savedBadge=()=>document.querySelector('[data-saved-scope="/profiles"]');check(!savedBadge().hidden,'Saved map badges become visible after a completed scope');
+ savedBadge().click();check($('insp').innerText.includes('Profile evidence') && $('insp').innerText.includes('client.js:5') && !$('startAppAnalysis') && !$('overviewLimits'),'Direct map badge opens saved evidence without AI controls');
+ $('explainLocalScope').click();await new Promise(r=>setTimeout(r,15));window.runningAnalysis.saved_scope_overviews=[{...record,commit:'different'}];await AnalysisRun.check();
+ check(savedBadge().hidden,'Stale current-scope badges disappear');
  check(!$('insp').innerText.includes('Profile evidence') && $('startAppAnalysis'),'A changed pin hides stale path explanations');
  index.service_flow.registered_route_groups=[{resource:'/internal/8',registered_route_indexes:[9]}];
  S.agentPrompt=null;await doRefresh();const list=$('registeredRoutes');list.open=true;

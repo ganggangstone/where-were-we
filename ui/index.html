@@ -389,7 +389,7 @@ Object.assign(UI_EN,{'모듈 연결 (베타)':'Module connections (beta)','로�
 Object.assign(UI_EN,{'파일 범위':'File range','코드에서 확인한 기능 (베타)':'Features found in source (beta)','기능 흐름 (베타)':'Feature flows (beta)','기능 선택':'Select feature','화면 문구':'Interface label','서버의 데이터 접근':'Server data access','모델 읽기':'Read model','모델 쓰기':'Write model','요청을 시작하는 화면 동작':'UI actions that trigger this request','양식 제출':'Form submission','버튼 클릭':'Button click','입력 변경':'Input change','이벤트 처리 함수':'Event handler','클라이언트 호출':'Client invocation','클라이언트 정의':'Client definition','매개변수가 한 경로 구간일 때 일치':'Matches when the parameter occupies one URL segment','GitHub 작업 정보 미확인':'GitHub work data unavailable','최근 확인':'Last verified','설정·클라이언트 기본값에서 일치':'Matches configured client and server defaults','기본값 근거':'Default value evidence','HTTP 요청 흐름 (베타)':'HTTP request flow (beta)','고정 fetch 주소 · 서버 경로 대조':'Literal fetch URLs matched to server routes','요청을 보내는 코드':'Client call site','받는 서버 함수':'Server handler','경로 등록·실행 근거':'Route registration and startup evidence','주소 선언':'URL declaration','연결된 요청':'Matched requests','대상 미확인 요청':'Unresolved requests','확인한 요청':'Requests detected','서버 경로':'Server routes','연결 선택':'Select connection'});
 Object.assign(UI_EN,{'저장된 페이지':'Saved pages','미저장 페이지로':'Go to unsaved page'});
 Object.assign(UI_EN,{'워크스페이스 패키지':'Workspace packages','내부 패키지 의존성':'Workspace dependencies'});
-Object.assign(UI_EN,{'영역 AI 설명 (베타)':'Area AI explanations (beta)','경로 영역':'Path area','모든 경로':'All paths'});
+Object.assign(UI_EN,{'영역 AI 설명 (베타)':'Area AI explanations (beta)','저장된 설명':'Saved explanation','경로 영역':'Path area','모든 경로':'All paths'});
 const UI_PATTERN = new RegExp(Object.keys(UI_EN).sort((a, b) => b.length - a.length).map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'g');
 function tr(text) { return S.lang === 'en' ? String(text).replace(UI_PATTERN, match => UI_EN[match]) : String(text); }
 function ui(parts, ...values) { return parts.reduce((out, part, i) => out + tr(part) + (i < values.length ? values[i] : ''), ''); }
@@ -682,7 +682,7 @@ function openAnalysisPanel(task=null,detailTarget='',target=analysisTarget(),are
   if(area)Object.assign(S.analysisChoice,{area,maxCalls:area.resources.length});
   if(['make_steps','make_jobs'].includes(task))S.analysisChoice.targets=analysisCalls(task,{repository:S.repository,...(task==='make_steps'?{screen:detailTarget}:{node:detailTarget})}).map(a=>({repository:a.repository || '',target:a.screen || a.node}));
   S.agentPrompt=activeAnalysis()?.handoff ?? '';renderAgentPrompt();$('insp').scrollTop=0;
-  if(typeof AnalysisRun!=='undefined')AnalysisRun.open();
+  if(typeof AnalysisRun!=='undefined' && task!=='saved_scope')AnalysisRun.open();
 }
 function analysisChooser(collapsed=false) {
   const repos=S.projectInfo?.repositories || [],choice={task:S.analysisChoice?.task ?? null,target:analysisTarget()},needsCode=repos.length>1 && !S.repository;
@@ -1539,6 +1539,9 @@ function compactTrace(link,action) {
   ];
   return `<ol class="flow-trace" aria-label="${tr('호출 흐름')}">${nodes.map(([stage,label])=>`<li data-trace-stage="${stage}"><code>${esc(label)}</code></li>`).join('')}</ol>`;
 }
+function savedScopeButton(resource) {
+  return resource?`<button type="button" class="btn quiet" hidden data-saved-scope="${esc(resource)}">${tr('저장된 설명')}</button>`:'';
+}
 function standaloneRoutes(flow) {
   const identity=(r,path)=>JSON.stringify([r.method,path,r.server.file,r.server.line]);
   const linked=new Set(flow.connections.map(row=>identity(row,row.server_path || row.path)));
@@ -1591,7 +1594,7 @@ function registeredRoutesView(flow,state,evidence) {
     const proof=filesystem?`<div>${tr('Next.js 파일 경로')} · ${evidence(route.server.file,route.server.line)}</div>${refs?`<div class="s">${tr('패키지·설정')} · ${refs}</div>`:''}`:refs;
     const resource=resourceFor.get(route);
     const explain=resource?`<button class="btn quiet" data-explain-route="${esc(resource)}">${tr('AI 설명 (베타)')}</button>`:'';
-    return `<details class="sect" data-registered-route="${esc(resource || '')}"><summary><strong class="mono">${esc(route.method+' '+route.path)}</strong> ${defaults}</summary>${compactTrace(route)}<details><summary>${tr('근거')}</summary>${proof}${flowDataSteps(route.data_steps,evidence)}</details>${explain}</details>`;
+    return `<details class="sect" data-registered-route="${esc(resource || '')}"><summary><strong class="mono">${esc(route.method+' '+route.path)}</strong> ${defaults}${savedScopeButton(resource)}</summary>${compactTrace(route)}<details><summary>${tr('근거')}</summary>${proof}${flowDataSteps(route.data_steps,evidence)}</details>${explain}</details>`;
   }).join('');
   const controls=pages>1?`<div class="ctl"><button class="btn quiet" data-route-page="${page-1}" ${page===0?'disabled':''}>${tr('이전')}</button><span>${page+1} / ${pages}</span><button class="btn quiet" data-route-page="${page+1}" ${page+1===pages?'disabled':''}>${tr('다음')}</button></div>`:'';
   return `<details class="sect" id="registeredRoutes" ${(state.routesOpen ?? !flow.connections.length)?'open':''}><summary>${tr('서버 경로 (베타)')} · ${routes.length}</summary>${picker}${explainArea}${list}${controls}${capped?`<div class="s">${tr('저장된 경로')} ${flow.registered_routes.length}/${flow.coverage.routes}</div>`:''}</details>`;
@@ -1622,7 +1625,7 @@ function serviceFlowView(flow,state,evidence) {
     const members=group.connection_indexes.map(i=>connections[i]).filter(Boolean);
     const actions=[...new Set(members.flatMap(edge=>(edge.actions || []).map(flowActionName)))];
     const description=actions.length?actions.join(' · '):[...new Set(members.map(edge=>edge.method))].join(' · ');
-    return `<button class="btn quiet" data-local-resource="${esc(group.resource)}" aria-expanded="${group===resource}"><strong>${esc(group.resource)}</strong>${group===resource?'':' · '+esc(description)}</button>`;
+    return `<button class="btn quiet" data-local-resource="${esc(group.resource)}" aria-expanded="${group===resource}"><strong>${esc(group.resource)}</strong>${group===resource?'':' · '+esc(description)}</button>${savedScopeButton(group.resource)}`;
   }).join('');
   const groupHeader=cards?`<div class="flow-header"><h2>${tr('기능 (베타)')}</h2><div class="ctl">${cards}</div></div>`:'';
   if(groups.length && !resource)return `<section class="sect ${cards?'resource-flow':''}" data-http-flow>${groupHeader}</section>`;
@@ -1778,6 +1781,7 @@ function structureIndexView(m,includePurpose=true,featuresOnly=false) {
 function bindStructureIndex() {
   const graph=$('moduleGraph');
   if(!graph)return;
+  if(typeof AnalysisRun!=='undefined')AnalysisRun.bindMapResults();
   const update=(change,focus)=>{
     Object.assign(S.moduleGraph,change);
     graph.outerHTML=structureIndexView(M(),true,graph.hasAttribute('data-work-features'));
@@ -2338,6 +2342,10 @@ renderHeader();
 function renderAgentPrompt() {
   if(S.agentPurpose==='connection')return renderConnectionDiagnostic();
   const analysis=S.agentPurpose==='analysis',request=analysis?activeAnalysis():null;
+  if(analysis && S.analysisChoice?.task==='saved_scope'){
+    $('insp').innerHTML=`<h2>${esc(S.analysisChoice.detailTarget)}</h2>`+AnalysisRun.savedScopeHtml();
+    AnalysisRun.bind();return;
+  }
   if(analysis && S.analysisChoice?.area){
     $('insp').innerHTML=`<h2>${tr('영역 AI 설명 (베타)')}</h2><code>${esc(S.analysisChoice.area.prefix)}</code>`+AnalysisRun.html(false);
     AnalysisRun.bind();return;
