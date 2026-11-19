@@ -43,6 +43,25 @@ def store_record(db:SessionDep,payload):
         self.assertFalse(analyze(source=source.replace('db:SessionDep','db:Fake')))
         self.assertEqual(len(analyze(source=source.replace('select(Record)','untrusted(Record)'))),1)
 
+    def test_filtered_branch_preserves_polarity_and_exact_predicate(self):
+        import analysis_run
+        tree=ast.parse("""if principal.is_admin:
+    query=select(Record)
+    rows=s.exec(query).all()
+else:
+    query=(select(Record)
+           .where(Record.account==principal.id))
+    rows=s.exec(query).all()
+""")
+        rows=sqlmodel_steps._operations(tree.body,{'s':'SessionDep'},{'select':('sqlmodel','select',1)})
+        self.assertEqual([(r[-2],r[-1]) for r in rows],[(((1,True),),[]),(((1,False),),[6])])
+        flow={'data_steps':[{'operation':'read','model':'Record','file':'query.py','line':7,
+                            'guards':[{'file':'query.py','line':1,'when':False}],
+                            'filters':[{'file':'query.py','line':6}]}]}
+        detail,sites=list(analysis_run._flow_details(flow))[-1]
+        self.assertEqual(detail,{'kind':'conditional_filter','when':False,'model':'Record'})
+        self.assertEqual([s['line'] for s in sites],[1,6])
+
     def test_python_314_exception_list_keeps_line_numbers(self):
         code=b'try:\n    pass\nexcept ValueError, RuntimeError:\n    pass\n'
         self.assertEqual(structure_index._python_tree(code).body[0].handlers[0].lineno,3)

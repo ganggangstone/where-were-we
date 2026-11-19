@@ -38,12 +38,13 @@ def _select_model(expr,imports):
     return None
 
 
-def _operations(body, sessions, imports):
+def _operations(body, sessions, imports, guards=()):
     rows=[]
     for pos,stmt in enumerate(body):
         if isinstance(stmt,ast.If):
-            rows.extend(_operations(stmt.body,sessions,imports))
-            rows.extend(_operations(stmt.orelse,sessions,imports))
+            guard_line=stmt.test.lineno if stmt.test.end_lineno==stmt.test.lineno else None
+            rows.extend(_operations(stmt.body,sessions,imports,(*guards,(guard_line,True))))
+            rows.extend(_operations(stmt.orelse,sessions,imports,(*guards,(guard_line,False))))
         if not isinstance(stmt,ast.Assign) or len(stmt.targets)!=1 or not isinstance(stmt.targets[0],ast.Name):
             continue
         var=stmt.targets[0].id
@@ -57,7 +58,12 @@ def _operations(body, sessions, imports):
             execution=next_val
             if _method(execution,'all') or _method(execution,'one'):execution=execution.func.value
             if _method(execution,'exec') and isinstance(execution.func.value,ast.Name) and execution.func.value.id in sessions and len(execution.args)==1 and isinstance(execution.args[0],ast.Name) and execution.args[0].id==var:
-                rows.append(('read',model,sessions[execution.func.value.id],execution.lineno,[value.lineno]))
+                filters=[]
+                chain=value
+                while isinstance(chain,ast.Call) and isinstance(chain.func,ast.Attribute):
+                    if chain.func.attr=='where':filters.extend(arg.lineno if arg.lineno==arg.end_lineno else None for arg in chain.args)
+                    chain=chain.func.value
+                rows.append(('read',model,sessions[execution.func.value.id],execution.lineno,[value.lineno],guards,filters))
         if _method(value,'model_validate') and isinstance(value.func.value,ast.Name) and len(following)==2:
             commit=getattr(following[1],'value',None)
             if not (isinstance(next_stmt,ast.Expr) and isinstance(following[1],ast.Expr)
@@ -67,7 +73,7 @@ def _operations(body, sessions, imports):
                     and len(next_val.args)==1 and isinstance(next_val.args[0],ast.Name)
                     and next_val.args[0].id==var and not commit.args and not commit.keywords):
                 continue
-            rows.append(('write',value.func.value.id,sessions[commit.func.value.id],commit.lineno,[value.lineno,next_val.lineno]))
+            rows.append(('write',value.func.value.id,sessions[commit.func.value.id],commit.lineno,[value.lineno,next_val.lineno],guards,[]))
     return rows
 
 
@@ -125,7 +131,7 @@ def attach(modules,routes):
         server=route['server']
         file=server['file']
         if file not in modules:continue
-        for op,model,session,line,lines in modules[file]['functions'].get((server['function'],server['line']),[]):
+        for op,model,session,line,lines,guards,filters in modules[file]['functions'].get((server['function'],server['line']),[]):
             definition,table,model_import=locate(file,model)
             dep,alias,session_import=locate(file,session)
             if (not definition or table not in modules[definition]['tables'] or not dep or alias not in modules[dep]['aliases']):continue
@@ -133,4 +139,6 @@ def attach(modules,routes):
             proof.append((definition,modules[definition]['tables'][table]))
             proof.extend((dep,n) for n in modules[dep]['aliases'][alias])
             route.setdefault('data_steps',[]).append({'operation':op,'model':table,'file':file,'line':line,
-                'evidence':[{'file':f,'line':n} for f,n in proof]})
+                'evidence':[{'file':f,'line':n} for f,n in proof],
+                **({'guards':[{'file':file,'line':n,'when':truth} for n,truth in guards]} if guards and all(n for n,_ in guards) else {}),
+                **({'filters':[{'file':file,'line':n} for n in filters]} if filters and all(filters) else {})})

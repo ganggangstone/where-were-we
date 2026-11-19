@@ -1035,6 +1035,10 @@ def _flow_details(flow):
         local=next((s for s in step.get('evidence',[]) if s['file']==step['file']),None)
         if local:sites.append(local)
         yield {'kind':'data','model':step['model'],'operation':step['operation']},sites
+        guards=step.get('guards',[])
+        filters=step.get('filters',[])
+        if len(guards)==1 and len(filters)==1:
+            yield {'kind':'conditional_filter','model':step['model'],'when':guards[0]['when']},[guards[0],filters[0]]
 
 
 def _resource_rows(service):
@@ -1335,7 +1339,7 @@ def _quick_overview(repo,request,language,invoke,cancelled,deadline,raw,resource
                 edge['details']=[{k:v for k,v in detail.items() if k!='refs'} |
                                  {'evidence':[references[ref] for ref in detail['refs']]} for detail in edge['details']]
         if any(edge.get('details') for edge in connections):
-            packet['prompt']+=' Use supplied action and data evidence when describing a feature. A read does not imply a write; do not infer persistence or an unobserved user action.'
+            packet['prompt']+=' Use supplied action and data evidence when describing a feature. Describe conditional_filter limits using the branch condition, its true or false polarity, and the filter predicate. A read does not imply a write; do not infer persistence or an unobserved user action.'
         if resource:
             for edge,flow in zip(result['connections'],source_flows):
                 edge['source_connection']=flow
