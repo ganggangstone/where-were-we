@@ -945,18 +945,17 @@ async function refreshConnectedCode(project,repository) {
   // A newer project/code choice made while refreshing wins; only reload what is still wanted.
   if(S.desiredProject===project && S.desiredRepository===repository)await loadProject(project,false,repository);
   if(String(output).includes('FAILED'))throw Error(output);
-  if(S.desiredProject===project && S.desiredRepository===repository) {
-    const map=M(),indexes=map?.structure_indexes || (map?.structure_index?[map.structure_index]:[]);
-    if(indexes.some(index=>index.service_flow?.feature_groups?.length)) {
-      S.agentPrompt=null;S.view='sys';S.q='';render();setStatus('');
-    } else prepareAfterRefresh(project,repository);
-  }
+  if(S.desiredProject===project && S.desiredRepository===repository)prepareAfterRefresh(project,repository);
   return output;
 }
 // Every refresh path (button, settings, app control, new connection) prepares the request once, quietly.
 // Preparation is separate from collection: its failure must not read as a refresh failure.
 function prepareAfterRefresh(project,repository) {
   if(S.project!==project || S.repository!==repository)return;
+  const map=M(),indexes=map?.structure_indexes || (map?.structure_index?[map.structure_index]:[]);
+  if(indexes.some(index=>index.service_flow?.feature_groups?.length)) {
+    S.agentPrompt=null;S.view='sys';S.q='';render();setStatus('');return;
+  }
   const waiting=S.openRequestFor?.project===project?S.openRequestFor.ids:[];
   requestAgentAction('analysis_plan',{},true)
     .then(request=>{if(!request || request.up_to_date || S.project!==project || S.repository!==repository)return;
