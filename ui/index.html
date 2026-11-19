@@ -1521,7 +1521,7 @@ function purposeView(m,index) {
   if(!description?.text || !description.file || !Number.isInteger(description.line) || description.line<1)return '';
   const file=index.repository?index.repository+'/'+description.file:description.file;
   const url='zed://file'+codeLocation(m,file).split('/').map(encodeURIComponent).join('/')+':'+description.line;
-  return `<details class="sect" data-project-purpose><summary>${esc(description.text)}</summary><div class="module-scope s"><code title="${esc(index.commit)}">${esc(index.commit.slice(0,12))}</code> <a class="lnk mono" href="${esc(url)}" data-url="${esc(url)}" title="${esc(tr('작업 폴더에서 열기'))}">${esc(description.file)}:${description.line}</a></div></details>`;
+  return `<details class="sect" data-project-purpose><summary>${esc(description.text)}</summary><div class="module-scope s"><code title="${esc(index.commit)}">${esc(index.commit.slice(0,12))}</code> <button class="lnk mono" data-url="${esc(url)}" title="${esc(tr('작업 폴더에서 열기'))}">${esc(description.file)}:${description.line}</button></div></details>`;
 }
 function structureIndexView(m,includePurpose=true) {
   const indexes=m.structure_indexes || (m.structure_index ? [m.structure_index] : []);
@@ -1628,7 +1628,7 @@ function bindStructureIndex() {
     update({page:{...S.moduleGraph.page,[key]:Number(button.dataset.next)}});
     $('moduleGraph').querySelector(`[data-module-page="${key}"]:not(:disabled)`)?.focus();
   });
-  graph.querySelectorAll('a[data-url]').forEach(a=>{a.href=a.dataset.url;a.onclick=e=>{e.preventDefault();e.stopPropagation();invoke('open_url',{url:a.dataset.url});};});
+  graph.querySelectorAll('[data-url]').forEach(a=>{if(a.tagName==='A')a.href=a.dataset.url;a.onclick=e=>{e.preventDefault();e.stopPropagation();invoke('open_url',{url:a.dataset.url});};});
 }
 function sysView(m) {
   const y = S.system;
