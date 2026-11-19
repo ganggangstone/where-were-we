@@ -1431,7 +1431,11 @@ function directoryDetail(selection,fileUrl) {
   const detail={...selected,status:'indexed',imports:(result.imports || []).filter(row=>row.file===selected.file),package_imports:(result.package_imports || []).filter(row=>row.file===selected.file)};
   return `<section class="sect" data-directory-detail><div class="s">${summary}</div><label>${tr('파일')} <select data-directory-file>${menu}</select></label>${fileStructureDetail({file:selected.file,page:selection.page,result:detail},fileUrl(selected.file),fileUrl)}</section>`;
 }
-function inventoryBrowser(m,row,key) {
+function inventoryBrowser(m,row,key,coverage) {
+  const badge=directory=>{
+    const entry=coverage?.directories?.find(item=>item.directory===directory);
+    return entry?`<span class="pill" data-directory-coverage>${tr('확인한 파일')} ${esc(entry.indexed_files)}/${esc(entry.candidate_files)}</span>`:'';
+  };
   const state=S.inventoryBrowse?.key===key?S.inventoryBrowse:{dir:'',page:0};
   const prefix=state.dir?state.dir+'/':'';
   const children=new Map();
@@ -1445,7 +1449,7 @@ function inventoryBrowser(m,row,key) {
   const fileUrl=path=>'zed://file'+codeLocation(m,row.repository?row.repository+'/'+path:path).split('/').map(encodeURIComponent).join('/');
   const rows=entries.slice(page*size,(page+1)*size).map(([name,folder])=>{
     const path=prefix+name;
-    if(folder)return `<li><button class="btn quiet mono" data-inventory-dir="${esc(path)}">${esc(name)}/</button></li>`;
+    if(folder)return `<li><button class="btn quiet mono" data-inventory-dir="${esc(path)}">${esc(name)}/</button> ${badge(path)}</li>`;
     const url=fileUrl(path);
     const selected=S.inventoryFile?.key===key && S.inventoryFile.file===path;
     const inspect=/\.(py|[mc]?js|jsx|[mc]?ts|tsx|html?|go)$/.test(name)?`<button class="btn quiet" data-inspect-path="${esc(path)}" aria-expanded="${!!selected}">${tr('파일 구조 (베타)')}</button>`:'';
@@ -1455,7 +1459,7 @@ function inventoryBrowser(m,row,key) {
   const controls=pages>1?`<div class="ctl"><button class="btn quiet" data-inventory-page="${page-1}" ${page===0?'disabled':''}>${tr('이전')}</button><span>${page+1} / ${pages}</span><button class="btn quiet" data-inventory-page="${page+1}" ${page+1===pages?'disabled':''}>${tr('다음')}</button></div>`:'';
   const directory=S.inventoryDirectory?.key===key && S.inventoryDirectory.directory===state.dir?S.inventoryDirectory:null;
   const inspect=state.dir?`<button class="btn quiet" data-inspect-directory="${esc(state.dir)}" aria-expanded="${!!directory}">${tr('폴더 구조 (베타)')}</button>`:'';
-  return `<div class="ctl">${state.dir?`<button class="btn quiet" data-inventory-dir="${esc(parent)}">${tr('상위 폴더')}</button>`:''}<code>${esc(state.dir || '/')}</code>${inspect}</div>${directory?directoryDetail(directory,fileUrl):''}<ul>${rows.join('')}</ul>${controls}${row.paths_truncated?`<p class="s">${tr('파일 경로 표시 한도 도달')}</p>`:''}`;
+  return `<div class="ctl">${state.dir?`<button class="btn quiet" data-inventory-dir="${esc(parent)}">${tr('상위 폴더')}</button>`:''}<code>${esc(state.dir || '/')}</code> ${badge(state.dir || '.')} ${inspect}</div>${directory?directoryDetail(directory,fileUrl):''}<ul>${rows.join('')}</ul>${controls}${row.paths_truncated?`<p class="s">${tr('파일 경로 표시 한도 도달')}</p>`:''}`;
 }
 function inventoryView(m) {
   const rows=m.inventories || (m.inventory ? [m.inventory] : []);
@@ -1471,7 +1475,7 @@ function inventoryView(m) {
     const label=row.repository ? connectionDisplayName(row.repository) : '';
     const key=JSON.stringify([S.project,row.repository || '',row.commit]),open=S.inventoryOpen===key;
     const legacyCounts=()=>`<table><thead><tr><th>${tr('최상위 폴더')}</th><th>${tr('파일 수')}</th></tr></thead><tbody>${row.directories.map(([dir,count])=>`<tr><td>${dir?esc(dir):tr('루트 디렉터리')}</td><td>${esc(count)}</td></tr>`).join('')}</tbody></table>`;
-    return `<details class="sect" data-inventory="${esc(key)}" ${open?'open':''}><summary>${esc([label,tr(indexes.some(index=>index.service_flow?.feature_groups?.length)?'파일':'Git 추적 파일'),row.files].filter(x=>x!=='').join(' · '))}</summary>${open?`<p class="mono" title="${esc(row.commit)}">${esc(row.commit.slice(0,12))}</p>${Array.isArray(row.paths)?inventoryBrowser(m,row,key):legacyCounts()}`:''}</details>`;
+    return `<details class="sect" data-inventory="${esc(key)}" ${open?'open':''}><summary>${esc([label,tr(indexes.some(index=>index.service_flow?.feature_groups?.length)?'파일':'Git 추적 파일'),row.files].filter(x=>x!=='').join(' · '))}</summary>${open?`<p class="mono" title="${esc(row.commit)}">${esc(row.commit.slice(0,12))}</p>${Array.isArray(row.paths)?inventoryBrowser(m,row,key,indexes.find(index=>(index.repository || '')===(row.repository || '') && index.commit===row.commit)?.coverage):legacyCounts()}`:''}</details>`;
   }).join('');
 }
 function flowActionName(action) {

@@ -144,12 +144,14 @@ class RefreshFirstWebKit(unittest.TestCase):
  check($('insp').innerText.includes('api.py:28') && !$('insp').innerText.includes(S.lang==='en'?'Request code':'요청 코드') && !$('startAppAnalysis'),'Saved server registration opens without implying a request caller or another model turn');
  S.agentPrompt=null;
  const paths=['src/nested/<example name>.go','src/nested/worker.ts','src/nested/notes.md',...Array.from({length:80},(_,i)=>'src/item'+String(i).padStart(2,'0')+'.go')];
- window.mutateBundle=b=>{b.dev.structure_indexes=[{...index,files:[],imports:[],service_flow:null}];b.dev.inventories=[{repository:'web',commit:pin,files:82,paths,paths_truncated:true,directories:[['src',82]]}]};
+ window.mutateBundle=b=>{b.dev.structure_indexes=[{...index,files:[],imports:[],service_flow:null,coverage:{directories:[{directory:'src',indexed_files:2,candidate_files:80}]}}];b.dev.inventories=[{repository:'web',commit:pin,files:82,paths,paths_truncated:true,directories:[['src',82]]}]};
  await doRefresh();
  const box=()=>$('map').querySelector('[data-inventory]');
  check(purpose().compareDocumentPosition(box()) & Node.DOCUMENT_POSITION_FOLLOWING,'The source description precedes an unsupported-language inventory');
  check(box().open && box().innerText.includes(pin) && box().innerText.includes(tr('파일 경로 표시 한도 도달')),'Unsupported repositories open a pinned, explicitly partial path inventory');
+ check(box().querySelector('[data-directory-coverage]').innerText===tr('확인한 파일')+' 2/80','Folder badges use saved coverage for the selected revision');
  box().querySelector('[data-inventory-dir="src"]').click();
+ check(box().querySelector('[data-directory-coverage]').parentNode.querySelector('[data-inspect-directory]'),'Folder coverage stays beside its scoped inspection action');
  check(box().querySelectorAll('li').length===40 && !box().innerText.includes('item79.go'),'Directory pages have a bounded DOM');
  box().querySelector('[data-inventory-page="1"]').click();box().querySelector('[data-inventory-page="2"]').click();
  check(box().innerText.includes('item79.go'),'Final partial page is reachable');
