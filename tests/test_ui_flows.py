@@ -843,7 +843,7 @@ class Flows(unittest.TestCase):
  $('analysisTarget').value='*';$('analysisTarget').dispatchEvent(new Event('change'));
  await $('startAppAnalysis').onclick();await wait();
  sent=calls.filter(c=>c.command==='analysis_run_start').at(-1).args.scope;
- assert(sent.repository==='' && sent.intent.task==='all','All selector is not a repository');
+ assert(sent.repository==='' && sent.intent.task==='overview','Initial overview covers all selected repositories');
  assert(S.node==='api::worker','Opening requests preserves selected program');
 ''')
 

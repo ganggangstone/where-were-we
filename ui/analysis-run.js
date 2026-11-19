@@ -4,12 +4,12 @@ const AnalysisRun = (() => {
   let scopeKey = '', epoch = 0, revision = 0, timer = null, checking = null;
   let run = null, provider = null, providerBusy = false, busy = false, error = null;
   const loaded = new Set();
-  let openedPreview = null, openedOverview = '';
+  let openedPreview = null, openedOverview = null;
   const text = (ko, en) => S.lang === 'en' ? en : ko;
   const scope = () => ({project:S.project, repository:['make_steps','make_jobs'].includes(S.analysisChoice?.task) ? '' : (S.analysisChoice?.target || S.repository || '').replace(/^\*$/, ''), branch:S.branch, lang:S.lang});
   function intent() {
-    const choice=S.analysisChoice || {}, command=choice.task || 'analysis_plan';
-    const task=({analysis_plan:'all',analysis_request:'analysis',make_system:'system',suggest_groups:'groups',make_steps:'steps',make_jobs:'jobs',briefing_request:'briefing'})[command] || 'all';
+    const choice=S.analysisChoice || {}, command=choice.task || 'quick_overview';
+    const task=({quick_overview:'overview',analysis_plan:'all',analysis_request:'analysis',make_system:'system',suggest_groups:'groups',make_steps:'steps',make_jobs:'jobs',briefing_request:'briefing'})[command] || 'all';
     const args={...scope(),...(task==='steps'?{screen:choice.detailTarget}:task==='jobs'?{node:choice.detailTarget}:{})};
     const targets=['steps','jobs'].includes(task) ? (choice.targets || analysisCalls(command,args).map(a=>({repository:a.repository || '',target:a.screen || a.node}))) : [];
     return {task,targets};
@@ -19,7 +19,7 @@ const AnalysisRun = (() => {
   const shown = () => S.agentPurpose === 'analysis' && S.agentPrompt != null;
   const current = token => token === epoch && scopeKey === key();
   const active = () => !!run && activeStates.has(run.state);
-  const sameScope = () => !!run && Object.entries(scope()).every(([name,value]) => run[name] === value) && JSON.stringify(run.intent || {task:'all',targets:[]})===JSON.stringify(intent());
+  const sameScope = () => !!run && Object.entries(scope()).every(([name,value]) => run[name] === value) && (JSON.stringify(run.intent || {task:'all',targets:[]})===JSON.stringify(intent()) || (!S.analysisChoice?.task && (run.intent?.task || 'all')==='all'));
   const usable = () => provider?.available === true && provider?.authenticated === true && provider?.account && typeof provider.account === 'object';
   function paint() {
     if (shown()) renderAgentPrompt();
@@ -75,7 +75,7 @@ const AnalysisRun = (() => {
     if (!current(token)) return;
     run = value; error = null; paint();
     // Use the existing analysis-only read: never collect or move change history.
-    if (sameScope() && !active() && (run.state === 'completed' || run.completed_tasks?.length) && !loaded.has(run.id)) {
+    if (run?.intent?.task!=='overview' && sameScope() && !active() && (run.state === 'completed' || run.completed_tasks?.length) && !loaded.has(run.id)) {
       const id = run.id; loaded.add(id);
       try { await reloadAnalysisOnly(() => current(token) && run?.id === id); }
       catch { if (current(token)) { loaded.delete(id); error = {code:'result_read_failed'}; paint(); } }
@@ -132,8 +132,8 @@ const AnalysisRun = (() => {
   function overviewHtml() {
     return savedOverviews().map((group,index)=>{
       const key=overviewKey(group);
-      const open=openedOverview===key;
-      const rows=group.items.map(item=>`<div><b>${esc(item.name)}</b> ${esc([item.method,item.path,item.function].filter(Boolean).join(' '))} · <code>${esc(item.file)}:${esc(item.line)}</code><pre>${esc(item.quote)}</pre></div>`).join('');
+      const open=openedOverview===key || (openedOverview===null && group.format==='overview-v1');
+      const rows=group.items.map(item=>`<div><b>${esc(item.name)}</b> ${esc(item.description || '')} ${esc([item.method,item.path,item.function].filter(Boolean).join(' '))} · <code>${esc(item.file)}:${esc(item.line)}</code><pre>${esc(item.quote)}</pre></div>`).join('');
       return `<section class="sect"><button class="btn plain" type="button" id="savedOverview${index}" aria-expanded="${open}">${text('저장된 첫 개요','Saved initial overview')} · ${esc(connectionDisplayName(group.repository))}</button>
         <p class="s">${text('파일 '+group.files.length+'개의 일부 코드에서 확인한 항목 '+group.items.length+'개','Items verified: '+group.items.length+' · Files sampled: '+group.files.length)}</p>
         ${open ? `<div><code>${esc(group.commit.slice(0,8))}</code><p>${group.files.map(esc).join(', ')}</p>${rows}</div>` : ''}</section>`;
@@ -184,14 +184,14 @@ const AnalysisRun = (() => {
                'Initial input units reviewed: '+batches.completed+' · Total not yet known')
         : text('현재 작업 입력 조각','Current task input units')+': '+batches.completed+'/'+batches.total;
     }
-    const names={all:text('지도·서비스 구성·화면 묶음','Map, service overview, screen groups'),analysis:text('지도','Map'),system:text('서비스 구성','Service overview'),groups:text('화면 묶음','Screen groups'),steps:text('동작 과정','Action steps'),jobs:text('프로그램이 하는 일','Program jobs'),briefing:text('변경 설명','Change explanation')};
-    const taskName = typeof task === 'string' ? task : task ? [task.repository, text(PLAN_NAMES[task.task] || task.task, ({analysis:'Detailed map',system:'Architecture',groups:'Screen groups',jobs:'Program jobs',steps:'Action steps',briefing:'Change explanation'})[task.task] || task.task)].filter(Boolean).join(' · ') : '';
+    const names={overview:text('첫 개요','Initial overview'),all:text('지도·서비스 구성·화면 묶음','Map, service overview, screen groups'),analysis:text('지도','Map'),system:text('서비스 구성','Service overview'),groups:text('화면 묶음','Screen groups'),steps:text('동작 과정','Action steps'),jobs:text('프로그램이 하는 일','Program jobs'),briefing:text('변경 설명','Change explanation')};
+    const taskName = typeof task === 'string' ? task : task ? [task.repository, text(task.task==='overview'?'첫 개요':PLAN_NAMES[task.task] || task.task, ({overview:'Initial overview',analysis:'Detailed map',system:'Architecture',groups:'Screen groups',jobs:'Program jobs',steps:'Action steps',briefing:'Change explanation'})[task.task] || task.task)].filter(Boolean).join(' · ') : '';
     const issue = error || run?.error;
     const canStart = usable() && !providerBusy && !busy && !active();
     const runScope = run ? [run.repository ? connectionDisplayName(run.repository) : text('연결한 코드 전체','All connected repositories'),run.branch,run.lang].join(' · ') : '';
     const runAccount = run?.account?.email || run?.account?.id;
     return `<section class="sect" aria-labelledby="appAnalysisHeading"><h3 id="appAnalysisHeading">${text('앱에서 분석','Analyze in the app')}</h3>
-      <p class="s">${text('첫 분석은 지도·서비스 구성·화면 묶음을 만듭니다. 동작 과정과 프로그램이 하는 일은 해당 버튼을 누를 때 분석합니다.','First analysis builds the map, service overview, and screen groups. Action steps and program jobs run only when requested from their buttons.')}</p>
+      <p class="s">${text('첫 개요는 코드 저장소마다 최대 4개 파일의 일부를 읽고 AI를 최대 한 번 호출해 기능과 구조를 근거와 함께 저장합니다. 전체 분석은 지도·서비스 구성·화면 묶음을 만듭니다.','The initial overview samples up to four files and uses at most one AI call per repository. It saves findings about features and structure with source evidence. Full analysis builds the map, service overview, and screen groups.')}</p>
       <p class="s">${text('선택한 분석','Selected analysis')}: ${esc(names[intent().task])}${intent().targets.map(t=>' · '+esc(t.repository)+' · '+esc(t.target)).join('')}</p>
       <p><strong>Claude Code</strong> · ${text('계정','Account')}: ${esc(identity || text('확인되지 않음','Not verified'))}${account?.subscription_type ? ' · '+esc(account.subscription_type) : ''}</p>
       <p class="s">${text('이 컴퓨터에 로그인된 Claude 구독 계정을 사용합니다. 선택한 코드가 Claude에 전송되며 구독 사용량·한도가 적용됩니다. 시작·다시 시도를 누를 때만 AI를 실행합니다.','Uses the Claude subscription signed in on this computer. Selected source is sent to Claude; subscription usage and limits apply. AI runs only when you click Start or Retry.')}</p>
@@ -202,16 +202,17 @@ const AnalysisRun = (() => {
       ${overviewHtml()}
       ${previewHtml()}
       ${issue ? `<p role="alert">${esc(message(issue))}</p>` : ''}
-      <div class="ctl">${active() ? `<button class="btn" id="cancelAppAnalysis" ${busy || run.cancel_requested ? 'disabled' : ''}>${text('분석 취소','Cancel analysis')}</button>` : sameScope() && ['failed','cancelled'].includes(run?.state) ? `<button class="btn primary" id="retryAppAnalysis" ${canStart ? '' : 'disabled'}>${text('현재 코드로 다시 시도','Retry with current code')}</button>` : `<button class="btn primary" id="startAppAnalysis" ${canStart ? '' : 'disabled'}>${text('Claude Code로 분석 시작','Start analysis with Claude Code')}</button>`}
+      <div class="ctl">${active() ? `<button class="btn" id="cancelAppAnalysis" ${busy || run.cancel_requested ? 'disabled' : ''}>${text('분석 취소','Cancel analysis')}</button>` : sameScope() && ['failed','cancelled'].includes(run?.state) ? `<button class="btn primary" id="retryAppAnalysis" ${canStart ? '' : 'disabled'}>${text('현재 코드로 다시 시도','Retry with current code')}</button>` : `<button class="btn primary" id="startAppAnalysis" ${canStart ? '' : 'disabled'}>${intent().task==='overview'?text('첫 개요 만들기','Create initial overview'):text('Claude Code로 분석 시작','Start analysis with Claude Code')}</button>`}
+      ${!active() && intent().task==='overview' ? `<button class="btn quiet" id="startFullAnalysis" ${canStart ? '' : 'disabled'}>${text('전체 코드 분석','Analyze full codebase')}</button>` : ''}
       <button class="btn quiet" id="checkAppAnalysis" ${busy || providerBusy ? 'disabled' : ''}>${text('계정·상태 다시 확인','Check account and status')}</button>
-      ${sameScope() && done > 0 ? `<button class="btn quiet" id="viewAppAnalysis">${text('저장된 결과 보기','View saved results')}</button>` : ''}</div></section>`;
+      ${sameScope() && done > 0 && run.intent?.task!=='overview' ? `<button class="btn quiet" id="viewAppAnalysis">${text('저장된 결과 보기','View saved results')}</button>` : ''}</div></section>`;
   }
   function bind() {
     savedOverviews().forEach((group,i)=>{
       const button=$('savedOverview'+i);
       if(button)button.onclick=()=>{
         const key=overviewKey(group);
-        openedOverview=openedOverview===key?'':key;
+        openedOverview=button.getAttribute?.('aria-expanded')==='true' || openedOverview===key ? '' : key;
         paint();
       };
     });
@@ -225,6 +226,10 @@ const AnalysisRun = (() => {
       };
     });
     if ($('startAppAnalysis')) $('startAppAnalysis').onclick = () => execute('analysis_run_start');
+    if ($('startFullAnalysis')) $('startFullAnalysis').onclick = () => {
+      S.analysisChoice={...S.analysisChoice,task:'analysis_plan'};
+      return execute('analysis_run_start');
+    };
     if ($('retryAppAnalysis')) $('retryAppAnalysis').onclick = () => execute('analysis_run_retry');
     if ($('cancelAppAnalysis')) $('cancelAppAnalysis').onclick = () => execute('analysis_run_cancel');
     if ($('checkAppAnalysis')) $('checkAppAnalysis').onclick = () => { void providers(); void check(); };

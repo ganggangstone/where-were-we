@@ -114,7 +114,7 @@ def _scope(project, repository, branch, lang):
 
 def _intent(intent,repository):
     intent={'task':'all','targets':[]} if intent is None else intent
-    if not isinstance(intent,dict) or intent.get('task') not in ('all','analysis','system','groups','steps','jobs','briefing'):
+    if not isinstance(intent,dict) or intent.get('task') not in ('all','overview','analysis','system','groups','steps','jobs','briefing'):
         raise ValueError('Choose a known analysis task')
     task=intent['task'];targets=intent.get('targets',[])
     if not isinstance(targets,list) or any(not isinstance(t,dict) or set(t)!={'repository','target'} or
@@ -127,6 +127,11 @@ def _plan(value):
     name,branch,lang,repository=(value[k] for k in ('project','branch','lang','repository'))
     intent=value.get('intent',{'task':'all','targets':[]});chosen=intent['task']
     plan=ai_extract.plan(name,branch,lang,repository,overview=True)
+    if chosen=='overview':
+        finished={t['repository'] for t in value.get('completed_tasks',[])}
+        plan['tasks']=[{'repository':rid,'task':'overview',**pin} for rid,pin in plan['pins'].items() if rid not in finished]
+        plan['blocked']=[t for t in plan['blocked'] if t['task']=='analysis']
+        return plan
     if chosen=='all':return plan
     if chosen=='briefing':
         full=ai_extract.plan(name,branch,lang,repository)
@@ -171,7 +176,8 @@ def prepare(project, branch='dev', lang='ko', repository='', executor='claude', 
     scope = _scope(project,repository,branch,lang)
     scope['intent']=_intent(intent,scope['repository'])
     with locked():
-        for current in _runs():
+        history=_runs()
+        for current in history:
             if current['state'] in ACTIVE and current['project']==project:
                 raise RunError('already_running','Analysis is already prepared or running for this code. Continue or cancel that run')
         plan = _plan(scope)
@@ -179,6 +185,16 @@ def prepare(project, branch='dev', lang='ko', repository='', executor='claude', 
                  'started_at':None,'finished_at':None,'launch_epoch':None,'prepare_epoch':time.time(),'launch_intended':launch_intended,'pins':plan['pins'],'tasks':plan['tasks'],
                  'blocked':plan['blocked'],'skipped':plan['skipped'],'current_task':None,'completed_tasks':[],
                  'cancel_requested':False,'error':None,'account':None}
+        if scope['intent']['task']=='overview':
+            for old in history:
+                if any(old[key]!=scope[key] for key in ('project','lang','branch')):continue
+                for rid,overview in old.get('overviews',{}).items():
+                    pin=plan['pins'].get(rid)
+                    if pin and overview.get('format')=='overview-v1' and all(overview.get(k)==v for k,v in pin.items()):
+                        value.setdefault('overviews',{})[rid]=overview
+            cached=value.get('overviews',{})
+            value['completed_tasks']=[{'task':'overview','repository':rid,'target':None} for rid in cached]
+            value['tasks']=[t for t in value['tasks'] if t['repository'] not in cached]
         return write(value)
 
 def status(run_id=None, project=None, repository='', branch='dev', lang='ko'):
@@ -349,11 +365,11 @@ def export_source(repo, commit, commits=None, cancelled=None, deadline=None, sel
 
 def _request(value,task):
     args=(value['project'],value['branch'],value['lang'],task['repository'])
-    if task['task']=='analysis': return ai_extract.request(*args,overview=True)
+    if task['task'] in ('analysis','overview'): return ai_extract.request(*args,overview=True)
     if task['task']=='briefing': return briefing.request(value['project'],task['repository'],value['branch'],value['lang'])
     return ai_extract.task_request(value['project'],task['task'],value['branch'],value['lang'],task['repository'],task.get('target',''),overview=True)
 
-def _first_files(repo,head,request):
+def _first_files(repo,head,request,overview=False):
     """Choose inexpensive evidence across directories. Every other file stays queued."""
     files={}
     total=0
@@ -367,18 +383,20 @@ def _first_files(repo,head,request):
         total+=int(size)
     # For small inputs keep the existing single request. Bound the seed read
     # itself so a giant generated file cannot delay the first request.
-    if len(files)<64 and total<4*1024*1024:return set()
+    if not overview and len(files)<64 and total<4*1024*1024:return set()
     recheck=ai_extract.files_in(request.get('recheck',[]))
     # Review catalog rows are [id, method/type, path, function, file, source].
     known={row[4] for row in request.get('known',[]) if isinstance(row,list) and len(row)>4}
     chosen=set();parents=set()
-    paths=sorted((f for f,n in files.items() if 6<=n<=UNIT_BYTES//2),
+    paths=sorted((f for f,n in files.items() if 6<=n<=(MAX_FILE_BYTES if overview else UNIT_BYTES//2)),
                  key=lambda f:(f not in recheck,f not in known,abs(files[f]-1024),f))
     for file in paths:
         parent=PurePosixPath(file).parent
         if parent in parents and file not in recheck:continue
         chosen.add(file);parents.add(parent)
         if len(chosen)>=4:break
+    if overview and len(chosen)<4:
+        chosen.update([p for p in paths if p not in chosen][:4-len(chosen)])
     return chosen
 
 def _payload(value,task,request,cancelled=None,deadline=None,blobs=None,deferred=None):
@@ -905,9 +923,43 @@ def _preview(run,task,commit,settled,programs,context):
             current['preview']={'commit':commit,'repository':task['repository'],'items':existing}
             write(current)
 
+def _quick_overview(repo,request,language,invoke,cancelled,deadline):
+    """One bounded call per repository. A reference selects an actual pinned line."""
+    commit=request['commit']
+    selected=_first_files(repo,commit,request,overview=True)
+    snapshots=export_source(repo,commit,selected={commit:selected},cancelled=cancelled,deadline=deadline)
+    sources=[];references={}
+    for source in snapshots[0]['files']:
+        lines=[row for row in source['lines'] if len(row['text'].strip())>=6]
+        # Spread the excerpt across the file, including its first and last usable lines.
+        offsets=sorted({i*(len(lines)-1)//23 for i in range(24)}) if len(lines)>24 else range(len(lines))
+        rows=[]
+        for i in offsets:
+            row=lines[i];text=row['text'].strip()[:160]
+            ref=len(references)+1
+            references[ref]={'file':source['file'],'line':row['line'],'quote':text}
+            rows.append({'ref':ref,'line':row['line'],'text':text})
+        if rows:sources.append({'file':source['file'],'lines':rows})
+    result={'format':'overview-v1','files':[s['file'] for s in sources],'items':[]}
+    if not sources:return result
+    packet={'lang':language,'sources':sources,
+            'prompt':'Describe directly evidenced features and structure in the selected language. '
+                     'Each item names one feature, component or relationship, explains its role in one sentence and selects its supporting ref. '
+                     'Return at most 12 items. Skip unsupported claims. Empty items are valid. Do not request further reads.',
+            'schema':{'items':[{'name':'feature or component','description':'what it does','ref':1}]}}
+    answer=invoke(packet)
+    items=answer.get('items')
+    if not isinstance(items,list) or len(items)>12 or answer.get('needs'):raise InvalidClaim('Invalid initial overview response')
+    for item in items:
+        if (not isinstance(item,dict) or type(item.get('ref'))!=int or item['ref'] not in references
+                or any(not isinstance(item.get(k),str) or not 0<len(item[k].strip())<=500 for k in ('name','description'))):
+            raise InvalidClaim('An initial overview item lacked a supported source reference or description')
+        result['items'].append({k:item[k] for k in ('name','description')} | references[item['ref']])
+    _strict_result('analysis',{'inspected':result['items']},repo,commit)
+    return result
+
 def generate(value,task,request,executor,cancelled,deadline,check,blobs=None):
     deferred=[]
-    payload=_payload(value,task,request,cancelled,deadline,blobs,deferred)
     repo=None;raw=None
     if task['task']!='briefing':
         conf,bundle,_,_=ai_extract.context(value['project'],task['repository'],value['branch'])
@@ -933,6 +985,9 @@ def generate(value,task,request,executor,cancelled,deadline,check,blobs=None):
         result=_result(executor(prompt,cancelled=cancelled,timeout=min(TASK_SECONDS,max(1,int(deadline-time.monotonic())))))
         check()
         return result
+    if task['task']=='overview':
+        return _quick_overview(repo,request,value['lang'],invoke,cancelled,deadline)
+    payload=_payload(value,task,request,cancelled,deadline,blobs,deferred)
     if task['task']=='analysis':
         payload['prompt']+=' You may add preview_programs: [{name,file,line,quote}] for directly evidenced programs, CLI commands or workers. If there are no screens or routes, still provide inspected evidence and unknown as the map schema requires.'
     extra=[];provisional={}
@@ -1164,7 +1219,10 @@ def run(run_id, executor=None):
                     if value['cancel_requested']: raise Cancelled()
                     _check_pins(value,_plan(value))
                     value['state']='saving';write(value)
-                    _save(task,request,result)
+                    if task['task']=='overview':
+                        rid=task['repository']
+                        value.setdefault('overviews',{})[rid]={'repository':rid,**value['pins'][rid],**json.loads(result)}
+                    else:_save(task,request,result)
                     preview=value.get('preview',{})
                     programs=[item for item in preview.get('items',[]) if item['kind']=='program']
                     if task['task']=='analysis':

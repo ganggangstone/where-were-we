@@ -129,6 +129,36 @@ class Preview(unittest.TestCase):
         self.assertEqual(seen_pages, set(range(len(known))))
         self.assertEqual(final_sources, set(self.git('ls-files').splitlines()))
 
+    def test_bounded_overview_finishes_and_reuses_a_pinned_sample_without_marking_full_map_complete(self):
+        for i in range(68):
+            folder=self.repo/f'part{i}'
+            folder.mkdir()
+            (folder/'module.odd').write_text('command dispatches current input\n'*600)
+        self.git('add','.');self.git('commit','-qm','Large independent program inventory')
+        baseline=self.raw();packets=[]
+        def executor(prompt,**kwargs):
+            p=json.loads(prompt.split('\n',1)[1])
+            packets.append(p)
+            self.assertLessEqual(len(prompt.encode()),analysis_run.MAX_PROMPT_BYTES)
+            self.assertEqual(len({f['file'] for f in p['sources']}),4)
+            self.assertTrue(all(len(f['lines'])<=24 for f in p['sources']))
+            self.assertTrue(all(len(row['text'])<=160 for f in p['sources'] for row in f['lines']))
+            return {'items':[{'name':'Dispatch','description':'Dispatches the current input.','ref':p['sources'][0]['lines'][0]['ref']}]}
+        intent={'task':'overview','targets':[]}
+        run=self.prepare(intent=intent)
+        done=analysis_run.run(run['id'],executor)
+        self.assertEqual(done['state'],'completed',done.get('error'))
+        self.assertEqual(len(packets),1)
+        self.assertEqual(self.raw(),baseline)
+        group=done['overviews']['service']
+        item=group['items'][0]
+        self.assertIn(item['quote'],(self.repo/item['file']).read_text().splitlines()[item['line']-1])
+        self.assertIn('analysis',[t['task'] for t in analysis_run._plan({**run,'intent':{'task':'all','targets':[]}})['tasks']])
+        cached=analysis_run.run(self.prepare(intent=intent)['id'],executor)
+        self.assertEqual(cached['state'],'completed',cached.get('error'))
+        self.assertEqual(cached['overviews']['service'],group)
+        self.assertEqual(len(packets),1)
+
     def test_source_units_share_the_queue_with_matching_review_rows(self):
         def page(key,index,data):
             return {'kind':'metadata','id':key+str(index),'value':{'path':[key,index],'value':data}}

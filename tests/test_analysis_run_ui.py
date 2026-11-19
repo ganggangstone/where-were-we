@@ -91,6 +91,17 @@ const args=calls.filter(c=>c.command==='analysis_run_start').at(-1).args;
 assert(args.scope.intent.task==='groups' && args.scope.intent.targets.length===0,'Explicit grouping intent reaches native bridge');
 ''')
 
+    def test_initial_overview_and_full_analysis_have_distinct_explicit_buttons(self):
+        self.check_js(r'''
+await open();
+assert($('startFullAnalysis') && $('insp').innerHTML.includes('at most one AI call per repository'),'Scope and call bound visible');
+await $('startAppAnalysis').onclick();await flush();
+assert(calls.filter(c=>c.command==='analysis_run_start').at(-1).args.scope.intent.task==='overview','Default button requests the bounded overview');
+status=null;await AnalysisRun.check();
+await $('startFullAnalysis').onclick();await flush();
+assert(calls.filter(c=>c.command==='analysis_run_start').at(-1).args.scope.intent.task==='all','Full button requests the complete plan');
+''')
+
     def test_provider_account_and_charge_before_explicit_start(self):
         self.check_js(r'''
 await flush();assert(count('analysis_run_status')===1,'Startup recovers status');
