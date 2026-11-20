@@ -428,6 +428,7 @@ Object.assign(UI_EN,{'파일 범위':'File range','코드에서 확인한 기능
 Object.assign(UI_EN,{'저장된 페이지':'Saved pages','미저장 페이지로':'Go to unsaved page'});
 Object.assign(UI_EN,{'워크스페이스 패키지':'Workspace packages','내부 패키지 의존성':'Workspace dependencies'});
 Object.assign(UI_EN,{'영역 AI 설명 (베타)':'Area AI explanations (beta)','저장된 설명':'Saved explanation','경로 영역':'Path area','모든 경로':'All paths'});
+Object.assign(UI_EN,{"표시 버전":"Map version","이 코드만 · 서버 연결 유지":"This code only · server links kept","코드 간 서버 연결 가능":"Code can link to servers","확인된 길 없음 · 직접 주소로 열리거나 미연결":"No links found · direct URL or unconnected","코드·지도 유지":"Code and map kept","Claude Code 분석 또는 AI 요청":"Claude Code analysis or AI request"});
 const UI_PATTERN = new RegExp(Object.keys(UI_EN).sort((a, b) => b.length - a.length).map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'g');
 function tr(text) { return S.lang === 'en' ? String(text).replace(UI_PATTERN, match => UI_EN[match]) : String(text); }
 function ui(parts, ...values) { return parts.reduce((out, part, i) => out + tr(part) + (i < values.length ? values[i] : ''), ''); }
@@ -1071,12 +1072,12 @@ function renderRepositories() {
   ])}${unknown(r).length?`<ul class="status-list">${unknown(r).map(text=>`<li><span class="pill warn">${tr('확인 못 한 것')}</span><span>${esc(text)}</span></li>`).join('')}</ul>`:''}</section>`;
   const failure=r=>`<div class="s error" role="alert"><b>${esc(r.name)} · ${failed(r)}</b> ${String(r.error).includes('GITHUB_ACCESS|') ? esc(githubErrorText(r.error))+` <button class="btn quiet" data-github-repair="${esc(r.id || '')}">${tr('GitHub 계정 바꾸기')}</button>` : ''}${errorDetails(String(r.error))}</div>`;
   const unlinked=repos.length>1 && !repos.some(r=>r.api_targets?.length), candidates=M()?.connection_candidates?.length || 0;
-  bar.innerHTML = `<select id="repository" aria-label="${tr('연결한 코드')}"><option value="">${tr('모든 코드')}</option>${repos.map(r => `<option value="${esc(r.id)}" ${r.id === S.repository ? 'selected' : ''}>${esc(r.name)}</option>`).join('')}</select><span class="s">${tr('지도에 표시할 버전')}</span><div class="seg light" id="branch" role="group" aria-label="${tr('지도에 표시할 버전')}"><button data-b="dev"></button><button data-b="main"></button></div><button class="btn quiet" id="manageRepositories">${tr('코드 추가·수정')}</button><button class="btn quiet" id="analyzeMap">${esc(analysisButtonText())}</button>`+
+  bar.innerHTML = `<select id="repository" aria-label="${tr('연결한 코드')}"><option value="">${tr('모든 코드')}</option>${repos.map(r => `<option value="${esc(r.id)}" ${r.id === S.repository ? 'selected' : ''}>${esc(r.name)}</option>`).join('')}</select><span class="s">${tr('표시 버전')}</span><div class="seg light" id="branch" role="group" aria-label="${tr('지도에 표시할 버전')}"><button data-b="dev"></button><button data-b="main"></button></div><button class="btn quiet" id="manageRepositories">${tr('코드 추가·수정')}</button><button class="btn quiet" id="analyzeMap">${esc(analysisButtonText())}</button>`+
     // 코드가 둘 이상일 때만: 모든 코드와 코드 하나의 차이. 코드 하나를 골라도 지정한 서버 연결(api_targets)은 그 서버의 요청까지 이어진다(project._compose).
-    (repos.length>1 ? `<span class="s" data-code-scope>${tr(S.repository ? '이 코드의 화면만 봅니다. 지정한 서버 연결은 그대로 이어집니다.' : '모든 코드: 연결한 코드 전체를 한 지도로 봅니다.')}</span>` : '')+
+    (repos.length>1 ? `<span class="s" data-code-scope>${tr(S.repository ? '이 코드만 · 서버 연결 유지' : '연결한 코드 전체')}</span>` : '')+
     `<span class="chips">${current.map(chip).join('')}</span>`+
     current.filter(r=>r.github_collection?.state==='unavailable').map(r=>`<span class="pill warn" role="status">${esc(r.name)} · ${tr('GitHub 작업 정보 미확인')}${r.github_collection.last_success_at?' · '+tr('최근 확인')+' '+esc(when(r.github_collection.last_success_at)):''}</span>`).join('')+
-    (unlinked ? `<span class="s">${tr('코드가 서로 요청을 주고받는다면 지도에서 연결할 수 있습니다.')}</span><button class="btn plain" id="linkCode">${tr('서버 연결 지정')}</button>` : '')+
+    (unlinked ? `<span class="s">${tr('코드 간 서버 연결 가능')}</span><button class="btn plain" id="linkCode">${tr('서버 연결 지정')}</button>` : '')+
     (candidates ? `<button class="btn plain" id="reviewCandidates">${ui`연결 후보 ${candidates}개 확인`}</button>` : '')+
     `<details class="repository-detail"><summary>${tr('코드 상태 자세히')}</summary>${current.map(detail).join('')}</details>`+current.filter(r=>r.error).map(failure).join('');
   if ($('linkCode')) $('linkCode').onclick = () => editProject(false, 'targets');
@@ -1181,12 +1182,12 @@ function editProject(create, focus=null) {
   function rows() {
     $('repositoryRows').innerHTML = repos.map((r,i) => `<fieldset data-repository-row="${i}"><legend data-repository-title="${i}">${esc(r.name || tr('새 코드 폴더'))}</legend><input type="hidden" data-field="id" value="${esc(r.id)}">
       <div class="repository-fields"><label>${tr('GitHub 주소 또는 코드 폴더')}<input data-field="path" value="${esc(r.url || r.path)}" placeholder="https://github.com/example/web"></label><label>${tr('화면에 표시할 이름 (선택)')}<input data-field="name" value="${esc(r.name)}" placeholder="${tr('예: 웹 화면, 서버, 작업 프로그램')}"></label></div>
-      ${repos.length>1 ? `<div class="sect"><h4>${tr('이 코드가 요청을 보내는 서버')}</h4><p class="s">${tr('확인된 서버만 지도에 연결합니다.')}</p><div data-api-options="${i}">${targetOptions(i)}</div></div>` : ''}
+      ${repos.length>1 ? `<div class="sect"><h4 title="${esc(tr('확인된 서버만 지도에 연결합니다.'))}">${tr('이 코드가 요청을 보내는 서버')}</h4><div data-api-options="${i}">${targetOptions(i)}</div></div>` : ''}
       ${r.managed?helpDetails(`<p class="s">${esc(r.path)} · @${esc(r.github?.account || '')}</p>`,'코드 보관 위치'):''}<div data-registration-account="${i}"></div>
       <details><summary>${tr('지도에 표시할 버전')}</summary><div class="repository-fields">${[['dev','분석할 버전',r.refs.dev || ''],['main','비교할 기준 버전',r.refs.main || '']].map(([key,label,value])=>`<label>${tr(label)}<input data-field="${key}" value="${esc(value)}" placeholder="${key==='dev'?'HEAD':'origin/main'}"></label>`).join('')}</div><p class="s">${tr('브랜치·태그·커밋 · 비교는 선택')}</p></details>
       <details><summary>${tr('코드 위치 직접 지정')}</summary>
       <div class="repository-fields">${[['frontend','화면 코드 위치',r.layout.frontend || ''],['backend','서버 코드 위치',r.layout.backend || '']].map(([key,label,value])=>`<label>${tr(label)}<input data-field="${key}" value="${esc(value)}" placeholder="${tr('자동으로 찾기')}"></label>`).join('')}</div></details>
-      ${repos.length>1 ? `<div class="ctl"><button class="btn quiet" data-remove="${i}">${tr('이 코드 연결 해제')}</button><span class="s">${tr('코드와 지도는 남습니다.')}</span></div>` : ''}</fieldset>`).join('');
+      ${repos.length>1 ? `<div class="ctl"><button class="btn quiet" data-remove="${i}">${tr('이 코드 연결 해제')}</button><span class="s">${tr('코드·지도 유지')}</span></div>` : ''}</fieldset>`).join('');
     document.querySelectorAll('[data-remove]').forEach(b=>b.onclick=()=>{collectShared();repos.splice(+b.dataset.remove,1);rows();sharedRows();});
     document.querySelectorAll('[data-field="path"], [data-field="name"]').forEach(input=>input.onchange=()=>{
       collectShared();updateTargets();
@@ -1351,7 +1352,7 @@ function inspector(m) {
   const ways = ui`<div class="sect"><h4>여기로 오는 길 ${ins.length} · 여기서 가는 길 ${outs.length}</h4><div class="group">` +
     (insAll.length || outsAll.length || unk ? ins.map(e => way(e, e.from, '←')).join('') + outs.map(e => way(e, e.to, '→')).join('') +
       (menuIn || menuOut ? ui`<div class="row"><span class="arrow">≡</span><div class="grow"><div class="t">메뉴와 탭</div><div class="s">${menuIn ? tr('메뉴에서 여기로 올 수 있습니다') : tr('메뉴에는 이 화면이 없습니다')}${menuOut ? ui` · 메뉴로 ${menuOut}곳에 갈 수 있습니다` : ''}</div></div></div>` : '') + (unk ? ui`<div class="row"><span class="arrow">?</span><div class="grow"><div class="t">어디로 가는지 코드만으로 못 정한 이동 ${unk}개</div></div></div>` : '')
-      : ui`<div class="row"><div class="grow empty">코드에서 확인되는 길이 없습니다. 주소를 직접 입력해야 열리거나 아직 어디에도 이어지지 않았습니다.</div></div>`) + `</div></div>`;
+      : ui`<div class="row"><div class="grow empty">확인된 길 없음 · 직접 주소로 열리거나 미연결</div></div>`) + `</div></div>`;
   h += ui`<div class="sect"><h4>이 화면이 서버에 하는 일 ${rs.length}<span class="bar inline" title="테스트 연결 ${tested}/${rs.length}"><i style="width:${rs.length ? tested / rs.length * 100 : 0}%"></i></span><span class="regular">테스트 연결 ${tested}/${rs.length}</span></h4>
 <div class="group">`;
   if (!rs.length) h += ui`<div class="row"><div class="grow empty">서버를 부르는 곳이 코드에서 확인되지 않습니다.</div></div>`;
@@ -1360,7 +1361,7 @@ function inspector(m) {
     h += ui`<div class="row click" data-req="${esc(r.key)}" aria-expanded="${isOpen}"><div class="grow"><div class="t"><span class="${reqIsAi(r) ? 'ai' : ''}">${esc(reqLabel(r))}</span></div></div>${t ? ui`<span class="pill ok">테스트 연결 ${t}</span>` : ''}${im === false ? tr('<span class="pill strong">선택한 버전에만 있음</span>') : ''}${ow.length ? ui`<span class="pill warn" title="${esc(ow.map(p => '#' + p.number + ' ' + p.title).join('\n'))}">열린 작업 ${ow.length}</span>` : ''}<span class="chev">${isOpen ? '⌄' : '›'}</span></div>`;
     if (isOpen) h += detail(m, s, r);
   }
-  h += `</div>${rs.length > made ? ui`<div class="ctl"><button class="btn primary" id="mk">이 동작의 과정 알아보기 (${rs.length - made}개 남음)</button><span id="mklog">분석 화면에서 Claude Code로 바로 분석하거나 AI에게 보낼 요청을 만듭니다.</span></div>` : ''}</div>`;
+  h += `</div>${rs.length > made ? ui`<div class="ctl"><button class="btn primary" id="mk">이 동작의 과정 알아보기 (${rs.length - made}개 남음)</button><span id="mklog">Claude Code 분석 또는 AI 요청</span></div>` : ''}</div>`;
   h += ways;
   return h + workSection(workOf(s.path), '이 화면과 이어진 작업 ');
 }

@@ -382,19 +382,19 @@ window.__TAURI__={core:{invoke:async(command,args)=>{
   await requestAgentAction('make_system');
   assert($('cpAgent').textContent==='Copy request' && $('checkAnalysisResults'),'Use the chosen existing-pane sequence');
   await $('cpAgent').onclick();
-  assert(!$('analysisResultState').textContent.includes('saved a new result'),'Copying must not imply saved or running analysis');
+  assert(!$('analysisResultState').textContent.includes('result saved'),'Copying must not imply saved or running analysis');
   analysisBundle={project:{repositories:[{id:'web',results:{dev:{system:null}}}]},dev:{repo:'/demo/web',screens:[]},main:null,changes:{last_refresh:'must-not-replace'},branch_details:{}};
   const beforeChecks=backendCalls.length;
   await $('checkAnalysisResults').onclick();
-  assert($('analysisResultState').textContent.includes('No new result yet'),'Missing results need an explicit state');
+  assert($('analysisResultState').textContent.includes('No new result'),'Missing results need an explicit state');
   assert(S.changes===changes && S.chi===2 && S.settings===settings,'Checking results must preserve change history, selected entry and comparison settings');
   assert(backendCalls.slice(beforeChecks).every(c=>c==='read_project'),'Result checks must only read saved data');
   analysisBundle.project.repositories[0].results.dev.system={version:'new',commit:'abc',stale:false};
   await $('checkAnalysisResults').onclick();
-  assert($('analysisResultState').textContent.includes('saved a new result'),'Completion requires a saved matching result');
+  assert($('analysisResultState').textContent.includes('result saved'),'Completion requires a saved matching result');
   analysisBundle.project.repositories[0].results.dev.system={version:'old',commit:'different',stale:false};
   await $('checkAnalysisResults').onclick();
-  assert($('analysisResultState').textContent.includes('different code version'),'A stale saved result must be distinct from a new result');
+  assert($('analysisResultState').textContent.includes('Code changed'),'A stale saved result must be distinct from a new result');
   const mapBefore=S.maps.dev;resultReadFailure=true;await $('checkAnalysisResults').onclick();
   assert(S.maps.dev===mapBefore && S.changes===changes,'A failed result read must preserve the displayed map and changes');
   // A request belongs to the language it was prepared in; after switching, the Korean request is prepared the same way and shows the same path.
@@ -406,9 +406,9 @@ window.__TAURI__={core:{invoke:async(command,args)=>{
   assert(tr('AI 채팅에 붙여 넣어 실행합니다.')==='Paste into your AI chat to run.' && tr('분석 화면에서 Claude Code로 바로 분석하거나 AI에게 보낼 요청을 만듭니다.').includes('analysis panel'),'Request wording separates preparing a request from analyzing in the app');
   analysisBundle.project.repositories[0].results.dev.system={version:'proposal',commit:'abc',stale:false,proposal:true};
   await $('checkAnalysisResults').onclick();
-  assert($('analysisResultState').textContent.includes('saved separately') && $('viewAnalysisResults').textContent==='View AI proposal','A saved AI proposal is offered as the proposal, not as the old manual map');
+  assert($('analysisResultState').textContent.includes('Proposal saved') && $('viewAnalysisResults').textContent==='View AI proposal','A saved AI proposal is offered as the proposal, not as the old manual map');
   S.analysisRequest.requirements[0].before={version:'proposal'};await $('checkAnalysisResults').onclick();
-  assert($('analysisResultState').textContent.includes('earlier AI proposal') && $('viewAnalysisResults').textContent==='View AI proposal','An earlier AI proposal is offered as the proposal too');
+  assert($('analysisResultState').textContent.includes('Earlier proposal') && $('viewAnalysisResults').textContent==='View AI proposal','An earlier AI proposal is offered as the proposal too');
   S.repository='';S.projectInfo={repositories:[{id:'api-a'},{id:'api-b'}]};
   requests=()=>['api-a','api-b'].map(repository=>({route:{repository,file:repository+'/server.py',function:'Save'}}));
   await requestAgentAction('make_steps',{screen:'/items'});
@@ -416,10 +416,10 @@ window.__TAURI__={core:{invoke:async(command,args)=>{
   analysisBundle={project:{repositories:[{id:'api-a',results:{dev:{steps:{'server.py::Save':{version:'a-new',commit:'abc'}}}}},
     {id:'api-b',results:{dev:{steps:{}}}}]},dev:{repo:'/demo',screens:[]},main:null,branch_details:{},changes:{last_refresh:'do-not-use'}};
   await $('checkAnalysisResults').onclick();
-  assert($('analysisResultState').textContent.includes('Some results'),'One saved server is partial completion');
+  assert($('analysisResultState').textContent.includes('Partial'),'One saved server is partial completion');
   analysisBundle.project.repositories[1].results.dev.steps['server.py::Save']={version:'b-new',commit:'abc'};
   await $('checkAnalysisResults').onclick();
-  assert($('analysisResultState').textContent.includes('saved a new result'),'All server results must be saved before completion');
+  assert($('analysisResultState').textContent.includes('result saved'),'All server results must be saved before completion');
   let resolveRead;delayedResult=new Promise(resolve=>{resolveRead=resolve;});
   const originalMap=S.maps.dev,pendingCheck=$('checkAnalysisResults').onclick();
   S.branch='main';resolveRead(JSON.stringify({...analysisBundle,dev:{repo:'/wrong'}}));await pendingCheck;

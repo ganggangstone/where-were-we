@@ -639,9 +639,9 @@ class Flows(unittest.TestCase):
     def test_all_code_is_explained_and_one_code_keeps_its_configured_server_links(self):
         self.check(r'''
  const note=()=>$('repository-bar').querySelector('[data-code-scope]')?.textContent || '';
- assert(note()===tr('모든 코드: 연결한 코드 전체를 한 지도로 봅니다.'),'All code is explained beside the selector: '+note());
+ assert(note()===tr('연결한 코드 전체'),'All code is explained beside the selector: '+note());
  $('repository').value='web';$('repository').dispatchEvent(new Event('change'));for(let i=0;i<50 && S.repository!=='web';i++)await wait();await wait();
- assert(note()===tr('이 코드의 화면만 봅니다. 지정한 서버 연결은 그대로 이어집니다.'),'One code says what stays linked: '+note());
+ assert(note()===tr('이 코드만 · 서버 연결 유지'),'One code says what stays linked: '+note());
  window.mutateBundle=b=>{b.project.repositories=b.project.repositories.slice(0,1);};await loadProject('Second',false,'');await wait();
  assert(!$('repository-bar').querySelector('[data-code-scope]'),'One connected code needs no scope note');
 ''')
@@ -723,7 +723,7 @@ class Flows(unittest.TestCase):
  assert($('manageRepositories').textContent===tr('코드 추가·수정'),'The code bar button says add or edit code');
  $('manageRepositories').click();assert(d.querySelector('h2').textContent===tr('살펴보는 코드') && !d.textContent.includes(tr('기본값: 첫 코드 이름')),'Editing names the explored code without the default hint');d.close();
  assert($('analyzeMap').textContent.startsWith(tr('AI 지도')),'The AI button says what the AI makes: '+$('analyzeMap').textContent);
- $('analyzeMap').click();assert(pane().includes(tr('자세한 지도')) && pane().querySelector('.request-flow')?.textContent.includes(tr('AI 채팅')),'The panel shows the copy-to-chat flow');
+ $('analyzeMap').click();assert(pane().includes(tr('자세한 지도')) && $('insp').querySelector('.request-flow')?.textContent.includes(tr('AI 채팅')),'The panel shows the copy-to-chat flow');
 ''',query='&empty=1')
 
     def test_dictionary_has_no_duplicate_interface_keys(self):
@@ -735,7 +735,7 @@ class Flows(unittest.TestCase):
     def test_code_buttons_name_the_code_and_keep_the_existing_selection(self):
         self.check(r'''
  const bar=$('branch');assert(bar.getAttribute('aria-label')===tr('지도에 표시할 버전'),'Code selector has a plain label');
- assert(bar.previousElementSibling.textContent===tr('지도에 표시할 버전'),'Label is visible beside the buttons');
+ assert(bar.previousElementSibling.textContent===tr('표시 버전'),'Label is visible beside the buttons');
  assert(bar.querySelector('[data-b=dev]').textContent==='HEAD','First button names its actual ref');
  assert(bar.querySelector('[data-b=main]').textContent==='v1.0','Second button names its actual ref');
  S.projectInfo.repositories[1].refs.dev='origin/next';renderRepositories();
@@ -1528,11 +1528,11 @@ class UxWriting(unittest.TestCase):
  const text=outside($('map')),summaries=[...$('map').querySelectorAll('summary')];
  assert(text.includes('Known problem') && text.includes('Known after'),'Problem and what changed are shown by default');
  assert(!text.includes('Unknown why') && !text.includes('Unknown remaining') && !text.includes('Known before'),'Other fields are folded');
- assert(text.includes(tr('확인이 필요한 내용')+' 2'),'Unknown fields have a visible count');
+ assert(text.includes(tr('미확인')+' 2'),'Unknown fields have a visible count');
  const more=$('map').querySelector('.change-details');
  assert(more && more.textContent.includes('Known before') && more.textContent.includes('Unknown remaining') && more.textContent.includes('Fictional term'),'Details, unknown fields and terms retained together');
  assert(!$('map').querySelector('details details'),'Details and evidence never require nested disclosures');
- assert(text.includes(tr('설명 구간')) && text.includes(when('2026-09-01T00:00:00Z')) && text.includes(when('2026-09-20T00:00:00Z')),'Explanation period is visible: '+text);
+ assert(text.includes(when('2026-09-01T00:00:00Z')) && text.includes(when('2026-09-20T00:00:00Z')),'Explanation period is visible: '+text);
  assert(text.includes(tr('새로고침 기록 구간')) && text.includes(when('2026-09-24T00:00:00Z')),'Selected refresh history period is shown separately');
  assert(!text.includes('aaaa1111'),'Commit provenance stays folded');
  S.changes.last_results=[{repository:'web',at:'2026-10-27T01:47:00Z',since:'2026-10-26T00:00:00Z',changed:false,scope:'basic'}];render();assert(outside($('map')).includes(when('2026-10-27T01:47:00Z')) && outside($('map')).includes(tr('선택한 기준 이후 달라진 것 없음')),'Latest no-change refresh remains visible beside historical records');
