@@ -319,6 +319,10 @@ h3 > .chip { margin-left:var(--space-2) }
 .unit-board > h3 { display:flex; flex-wrap:wrap; align-items:center; gap:var(--space-2) var(--space-0) }
 .unit-count { margin-left:auto; white-space:nowrap; font:var(--font-secondary); font-weight:var(--weight-strong); color:var(--color-text-secondary) }
 .unit-start, .unit-run { display:flex; flex-wrap:wrap; align-items:center; gap:var(--space-3); margin:var(--space-3) var(--space-0) }
+.unit-coverage { display:grid; gap:var(--space-2); margin:var(--space-3) var(--space-0) }
+.unit-coverage [role="radiogroup"] { display:flex; flex-wrap:wrap; gap:var(--space-2) var(--space-4) }
+.unit-mode { display:inline-flex; align-items:baseline; gap:var(--space-2); font:var(--font-secondary); color:var(--color-text-secondary) }
+.unit-mode b { color:var(--color-text) }
 .unit-bar { display:flex; height:var(--size-bar); overflow:hidden; border-radius:var(--radius-bar); background:var(--color-bg-control); margin:var(--space-3) var(--space-0) }
 .unit-bar > i { display:block; height:100%; background:currentColor }
 .unit-bar > i[data-state="pending"], .unit-bar > i[data-state="unavailable"] { background:transparent }

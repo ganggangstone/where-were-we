@@ -107,7 +107,11 @@ class FullRun(unittest.TestCase):
             return {'items':items(packet) if packet.get('resource') else []}
         return fake
 
-    def intent(self,board=None):return {'task':'full','targets':[],'max_calls':(board or self.board())['calls']}
+    def intent(self,board=None,coverage='signal'):
+        board=board or self.board()
+        return {'task':'full','targets':[],'max_calls':board['modes'][coverage]['calls'],'coverage':coverage}
+
+    def map_calls(self,board,coverage='signal'):return board['modes'][coverage]['calls_parts']['map']
 
     def test_board_is_local_and_the_call_cap_must_be_confirmed(self):
         board=self.board()
@@ -120,7 +124,7 @@ class FullRun(unittest.TestCase):
         self.assertEqual(self.prepare(intent=self.intent(board))['state'],'preparing')
 
     def test_overview_first_then_units_are_saved_with_isolated_failures_and_resume(self):
-        board=self.board();job=self.prepare(intent=self.intent(board))
+        board=self.board();job=self.prepare(intent={**self.intent(board),'max_calls':board['calls']+1})  # +1: the map discovers one more unit (program:api)
         calls=[];bad='folder:lib'
         done=analysis_run.run(job['id'],self.executor(calls,bad=(bad,)))
         self.assertEqual(done['state'],'completed',done.get('error'))
@@ -230,14 +234,15 @@ class FullRun(unittest.TestCase):
     def test_map_estimate_follows_the_saved_map_whole_commit_first_then_only_the_changes(self):
         self.large_map()
         whole=self.board()
-        done=analysis_run.run(self.prepare(intent={**self.intent(whole),'max_calls':whole['calls']+60})['id'],self.executor([]))
+        done=analysis_run.run(self.prepare(intent={**self.intent(whole,'all'),'max_calls':whole['modes']['all']['calls']+60})['id'],self.executor([]))
         self.assertEqual(done['state'],'completed',done.get('error'))
         (self.repo/'lib'/'m0.py').write_text('def lib_0():\n    return 100\n');self.git('add','-A');self.git('commit','-qm','Small change')
         analysis_run._INDEXES.clear()
         patched=self.board()
         self.assertEqual(patched['repositories'][0]['commit'],self.git('rev-parse','HEAD').strip())
-        self.assertGreater(whole['map_calls'],3)  # the 6500-line padding file alone fills several batches
-        self.assertLess(patched['map_calls'],whole['map_calls'])  # only the changes and the files the saved map cites are read again
+        self.assertGreater(self.map_calls(whole,'all'),3)  # the 6500-line padding file alone fills several batches
+        self.assertLess(self.map_calls(whole),self.map_calls(whole,'all'))  # signal windows leave the padding document to the local index
+        self.assertLess(self.map_calls(patched),self.map_calls(whole,'all'))  # only the changes and the files the saved map cites are read again
         repo,raw,_,head=analysis_run.ai_extract.context('demo','service','dev')
         mode=analysis_run.ai_extract.map_mode(repo['path'],raw['dev'],'en',analysis_run.store.fingerprint(repo),head)
         self.assertEqual(mode[0],'patch')
@@ -289,7 +294,7 @@ class FullRun(unittest.TestCase):
     def test_map_progress_is_saved_per_input_piece_but_published_only_when_complete(self):
         self.large_map();baseline=self.raw()
         board=self.board();self.assertEqual(self.states(board)['task:analysis'],'pending')
-        job=self.prepare(intent={**self.intent(board),'max_calls':board['calls']+60});calls=[]
+        job=self.prepare(intent={**self.intent(board,'all'),'max_calls':board['modes']['all']['calls']+60});calls=[]
         def stop(_):
             saved=(analysis_run.read(job['id']).get('partial_results',{}).get('service') or {}).get('analysis') or {}
             if saved.get('count') and saved['covered']<saved['total']:analysis_run.cancel(job['id'])  # stop once a finding is saved and pieces remain
@@ -316,15 +321,146 @@ class FullRun(unittest.TestCase):
         self.large_map()
         from unittest.mock import patch
         with patch.object(analysis_run,'MAP_USABLE',10**9):  # an estimate far below what the batches really need
-            board=self.board();job=self.prepare(intent=self.intent(board))
+            board=self.board();job=self.prepare(intent=self.intent(board,'all'))
         calls=[]
         done=analysis_run.run(job['id'],self.executor(calls))
         self.assertEqual(done['state'],'failed');self.assertEqual(done['error']['code'],'call_limit')
-        self.assertEqual(len(calls),board['calls'])  # exactly the confirmed maximum was spent
+        self.assertEqual(len(calls),board['modes']['all']['calls'])  # exactly the confirmed maximum was spent
         self.assertNotEqual(self.states()['task:analysis'],'saved')
         self.assertTrue(done['partial_results']['service']['analysis']['covered']>0)
         # The unit explanations saved before the map started stay saved.
         self.assertTrue(all(v=='saved' for k,v in self.states().items() if k.startswith(('route:','folder:'))))
+
+    def signal_fixture(self):
+        """A route file buried in padding, a long document, a test and a plain module without any signal."""
+        (self.repo/'bulk').mkdir()
+        (self.repo/'bulk/big.py').write_text('\n'.join(['value = 1']*1500+["@app.get('/deep')","def deep():","    return 1"]+['value = 2']*1500)+'\n')
+        (self.repo/'NOTES.md').write_text('unique note row\n'*4000)
+        (self.repo/'tests').mkdir();(self.repo/'tests/test_api.py').write_text("client.get('/orders')\n"*5)
+        (self.repo/'lib/plain.py').write_text('def plain():\n    return 3\n'*40)
+        self.git('add','-A');self.git('commit','-qm','Signal fixture');self.publish_index()
+
+    def supplied(self,calls):
+        """{file: lines the map prompts carried}, and every map prompt's text."""
+        seen={};text=[]
+        for packet in calls:
+            if 'screens' not in packet.get('schema',{}):continue
+            text.append(json.dumps(packet))
+            for snapshot in packet.get('snapshots',[]):
+                for file in snapshot['files']:
+                    rows=file.get('numbered_lines') or file.get('lines') or []
+                    seen.setdefault(file['file'],set()).update(r[0] if isinstance(r,list) else r['line'] for r in rows)
+        return seen,text
+
+    def test_signal_reading_sends_windows_names_every_tier_and_stays_inside_the_cap(self):
+        self.signal_fixture()
+        board=self.board();coverage=board['repositories'][0]['map_coverage']
+        self.assertEqual(coverage['files'],coverage['windows']+coverage['whole']+coverage['local']+coverage['docs']+coverage['support'])
+        self.assertGreaterEqual(coverage['docs'],1);self.assertGreaterEqual(coverage['support'],1);self.assertGreaterEqual(coverage['local'],1)
+        self.assertLess(coverage['sent_bytes'],coverage['text_bytes']/4)
+        self.assertLess(board['modes']['signal']['calls'],board['modes']['all']['calls'])
+        calls=[];intent=self.intent(board)
+        done=analysis_run.run(self.prepare(intent=intent)['id'],self.executor(calls))
+        self.assertEqual(done['state'],'completed',done.get('error'))
+        self.assertLessEqual(len(calls),intent['max_calls'])
+        seen,text=self.supplied(calls)
+        self.assertEqual(sorted(seen['bulk/big.py'])[0],1499);self.assertIn(1501,seen['bulk/big.py']);self.assertLess(len(seen['bulk/big.py']),12)  # the route and its neighbours, original numbers
+        self.assertNotIn('NOTES.md',seen);self.assertNotIn('tests/test_api.py',seen);self.assertNotIn('lib/plain.py',seen)
+        notes=[c['coverage'] for c in calls if 'screens' in c.get('schema',{}) and 'coverage' in c]
+        self.assertTrue(notes and all(n['text_files_read_locally']==coverage['files'] and n['sent_as_signal_windows']==coverage['windows'] for n in notes),'the AI is told what it does not see as text')
+        self.assertTrue(all('unique note row' not in t for t in text))
+        self.assertEqual([r['path'] for r in self.raw()['dev']['backend_routes']],['/items'])  # the map is saved as before
+
+    def test_every_text_file_reading_still_sends_all_of_it(self):
+        self.signal_fixture()
+        board=self.board();calls=[]
+        done=analysis_run.run(self.prepare(intent={**self.intent(board,'all'),'max_calls':board['modes']['all']['calls']+30})['id'],self.executor(calls))
+        self.assertEqual(done['state'],'completed',done.get('error'))
+        seen,text=self.supplied(calls)
+        self.assertIn('NOTES.md',seen);self.assertIn('lib/plain.py',seen);self.assertEqual(len(seen['bulk/big.py']),3003)
+        self.assertTrue(all('coverage' not in c for c in calls if 'screens' in c.get('schema',{})))
+
+    def test_the_ai_can_still_ask_for_a_file_the_signal_scan_did_not_send(self):
+        self.signal_fixture()
+        board=self.board();job=self.prepare(intent={**self.intent(board),'max_calls':board['calls']+4});calls=[]  # +4: the read request costs one more call, the map one more unit
+        inner=self.executor(calls)
+        def fake(prompt,**kwargs):
+            answer=inner(prompt,**kwargs);packet=calls[-1]
+            if 'screens' in packet.get('schema',{}) and 'batch' not in packet and not packet.get('provisional_result'):
+                answer={**(answer if isinstance(answer,dict) else json.loads(answer)),'needs':[{'file':'lib/plain.py','start':1,'limit':4}]}
+            return answer
+        done=analysis_run.run(job['id'],fake)
+        self.assertEqual(done['state'],'completed',done.get('error'))
+        seen,_=self.supplied(calls)
+        self.assertEqual(seen.get('lib/plain.py'),{1,2,3,4})  # only the requested range travelled
+
+    def test_signal_scan_is_cached_so_another_process_does_not_scan_again(self):
+        self.signal_fixture()
+        first=self.board()
+        self.assertEqual(len(list((Path(analysis_run.mapcore.ROOT)/'.analysis-cache').glob('signals-*.json'))),1)
+        analysis_run._SIGNALS.clear()
+        original=analysis_run.source_signals.scan_commit
+        analysis_run.source_signals.scan_commit=lambda *a,**k:self.fail('scanned again')
+        self.addCleanup(setattr,analysis_run.source_signals,'scan_commit',original)
+        again=self.board()
+        self.assertEqual(again['repositories'][0]['map_coverage'],first['repositories'][0]['map_coverage']);self.assertEqual(again['modes'],first['modes'])
+
+    def test_signal_windows_over_several_batches_save_progress_cancel_and_resume_without_resending(self):
+        (self.repo/'mods').mkdir()
+        for i in range(420):
+            (self.repo/'mods'/f'm{i}.py').write_text('\n'.join([f'a{i} = {n}' for n in range(30)]+[f"@app.get('/m{i}')",f'def m{i}():']+[f"    step_{n} = 'padding text of window {i} line {n} to widen the rows'" for n in range(12)])+'\n')
+        self.git('add','-A');self.git('commit','-qm','Many route files');self.publish_index()
+        board=self.board();job=self.prepare(intent={**self.intent(board),'max_calls':board['calls']+30});calls=[]
+        def stop(_):
+            if self.batches(calls)==2:analysis_run.cancel(job['id'])
+        stopped=analysis_run.run(job['id'],self.executor(calls,after=stop))
+        self.assertEqual(stopped['state'],'cancelled',stopped.get('error'))
+        part=stopped['partial_results']['service']['analysis']
+        self.assertEqual(part['state'],'partial');self.assertGreater(part['covered'],0);self.assertLess(part['covered'],part['total'])
+        sent=[c['batch']['id'] for c in calls if 'batch' in c and 'screens' in c['schema']]
+        self.assertGreaterEqual(len(sent),2)
+        again=[];done=analysis_run.run(analysis_run.retry(job['id'])['id'],self.executor(again))
+        self.assertEqual(done['state'],'completed',done.get('error'))
+        resent=[c['batch']['id'] for c in again if 'batch' in c and 'screens' in c['schema']]
+        self.assertFalse(set(resent)&set(sent[:1]),'a settled batch is not sent again')
+        self.assertEqual(done['partial_results']['service']['analysis']['state'],'published')
+        self.assertTrue(all(len(c.get('coverage',{}))==6 for c in calls if 'batch' in c and 'screens' in c['schema']))
+
+    def test_a_saved_maps_cited_files_are_sent_whole_beside_the_windows(self):
+        self.signal_fixture()
+        raw=self.raw();raw['dev']['analysis']={**(raw['dev'].get('analysis') or {}),'source':'ai'}
+        routes=analysis_run.ai_extract.ai_catalog({'analysis':{'source':'ai'},'backend_routes':[{'file':'lib/plain.py','path':'/plain','method':'GET','function':'plain'}],'screens':[]})[0]
+        rows,report=analysis_run._window_plan(analysis_run._signals(str(self.repo),self.git('rev-parse','HEAD').strip()),{'lib/plain.py'})
+        self.assertIsNone(rows['lib/plain.py']);self.assertEqual(report['whole'],1);del routes
+
+    def test_unit_calls_are_packed_by_sample_bytes_and_the_cap_counts_the_same_packs(self):
+        rows=[(f'/r{i}','route',500) for i in range(9)]+[(f'folder:f{i}','folder',9000) for i in range(30)]+[('package:p','package',200)]
+        packs=analysis_run._packs(rows)
+        self.assertEqual([len(p) for p in packs[:3]],[4,4,1])  # path groups four at a time, never mixed with other units
+        plain=packs[3:]
+        self.assertTrue(all(sum(9000 if t.startswith('folder') else 200 for t in p)<=analysis_run.UNIT_PACK_BYTES and len(p)<=analysis_run.UNIT_PACK_MAX for p in plain))
+        self.assertEqual(sorted(t for p in packs for t in p),sorted(t for t,_,_ in rows))  # nothing is dropped or repeated
+        self.assertLess(len(plain),30//4)  # fewer calls than four units each
+        board=self.board();calls=[]
+        done=analysis_run.run(self.prepare(intent=self.intent(board))['id'],self.executor(calls))
+        self.assertEqual(done['state'],'completed',done.get('error'))
+        self.assertLessEqual(sum(1 for c in calls if 'resources' in c),board['calls_parts']['units'])
+
+    def test_a_failing_unit_is_asked_exactly_as_often_as_the_attempt_limit_allows(self):
+        board=self.board();calls=[]
+        done=analysis_run.run(self.prepare(intent={**self.intent(board),'max_calls':board['calls']+3})['id'],self.executor(calls,bad=('folder:lib',)))
+        self.assertEqual(done['state'],'completed',done.get('error'))
+        asked=sum(1 for c in calls for r in (c.get('resources') or [c]) if r.get('resource')=='folder:lib')
+        self.assertEqual(asked,analysis_run.UNIT_ATTEMPTS)
+        self.assertEqual([f['attempts'] for f in done['unit_failures']],[analysis_run.UNIT_ATTEMPTS])
+
+    def test_a_long_list_of_paths_travels_in_pages_of_whole_entries(self):
+        paths=[f'src/module{i:05d}/file_name_{i:05d}.py' for i in range(3000)]
+        header,units=analysis_run._units({'input':{'files':paths,'k':1}})
+        pages=[u['value'] for u in units if u['value']['path']==['input','files']]
+        self.assertLess(len(pages),len(paths)/100)  # one unit per page, not per path
+        joined=[p for page in pages for p in page['value']];self.assertEqual(joined,paths)
+        self.assertEqual([page['offset'] for page in pages],[sum(len(q['value']) for q in pages[:i]) for i in range(len(pages))])
 
     def test_units_discovered_by_the_saved_map_and_structure_are_analyzed_too(self):
         self.assertNotIn('program:api',self.states())

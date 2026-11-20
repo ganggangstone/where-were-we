@@ -24,6 +24,7 @@ import analysis_units
 import briefing
 import mapcore
 import project as store
+import source_signals
 
 ACTIVE = {'preparing', 'running', 'saving'}
 TERMINAL = {'completed', 'failed', 'cancelled'}
@@ -36,6 +37,10 @@ MAX_PROMPT_BYTES = 128 * 1024
 UNIT_BYTES = 16 * 1024
 MAX_READ_ROUNDS = 32
 RESOURCE_PACK_SIZE = 4
+UNIT_PACK_BYTES = 88 * 1024  # sample bytes of the plain units one call explains, packet overhead included; the prompt cap stays the hard limit
+UNIT_PACK_MAX = 24
+UNIT_OVERHEAD = 1700  # the instructions and schema every unit packet repeats
+UNIT_UNKNOWN = 9000  # a unit saved by an older catalog has no measured sample
 UNIT_ATTEMPTS = 2
 MAP_TASKS = ('analysis','system','groups')
 PARTIAL_ITEMS = 60
@@ -109,6 +114,22 @@ def _progress(value):
     result.update(completed_tasks=len(completed),tasks=len(tasks))
     return result
 
+def _packs(rows):
+    """Group the pending unit targets, in order, into calls: path groups four at a time as before, every other unit by the
+    sample bytes they carry (at most UNIT_PACK_BYTES and UNIT_PACK_MAX units per call). rows: [(target, kind, sample bytes)]."""
+    packs=[];current=[];used=0;plain=None
+    for target,kind,n in rows:
+        now=kind!='route'
+        if current and (now!=plain or (not now and len(current)>=RESOURCE_PACK_SIZE) or (now and (len(current)>=UNIT_PACK_MAX or used+n>UNIT_PACK_BYTES))):
+            packs.append(current);current=[];used=0
+        current.append(target);used+=n;plain=now
+    if current:packs.append(current)
+    return packs
+
+def _pending_rows(units,states):
+    """[(target, kind, sample bytes)] of the units whose state still needs a call, in catalog order."""
+    return [(u.get('resource') or u['id'],u['kind'],u.get('sample',UNIT_UNKNOWN)) for u,state in zip(units,states) if state not in ('saved','unavailable')]
+
 UNIT_STATES=('saved','working','partial','pending','failed','unavailable','stale')
 
 def _board_totals(repositories):
@@ -118,16 +139,22 @@ def _board_totals(repositories):
     totals['units']=sum(totals[k] for k in UNIT_STATES)
     return totals
 
-def _board_parts(repositories):
+def _board_parts(repositories,coverage='signal'):
     """What the call limit is made of: first overviews, map-family batches, unit packs and the retry allowance."""
-    packs=-(-sum(1 for repo in repositories for row in repo['units'] if row[4] not in ('saved','unavailable') and row[1] not in MAP_KINDS)//RESOURCE_PACK_SIZE)
-    return {'overview':sum(1 for repo in repositories if repo['overview']!='saved'),'map':sum(repo.get('map_calls',0) for repo in repositories),
+    packs=sum(repo['unit_packs'] for repo in repositories)
+    return {'overview':sum(1 for repo in repositories if repo['overview']!='saved'),'map':sum(repo['map_calls_by'][coverage] for repo in repositories),
             'units':packs,'retry':-(-packs//2)}
 
-def _board_calls(repositories):
-    return sum(_board_parts(repositories).values())
+def _board_calls(repositories,coverage='signal'):
+    return sum(_board_parts(repositories,coverage).values())
+
+def _board_modes(repositories):
+    """The call limit of each coverage choice (signal windows or every text file), so the user can compare before starting."""
+    return {mode:{'calls':_board_calls(repositories,mode),'calls_parts':_board_parts(repositories,mode),
+                  'time_limit_seconds':max(MAX_SECONDS,(2*_board_calls(repositories,mode)+1)*TASK_SECONDS)} for mode in COVERAGE}
 
 MAP_KINDS=('map','system','groups')
+COVERAGE=('signal','all')
 
 def _map_states(catalog,pending,partial,working=(),done=(),blocked=None):
     """State of the map, service structure and screen-group tasks of one repository."""
@@ -146,7 +173,7 @@ def _map_states(catalog,pending,partial,working=(),done=(),blocked=None):
 
 def _map_rows(catalog,states):
     rows=[[f'task:{task}','map' if task=='analysis' else task,task,0,*states[task]] for task in MAP_TASKS]
-    calls=sum(catalog['map']['calls'][task] for task in MAP_TASKS if states[task][0] in ('pending','stale','partial','working'))
+    calls={mode:sum(_mode_calls(catalog['map'],mode)[task] for task in MAP_TASKS if states[task][0] in ('pending','stale','partial','working')) for mode in COVERAGE}
     return rows,calls
 
 def _run_board(value):
@@ -177,10 +204,12 @@ def _run_board(value):
         working={current['task']} if value.get('state') in ACTIVE and current.get('repository')==rid and current.get('task') in MAP_TASKS else set()
         done={t['task'] for t in value.get('completed_tasks',[]) if t['repository']==rid and t['task'] in MAP_TASKS}
         blocked=next((t.get('reason') for t in value.get('blocked',[]) if t.get('repository')==rid and t.get('task')=='analysis'),None)
-        extra,map_calls=_map_rows(catalog,_map_states(catalog,pending,partial,working,done,blocked))
-        repositories.append({'repository':rid,'commit':catalog['commit'],'coverage':catalog['coverage'],'overview':base,'units':rows+extra,'map_calls':map_calls})
-    return {'repositories':repositories,'totals':_board_totals(repositories),'calls':_board_calls(repositories),
-            'calls_parts':_board_parts(repositories),'map_calls':sum(repo['map_calls'] for repo in repositories)}
+        extra,by=_map_rows(catalog,_map_states(catalog,pending,partial,working,done,blocked))
+        repositories.append({'repository':rid,'commit':catalog['commit'],'coverage':catalog['coverage'],'map_coverage':catalog['map'].get('coverage'),'overview':base,'units':rows+extra,'map_calls_by':by,
+                             'unit_packs':len(_packs(_pending_rows(catalog['units'],[r[4] for r in rows])))})
+    coverage=(value.get('intent') or {}).get('coverage','signal')
+    return {'repositories':repositories,'totals':_board_totals(repositories),'calls':_board_calls(repositories,coverage),'coverage':coverage,
+            'calls_parts':_board_parts(repositories,coverage),'map_calls':sum(repo['map_calls_by'][coverage] for repo in repositories),'modes':_board_modes(repositories)}
 
 def _latest_partials(history,rid,pin):
     """Unfinished map-family results of the latest runs on exactly this code and configuration."""
@@ -229,10 +258,11 @@ def unit_board(project,repository='',branch='dev',lang='ko'):
         overview='saved' if base and base.get('version')==OVERVIEW_VERSION and all(base.get(k)==v for k,v in pin.items()) else 'pending'
         pending={t['task']:bool(t.get('before')) for t in plan['tasks'] if t['repository']==rid and t['task'] in MAP_TASKS}
         blocked=next((t.get('reason') for t in plan['blocked'] if t.get('repository')==rid and t.get('task')=='analysis'),None)
-        extra,map_calls=_map_rows(catalog,_map_states(catalog,pending,_latest_partials(history,rid,pin),blocked=blocked))
-        repositories.append({'repository':rid,'commit':catalog['commit'],'coverage':catalog['coverage'],'overview':overview,'units':rows+extra,'map_calls':map_calls})
-    return {'repositories':repositories,'totals':_board_totals(repositories),'calls':_board_calls(repositories),
-            'calls_parts':_board_parts(repositories),'map_calls':sum(repo['map_calls'] for repo in repositories),
+        extra,by=_map_rows(catalog,_map_states(catalog,pending,_latest_partials(history,rid,pin),blocked=blocked))
+        repositories.append({'repository':rid,'commit':catalog['commit'],'coverage':catalog['coverage'],'map_coverage':catalog['map'].get('coverage'),'overview':overview,'units':rows+extra,'map_calls_by':by,
+                             'unit_packs':len(_packs(_pending_rows(catalog['units'],[r[4] for r in rows])))})
+    return {'repositories':repositories,'totals':_board_totals(repositories),'calls':_board_calls(repositories),'coverage':'signal',
+            'calls_parts':_board_parts(repositories),'map_calls':sum(repo['map_calls_by']['signal'] for repo in repositories),'modes':_board_modes(repositories),
             'time_limit_seconds':max(MAX_SECONDS,(2*_board_calls(repositories)+1)*TASK_SECONDS)}
 
 def unit_quick(project,repository='',branch='dev',lang='ko'):
@@ -367,7 +397,9 @@ def _intent(intent,repository):
     if task=='full':
         limit=intent.get('max_calls')
         if type(limit)!=int or limit<0:raise ValueError('Confirm the maximum call count of the full analysis')
-        return {'task':task,'targets':[],'max_calls':limit}
+        coverage=intent.get('coverage','signal')
+        if coverage not in COVERAGE:raise ValueError('Choose signal windows or every text file')
+        return {'task':task,'targets':[],'max_calls':limit,'coverage':coverage}
     if task=='resources':
         limit=intent.get('max_calls')
         if type(limit)!=int or limit<0:raise ValueError('Confirm the maximum number of resource analysis calls')
@@ -431,6 +463,14 @@ def _pinned_index(repo,selected,head):
     _INDEXES.clear();_INDEXES[key]=built
     return built
 
+def _sample(repo,commit,units):
+    """Give every unit the bytes its explanation sample carries (its first four files, 24 usable lines each, plus the repeated
+    instructions), so calls can be packed by what they really carry. Reads only those files."""
+    files={f for u in units if u['kind']!='route' for f in u['files'][:4]}
+    cost=source_signals.sample_bytes(repo,_eligible(repo,commit,files)) if files else {}
+    for unit in units:
+        if unit['kind']!='route':unit['sample']=UNIT_OVERHEAD+sum(cost.get(f,0) for f in unit['files'][:4])
+
 def _unit_catalogs(value,plan):
     """Freeze the AI-free unit catalog of every pinned repository for this run."""
     catalogs={}
@@ -444,6 +484,7 @@ def _unit_catalogs(value,plan):
         programs=[{'id':n['id'],'name':n.get('name'),'code':n['code']} for n in nodes if n.get('kind','program')=='program' and n.get('code') and n.get('id')]
         sizes=_tracked(conf['path'],head)
         built=analysis_units.catalog(index,sizes,_exclusion,screens,programs)
+        _sample(conf['path'],head,built['units'])
         flag=ai_extract.review_flag(value['project'],rid,value['branch'],selected)
         catalogs[rid]={'commit':head,**built,'map':_map_estimate(conf['path'],head,selected,sizes,screens,value.get('lang') or 'ko',pin['configuration'],flag)}
     return catalogs
@@ -452,9 +493,8 @@ SOURCE_ROW_OVERHEAD = 11  # bytes the compact [line,"text"] form adds to each so
 MAP_USABLE = MAX_PROMPT_BYTES-2*UNIT_BYTES-4096-UNIT_BYTES  # source bytes one batch carries beside the shared protocol (16KB reserve; measured 7KB)
 MAP_FOLLOW_UP = 1.1  # read requests and one evidence retry per batch
 
-def _source_profile(repo,commit,paths=None):
-    """Bytes each exportable file adds to a map batch ({file: serialized bytes}); regular UTF-8 text blobs only.
-    One streamed git read of the pinned commit, so no file is checked out or parsed twice."""
+def _eligible(repo,commit,paths=None):
+    """(file, blob id) of the regular, non-secret, non-binary-suffix files of a pinned commit."""
     entries=[]
     for entry in _git(repo,'ls-tree','-rz','--full-tree',commit).split(b'\0'):
         if not entry:continue
@@ -463,30 +503,61 @@ def _source_profile(repo,commit,paths=None):
         try:file=raw_path.decode('utf-8')
         except UnicodeError:continue
         if (paths is None or file in paths) and not _secret(file) and PurePosixPath(file).suffix.lower() not in BINARY_SUFFIXES:entries.append((file,oid))
-    if not entries:return {}
-    process=subprocess.Popen(['git','-C',repo,'cat-file','--batch'],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL)
-    feeder=threading.Thread(target=lambda:(process.stdin.write(b''.join(oid+b'\n' for _,oid in entries)),process.stdin.close()),daemon=True)
-    feeder.start()
-    profile={}
-    try:
-        for file,_ in entries:
-            header=process.stdout.readline().split()
-            if len(header)!=3:continue  # a missing object is not exportable
-            data=process.stdout.read(int(header[2]));process.stdout.read(1)
-            if b'\x00' in data:continue
-            try:data.decode('utf-8')
-            except UnicodeError:continue
-            lines=data.count(b'\n')+(1 if data and not data.endswith(b'\n') else 0)
-            profile[file]=len(data)+lines*SOURCE_ROW_OVERHEAD+data.count(b'"')+data.count(b'\\')+data.count(b'\t')+len(file)+34  # 34: the file wrapper
-    finally:
-        process.stdout.close();process.wait()
-    return profile
+    return entries
+
+def _scan(repo,commit,paths=None,signals=True):
+    return source_signals.scan_commit(repo,commit,_eligible(repo,commit,paths),SOURCE_ROW_OVERHEAD,signals)
+
+def _source_profile(repo,commit,paths=None):
+    """Bytes each exportable file adds to a map batch ({file: serialized bytes}); regular UTF-8 text blobs only.
+    One streamed git read of the pinned commit, so no file is checked out or parsed twice."""
+    return {file:row['size'] for file,row in _scan(repo,commit,paths,False).items()}
+
+_SIGNALS={}
+
+def _signals(repo,commit):
+    """The signal scan of every eligible text file of a pinned commit: windows to send, sizes, tiers.
+    Derived data of the commit and the scanner, cached under .analysis-cache (never project data)."""
+    key=mapcore.cache_key(repo,commit,source_signals.digest(),SOURCE_ROW_OVERHEAD,'signals')
+    if key in _SIGNALS:return _SIGNALS[key]
+    rows=mapcore.cache_read('signals',key)
+    if not isinstance(rows,dict) or rows.get('commit')!=commit:
+        rows={'commit':commit,'files':{f:source_signals.pack(r) for f,r in _scan(repo,commit).items()}}
+        mapcore.cache_write('signals',key,rows)
+    files={f:source_signals.unpack(r) for f,r in rows['files'].items()}
+    _SIGNALS.clear();_SIGNALS[key]=files
+    return files
+
+def _cited_files(prev):
+    """Files the saved AI map already cites. They are sent whole beside the signal windows, as a patch run does."""
+    if (prev.get('analysis') or {}).get('source')!='ai':return set()
+    routes,screens,functions=ai_extract.ai_catalog(prev)
+    return {f for item in routes+screens for f in ai_extract.item_files(item,functions)}
+
+def _window_plan(rows,cited=()):
+    """Which lines of which files the map sends, and what that leaves to the local index.
+
+    {file: None} sends the whole file, {file: (spans, clips)} sends the lines around its signals.
+    The report counts every tier, so nothing is dropped without being named."""
+    plan={};report={'files':len(rows),'windows':0,'whole':0,'local':0,'docs':0,'support':0,'truncated':0,'text_bytes':0,'sent_bytes':0,'clipped':0}
+    for file,row in rows.items():
+        report['text_bytes']+=row['size']
+        if file in cited:
+            plan[file]=None;report['whole']+=1;report['sent_bytes']+=row['size']
+        elif row['kind']=='doc':report['docs']+=1
+        elif row['kind']=='support':report['support']+=1
+        elif row['windows']:
+            plan[file]=(row['windows'],row['clips']);report['windows']+=1;report['sent_bytes']+=row['sent']
+            report['truncated']+=bool(row['truncated']);report['clipped']+=len(row['clips'])
+        else:report['local']+=1
+    return plan,report
 
 def _map_estimate(repo,head,selected,sizes,screens,lang,configuration,flag=None):
     """Upper bound of the model calls of the map, service structure and screen-group tasks.
 
-    The map reads the whole commit in batches when its saved result cannot be patched, otherwise only the changes
-    since it plus every file its saved items cite. The numbers come from the real file contents at the pin."""
+    A saved map that can be patched reads the changes since it plus every file it cites. Any other map reads the
+    signal windows of the commit (what the user sees as "signal-based") or, when the user asks for it, every text
+    file whole ("all"). Both numbers come from the real file contents at the pin."""
     shown=sum(1 for screen in screens if not screen.get('redirect'))
     page=MAP_USABLE
     calls_of=lambda size:max(1,-(-int(size*MAP_FOLLOW_UP)//page))
@@ -498,8 +569,7 @@ def _map_estimate(repo,head,selected,sizes,screens,lang,configuration,flag=None)
         if mode and mode[0]=='patch':
             base=prev['commit']
             changed,deleted,present=ai_extract.changes(repo,base,head)
-            routes,saved_screens,functions=ai_extract.ai_catalog(prev)
-            cited={f for item in routes+saved_screens for f in ai_extract.item_files(item,functions) if f}
+            cited=_cited_files(prev)
             now=_source_profile(repo,head,set(present)|cited)
             before=_source_profile(repo,base,changed|set(deleted))
             size=sum(now.values())+sum(before.values())
@@ -507,15 +577,24 @@ def _map_estimate(repo,head,selected,sizes,screens,lang,configuration,flag=None)
             result['calls']['analysis']=calls_of(size)
             result['calls']['system']=calls_of(sum(v for f,v in now.items() if f in changed)+sum(before.values())+len(json.dumps(prev.get('screens',[]))) // 8)
         else:
-            size=sum(_source_profile(repo,head).values())
+            rows=_signals(repo,head)
+            plan,report=_window_plan(rows,_cited_files(prev))
+            all_size=report['text_bytes']
             meta=names+20000+len(json.dumps({k:prev.get(k,[]) for k in ('screens','backend_routes','api_functions')},default=str))
-            result.update(source_bytes=size)
-            result['calls']['analysis']=calls_of(size);result['calls']['system']=calls_of(meta)
+            system=calls_of(meta)
+            modes={'signal':{'source_bytes':report['sent_bytes'],'calls':{'analysis':calls_of(report['sent_bytes']),'system':system,'groups':result['calls']['groups']}},
+                   'all':{'source_bytes':all_size,'calls':{'analysis':calls_of(all_size),'system':system,'groups':result['calls']['groups']}}}
+            result.update(source_bytes=modes['signal']['source_bytes'],modes=modes,coverage=report)
+            result['calls']=dict(modes['signal']['calls'])
     except (RunError,*ai_extract.READ_ERRORS,KeyError,TypeError,ValueError):
         # Unreadable history: assume the whole commit is read.
         readable=sum(int(min(size,MAX_FILE_BYTES)*1.4) for file,size in sizes.items() if not _exclusion(file,size))
         result.update(source_bytes=readable);result['calls'].update(analysis=calls_of(readable),system=calls_of(names+20000))
     return result
+
+def _mode_calls(estimate,coverage):
+    """Calls per map task of one coverage choice; a patch run has a single plan."""
+    return ((estimate.get('modes') or {}).get(coverage) or estimate)['calls']
 
 def _unit(value,rid,target):
     for unit in (value.get('units',{}).get(rid) or {}).get('units',[]):
@@ -533,11 +612,12 @@ def _is_unit(value,rid,target):
 def _estimates(value):
     return {rid:catalog['map'] for rid,catalog in (value.get('units') or {}).items() if 'map' in catalog}
 
-def _full_calls(tasks,estimates=None):
+def _full_calls(tasks,estimates=None,coverage='signal',catalogs=None):
     """Upper bound of model calls: one per base overview, one per four unit overviews, estimated calls per map task."""
     base=sum(1 for t in tasks if not t.get('target') and t['task'] not in MAP_TASKS)
-    maps=sum(((estimates or {}).get(t['repository']) or {}).get('calls',{}).get(t['task'],1) for t in tasks if t['task'] in MAP_TASKS)
-    packs=-(-sum(1 for t in tasks if t.get('target'))//RESOURCE_PACK_SIZE)
+    maps=sum(_mode_calls((estimates or {}).get(t['repository']) or {'calls':{}},coverage).get(t['task'],1) for t in tasks if t['task'] in MAP_TASKS)
+    sample={(rid,u.get('resource') or u['id']):u.get('sample') for rid,c in (catalogs or {}).items() for u in c['units']}
+    packs=len(_packs([(t['target'],t.get('unit_kind') or 'route',sample.get((t['repository'],t['target'])) or UNIT_UNKNOWN) for t in tasks if t.get('target')]))
     # A unit whose answer fails its evidence check is asked once more, alone; allow half again as many unit calls.
     return base+maps+packs+-(-packs//2)
 
@@ -703,7 +783,7 @@ def prepare(project, branch='dev', lang='ko', repository='', executor='claude', 
                             value['unavailable_resources'].append(entry)
                 skipped={(u['repository'],u['target']) for u in value.get('unavailable_resources',[])}
                 value['tasks']=remaining=[t for t in remaining if (t['repository'],t.get('target')) not in skipped or not t.get('target')]
-                calls=_full_calls(remaining,_estimates(value))
+                calls=_full_calls(remaining,_estimates(value),scope['intent']['coverage'],value['units'])
                 if calls>scope['intent']['max_calls']:raise ValueError('The call count changed; confirm the new maximum call count')
                 value['unit_estimate']={'units':len(plan['unit_targets']),'cached':sum(1 for t in value['completed_tasks'] if t.get('target')),'calls':calls}
         return write(value)
@@ -888,9 +968,11 @@ def _blob_lines(repo,oid,cancelled=None,deadline=None):
     if '\x00' in text:return 'binary'
     return [{'line':i,'text':line} for i,line in enumerate(text.splitlines(),1)]
 
-def export_source(repo, commit, commits=None, cancelled=None, deadline=None, selected=None, blobs=None, excluded=None):
+def export_source(repo, commit, commits=None, cancelled=None, deadline=None, selected=None, blobs=None, excluded=None, windows=None):
     """Export immutable regular text blobs only. Never inspect the checkout or follow symlinks.
-    blobs keeps content by object ID for one run; each commit's tree and path rules still decide what is exported."""
+    blobs keeps content by object ID for one run; each commit's tree and path rules still decide what is exported.
+    windows ({file: None | (spans, clips)}) cuts the pinned commit's files down to the numbered lines around their signals;
+    the lines keep their original numbers, so a citation still names a real line of the pinned file."""
     snapshots=[];blobs={} if blobs is None else blobs
     for pinned in dict.fromkeys([commit,*(commits or [])]):
         _checkpoint(cancelled,deadline)
@@ -912,6 +994,7 @@ def export_source(repo, commit, commits=None, cancelled=None, deadline=None, sel
             lines=blobs.get(oid)
             if lines is None:lines=blobs[oid]=_blob_lines(repo,oid.decode(),cancelled,deadline)
             if isinstance(lines,str):omitted.append({'file':file,'reason':lines});continue
+            if windows is not None and pinned==commit and windows.get(file):lines=source_signals.window_rows(lines,*windows[file])
             files.append({'file':file,'lines':lines})
         snapshots.append({'commit':pinned,'files':files,'omitted':omitted})
     return snapshots
@@ -957,6 +1040,16 @@ def _first_files(repo,head,request,overview=False):
     if overview and len(chosen)<4:
         chosen.update([p for p in paths if p not in chosen][:4-len(chosen)])
     return chosen
+
+def _windowed(value,task,request):
+    """The full analysis reads the map from signal windows unless the user chose every text file."""
+    return ((value.get('intent') or {}).get('task')=='full' and (value.get('intent') or {}).get('coverage','signal')=='signal'
+            and task['task']=='analysis' and request.get('mode') in ('full','review'))
+
+def _coverage_note(report):
+    """What the AI is told about the files it does not see as text: counted by tier, all of them read locally."""
+    return {'text_files_read_locally':report['files'],'sent_as_signal_windows':report['windows'],'sent_whole_because_cited_by_saved_map':report['whole'],
+            'scanned_without_signal':report['local'],'documents_and_data':report['docs'],'tests_and_vendored':report['support']}
 
 def _payload(value,task,request,cancelled=None,deadline=None,blobs=None,deferred=None):
     _checkpoint(cancelled,deadline)
@@ -1004,6 +1097,13 @@ def _payload(value,task,request,cancelled=None,deadline=None,blobs=None,deferred
             payload['input']={**request['input'],'map':{k:m.get(k,[]) for k in ('screens','backend_routes','api_functions')},
                               'files':sorted(ai_extract.tree_blobs(repo['path'],head))}
             selected={head:set()}
+        if _windowed(value,task,request):
+            plan,report=_window_plan(_signals(repo['path'],head),_cited_files(m))
+            payload['coverage']=_coverage_note(report)
+            payload['prompt']=payload.get('prompt','')+(' Source rows are windows around structural signal lines (original line numbers kept), not whole files. '
+                'The coverage note counts the other files, which were read and scanned locally; read more of a file or search the pinned commit with needs when a finding depends on it.')
+            payload['snapshots']=export_source(repo['path'],head,cancelled=cancelled,deadline=deadline,selected={head:set(plan)},blobs=blobs,windows=plan)
+            return payload
         if deferred is not None and task['task']=='analysis' and request.get('mode') in ('full','review'):
             first=_first_files(repo['path'],head,request)
             if first:
@@ -1231,6 +1331,18 @@ def _units(payload):
         if len(json.dumps(value,ensure_ascii=False).encode())<=UNIT_BYTES:add('metadata',{'path':path,'value':value})
         elif isinstance(value,dict):
             for k,v in value.items():page(path+[k],v)
+        elif isinstance(value,list) and value and all(isinstance(v,str) for v in value):
+            # A list of strings (file paths) travels in pages of whole entries; `offset` is the index of a page's first entry.
+            chunk=[];size=2;first=0
+            for i,v in enumerate(value):
+                n=len(json.dumps(v,ensure_ascii=False).encode())+2
+                if n>UNIT_BYTES:
+                    if chunk:add('metadata',{'path':path,'offset':first,'value':chunk});chunk=[];size=2
+                    page(path+[i],v);first=i+1;continue
+                if chunk and size+n>UNIT_BYTES:add('metadata',{'path':path,'offset':first,'value':chunk});chunk=[];size=2;first=i
+                if not chunk:first=i
+                chunk.append(v);size+=n
+            if chunk:add('metadata',{'path':path,'offset':first,'value':chunk})
         elif isinstance(value,list):
             for i,v in enumerate(value):page(path+[i],v)
         elif isinstance(value,str):
@@ -1952,7 +2064,7 @@ def generate(value,task,request,executor,cancelled,deadline,check,blobs=None):
                 if not prepared or error.code!='scope_unavailable':raise
                 break
             candidate=[p for _,p,_ in prepared]+[packet]
-            if len(candidate)>RESOURCE_PACK_SIZE:
+            if len(candidate)>RESOURCE_PACK_SIZE and not all(_is_unit(value,task['repository'],t) for t in task['pack_targets']):
                 # An ordinary four-scope packet can carry eight endpoint pairs
                 # and 384 source rows. Extend only one-endpoint registrations
                 # without action/data traces, within the same evidence budget.
@@ -2039,7 +2151,8 @@ def generate(value,task,request,executor,cancelled,deadline,check,blobs=None):
         family=path(value.get('resume_from',value['id'])).stem
         scope_key=ai_extract.digest([1,request['record_arguments'],header,provisional])
         checkpoint_dir=root()/'checkpoints'/family/scope_key
-    wide_batches=bool(deferred)
+    windowed=_windowed(value,task,request)
+    wide_batches=bool(deferred) or windowed
     progress()
     while pending or deferred:
         if deferred and index:
@@ -2057,9 +2170,9 @@ def generate(value,task,request,executor,cancelled,deadline,check,blobs=None):
         # Keep the opening review bounded by its few source files. Historical
         # catalog pages have their own pending units, and explicit needs can
         # still retrieve them in this round from the original payload.
-        seed_only = wide_batches and index == 1 and pending[0]['kind'] == 'source'
+        seed_only = bool(deferred) and index == 1 and pending[0]['kind'] == 'source'
         batch_header = header
-        if wide_batches and index>1 and len(units)>=128:
+        if wide_batches and (index>1 or windowed) and len(units)>=128:
             batch_header={**header,'source_line_format':'numbered_lines entries are [original one-based line, literal text, optional original character offset].'}
         if seed_only:
             batch_header = {k: v for k, v in header.items()
@@ -2068,7 +2181,7 @@ def generate(value,task,request,executor,cancelled,deadline,check,blobs=None):
                                       ' This is an opening source sample. Report directly supported findings. '
                                       'Catalog review and remaining files follow in later batches.')
         # Leave room for at least one additional source unit and prior claims.
-        budget=MAX_PROMPT_BYTES-2*UNIT_BYTES-4096 if wide_batches and index>1 else MAX_PROMPT_BYTES//2
+        budget=MAX_PROMPT_BYTES-2*UNIT_BYTES-4096 if wide_batches and (index>1 or windowed) else MAX_PROMPT_BYTES//2
         while pending and (not seed_only or pending[0]['kind'] == 'source'):
             candidate=batch+[pending[0]]
             if len(_encoded(_batch_payload(batch_header,candidate,batch_id)).encode())>budget:
@@ -2266,6 +2379,7 @@ def run(run_id, executor=None):
             for _ in range(task_limit):
                 if cancelled(): raise Cancelled()
                 if time.monotonic()>deadline: raise RunError('timeout','Analysis reached its time limit. Retry to finish remaining tasks')
+                with locked():value=read(run_id)  # failures recorded by the previous task count in this plan
                 plan=_plan(value);_check_pins(value,plan)
                 with locked():
                     value=read(run_id)
@@ -2302,7 +2416,11 @@ def run(run_id, executor=None):
                     targets=[t['target'] for t in plan['tasks'][:SIMPLE_RESOURCE_PACK_SIZE] if t['repository']==task['repository']]
                     if len(targets)>1:task={**task,'pack_targets':targets}
                 elif full_run and task.get('target'):
-                    targets=[t['target'] for t in plan['tasks'] if t['repository']==task['repository'] and t.get('target')][:RESOURCE_PACK_SIZE]
+                    # The same grouping the call limit was counted with: path groups four at a time, other units by sample bytes.
+                    sample={u.get('resource') or u['id']:u.get('sample') for u in value['units'][task['repository']]['units']}
+                    ahead=[(t['target'],t.get('unit_kind') or 'route',sample.get(t['target']) or UNIT_UNKNOWN)
+                           for t in plan['tasks'] if t['repository']==task['repository'] and t.get('target')]
+                    targets=_packs(ahead)[0]
                     if len(targets)>1:task={**task,'pack_targets':targets}
                 request=_request(value,task)
                 args=request['record_arguments']

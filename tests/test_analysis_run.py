@@ -215,7 +215,7 @@ class AnalysisRun(unittest.TestCase):
         """Respond only to evidence actually delivered, never the whole hidden fixture."""
         p=json.loads(prompt.split('\n',1)[1]);schema=p['schema']
         files={f['file'] for s in p.get('snapshots',[]) for f in s['files']}
-        supplied='\n'.join(line['text'] for s in p.get('snapshots',[]) for f in s['files'] for line in f['lines'])
+        supplied='\n'.join(line['text'] if isinstance(line,dict) else line[1] for s in p.get('snapshots',[]) for f in s['files'] for line in (f.get('lines') or f.get('numbered_lines') or []))  # the compact form carries [line, text]
         if 'screens' in schema:
             data={**self.data,'screens':self.data['screens'] if '<button @click="saveItem">' in supplied else [],
                   'backend_routes':self.data['backend_routes'] if 'router.POST("/items", SaveItem)' in supplied else []}

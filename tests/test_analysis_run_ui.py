@@ -43,6 +43,10 @@ elements.insp.querySelectorAll=selector=>{
   const found=[...elements.insp.innerHTML.matchAll(new RegExp('data-'+unit[1]+'="([^"]*)"','g'))].map(hit=>({dataset:{[key]:hit[1]},onclick:null}));
   (globalThis.unitHandles||(globalThis.unitHandles={}))[unit[1]]=found;return found;
  }
+ if(selector==='input[name="mapCoverage"]'){
+  const found=[...elements.insp.innerHTML.matchAll(/<input type="radio" name="mapCoverage" value="([^"]+)"/g)].map(hit=>({value:hit[1],onchange:null}));
+  globalThis.coverageHandles=found;return found;
+ }
  const hits=[...elements.insp.innerHTML.matchAll(/data-overview-feature="([^"]+)"/g)];
  globalThis.featureButtons=hits.map(hit=>({dataset:{overviewFeature:hit[1].replaceAll('&quot;','"')}}));return featureButtons;
 };
@@ -132,6 +136,27 @@ html=$('insp').innerHTML;
 assert(!html.includes('data-unit-board="loading"') && $('startFullAnalysis') && html.includes('up to 2300 calls'),'The units replace the placeholder');
 assert(html.includes('How the call limit is counted') && html.includes('First overview 1 · map and structure 1900 · unit packs 249 · retry allowance 125 = 2300'),'The limit shows what it is made of');
 assert(html.includes('Time cap 40 h'),'Long caps read in hours or days');
+""")
+
+    def test_coverage_choice_names_what_is_read_indexed_and_interpreted_and_sends_the_confirmed_cap(self):
+        self.check_js(self.BOARD + r"""
+const report={files:1000,windows:90,whole:10,local:300,docs:450,support:150,truncated:0,text_bytes:52428800,sent_bytes:2097152,clipped:0};
+const modes={signal:{calls:30,calls_parts:{overview:1,map:12,units:14,retry:3},time_limit_seconds:7200,source_bytes:2097152},
+             all:{calls:900,calls_parts:{overview:1,map:800,units:75,retry:24},time_limit_seconds:3600*40,source_bytes:52428800}};
+const board=unitBoard({calls:30,calls_parts:modes.signal.calls_parts,modes,coverage:'signal'});board.repositories[0].map_coverage=report;
+native=(command,args)=>command==='analysis_run_status'&&args.view==='units'?board:undefined;
+status=null;await open();await AnalysisRun.check();await flush();
+let html=$('insp').innerHTML;
+assert(html.includes('data-map-coverage="signal"') && html.includes('Signal-based reading (default)') && html.includes('up to 30 calls'),'Signal-based reading is the default and shows its own cap');
+assert(html.includes('Read and indexed locally 1000') && html.includes('AI-interpreted around signals 90') && html.includes('no signal (local index only) 300') && html.includes('documents and data (local index only) 450') && html.includes('tests and vendored code (local index only) 150'),'Read, indexed and AI-interpreted counts are separate');
+assert(html.includes('about 2.0 MB of 50 MB of source text'),'Sent and total source sizes are shown');
+assert(coverageHandles.length===2,'Both choices are offered');
+await coverageHandles.find(h=>h.value==='all').onchange();await flush();
+html=$('insp').innerHTML;
+assert(html.includes('data-map-coverage="all"') && html.includes('up to 900 calls') && html.includes('Time cap 40 h'),'Choosing every text file shows its larger cap before the click');
+await $('startFullAnalysis').onclick();await flush();
+const intent=calls.find(c=>c.command==='analysis_run_start').args.scope.intent;
+assert(intent.task==='full' && intent.max_calls===900 && intent.coverage==='all','The confirmed cap and coverage of the chosen reading are sent');
 """)
 
     def test_running_board_filters_opens_saved_units_and_cancels(self):
