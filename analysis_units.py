@@ -5,11 +5,15 @@ a screen, a program, a workspace package, a command family, or a plain folder. U
 come from the local structure index only, so the same catalog applies to web services,
 libraries and command-line tools. Every tracked file is either inside a unit or counted
 under one named exclusion reason, so missing coverage is visible instead of implied.
+Files outside the structure index (documents, configuration, scripts, languages the
+indexer does not read, files past its limit) are plain files: they stay in folder units
+and are sampled from their text, so only secrets, binaries and oversized files are excluded.
 """
+import hashlib
 import posixpath
 from collections import defaultdict
 
-VERSION = 1
+VERSION = 2
 FOLDER_MAX_FILES = 12
 STORED_FILES = 64
 KINDS = ('route', 'package', 'cli', 'screen', 'program', 'folder')
@@ -73,7 +77,8 @@ def _folders(files):
 def catalog(index, tracked, exclusion, screens=(), programs=()):
     """index: pinned structure index. tracked: {path: bytes} of regular tracked blobs.
     exclusion(path, size) -> reason or None. screens/programs come from the saved map when it exists."""
-    indexed = {row['file'] for row in index.get('files', []) if not exclusion(row['file'], tracked.get(row['file'], 0))}
+    eligible = {file for file, size in tracked.items() if not exclusion(file, size)}
+    indexed = {row['file'] for row in index.get('files', []) if row['file'] in eligible}
     weight = defaultdict(int)
     for row in index.get('files', []):
         weight[row['file']] += len(row.get('declarations', []))
@@ -94,6 +99,7 @@ def catalog(index, tracked, exclusion, screens=(), programs=()):
             return
         owned[unit_id] = set(files)
         units.append({'id': unit_id, 'kind': kind, 'name': name, 'file_count': len(files),
+                      'digest': hashlib.sha1('\0'.join(sorted(files)).encode()).hexdigest()[:16],
                       'files': files[:STORED_FILES], **extra})
 
     for resource, files in sorted(_route_files(index.get('service_flow') or {}, indexed).items()):
@@ -102,7 +108,7 @@ def catalog(index, tracked, exclusion, screens=(), programs=()):
     for package in index.get('workspace_packages', []):
         folder = posixpath.dirname(package.get('file', ''))
         if folder:
-            members = _under(indexed, [folder])
+            members = _under(eligible, [folder])
             package_files.update(members)
             add('package', package['name'], package['name'], members)
     families = defaultdict(set)
@@ -116,23 +122,20 @@ def catalog(index, tracked, exclusion, screens=(), programs=()):
             add('screen', file, screen.get('heading') or screen.get('component') or screen.get('path') or file,
                 [file, *imports[file][:3]], path=screen.get('path'))
     for program in programs:
-        inside = _under(indexed, program.get('code') or [])
+        inside = _under(eligible, program.get('code') or [])
         if inside and not set(inside) <= package_files:
             add('program', program['id'], program.get('name') or program['id'], inside)
     claimed = set().union(*owned.values()) if owned else set()
-    for unit in _folders(sorted(indexed - claimed)):
+    for unit in _folders(sorted(eligible - claimed)):
         add('folder', unit['id'][7:], unit['name'], unit['files'])
     in_units = set().union(*owned.values()) if owned else set()
     reasons = defaultdict(int)
     for file, size in tracked.items():
-        if file in indexed:
-            continue
-        reasons[exclusion(file, size) or 'not_indexed'] += 1
+        if file not in eligible:
+            reasons[exclusion(file, size)] += 1
     counts = index.get('coverage', {})
-    limited = min(reasons.get('not_indexed', 0), counts.get('skipped_files', 0))
-    excluded = {'secret': reasons.get('secret', 0), 'binary': reasons.get('binary', 0), 'large': reasons.get('large', 0),
-                'unsupported': reasons.get('not_indexed', 0) - limited, 'limit': limited}
     return {'version': VERSION, 'units': units,
-            'coverage': {'tracked': len(tracked), 'indexed': len(indexed), 'in_units': len(in_units),
-                         'excluded': {k: v for k, v in excluded.items() if v}, 'truncated': bool(counts.get('truncated')),
+            'coverage': {'tracked': len(tracked), 'indexed': len(indexed), 'plain': len(eligible) - len(indexed),
+                         'in_units': len(in_units), 'excluded': {k: v for k, v in sorted(reasons.items()) if v},
+                         'truncated': bool(counts.get('truncated')),
                          'index_candidates': counts.get('candidate_files'), 'index_skipped': counts.get('skipped_files', 0)}}

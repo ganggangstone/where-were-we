@@ -61,6 +61,7 @@ const AnalysisRun = (() => {
       analysis_blocked:['먼저 확인할 분석이 있습니다. 기존 AI 요청의 안내에서 수집 상태·코드 설정·AI 제안을 확인하세요.','Some analysis needs attention. Check collection, code settings, and AI proposals in the existing request instructions.'],
       timeout:['분석 제한 시간에 도달했습니다. 저장된 결과는 유지됩니다. 다시 시도하면 남은 분석을 실행합니다.','Analysis reached its time limit. Saved results are retained. Retry to finish the remaining analysis.'],
       task_limit:['분석 작업 한도에 도달했습니다. 다시 시도하면 남은 분석을 실행합니다.','Analysis reached its task limit. Retry to finish the remaining analysis.'],
+      call_limit:['확인한 AI 호출 상한에 도달했습니다. 저장된 결과는 그대로 남아 있고, 이어서 분석하면 나머지를 처리합니다.','The confirmed AI call limit was reached. Saved results are kept; continue to process the rest.'],
       result_read_failed:['저장된 결과를 읽지 못했습니다. 계정·상태 다시 확인을 누르세요.','Could not read saved results. Click Check account and status.'],
       worker_start_failed:['분석을 시작하지 못했습니다. 다시 시도하세요.','Could not start the analysis worker. Retry the analysis.']
     };
@@ -403,10 +404,11 @@ const AnalysisRun = (() => {
   }
 
   // ---- Full code analysis: units are saved as they finish and read as a map and cards, not as a wall of text ----
-  const KINDS={route:['경로','Paths'],screen:['화면','Screens'],program:['프로그램','Programs'],package:['패키지','Packages'],cli:['CLI','CLI'],folder:['폴더','Folders']};
-  const UNIT_STATES={saved:['저장됨','Saved'],working:['준비 중','Preparing'],pending:['대기','Queued'],failed:['검증 실패','Failed'],unavailable:['건너뜀','Skipped'],stale:['오래됨','Outdated']};
-  const STATE_ORDER=['working','saved','failed','stale','pending','unavailable'];
-  const REASONS={secret:['비밀 파일','Credential files'],binary:['이미지·바이너리','Binary files'],large:['300KB 초과','Over 300KB'],unsupported:['지원하지 않는 형식','Unsupported formats'],limit:['색인 한도','Index limit']};
+  const KINDS={route:['경로','Paths'],screen:['화면','Screens'],program:['프로그램','Programs'],package:['패키지','Packages'],cli:['CLI','CLI'],folder:['폴더','Folders'],map:['지도','Map'],system:['서비스 구성','Service structure'],groups:['화면 묶음','Screen groups']};
+  const MAP_KINDS=['map','system','groups'];
+  const UNIT_STATES={saved:['저장됨','Saved'],working:['준비 중','Preparing'],partial:['부분 저장','Partial'],pending:['대기','Queued'],failed:['검증 실패','Failed'],unavailable:['건너뜀','Skipped'],stale:['오래됨','Outdated']};
+  const STATE_ORDER=['working','partial','saved','failed','stale','pending','unavailable'];
+  const REASONS={secret:['비밀 파일','Credential files'],binary:['이미지·바이너리','Binary files'],large:['300KB 초과','Over 300KB'],generated:['생성·잠금 파일','Generated or lock files']};
   const SAMPLE_FILES=4;
   let board=null,boardScope='',boardError=null,unitFilter='all',unitLimit=24,openedUnit=null,loadingBoard=false,unitRows=[];
   const unitDetails=new Map();
@@ -429,16 +431,29 @@ const AnalysisRun = (() => {
   }
   function unitSummary(b) {
     const cover=b.repositories.reduce((sum,repo)=>{
-      const c=repo.coverage || {};sum.tracked+=c.tracked || 0;sum.inside+=c.in_units || 0;sum.truncated=sum.truncated || !!c.truncated;
+      const c=repo.coverage || {};sum.tracked+=c.tracked || 0;sum.inside+=c.in_units || 0;sum.plain+=c.plain || 0;sum.truncated=sum.truncated || !!c.truncated;
       for(const [reason,count] of Object.entries(c.excluded || {}))sum.excluded[reason]=(sum.excluded[reason] || 0)+count;
       return sum;
-    },{tracked:0,inside:0,truncated:false,excluded:{}});
+    },{tracked:0,inside:0,plain:0,truncated:false,excluded:{}});
     const out=Object.values(cover.excluded).reduce((a,n)=>a+n,0);
     const reasons=Object.entries(cover.excluded).map(([reason,count])=>`<li><span>${text(...(REASONS[reason] || [reason,reason]))}</span><b>${count}</b></li>`).join('');
-    return `<details class="unit-scope" data-unit-scope><summary>${text('범위','Scope')} · ${text('파일','Files')} ${cover.inside}/${cover.tracked}${out?` <span class="chip warn">${text('제외','Excluded')} ${out}</span>`:''}${cover.truncated?` <span class="chip warn">${text('색인 한도 도달','Index limit reached')}</span>`:''} <span class="chip">${text('단위당 표본 ≤'+SAMPLE_FILES+'파일','≤'+SAMPLE_FILES+' sampled files per unit')}</span></summary>${reasons?`<ul class="unit-excluded">${reasons}</ul>`:''}</details>`;
+    return `<details class="unit-scope" data-unit-scope><summary>${text('범위','Scope')} · ${text('파일','Files')} ${cover.inside}/${cover.tracked}${out?` <span class="chip warn">${text('제외','Excluded')} ${out}</span>`:''}${cover.plain?` <span class="chip">${text('색인 밖 일반 파일 '+cover.plain+'개 포함',cover.plain+' plain files outside the index included')}</span>`:''}${cover.truncated?` <span class="chip warn">${text('색인 한도 도달','Index limit reached')}</span>`:''} <span class="chip">${text('단위당 표본 ≤'+SAMPLE_FILES+'파일','≤'+SAMPLE_FILES+' sampled files per unit')}</span></summary>${reasons?`<ul class="unit-excluded">${reasons}</ul>`:''}</details>`;
+  }
+  const ITEM_KINDS={screen:['화면','Screen'],request:['서버 요청','Server request'],program:['프로그램','Program'],external:['외부 서비스','External service'],group:['화면 묶음','Screen group']};
+  function partialDetail(group) {
+    const items=group.items || [];
+    const rows=items.map(item=>`<li><span class="chip">${text(...(ITEM_KINDS[item.kind] || [item.kind,item.kind]))}</span> <b>${esc(item.name || '')}</b>${item.detail?` <span class="s">${esc(item.detail)}</span>`:''}${item.file?`<details data-claim-evidence><summary>${text('코드 근거','Code evidence')}</summary><div class="s"><code>${esc(item.file)}:${esc(item.line)}</code></div><pre>${esc(item.quote)}</pre></details>`:''}</li>`).join('');
+    return `<p class="s">${text('입력 조각 '+group.covered+'/'+group.total+' 확인 · 아직 저장된 결과에 반영되지 않았습니다','Input pieces '+group.covered+'/'+group.total+' checked · not in the saved result yet')}</p><ul class="unit-partial">${rows}</ul>${group.count>items.length?`<p class="s">+${group.count-items.length}</p>`:''}`;
   }
   function unitDetail(row) {
     if(['pending','working'].includes(row.state))return '';
+    if(MAP_KINDS.includes(row.kind)) {
+      if(row.state==='unavailable')return `<p class="s">${row.detail==='no screens'?text('화면이 없어 묶을 것이 없습니다.','No screens, so there is nothing to group.'):text('이 코드는 분석할 수 없습니다: ','Cannot be analyzed: ')+esc(row.detail)}</p>`;
+      if(row.state!=='partial')return '';
+      const group=unitDetails.get(unitKey(row));
+      if(group===undefined)return `<p class="s">${text('불러오는 중…','Loading…')}</p>`;
+      return group && group.items?partialDetail(group):`<p class="s">${text('부분 결과를 읽지 못했습니다.','Partial result unavailable.')}</p>`;
+    }
     if(row.state==='failed')return `<p class="s">${text('AI 설명이 근거와 맞지 않아 저장하지 않았습니다.','The AI answer did not match its evidence and was not saved.')}</p>`;
     if(row.state==='unavailable')return `<p class="s">${text('근거로 읽을 수 있는 코드 줄이 없습니다.','No readable source lines.')}</p>`;
     const group=unitDetails.get(unitKey(row));
@@ -447,9 +462,12 @@ const AnalysisRun = (() => {
     return `${group.stale?`<p class="s">${text('이전 코드 기준 · 다시 분석 필요','Based on older code · reanalyze')}</p>`:''}<code>${esc(group.commit.slice(0,8))}</code>${overviewTree(group)}`;
   }
   function unitCard(row,index,multi) {
-    const open=openedUnit===unitKey(row),expandable=!['pending','working'].includes(row.state);
+    const mapRow=MAP_KINDS.includes(row.kind);
+    const open=openedUnit===unitKey(row),expandable=!['pending','working'].includes(row.state) && (!mapRow || ['partial','unavailable'].includes(row.state));
     const state=text(...UNIT_STATES[row.state]);
-    return `<li class="unit-card" data-state="${row.state}" data-unit-card="${index}"><button class="unit-head" type="button" data-unit-open="${index}" aria-expanded="${expandable?open:false}" ${expandable?'':'aria-disabled="true"'}><i class="unit-dot" aria-hidden="true"></i><strong>${esc(row.name)}</strong><span class="chips"><span class="chip">${text(...(KINDS[row.kind] || [row.kind,row.kind]))}</span>${row.count>SAMPLE_FILES?`<span class="chip">${text('표본','Sample')} ${SAMPLE_FILES}/${row.count}</span>`:''}${multi?`<span class="chip">${esc(connectionDisplayName(row.repo))}</span>`:''}${row.detail==='reused'?`<span class="chip">${text('코드 변경 없음','Code unchanged')}</span>`:''}</span><span class="unit-state">${state}</span></button>${open && expandable?unitDetail(row):''}</li>`;
+    const title=mapRow?text(...KINDS[row.kind]):esc(row.name);
+    const pieces=mapRow && /^\d+\/\d+$/.test(row.detail)?`<span class="chip">${text('입력 조각','Input pieces')} ${esc(row.detail)}</span>`:'';
+    return `<li class="unit-card" data-state="${row.state}" data-unit-card="${index}"><button class="unit-head" type="button" data-unit-open="${index}" aria-expanded="${expandable?open:false}" ${expandable?'':'aria-disabled="true"'}><i class="unit-dot" aria-hidden="true"></i><strong>${title}</strong><span class="chips">${mapRow?'':`<span class="chip">${text(...(KINDS[row.kind] || [row.kind,row.kind]))}</span>`}${pieces}${!mapRow && row.count>SAMPLE_FILES?`<span class="chip">${text('표본','Sample')} ${SAMPLE_FILES}/${row.count}</span>`:''}${multi?`<span class="chip">${esc(connectionDisplayName(row.repo))}</span>`:''}${row.detail==='reused'?`<span class="chip">${text('코드 변경 없음','Code unchanged')}</span>`:''}</span><span class="unit-state">${state}</span></button>${open && expandable?unitDetail(row):''}</li>`;
   }
   function boardHtml() {
     const b=liveBoard(),live=fullRun() && active();
@@ -478,20 +496,23 @@ const AnalysisRun = (() => {
     const finished=fullRun() && ['failed','cancelled'].includes(run.state);
     const calls=b.calls,minutes=Math.max(1,Math.round((b.time_limit_seconds || 3600)/60));
     const label=(t.saved?text('이어서 분석','Continue'):text('분석 시작','Start'))+' · '+text('호출 최대 '+calls+'회','up to '+calls+' calls');
-    const start=live?`<div class="unit-run" role="status" aria-live="polite"><span class="chip">${text('AI 호출','AI calls')} ${run.input_stats?.calls || 0} · ${text('최대','max')} ${run.unit_estimate?.calls ?? calls}</span><span class="chip">${text('경과','Elapsed')} ${Math.max(0,Math.round((Date.now()-Date.parse(run.started_at || run.created_at))/60000)) || 0}${text('분',' min')}</span><button class="btn" id="cancelFullAnalysis" ${busy || run.cancel_requested?'disabled':''}>${text('취소','Cancel')}</button></div>`
-      : calls>0 ? `<div class="unit-start"><span class="chips"><span class="chip">${text('AI 호출 최대','AI calls up to')} ${calls}</span><span class="chip">${text('선택한 코드가 Claude로 전송','Selected code is sent to Claude')}</span><span class="chip">${text('구독 한도 적용','Subscription limit applies')}</span><span class="chip">${text('시간 상한','Time cap')} ${minutes}${text('분',' min')}</span></span><button class="btn primary" id="startFullAnalysis" ${canStart?'':'disabled'}>${label}</button>${usableNow?'':`<button class="btn quiet" id="checkFullAccount">${text('계정 확인','Check account')}</button>`}</div>`
-      : `<p class="s"><span class="chip ok">${text('최신','Up to date')}</span></p>`;
+    const unfinished=['working','partial','failed','stale','pending'].reduce((n,k)=>n+(t[k] || 0),0);
+    const status=unfinished?`<span class="chip warn">${text('미완료','Unfinished')} ${unfinished}</span>`:`<span class="chip ok">${text('전체 저장됨','All saved')}${t.unavailable?' · '+text('건너뜀','skipped')+' '+t.unavailable:''}</span>`;
+    const mapPending=unitRows.some(row=>MAP_KINDS.includes(row.kind) && ['pending','stale','partial','working'].includes(row.state));
+    const mapChips=(b.map_calls?`<span class="chip" title="${text('입력 조각 수로 추정한 값입니다','Estimated from the number of input pieces')}">${text('지도·구성 약','Map and structure about')} ${b.map_calls}${text('회',' calls')}</span>`:'')+(mapPending?`<span class="chip">${text('지도 뒤 화면·프로그램 단위 추가 가능','Screens and programs may be added after the map')}</span>`:'');
+    const start=live?`<div class="unit-run" role="status" aria-live="polite">${status}<span class="chip">${text('AI 호출','AI calls')} ${run.input_stats?.calls || 0} · ${text('최대','max')} ${run.unit_estimate?.calls ?? calls}</span><span class="chip">${text('경과','Elapsed')} ${Math.max(0,Math.round((Date.now()-Date.parse(run.started_at || run.created_at))/60000)) || 0}${text('분',' min')}</span><button class="btn" id="cancelFullAnalysis" ${busy || run.cancel_requested?'disabled':''}>${text('취소','Cancel')}</button></div>`
+      : calls>0 ? `<div class="unit-start"><span class="chips">${status}<span class="chip">${text('AI 호출 최대','AI calls up to')} ${calls}</span>${mapChips}<span class="chip">${text('선택한 코드가 Claude로 전송','Selected code is sent to Claude')}</span><span class="chip">${text('구독 한도 적용','Subscription limit applies')}</span><span class="chip">${text('시간 상한','Time cap')} ${minutes}${text('분',' min')}</span></span><button class="btn primary" id="startFullAnalysis" ${canStart?'':'disabled'}>${label}</button>${usableNow?'':`<button class="btn quiet" id="checkFullAccount">${text('계정 확인','Check account')}</button>`}</div>`
+      : `<p class="s">${status}</p>`;
     const alert=finished?`<p role="alert">${esc(message(run.error || {code:'CANCELLED'}))}</p>`:'';
     return `<section class="sect unit-board" data-unit-board><h3>${text('전체 코드 분석','Full code analysis')} ${beta()}<span class="unit-count">${t.saved}/${total}</span></h3>${start}${alert}${bar}${filters}<div class="unit-map" role="group" aria-label="${text('단위 구조도','Unit map')}">${lanes}</div>${unitSummary(b)}<ul class="unit-cards">${shown.map(([row,i])=>unitCard(row,i,multi)).join('')}</ul>${hidden>0?`<button class="btn quiet" type="button" id="unitMore">${text('더 보기','Show more')} (${hidden})</button>`:''}</section>`;
   }
   async function readUnit(row) {
     const base={...scope(),repository:row.repo};
-    return decode(row.kind==='route'?await invoke('analysis_run_status',{view:'resource',scope:base,resource:row.name})
-      :await invoke('analysis_run_status',{view:'unit',scope:base,resource:row.id}));
+    return decode(await invoke('analysis_run_status',{view:'unit',scope:base,resource:row.id}));
   }
   async function openUnit(row) {
     const key=unitKey(row);
-    if(['pending','working'].includes(row.state)){openedUnit=key;paint();return;}
+    if(['pending','working'].includes(row.state) || MAP_KINDS.includes(row.kind) && !['partial','unavailable'].includes(row.state)){openedUnit=key;paint();return;}
     openedUnit=openedUnit===key?null:key;paint();
     if(openedUnit!==key || unitDetails.has(key) || ['failed','unavailable'].includes(row.state))return;
     const token=epoch;

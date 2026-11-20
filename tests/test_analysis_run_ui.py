@@ -115,15 +115,62 @@ assert($('cancelFullAnalysis') && !$('startFullAnalysis') && $('insp').innerHTML
 unitHandles['unit-filter'].find(b=>b.dataset.unitFilter==='pending').onclick();
 assert($('insp').innerHTML.includes('data-unit-card="2"') && !$('insp').innerHTML.includes('data-unit-card="0"'),'Filter keeps only queued units');
 unitHandles['unit-filter'].find(b=>b.dataset.unitFilter==='all').onclick();
-native=(command,args)=>command==='analysis_run_status'&&args.view==='resource'?{repository:'service',commit:'abcd1234ef',configuration:'pin',resource:'/orders',files:['api.py'],items:[{name:'List orders',description:'Returns the orders',file:'api.py',line:1,quote:'def orders'}],format:'overview-v1'}:undefined;
+native=(command,args)=>command==='analysis_run_status'&&args.view==='unit'?{repository:'service',commit:'abcd1234ef',configuration:'pin',resource:'/orders',files:['api.py'],items:[{name:'List orders',description:'Returns the orders',file:'api.py',line:1,quote:'def orders'}],format:'overview-v1'}:undefined;
 unitHandles['unit-open'].find(b=>b.dataset.unitOpen==='0').onclick();await flush();
-const read=calls.filter(c=>c.command==='analysis_run_status'&&c.args.view==='resource').at(-1);
-assert(read && read.args.resource==='/orders' && $('insp').innerHTML.includes('List orders'),'A saved unit opens its explanation on demand');
+const read=calls.filter(c=>c.command==='analysis_run_status'&&c.args.view==='unit').at(-1);
+assert(read && read.args.resource==='route:/orders' && $('insp').innerHTML.includes('List orders'),'A saved unit opens its explanation on demand');
 const before=calls.length;
 unitHandles['unit-open'].find(b=>b.dataset.unitOpen==='1').onclick();await flush();
 assert(calls.length===before,'A unit still being prepared reads nothing');
 await $('cancelFullAnalysis').onclick();await flush();
 assert(count('analysis_run_cancel')===1,'Cancel reaches the backend');
+""")
+
+    MAP_BOARD = r"""
+const mapBoard=(extra={})=>({repositories:[{repository:'service',units:[
+ ['route:/orders','route','/orders',3,'saved','new'],
+ ['folder:lib','folder','lib',9,'saved',''],
+ ['task:analysis','map','analysis',0,'partial','3/8'],
+ ['task:system','system','system',0,'pending',''],
+ ['task:groups','groups','groups',0,'unavailable','no screens']],
+ coverage:{tracked:30,in_units:26,plain:11,indexed:15,excluded:{secret:1,generated:3},truncated:false}}],
+ totals:{units:5,saved:2,partial:1,pending:1,unavailable:1},calls:6,map_calls:4,time_limit_seconds:3600,...extra});
+const serveMap=(extra)=>{native=(command,args)=>command==='analysis_run_status'&&args.view==='units'?mapBoard(extra):undefined;};
+"""
+
+    def test_map_structure_and_group_tasks_show_partial_progress_with_evidence_and_never_claim_completion(self):
+        self.check_js(self.MAP_BOARD + r"""
+serveMap();status=null;await open();await AnalysisRun.check();await flush();
+let html=$('insp').innerHTML;
+assert(html.includes('Map') && html.includes('Service structure') && html.includes('Screen groups'),'The three whole-code tasks are units too');
+assert(html.includes('Partial') && html.includes('Input pieces</span> 3/8') === false && html.includes('Input pieces 3/8'),'Partial progress shows how many input pieces are checked');
+assert(html.includes('Unfinished 2') && !html.includes('All saved'),'Unsaved work is never shown as complete');
+assert(html.includes('Map and structure about 4 calls') && html.includes('Screens and programs may be added after the map'),'Cost and the later unit discovery are disclosed before the click');
+assert(html.includes('11 plain files outside the index included') && html.includes('Generated or lock files'),'Plain files and generated-file exclusions are visible');
+native=(command,args)=>command==='analysis_run_status'&&args.view==='unit'?{task:'analysis',state:'partial',covered:3,total:8,count:3,items:[{kind:'request',name:'GET /items',detail:'list_items',file:'api.py',line:3,quote:'def list_items'},{kind:'screen',name:'Home',detail:'/',file:'ui.ts',line:1,quote:'<home>'}]}:undefined;
+unitHandles['unit-open'].find(b=>b.dataset.unitOpen==='2').onclick();await flush();
+const read=calls.filter(c=>c.command==='analysis_run_status'&&c.args.view==='unit').at(-1);
+html=$('insp').innerHTML;
+assert(read.args.resource==='task:analysis','The unfinished result is read by its task id');
+assert(html.includes('Input pieces 3/8 checked') && html.includes('not in the saved result yet') && html.includes('GET /items') && html.includes('api.py:3') && html.includes('&lt;home>'),'Checked items keep their code evidence and are labeled unfinished');
+assert(html.includes('+1'),'Items beyond the stored sample are counted, not hidden');
+const before=calls.length;
+unitHandles['unit-open'].find(b=>b.dataset.unitOpen==='3').onclick();await flush();
+assert(calls.length===before,'A queued task reads nothing');
+serveMap({repositories:[{repository:'service',units:[['task:analysis','map','analysis',0,'saved','']],coverage:{tracked:1,in_units:1,plain:0,excluded:{},truncated:false}}],totals:{units:1,saved:1},calls:0,map_calls:0});
+S.loadToken++;AnalysisRun.syncScope();await open();await AnalysisRun.check();await flush();
+assert($('insp').innerHTML.includes('All saved') && !$('insp').innerHTML.includes('Unfinished'),'Only a fully saved board says so');
+""")
+
+    def test_map_rows_are_localized_and_the_call_limit_has_a_plain_message(self):
+        self.check_js(self.MAP_BOARD + r"""
+S.lang='ko';serveMap();status=null;await open();await AnalysisRun.check();await flush();
+const html=$('insp').innerHTML;
+for(const word of ['지도','서비스 구성','화면 묶음','부분 저장','입력 조각 3/8','미완료 2','지도·구성 약 4회','색인 밖 일반 파일 11개 포함','생성·잠금 파일'])assert(html.includes(word),'Korean label '+word);
+assert(!/해요|이에요|예요|할게요/.test(html),'No informal ending');
+status=runRecord('failed',{intent:{task:'full',targets:[],max_calls:6},unit_board:mapBoard(),error:{code:'call_limit',message:'limit'}});
+await AnalysisRun.check();await flush();
+assert($('insp').innerHTML.includes('AI 호출 상한에 도달했습니다') && !$('insp').innerHTML.includes('전체 저장됨'),'A stopped run names the limit and is not complete');
 """)
 
     def test_board_tolerates_other_responses_and_asks_for_a_refresh(self):

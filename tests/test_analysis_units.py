@@ -9,7 +9,9 @@ import analysis_run
 import analysis_units
 import structure_index
 from test_analysis_run import AnalysisRun as _Fixture
-_setup,_git,_raw,_prepare=_Fixture.setUp,_Fixture.git,_Fixture.raw,_Fixture.prepare
+_setup,_git,_raw,_prepare,_map_fake=_Fixture.setUp,_Fixture.git,_Fixture.raw,_Fixture.prepare,_Fixture.source_fake
+_plain_fake=_Fixture.fake
+_EV,_SYSTEM,_GROUPS=_Fixture.EV,_Fixture.SYSTEM,_Fixture.GROUPS
 del _Fixture
 
 
@@ -17,7 +19,7 @@ def tracked(*names,size=100):return {name:size for name in names}
 
 
 class Catalog(unittest.TestCase):
-    exclusion=staticmethod(lambda file,size:'secret' if file.startswith('.env') else 'binary' if file.endswith('.png') else 'large' if size>300_000 else None)
+    exclusion=staticmethod(lambda file,size:'secret' if file.startswith('.env') else 'binary' if file.endswith('.png') else 'generated' if file.endswith('.lock') else 'large' if size>300_000 else None)
 
     def test_every_tracked_file_is_in_a_unit_or_counted_under_one_reason(self):
         files=[{'file':f'lib/{i}.py','declarations':[{'name':'f','kind':'function','line':1}]} for i in range(14)]
@@ -29,7 +31,7 @@ class Catalog(unittest.TestCase):
                'service_flow':{'feature_groups':[],'connections':[],'registered_routes':[{'server':{'file':'server/api.py'}}],
                                'registered_route_groups':[{'resource':'/api/x','registered_route_indexes':[0]}]},
                'coverage':{'candidate_files':len(files)+3,'skipped_files':1,'truncated':True}}
-        names=[f['file'] for f in files]+['.env','logo.png','data.json','huge.py','extra.md']
+        names=[f['file'] for f in files]+['.env','logo.png','data.json','huge.py','extra.md','uv.lock']
         sizes={n:100 for n in names};sizes['huge.py']=900_000
         built=analysis_units.catalog(index,sizes,self.exclusion,
             screens=[{'file':'app/page.tsx','path':'/','heading':'Home'},{'file':'app/page.tsx','path':'/x','redirect':True}],
@@ -40,10 +42,16 @@ class Catalog(unittest.TestCase):
         self.assertEqual(kinds['screen'],['Home']);self.assertEqual(kinds['program'],['Server'])  # the package already holds its own program
         self.assertTrue(all(len(u['files'])<=analysis_units.FOLDER_MAX_FILES for u in built['units'] if u['kind']=='folder'))
         coverage=built['coverage']
-        self.assertEqual(coverage['in_units'],coverage['indexed'])
-        self.assertEqual(coverage['excluded'],{'secret':1,'binary':1,'large':1,'unsupported':1,'limit':1})
+        # Documents, data and files past the index limit are plain files inside folder units, not silent gaps.
+        self.assertEqual(coverage['in_units'],coverage['indexed']+coverage['plain'])
+        self.assertEqual(coverage['plain'],2)
+        self.assertEqual(coverage['excluded'],{'secret':1,'binary':1,'large':1,'generated':1})
+        self.assertEqual(coverage['in_units']+sum(coverage['excluded'].values()),coverage['tracked'])
+        plain={f for u in built['units'] for f in u['files']}
+        self.assertTrue({'data.json','extra.md'}<=plain and not {'.env','logo.png','huge.py','uv.lock'}&plain)
         self.assertTrue(coverage['truncated'])
         self.assertEqual(coverage['tracked'],len(names))
+        self.assertTrue(all(u['digest'] for u in built['units']))
 
     def test_large_folders_split_into_bounded_units_without_losing_files(self):
         files=[{'file':f'src/mod{i%3}/f{i}.py','declarations':[]} for i in range(60)]
@@ -57,6 +65,9 @@ class FullRun(unittest.TestCase):
     git=_git
     raw=_raw
     prepare=_prepare
+    map_fake=_map_fake
+    fake=_plain_fake  # the fixture's own fallback for non-batched map tasks
+    EV,SYSTEM,GROUPS=_EV,_SYSTEM,_GROUPS
     PATHS=('/orders','/reports','/users')
 
     def setUp(self):
@@ -89,6 +100,7 @@ class FullRun(unittest.TestCase):
         def fake(prompt,**kwargs):
             packet=json.loads(prompt.split('\n',1)[1]);calls.append(packet)
             if after:after(len(calls))
+            if {'screens','nodes','groups'}&set(packet.get('schema',{})):return self.map_fake(prompt,**kwargs)  # map, structure, screen groups
             if 'resources' in packet:return {'results':[{'resource':p['resource'],'items':items(p)} for p in packet['resources']]}
             return {'items':items(packet) if packet.get('resource') else []}
         return fake
@@ -121,7 +133,7 @@ class FullRun(unittest.TestCase):
         self.assertEqual(next(iter(saved.values()))['items'][0]['role'],'Role')
         # A new run reuses every saved unit and sends only the one that failed.
         again=[];second=self.prepare(intent=self.intent())
-        self.assertEqual(second['unit_estimate']['calls'],1)
+        self.assertEqual([t.get('target') for t in second['tasks']],[bad]);self.assertEqual(second['unit_estimate']['calls'],2)  # one retry plus the allowance for a repeat
         finished=analysis_run.run(second['id'],self.executor(again))
         self.assertEqual(finished['state'],'completed')
         self.assertEqual(len(again),1);self.assertEqual(again[0]['resource'],bad)
@@ -149,9 +161,68 @@ class FullRun(unittest.TestCase):
         states=self.states()
         self.assertEqual(states['folder:lib'],'stale')
         self.assertEqual(states['folder:tools'],'saved')
+        # A path explanation survives a change in files it never cited: its model input is identical.
+        self.assertTrue(all(states[f'route:{p}']=='saved' for p in self.PATHS),states)
         calls=[];self.assertTrue(analysis_run.run(self.prepare(intent=self.intent())['id'],self.executor(calls))['state']=='completed')
         self.assertTrue(all('tools' not in json.dumps(p.get('resource') or p.get('resources')) for p in calls))
+        self.assertTrue(all('route' not in json.dumps(p.get('resource') or p.get('resources')) for p in calls))
         self.assertEqual(set(self.states().values()),{'saved'})
+        # Changing a cited file invalidates exactly the paths that cite it.
+        (self.repo/'api.py').write_text((self.repo/'api.py').read_text()+'\n# changed\n')
+        self.git('add','-A');self.git('commit','-qm','Change api');self.publish_index()
+        states=self.states()
+        self.assertTrue(all(states[f'route:{p}']=='stale' for p in self.PATHS),states)
+        self.assertEqual(states['folder:lib'],'saved')
+
+    def large_map(self):
+        (self.repo/'zz_padding.txt').write_text('unique row for analysis\n'*6500)
+        self.git('add','-A');self.git('commit','-qm','Large map input');self.publish_index()
+
+    def batches(self,calls):return sum(1 for c in calls if 'batch' in c)
+
+    def test_map_progress_is_saved_per_input_piece_but_published_only_when_complete(self):
+        self.large_map();baseline=self.raw()
+        board=self.board();self.assertEqual(self.states(board)['task:analysis'],'pending')
+        job=self.prepare(intent={**self.intent(board),'max_calls':board['calls']+60});calls=[]
+        def stop(_):
+            saved=(analysis_run.read(job['id']).get('partial_results',{}).get('service') or {}).get('analysis') or {}
+            if saved.get('count') and saved['covered']<saved['total']:analysis_run.cancel(job['id'])  # stop once a finding is saved and pieces remain
+        stopped=analysis_run.run(job['id'],self.executor(calls,after=stop))
+        self.assertEqual(stopped['state'],'cancelled')
+        part=stopped['partial_results']['service']['analysis']
+        self.assertEqual(part['state'],'partial');self.assertGreater(part['covered'],0);self.assertLess(part['covered'],part['total'])
+        self.assertTrue(part['items'] and all(i.get('file') and i.get('line') and i.get('quote') for i in part['items'] if i['kind'] in ('screen','request')))
+        self.assertEqual(self.raw(),baseline)  # the saved map is untouched until every input piece is covered
+        states=self.states()
+        self.assertEqual(states['task:analysis'],'partial');self.assertEqual(states['task:system'],'pending')
+        row=next(r for r in self.board()['repositories'][0]['units'] if r[0]=='task:analysis')
+        self.assertEqual(row[5],f"{part['covered']}/{part['total']}")
+        shown=analysis_run.unit_result('demo','service','dev','en','task:analysis')
+        self.assertEqual(shown['state'],'partial');self.assertEqual(shown['items'],part['items'])
+        again=[];done=analysis_run.run(analysis_run.retry(job['id'])['id'],self.executor(again))
+        self.assertEqual(done['state'],'completed',done.get('error'))
+        self.assertEqual(set(self.states().values()),{'saved'})
+        self.assertEqual(done['partial_results']['service']['analysis']['state'],'published')
+        self.assertEqual([r['path'] for r in self.raw()['dev']['backend_routes']],['/items'])
+        self.assertIsNone(analysis_run.unit_result('demo','service','dev','en','task:analysis'))
+
+    def test_call_limit_is_enforced_and_never_reported_as_complete(self):
+        self.large_map();board=self.board()
+        job=self.prepare(intent=self.intent(board));calls=[]
+        done=analysis_run.run(job['id'],self.executor(calls))
+        self.assertEqual(done['state'],'failed');self.assertEqual(done['error']['code'],'call_limit')
+        self.assertEqual(len(calls),board['calls'])  # exactly the confirmed maximum was spent
+        self.assertNotEqual(self.states()['task:analysis'],'saved')
+        self.assertTrue(done['partial_results']['service']['analysis']['covered']>0)
+        # The unit explanations saved before the map started stay saved.
+        self.assertTrue(all(v=='saved' for k,v in self.states().items() if k.startswith(('route:','folder:'))))
+
+    def test_units_discovered_by_the_saved_map_and_structure_are_analyzed_too(self):
+        self.assertNotIn('program:api',self.states())
+        done=analysis_run.run(self.prepare(intent=self.intent())['id'],self.executor([]))
+        self.assertEqual(done['state'],'completed',done.get('error'))
+        self.assertTrue(done['catalog_refreshed'])
+        states=self.states();self.assertEqual(states['program:api'],'saved');self.assertEqual(set(states.values()),{'saved'})
 
     def test_saved_unit_can_be_read_and_old_code_is_flagged(self):
         analysis_run.run(self.prepare(intent=self.intent())['id'],self.executor([]))
@@ -171,6 +242,56 @@ class FullRun(unittest.TestCase):
         self.assertEqual({v for k,v in states.items() if k!='folder:blank'},{'saved'})
         # The skipped unit costs no model call, and a later run does not report it as a failure.
         self.assertEqual(self.prepare(intent=self.intent())['state'],'preparing')
+
+
+class RepositoryTypes(unittest.TestCase):
+    """Units over differently shaped codebases: every tracked file is in a unit or under one exclusion reason."""
+    FILES={
+        'web app':{'api/main.py':'from fastapi import FastAPI\napp=FastAPI()\n@app.get("/items")\ndef items():pass\n',
+                   'web/app.ts':'export function load(){return fetch("/items")}\n','README.md':'# Shop\nOrders and items web shop\n',
+                   'docker-compose.yml':'services:\n  api:\n    build: ./api\n','.env':'TOKEN=secret\n','logo.png':'\x89PNG','uv.lock':'version = 1\n'*5},
+        'node cli':{'package.json':'{"name":"tool","version":"1.0.0","bin":{"tool":"cli.js"}}\n','cli.js':'#!/usr/bin/env node\nconsole.log("tool");\n',
+                    'docs/usage.md':'# Usage\nRun the tool with an argument.\n','LICENSE':'MIT License text for the tool\n'},
+        'workspace monorepo':{'package.json':'{"name":"root","private":true,"workspaces":["packages/*"]}\n',
+                              'packages/a/package.json':'{"name":"pkg-a","version":"1.0.0"}\n','packages/a/index.js':'module.exports=function a(){return 1}\n',
+                              'packages/b/package.json':'{"name":"pkg-b","version":"1.0.0","dependencies":{"pkg-a":"1.0.0"}}\n','packages/b/index.js':'const a=require("pkg-a");module.exports=a;\n'},
+        'python library':{'pyproject.toml':'[project]\nname = "lib"\n','src/lib/__init__.py':'from .core import run\n','src/lib/core.py':'def run():\n    return 1\n',
+                          'docs/index.md':'# Library docs\nHow to call run().\n','tests/test_core.py':'from lib import run\ndef test_run():\n    assert run()==1\n'},
+        'documents only':{'README.md':'# Notes\nPlain notes for the team.\n','docs/a.md':'# A\nFirst document page.\n','docs/b.txt':'Second document page text.\n'}}
+
+    def build(self,name):
+        import subprocess,tempfile
+        base=Path(tempfile.mkdtemp());self.addCleanup(lambda:__import__('shutil').rmtree(base,ignore_errors=True))
+        repo=base/'repo';repo.mkdir()
+        for file,text in self.FILES[name].items():
+            target=repo/file;target.parent.mkdir(parents=True,exist_ok=True)
+            target.write_bytes(text.encode('latin-1') if file.endswith('.png') else text.encode())
+        run=lambda *a:subprocess.run(['git','-C',str(repo),*a],check=True,capture_output=True,text=True,env={'GIT_AUTHOR_NAME':'t','GIT_AUTHOR_EMAIL':'t@example.invalid','GIT_COMMITTER_NAME':'t','GIT_COMMITTER_EMAIL':'t@example.invalid','PATH':'/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin','HOME':str(base)}).stdout
+        run('init','-q');run('add','-A');run('commit','-qm','fixture')
+        return str(repo),run('rev-parse','HEAD').strip()
+
+    def test_every_file_is_in_a_unit_or_counted_under_one_reason_and_each_unit_has_evidence(self):
+        kinds_seen={}
+        for name in self.FILES:
+            repo,head=self.build(name)
+            index=structure_index.build(repo,head);tracked=analysis_run._tracked(repo,head)
+            built=analysis_units.catalog(index,tracked,analysis_run._exclusion)
+            cover=built['coverage'];members=set()
+            for unit in built['units']:members.update(unit['files'])
+            self.assertEqual(cover['in_units']+sum(cover['excluded'].values()),cover['tracked'],(name,cover))
+            eligible={f for f,size in tracked.items() if not analysis_run._exclusion(f,size)}
+            self.assertEqual(members,eligible,name)  # small units list all their members
+            for unit in built['units']:
+                anchors=analysis_run._unit_anchors(index,unit)
+                shown=analysis_run.export_source(repo,head,selected={head:set(anchors)})[0]['files']
+                self.assertTrue(any(len(row['text'].strip())>=6 for f in shown for row in f['lines']),(name,unit['id']))
+                kinds_seen.setdefault(name,set()).add(unit['kind'])
+        self.assertIn('route',kinds_seen['web app']);self.assertIn('folder',kinds_seen['web app'])
+        self.assertIn('package',kinds_seen['workspace monorepo'])
+        self.assertIn('cli',kinds_seen['node cli'])
+        self.assertEqual(kinds_seen['documents only'],{'folder'})  # plain files alone still make units
+        web=analysis_units.catalog(structure_index.build(*self.build('web app')),analysis_run._tracked(*self.build('web app')),analysis_run._exclusion)
+        self.assertEqual(web['coverage']['excluded'],{'binary':1,'generated':1,'secret':1})
 
 
 if __name__=='__main__':unittest.main()

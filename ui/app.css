@@ -312,6 +312,7 @@ h3 > .chip { margin-left:var(--space-2) }
 .unit-board [data-state] { color:var(--color-text-secondary) }
 .unit-board [data-state="saved"] { color:var(--color-ok) }
 .unit-board [data-state="working"] { color:var(--color-accent) }
+.unit-board [data-state="partial"] { color:var(--color-accent) }
 .unit-board [data-state="failed"] { color:var(--color-warn) }
 .unit-board [data-state="stale"] { color:var(--color-ai) }
 .unit-card strong { color:var(--color-text) }
@@ -333,6 +334,9 @@ h3 > .chip { margin-left:var(--space-2) }
 .unit-cell[data-state="pending"] { background:transparent }
 .unit-cell[data-state="unavailable"] { background:transparent; border-style:dashed }
 .unit-cell[data-state="working"] { outline:var(--outline-focus); outline-offset:var(--size-hairline) }
+.unit-cell[data-state="partial"] { background:transparent; border-color:currentColor; border-style:dashed }
+.unit-partial b { color:var(--color-text) }
+.unit-partial { list-style:none; display:grid; gap:var(--space-3); padding:var(--space-0); margin:var(--space-3) var(--space-0) }
 .unit-scope > summary { font:var(--font-secondary); color:var(--color-text-secondary) }
 .unit-excluded { list-style:none; padding:var(--space-0); display:grid; gap:var(--space-2) }
 .unit-excluded li { display:flex; justify-content:space-between; font:var(--font-secondary); color:var(--color-text-secondary) }
