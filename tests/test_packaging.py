@@ -29,6 +29,16 @@ spec.loader.exec_module(builder)
 
 
 class PromptPaths(unittest.TestCase):
+    def test_every_local_module_a_packaged_file_imports_is_packaged(self):
+        """A module missing from BACKEND_FILES imports fine from the checkout and breaks only in the installed app."""
+        for name in builder.BACKEND_FILES:
+            for node in ast.walk(ast.parse((ROOT / name).read_text())):
+                modules = [a.name for a in node.names] if isinstance(node, ast.Import) else [node.module] if isinstance(node, ast.ImportFrom) and node.module and not node.level else []
+                for module in modules:
+                    top = module.split('.')[0]
+                    if (ROOT / f'{top}.py').is_file():
+                        self.assertIn(f'{top}.py', builder.BACKEND_FILES, f'{name} imports {top}')
+
     def test_mcp_instructions_follow_conversation_language(self):
         import mcp_server
         from reply_language import assert_reply_language

@@ -21,7 +21,7 @@ sys.path.insert(0,str(Path(__file__).resolve().parent))
 import mapcore
 import project
 
-BACKEND_FILES=('mapcore.py','project.py','mcp_server.py','extract.py','structure_index.py','service_flow.py','default_flow.py','express_routes.py','react_actions.py','sqlmodel_steps.py','cobra_commands.py','next_routes.py','ai_extract.py','analysis_units.py','analysis_run.py','cli_executor.py','briefing.py','connections.py','app_control.py','connection.py','refresh.py','collect.py','group.py','steps.py','system.py','jobs.py')
+BACKEND_FILES=('mapcore.py','project.py','mcp_server.py','extract.py','structure_index.py','service_flow.py','default_flow.py','express_routes.py','react_actions.py','sqlmodel_steps.py','cobra_commands.py','next_routes.py','ai_extract.py','analysis_units.py','source_signals.py','analysis_run.py','cli_executor.py','briefing.py','connections.py','app_control.py','connection.py','refresh.py','collect.py','group.py','steps.py','system.py','jobs.py')
 FEATURES={
  'maps':('projects','overview','changes','find','impact','refresh','record_test','set_test_rules'),
  'detail':('analyze','analysis_source','record_analysis','request_ai_task','record_ai_task','analysis_plan'),
