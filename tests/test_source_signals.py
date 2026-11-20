@@ -114,6 +114,32 @@ class Commit(unittest.TestCase):
             cost = ss.sample_bytes(folder, [e for e in entries if e[0] == 'api.py'])['api.py']
             self.assertLess(cost, 24 * 100)
 
+    def test_a_large_commit_is_split_over_workers_with_the_same_rows_and_falls_back_when_they_cannot_start(self):
+        with tempfile.TemporaryDirectory() as folder:
+            def git(*args):
+                return subprocess.run(['git', '-C', folder, *args], check=True, capture_output=True, text=True).stdout
+            git('init', '-q');git('config', 'user.name', 'T');git('config', 'user.email', 't@example.invalid')
+            for i in range(24):
+                Path(folder, f'm{i}.py').write_text(f"x = {i}\n" * 30 + f"@app.get('/m{i}')\ndef m{i}(): pass\n" + ("é = 1\n" if i % 5 == 0 else ''))
+            Path(folder, 'notes.md').write_text("# n\n")
+            git('add', '.');git('commit', '-qm', 'x')
+            head = git('rev-parse', 'HEAD').strip()
+            entries = [(row.split('\t')[1], row.split('\t')[0].split()[2].encode()) for row in git('ls-tree', '-r', head).splitlines()]
+            serial = ss._scan_serial(folder, entries, 11, True)
+            old = (ss.PARALLEL_MIN, ss.os.cpu_count)
+            ss.PARALLEL_MIN = 2;ss.os.cpu_count = lambda: 4
+            self.addCleanup(lambda: (setattr(ss, 'PARALLEL_MIN', old[0]), setattr(ss.os, 'cpu_count', old[1])))
+            spawned = []
+            real = ss._scan_worker
+            ss._scan_worker = lambda *a: (spawned.append(1), real(*a))[1]
+            self.addCleanup(setattr, ss, '_scan_worker', real)
+            parallel = ss.scan_commit(folder, head, entries, 11)
+            self.assertEqual(len(spawned), 3);self.assertEqual(parallel, serial);self.assertEqual(list(parallel), list(serial))
+            executable = ss.sys.executable
+            ss.sys.executable = '/nonexistent/python'
+            self.addCleanup(setattr, ss.sys, 'executable', executable)
+            self.assertEqual(ss.scan_commit(folder, head, entries, 11), serial)  # workers cannot start: scanned here instead
+
 
 if __name__ == '__main__':
     unittest.main()

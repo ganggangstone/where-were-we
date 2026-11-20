@@ -37,9 +37,9 @@ MAX_PROMPT_BYTES = 128 * 1024
 UNIT_BYTES = 16 * 1024
 MAX_READ_ROUNDS = 32
 RESOURCE_PACK_SIZE = 4
-UNIT_PACK_BYTES = 88 * 1024  # sample bytes of the plain units one call explains, packet overhead included; the prompt cap stays the hard limit
+UNIT_PACK_BYTES = 108 * 1024  # sample bytes of the plain units one call explains, packet overhead included; the prompt cap stays the hard limit
 UNIT_PACK_MAX = 24
-UNIT_OVERHEAD = 1700  # the instructions and schema every unit packet repeats
+UNIT_OVERHEAD = 300  # per-unit packet fields outside the source rows (the shared instructions are sent once per call)
 UNIT_UNKNOWN = 9000  # a unit saved by an older catalog has no measured sample
 UNIT_ATTEMPTS = 2
 MAP_TASKS = ('analysis','system','groups')
@@ -226,7 +226,7 @@ def unit_board(project,repository='',branch='dev',lang='ko'):
     scope=_scope(project,repository,branch,lang)
     value={'project':project,'branch':branch,'lang':lang,'repository':scope['repository'],'intent':{'task':'full','targets':[],'max_calls':0}}
     plan=ai_extract.plan(project,branch,lang,scope['repository'],overview=True,light=True)
-    catalogs=_unit_catalogs(value,plan)
+    catalogs=_unit_catalogs(value,plan,defer=True)
     history=[r for r in _runs() if all(r[k]==scope[k] for k in ('project','lang','branch'))]
     history.sort(key=lambda r:r['created_at'])
     contexts={}
@@ -261,9 +261,25 @@ def unit_board(project,repository='',branch='dev',lang='ko'):
         extra,by=_map_rows(catalog,_map_states(catalog,pending,_latest_partials(history,rid,pin),blocked=blocked))
         repositories.append({'repository':rid,'commit':catalog['commit'],'coverage':catalog['coverage'],'map_coverage':catalog['map'].get('coverage'),'overview':overview,'units':rows+extra,'map_calls_by':by,
                              'unit_packs':len(_packs(_pending_rows(catalog['units'],[r[4] for r in rows])))})
-    return {'repositories':repositories,'totals':_board_totals(repositories),'calls':_board_calls(repositories),'coverage':'signal',
+    pending=any(c['map'].get('pending_signals') for c in catalogs.values())
+    return {'repositories':repositories,'totals':_board_totals(repositories),'calls':_board_calls(repositories),'coverage':'signal','signals':'pending' if pending else 'ready',
             'calls_parts':_board_parts(repositories),'map_calls':sum(repo['map_calls_by']['signal'] for repo in repositories),'modes':_board_modes(repositories),
             'time_limit_seconds':max(MAX_SECONDS,(2*_board_calls(repositories)+1)*TASK_SECONDS)}
+
+def unit_signals(project,repository='',branch='dev',lang='ko'):
+    """Run (or load) the local signal scan of each pinned commit so the board's map numbers can be exact. Never calls AI.
+    It only fills .analysis-cache, so it runs beside the board without the run lock."""
+    scope=_scope(project,repository,branch,lang)
+    plan=ai_extract.plan(project,branch,lang,scope['repository'],overview=True,light=True)
+    repositories=[]
+    for rid,pin in plan['pins'].items():
+        conf,raw,_,head=ai_extract.context(project,rid,branch)
+        selected=raw[branch]
+        try:mode=ai_extract.map_mode(conf['path'],selected or {},lang,pin['configuration'],head,ai_extract.review_flag(project,rid,branch,selected))
+        except (RunError,*ai_extract.READ_ERRORS,KeyError,TypeError,ValueError):mode=None
+        if not (mode and mode[0]=='patch'):_signals(conf['path'],head)
+        repositories.append({'repository':rid,'commit':head})
+    return {'ready':True,'repositories':repositories}
 
 def unit_quick(project,repository='',branch='dev',lang='ko'):
     """The pinned commit and file counts before any unit is calculated, so the board can open at once. Reads git only."""
@@ -471,7 +487,7 @@ def _sample(repo,commit,units):
     for unit in units:
         if unit['kind']!='route':unit['sample']=UNIT_OVERHEAD+sum(cost.get(f,0) for f in unit['files'][:4])
 
-def _unit_catalogs(value,plan):
+def _unit_catalogs(value,plan,defer=False):
     """Freeze the AI-free unit catalog of every pinned repository for this run."""
     catalogs={}
     for rid,pin in plan['pins'].items():
@@ -486,7 +502,7 @@ def _unit_catalogs(value,plan):
         built=analysis_units.catalog(index,sizes,_exclusion,screens,programs)
         _sample(conf['path'],head,built['units'])
         flag=ai_extract.review_flag(value['project'],rid,value['branch'],selected)
-        catalogs[rid]={'commit':head,**built,'map':_map_estimate(conf['path'],head,selected,sizes,screens,value.get('lang') or 'ko',pin['configuration'],flag)}
+        catalogs[rid]={'commit':head,**built,'map':_map_estimate(conf['path'],head,selected,sizes,screens,value.get('lang') or 'ko',pin['configuration'],flag,defer)}
     return catalogs
 
 SOURCE_ROW_OVERHEAD = 11  # bytes the compact [line,"text"] form adds to each source line
@@ -515,13 +531,18 @@ def _source_profile(repo,commit,paths=None):
 
 _SIGNALS={}
 
-def _signals(repo,commit):
+class SignalsPending(Exception):
+    """The signal scan of this commit is not cached yet and the caller chose not to wait for it."""
+
+def _signals(repo,commit,wait=True):
     """The signal scan of every eligible text file of a pinned commit: windows to send, sizes, tiers.
-    Derived data of the commit and the scanner, cached under .analysis-cache (never project data)."""
+    Derived data of the commit and the scanner, cached under .analysis-cache (never project data).
+    wait=False returns only what is already cached (SignalsPending otherwise) so a board can open before the scan."""
     key=mapcore.cache_key(repo,commit,source_signals.digest(),SOURCE_ROW_OVERHEAD,'signals')
     if key in _SIGNALS:return _SIGNALS[key]
     rows=mapcore.cache_read('signals',key)
     if not isinstance(rows,dict) or rows.get('commit')!=commit:
+        if not wait:raise SignalsPending()
         rows={'commit':commit,'files':{f:source_signals.pack(r) for f,r in _scan(repo,commit).items()}}
         mapcore.cache_write('signals',key,rows)
     files={f:source_signals.unpack(r) for f,r in rows['files'].items()}
@@ -552,7 +573,7 @@ def _window_plan(rows,cited=()):
         else:report['local']+=1
     return plan,report
 
-def _map_estimate(repo,head,selected,sizes,screens,lang,configuration,flag=None):
+def _map_estimate(repo,head,selected,sizes,screens,lang,configuration,flag=None,defer=False):
     """Upper bound of the model calls of the map, service structure and screen-group tasks.
 
     A saved map that can be patched reads the changes since it plus every file it cites. Any other map reads the
@@ -577,7 +598,7 @@ def _map_estimate(repo,head,selected,sizes,screens,lang,configuration,flag=None)
             result['calls']['analysis']=calls_of(size)
             result['calls']['system']=calls_of(sum(v for f,v in now.items() if f in changed)+sum(before.values())+len(json.dumps(prev.get('screens',[]))) // 8)
         else:
-            rows=_signals(repo,head)
+            rows=_signals(repo,head,wait=not defer)
             plan,report=_window_plan(rows,_cited_files(prev))
             all_size=report['text_bytes']
             meta=names+20000+len(json.dumps({k:prev.get(k,[]) for k in ('screens','backend_routes','api_functions')},default=str))
@@ -586,10 +607,11 @@ def _map_estimate(repo,head,selected,sizes,screens,lang,configuration,flag=None)
                    'all':{'source_bytes':all_size,'calls':{'analysis':calls_of(all_size),'system':system,'groups':result['calls']['groups']}}}
             result.update(source_bytes=modes['signal']['source_bytes'],modes=modes,coverage=report)
             result['calls']=dict(modes['signal']['calls'])
-    except (RunError,*ai_extract.READ_ERRORS,KeyError,TypeError,ValueError):
-        # Unreadable history: assume the whole commit is read.
+    except (SignalsPending,RunError,*ai_extract.READ_ERRORS,KeyError,TypeError,ValueError) as error:
+        # Unreadable history, or a signal scan still running: assume the whole commit is read (an upper bound, flagged when pending).
         readable=sum(int(min(size,MAX_FILE_BYTES)*1.4) for file,size in sizes.items() if not _exclusion(file,size))
         result.update(source_bytes=readable);result['calls'].update(analysis=calls_of(readable),system=calls_of(names+20000))
+        if isinstance(error,SignalsPending):result['pending_signals']=True
     return result
 
 def _mode_calls(estimate,coverage):
@@ -789,6 +811,7 @@ def prepare(project, branch='dev', lang='ko', repository='', executor='claude', 
         return write(value)
 
 def status(run_id=None, project=None, repository='', branch='dev', lang='ko',view=None,resource=None):
+    if view=='signals':return unit_signals(project,repository,branch,lang)
     with locked():
         if view=='units':return unit_board(project,repository,branch,lang)
         if view=='units_quick':return unit_quick(project,repository,branch,lang)
@@ -1046,6 +1069,17 @@ def _windowed(value,task,request):
     return ((value.get('intent') or {}).get('task')=='full' and (value.get('intent') or {}).get('coverage','signal')=='signal'
             and task['task']=='analysis' and request.get('mode') in ('full','review'))
 
+def _listing(rows,tree):
+    """(paths of code and configuration files, per-directory counts of every other file) of a pinned tree.
+    The other files were still read locally; the service-structure task only needs to know they exist."""
+    listed=[];other=collections.defaultdict(collections.Counter)
+    names={'doc':'docs/data','support':'tests/vendored'}
+    for file in tree:
+        row=rows.get(file)
+        if row and row['kind'] in ('code','structured'):listed.append(file);continue
+        other[file.rsplit('/',1)[0] if '/' in file else ''][names.get(row['kind'],'other') if row else 'other']+=1
+    return listed,[f"{folder or '.'}/ "+' '.join(f'{kind}={n}' for kind,n in sorted(kinds.items())) for folder,kinds in sorted(other.items())]
+
 def _coverage_note(report):
     """What the AI is told about the files it does not see as text: counted by tier, all of them read locally."""
     return {'text_files_read_locally':report['files'],'sent_as_signal_windows':report['windows'],'sent_whole_because_cited_by_saved_map':report['whole'],
@@ -1094,8 +1128,15 @@ def _payload(value,task,request,cancelled=None,deadline=None,blobs=None,deferred
         elif task['task']=='system':
             # Reuse the validated map and collected structure. Missing context is
             # retrieved through the same pinned, bounded needs protocol.
-            payload['input']={**request['input'],'map':{k:m.get(k,[]) for k in ('screens','backend_routes','api_functions')},
-                              'files':sorted(ai_extract.tree_blobs(repo['path'],head))}
+            tree=sorted(ai_extract.tree_blobs(repo['path'],head))
+            extra={}
+            if (value.get('intent') or {}).get('task')=='full' and (value.get('intent') or {}).get('coverage','signal')=='signal':
+                rows=_signals(repo['path'],head)
+                tree,counts=_listing(rows,tree)
+                payload['coverage']={**_coverage_note(_window_plan(rows,_cited_files(m))[1]),'file_list':'paths of code and configuration files; other files only as per-directory counts in other_files'}
+                payload['prompt']=payload.get('prompt','')+' input.files lists code and configuration paths only. Documents, data, tests, vendored and binary files appear as counts per directory in input.other_files; every one of them can be read or searched with needs.'
+                extra={'other_files':counts}
+            payload['input']={**request['input'],'map':{k:m.get(k,[]) for k in ('screens','backend_routes','api_functions')},'files':tree,**extra}
             selected={head:set()}
         if _windowed(value,task,request):
             plan,report=_window_plan(_signals(repo['path'],head),_cited_files(m))
@@ -1905,7 +1946,8 @@ def _quick_overview(repo,request,language,invoke,cancelled,deadline,raw,resource
             text=row['text'].strip()[:160]
             ref=ref_offset+len(references)+1
             references[ref]={'file':source['file'],'line':row['line'],'quote':text}
-            rows.append({'ref':ref,'line':row['line'],'text':text,**evidence.get(row['line'],{})})
+            # A unit packet carries many rows, so they use the compact [ref, line, text(, declaration)] form.
+            rows.append([ref,row['line'],text,*([evidence[row['line']]] if evidence.get(row['line']) else [])] if unit else {'ref':ref,'line':row['line'],'text':text,**evidence.get(row['line'],{})})
         if rows:sources.append({'file':source['file'],'lines':rows})
     result={'format':'overview-v1','version':SCOPED_OVERVIEW_VERSION if resource or unit else OVERVIEW_VERSION,'files':[s['file'] for s in sources],'items':[],
             'scope_coverage':{'total':total_scopes,'selected':[]}}
@@ -1974,8 +2016,8 @@ def _quick_overview(repo,request,language,invoke,cancelled,deadline,raw,resource
             source_flows.append(flow)
     if resource and not connections:raise RunError('scope_unavailable','No eligible source evidence for the selected resource')
     if unit:
-        packet['resource']=unit['id']
-        packet['prompt']+=' Describe only the selected '+unit['kind']+' unit and the supplied evidence. Name its role in a short noun phrase and explain what it does without repeating file paths.'
+        packet['resource']=unit['id'];packet['unit_kind']=unit['kind']
+        packet['prompt']+=' Describe only the selected unit (its kind is unit_kind) and the supplied evidence. Source rows are [ref, line, text] with an optional fourth object of declaration metadata. Name its role in a short noun phrase and explain what it does without repeating file paths.'
     elif resource:
         packet['resource']=resource
         packet['prompt']+=' Describe only the selected resource and the supplied evidence.'
@@ -2022,6 +2064,18 @@ def _quick_overview(repo,request,language,invoke,cancelled,deadline,raw,resource
         return result
     return (packet,finalize) if invoke is None else finalize(invoke(packet))
 
+
+def _pack_envelope(candidate):
+    """One call for several independent resources. Instructions and answer shape that every packet repeats are stated once."""
+    envelope={'resources':candidate,'schema':{'results':[{'resource':'exact resource','items':[],'feature_groups':[]}]},
+              'prompt':'Answer each independent resource using only its own evidence and IDs. Return one result per resource.'}
+    shape=lambda packet:json.dumps({k:[{**item,'ref':0} for item in v] if k=='items' else v for k,v in (packet.get('schema') or {}).items()},sort_keys=True)
+    if len(candidate)>1 and len({p.get('prompt') for p in candidate})==1 and len({shape(p) for p in candidate})==1 and 'feature_groups' not in (candidate[0].get('schema') or {}):
+        first=candidate[0]
+        envelope['prompt']+=' For every resource: '+first['prompt']
+        envelope['schema']['results'][0]['items']=first['schema']['items']
+        envelope['resources']=[{k:v for k,v in packet.items() if k not in ('prompt','schema')} for packet in candidate]
+    return envelope
 
 def generate(value,task,request,executor,cancelled,deadline,check,blobs=None):
     deferred=[]
@@ -2072,8 +2126,7 @@ def generate(value,task,request,executor,cancelled,deadline,check,blobs=None):
                        p['connections'][0].get('kind')!='server_registration' or
                        p['connections'][0].get('details') for p in candidate):break
                 if sum(len(f['lines']) for p in candidate for f in p['sources'])>4*4*24:break
-            envelope={'resources':candidate,'schema':{'results':[{'resource':'exact resource','items':[],'feature_groups':[]}]},
-                      'prompt':'Answer each independent resource using only its own evidence and IDs. Return one result per resource.'}
+            envelope=_pack_envelope(candidate)
             if len(_encoded(envelope).encode())>MAX_PROMPT_BYTES and prepared:break
             prepared.append((target,packet,finalize))
             payload=envelope
@@ -2503,7 +2556,7 @@ def main():
     parser.add_argument('command',choices=('prepare','start','status','cancel','retry','worker','providers','active'))
     parser.add_argument('value',nargs='?');parser.add_argument('--project');parser.add_argument('--run-id')
     parser.add_argument('--repository',default='');parser.add_argument('--branch',default='dev');parser.add_argument('--lang',default='ko')
-    parser.add_argument('--view',choices=('progress','catalog','resource','units','units_quick','unit'));parser.add_argument('--resource')
+    parser.add_argument('--view',choices=('progress','catalog','resource','units','units_quick','unit','signals'));parser.add_argument('--resource')
     parser.add_argument('--intent',type=json.loads);parser.add_argument('--executor',default='claude');parser.add_argument('--expected-account')
     args=parser.parse_args()
     if args.command=='providers': result=providers()

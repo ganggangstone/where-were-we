@@ -15,10 +15,14 @@ Nothing here narrows what the user can ask for: `coverage=all` sends every eligi
 The scan is derived data of the pinned commit, so it is cached by commit and scanner digest.
 """
 import bisect
+import concurrent.futures
 import functools
 import hashlib
+import json
+import os
 import re
 import subprocess
+import sys
 import threading
 from pathlib import PurePosixPath
 
@@ -208,11 +212,11 @@ def stream(repo, entries):
         process.wait()
 
 
-def scan_commit(repo, commit, entries, overhead, signals=True):
-    """Scan every (path, oid) once through a single git cat-file stream.
+PARALLEL_MIN = 600   # files; a smaller commit is scanned in this process (starting workers would cost more than it saves)
+MAX_WORKERS = 6
 
-    Returns {path: scan row, with 'size' (bytes of the whole serialized text) and 'sent' (bytes of the windows)}.
-    Only regular UTF-8 text blobs are scanned; the caller decides which paths are eligible."""
+
+def _scan_serial(repo, entries, overhead, signals):
     rows = {}
     for file, text, data in stream(repo, entries):
         row = scan_text(file, text) if signals else {'windows': [], 'clips': {}, 'kind': '', 'lines': 0, 'classes': {}, 'truncated': False}
@@ -225,9 +229,35 @@ def scan_commit(repo, commit, entries, overhead, signals=True):
     return rows
 
 
+def _scan_worker(repo, entries, overhead):
+    """One scan in a separate interpreter (the regex work holds the GIL, so threads cannot share it)."""
+    process = subprocess.run([sys.executable, '-I', '-B', __file__, repo, str(overhead)], input=json.dumps([[f, o.decode()] for f, o in entries]).encode(),
+                             capture_output=True, check=True)
+    return {f: unpack(r) for f, r in json.loads(process.stdout).items()}
+
+
+def scan_commit(repo, commit, entries, overhead, signals=True):
+    """Scan every (path, oid) once through git cat-file streams.
+
+    Returns {path: scan row, with 'size' (bytes of the whole serialized text) and 'sent' (bytes of the windows)}.
+    Only regular UTF-8 text blobs are scanned; the caller decides which paths are eligible. A large commit is split
+    over a few worker interpreters; any worker failure falls back to scanning it all here, so the result is the same."""
+    workers = min(MAX_WORKERS, (os.cpu_count() or 1) - 1)
+    if not signals or workers < 2 or len(entries) < PARALLEL_MIN or not sys.executable:
+        return _scan_serial(repo, entries, overhead, signals)
+    chunks = [entries[i::workers] for i in range(workers)]
+    try:
+        with concurrent.futures.ThreadPoolExecutor(workers) as pool:
+            parts = list(pool.map(lambda chunk: _scan_worker(repo, chunk, overhead), chunks))
+    except (OSError, ValueError, KeyError, subprocess.SubprocessError):
+        return _scan_serial(repo, entries, overhead, signals)
+    found = {f: r for part in parts for f, r in part.items()}
+    return {f: found[f] for f, _ in entries if f in found}
+
+
 SAMPLE_ROWS = 24     # a unit explanation reads at most this many usable lines of a file
 SAMPLE_TEXT = 160    # ... each cut to this many characters
-SAMPLE_ROW_OVERHEAD = 48  # JSON the unit packet adds around each row (ref, line number, anchor fields)
+SAMPLE_ROW_OVERHEAD = 24  # JSON the unit packet adds around each compact row (ref, line number, separators)
 
 
 def sample_bytes(repo, entries):
@@ -271,3 +301,8 @@ def window_rows(lines, spans, clips):
             row = {'line': row['line'], 'text': text[offset:offset + LONG_LINE], **({'offset': offset} if offset else {})}
         rows.append(row)
     return rows
+
+
+if __name__ == '__main__':
+    entries = [(f, o.encode()) for f, o in json.load(sys.stdin)]
+    print(json.dumps({f: pack(r) for f, r in _scan_serial(sys.argv[1], entries, int(sys.argv[2]), True).items()}))

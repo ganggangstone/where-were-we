@@ -89,7 +89,12 @@ class FullRun(unittest.TestCase):
         raw['dev']['commit']=self.git('rev-parse','HEAD').strip()
         analysis_run.store.publish('demo','service',raw,{'fingerprint':analysis_run.store.fingerprint(repo)})
 
-    def board(self):return analysis_run.unit_board('demo','service','dev','en')
+    def board(self):
+        """What the UI does: open the board at once, then let the local signal scan finish and read it again."""
+        board=analysis_run.unit_board('demo','service','dev','en')
+        if board['signals']=='pending':
+            analysis_run.unit_signals('demo','service','dev','en');board=analysis_run.unit_board('demo','service','dev','en')
+        return board
     def states(self,board=None):
         board=board or self.board()
         return {row[0]:row[4] for row in board['repositories'][0]['units']}
@@ -98,7 +103,7 @@ class FullRun(unittest.TestCase):
         def items(packet):
             if packet.get('resource') in bad:return [{'name':'x','description':'y','ref':999999}]
             line=packet['sources'][0]['lines'][0]
-            return [{'name':'Feature','role':'Role','description':'Does something','ref':line['ref']}]
+            return [{'name':'Feature','role':'Role','description':'Does something','ref':line[0] if isinstance(line,list) else line['ref']}]
         def fake(prompt,**kwargs):
             packet=json.loads(prompt.split('\n',1)[1]);calls.append(packet)
             if after:after(len(calls))
@@ -370,6 +375,11 @@ class FullRun(unittest.TestCase):
         self.assertTrue(notes and all(n['text_files_read_locally']==coverage['files'] and n['sent_as_signal_windows']==coverage['windows'] for n in notes),'the AI is told what it does not see as text')
         self.assertTrue(all('unique note row' not in t for t in text))
         self.assertEqual([r['path'] for r in self.raw()['dev']['backend_routes']],['/items'])  # the map is saved as before
+        structure=[json.dumps(c) for c in calls if 'nodes' in c.get('schema',{})]
+        self.assertTrue(structure and all('lib/plain.py' in t and 'bulk/big.py' in t for t in structure[:1]))  # code paths are listed
+        joined=' '.join(structure)
+        self.assertNotIn('NOTES.md',joined);self.assertNotIn('tests/test_api.py',joined)  # documents and tests are counted per directory instead
+        self.assertIn('docs/data=',joined);self.assertIn('tests/vendored=',joined);self.assertIn('other_files',joined)
 
     def test_every_text_file_reading_still_sends_all_of_it(self):
         self.signal_fixture()
@@ -379,6 +389,7 @@ class FullRun(unittest.TestCase):
         seen,text=self.supplied(calls)
         self.assertIn('NOTES.md',seen);self.assertIn('lib/plain.py',seen);self.assertEqual(len(seen['bulk/big.py']),3003)
         self.assertTrue(all('coverage' not in c for c in calls if 'screens' in c.get('schema',{})))
+        self.assertIn('NOTES.md',' '.join(json.dumps(c) for c in calls if 'nodes' in c.get('schema',{})))  # every path is listed when everything is sent
 
     def test_the_ai_can_still_ask_for_a_file_the_signal_scan_did_not_send(self):
         self.signal_fixture()
@@ -404,6 +415,32 @@ class FullRun(unittest.TestCase):
         self.addCleanup(setattr,analysis_run.source_signals,'scan_commit',original)
         again=self.board()
         self.assertEqual(again['repositories'][0]['map_coverage'],first['repositories'][0]['map_coverage']);self.assertEqual(again['modes'],first['modes'])
+
+    def test_board_opens_before_the_scan_and_its_numbers_become_exact_after_it(self):
+        self.signal_fixture()
+        original=analysis_run.source_signals.scan_commit
+        analysis_run.source_signals.scan_commit=lambda *a,**k:self.fail('the board must not scan')
+        try:opened=analysis_run.unit_board('demo','service','dev','en')
+        finally:analysis_run.source_signals.scan_commit=original
+        self.assertEqual(opened['signals'],'pending');self.assertIsNone(opened['repositories'][0]['map_coverage'])
+        self.assertGreater(opened['totals']['units'],0)  # the unit list is already there
+        analysis_run.unit_signals('demo','service','dev','en')
+        ready=analysis_run.unit_board('demo','service','dev','en')
+        self.assertEqual(ready['signals'],'ready');self.assertTrue(ready['repositories'][0]['map_coverage']['files'])
+        self.assertLessEqual(ready['modes']['signal']['calls'],opened['modes']['signal']['calls'])  # the pending number is an upper bound
+        self.assertEqual(ready['totals'],opened['totals'])
+
+    def test_a_saved_map_that_can_be_patched_never_needs_the_scan(self):
+        self.large_map()
+        whole=self.board()
+        done=analysis_run.run(self.prepare(intent={**self.intent(whole,'all'),'max_calls':whole['modes']['all']['calls']+60})['id'],self.executor([]))
+        self.assertEqual(done['state'],'completed',done.get('error'))
+        (self.repo/'lib'/'m0.py').write_text('def lib_0():\n    return 100\n');self.git('add','-A');self.git('commit','-qm','Small change');analysis_run._INDEXES.clear()
+        original=analysis_run.source_signals.scan_commit
+        analysis_run.source_signals.scan_commit=lambda repo,commit,entries,overhead,signals=True:self.fail('a patch run reads changes, not the whole commit') if signals else original(repo,commit,entries,overhead,signals)
+        self.addCleanup(setattr,analysis_run.source_signals,'scan_commit',original)
+        self.assertEqual(analysis_run.unit_board('demo','service','dev','en')['signals'],'ready')
+        self.assertTrue(analysis_run.unit_signals('demo','service','dev','en')['ready'])
 
     def test_signal_windows_over_several_batches_save_progress_cancel_and_resume_without_resending(self):
         (self.repo/'mods').mkdir()

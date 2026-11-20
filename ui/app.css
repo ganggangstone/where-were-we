@@ -169,7 +169,7 @@ button.pill, .pill.click { font:var(--font-secondary); letter-spacing:var(--trac
 .group + .group { margin-top:var(--space-4) }
 .group { background:var(--color-bg-group); border:var(--border-hairline); border-radius:var(--radius-card); overflow:hidden }
 .row > * { min-width:var(--space-0) }
-.row > .grow { flex-basis:var(--size-node) }
+.row > .grow { flex-basis:calc(var(--size-node) * 3 / 2) } /* an action beside a label wraps below it before the label gets narrower than the action */
 .row { flex-wrap:wrap; padding:var(--space-3) var(--space-4); border-top:var(--border-hairline); display:flex; gap:var(--space-3); align-items:center } .row:first-child { border-top:none }
 .row.click:hover { background:var(--color-bg-control) }
 .row .chev, .arrow { color:var(--color-text-secondary) }

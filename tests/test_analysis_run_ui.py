@@ -138,6 +138,30 @@ assert(html.includes('How the call limit is counted') && html.includes('First ov
 assert(html.includes('Time cap 40 h'),'Long caps read in hours or days');
 """)
 
+    def test_units_show_first_while_the_local_signal_scan_finishes_and_start_waits_for_the_exact_numbers(self):
+        self.check_js(self.BOARD + r"""
+let release;const gate=new Promise(r=>release=r);
+const report={files:10,windows:2,whole:0,local:3,docs:3,support:2,truncated:0,text_bytes:1048576,sent_bytes:65536,clipped:0};
+const modes={signal:{calls:12,calls_parts:{overview:1,map:3,units:6,retry:2},time_limit_seconds:3600,source_bytes:65536},all:{calls:40,calls_parts:{overview:1,map:30,units:6,retry:3},time_limit_seconds:3600,source_bytes:1048576}};
+const pending=unitBoard({calls:40,modes:{signal:modes.all,all:modes.all},signals:'pending'});
+const ready=unitBoard({calls:12,calls_parts:modes.signal.calls_parts,modes,coverage:'signal',signals:'ready'});ready.repositories[0].map_coverage=report;
+let units=0;
+native=async(command,args)=>{
+ if(command!=='analysis_run_status')return undefined;
+ if(args.view==='signals'){await gate;return {ready:true,repositories:[]};}
+ if(args.view==='units'){units++;return units===1?pending:ready;}
+};
+status=null;await open();await AnalysisRun.check();await flush();
+let html=$('insp').innerHTML;
+assert(html.includes('/orders') && html.includes('1/4'),'The unit list shows before the scan ends');
+assert(html.includes('Scanning signals locally') && /id="startFullAnalysis" disabled/.test(html) && !html.includes('AI calls up to') && !html.includes('data-map-coverage'),'No call limit, no choice and no start until the scan ends');
+assert(count('analysis_run_start')===0,'Waiting costs no model call');
+release();await flush();await flush();await flush();
+html=$('insp').innerHTML;
+assert(!html.includes('Scanning signals locally') && html.includes('up to 12 calls') && html.includes('data-map-coverage="signal"') && !/id="startFullAnalysis" disabled/.test(html),'The exact limit and the coverage choice replace the waiting note');
+assert(calls.filter(c=>c.args && c.args.view==='signals').length===1 && units===2,'One scan request, then the board is read again');
+""")
+
     def test_coverage_choice_names_what_is_read_indexed_and_interpreted_and_sends_the_confirmed_cap(self):
         self.check_js(self.BOARD + r"""
 const report={files:1000,windows:90,whole:10,local:300,docs:450,support:150,truncated:0,text_bytes:52428800,sent_bytes:2097152,clipped:0};
@@ -303,7 +327,7 @@ native=(command,args)=>{
 await AnalysisRun.check();assert($('insp').innerHTML.includes('Path groups saved: 2 · Remaining: 1') && $('refreshSavedBatch'),'Compact counts with an on-demand result catalog');
 assert(calls.at(-1).args.view==='progress' && calls.at(-1).args.runId==='run-1','Routine poll only asks for compact progress');
 native=(command,args)=>command==='analysis_run_status'?runRecord('completed',{intent,completed_tasks:3,tasks:0}):undefined;
-await AnalysisRun.check();assert(calls.filter(c=>c.command==='analysis_run_status' && !String(c.args.view).startsWith('units')).at(-1).args.view==='catalog','Terminal transition reads the saved catalog');
+await AnalysisRun.check();assert(calls.filter(c=>c.command==='analysis_run_status' && !String(c.args.view).startsWith('units') && c.args.view!=='signals').at(-1).args.view==='catalog','Terminal transition reads the saved catalog');
 ''')
 
     def test_initial_overview_and_full_analysis_have_distinct_explicit_buttons(self):

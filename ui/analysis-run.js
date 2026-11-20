@@ -426,10 +426,18 @@ const AnalysisRun = (() => {
     void invoke('analysis_run_status',{scope:scope(),view:'units_quick'}).then(decode).then(value=>{
       if(current(token) && loadingBoard && Array.isArray(value?.repositories)){boardQuick=value;if(!liveBoard())paint();}
     }).catch(()=>{});
+    // The local signal scan (which sets the map's exact call count) runs beside the unit list and never blocks it.
+    const scanned=invoke('analysis_run_status',{scope:scope(),view:'signals'}).then(decode).then(value=>value?.ready===true).catch(()=>false);
     try {
-      const value=decode(await invoke('analysis_run_status',{scope:scope(),view:'units'}));
+      let value=decode(await invoke('analysis_run_status',{scope:scope(),view:'units'}));
       if(!current(token))return;
       boardScope=requested;board=Array.isArray(value?.repositories)?value:null;boardError=null;unitDetails.clear();
+      if(board?.signals==='pending'){
+        paint();
+        const ready=await scanned;
+        if(!current(token))return;
+        if(ready){value=decode(await invoke('analysis_run_status',{scope:scope(),view:'units'}));if(!current(token))return;if(Array.isArray(value?.repositories))board=value;}
+      }
     } catch(value) { if(current(token)){boardScope=requested;board=null;boardError=value;} }
     finally { loadingBoard=false;boardQuick=null; }
     if(current(token))paint();
@@ -502,7 +510,8 @@ const AnalysisRun = (() => {
     const shown=listed.slice(0,unitLimit),opened=unitRows.findIndex(row=>unitKey(row)===openedUnit);
     if(opened>=0 && !shown.some(([,i])=>i===opened))shown.unshift([unitRows[opened],opened]);
     const hidden=listed.length-shown.length;
-    const usableNow=usable(),canStart=usableNow && !providerBusy && !busy && !active();
+    const scanning=!live && b.signals==='pending';
+    const usableNow=usable(),canStart=usableNow && !providerBusy && !busy && !active() && !scanning;
     const finished=fullRun() && ['failed','cancelled'].includes(run.state);
     const mode=live?(run.intent?.coverage || b.coverage || 'signal'):(b.modes?.[mapCoverage]?mapCoverage:'signal'),picked=b.modes?.[mode];
     const calls=picked?.calls ?? b.calls,minutes=Math.max(1,Math.round((picked?.time_limit_seconds ?? b.time_limit_seconds ?? 3600)/60));
@@ -523,6 +532,7 @@ const AnalysisRun = (() => {
         :text('신호와 관계없이 모든 텍스트 파일의 원문을 조각으로 AI에 보냅니다. 호출과 전송량이 가장 큽니다.','Every text file is sent as pieces whatever its signals. This costs the most calls and data.')}</p>
       <details class="unit-calls"><summary>${text('읽음·색인·AI 해석 범위','Read, indexed and AI-interpreted')}</summary><p class="s">${text('로컬로 읽고 색인 '+sum('files')+'개 · AI가 신호 줄 주변 해석 '+sum('windows')+'개 · 저장된 지도가 인용해 전체 전송 '+sum('whole')+'개 · 신호 없음(로컬 색인만) '+sum('local')+'개 · 문서·데이터(로컬 색인만) '+sum('docs')+'개 · 테스트·외부 코드(로컬 색인만) '+sum('support')+'개. 지도·구성 전송 약 '+mb(b.modes[mode]?.source_bytes ?? sum('sent_bytes'))+' / 전체 원문 '+mb(sum('text_bytes'))+'. 바이너리·비밀·생성·300KB 초과 파일은 단위 제외 사유에 셉니다.','Read and indexed locally '+sum('files')+' · AI-interpreted around signals '+sum('windows')+' · sent whole because the saved map cites them '+sum('whole')+' · no signal (local index only) '+sum('local')+' · documents and data (local index only) '+sum('docs')+' · tests and vendored code (local index only) '+sum('support')+'. Map and structure send about '+mb(b.modes[mode]?.source_bytes ?? sum('sent_bytes'))+' of '+mb(sum('text_bytes'))+' of source text. Binary, secret, generated and oversized files are counted under the unit exclusion reasons.')}</p></details></div>`:'';
     const start=live?`<div class="unit-run" role="status" aria-live="polite">${status}<span class="chip">${text('AI 호출','AI calls')} ${run.input_stats?.calls || 0} · ${text('최대','max')} ${run.unit_estimate?.calls ?? calls}</span><span class="chip">${text('경과','Elapsed')} ${Math.max(0,Math.round((Date.now()-Date.parse(run.started_at || run.created_at))/60000)) || 0}${text('분',' min')}</span><button class="btn" id="cancelFullAnalysis" ${busy || run.cancel_requested?'disabled':''}>${text('취소','Cancel')}</button></div>`
+      : scanning ? `<div class="unit-start"><span class="chips">${status}<span class="chip" role="status">${text('로컬 신호 수집 중 · 호출 상한은 끝난 뒤 표시','Scanning signals locally · the call limit appears when done')}</span></span><button class="btn primary" id="startFullAnalysis" disabled>${text('분석 시작','Start')}</button></div>`
       : calls>0 ? `<div class="unit-start"><span class="chips">${status}<span class="chip">${text('AI 호출 최대','AI calls up to')} ${calls}</span>${mapChips}<span class="chip">${text('선택한 코드가 Claude로 전송','Selected code is sent to Claude')}</span><span class="chip">${text('구독 한도 적용','Subscription limit applies')}</span><span class="chip">${text('시간 상한','Time cap')} ${span(minutes)}</span></span><button class="btn primary" id="startFullAnalysis" ${canStart?'':'disabled'}>${label}</button>${usableNow?'':`<button class="btn quiet" id="checkFullAccount">${text('계정 확인','Check account')}</button>`}${partsHtml}</div>`
       : `<p class="s">${status}</p>`;
     const alert=finished?`<p role="alert">${esc(message(run.error || {code:'CANCELLED'}))}</p>`:'';
