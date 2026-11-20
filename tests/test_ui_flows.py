@@ -57,6 +57,7 @@ window.__TAURI__={core:{invoke:async(command,args)=>{
  if(command==='app_update_status')return null;
  if(command==='control_poll')return null;
  if(command==='control_focus')return null;
+ if(command==='analysis_run_status' && args.view==='units' && window.unitBoard)return JSON.stringify(window.unitBoard);
  if(command==='analysis_run_status')return JSON.stringify(window.runningAnalysis || null);
  if(command==='analysis_providers' && window.appAnalysisFixture)return JSON.stringify({providers:[{id:'claude',available:true,authenticated:true,account:{email:'fictional@example.invalid'}}]});
  if(command==='analysis_run_start' && window.appAnalysisFixture)return window.completeAppAnalysis ? JSON.stringify({...args.scope,id:'fixture-'+calls.length,state:'completed',completed_tasks:[{task:args.scope.intent.task}],tasks:[]}) : 'null';
@@ -732,6 +733,19 @@ class Flows(unittest.TestCase):
         seen=[a or b for a,b in keys];duplicates=sorted({k for k in seen if seen.count(k)>1})
         self.assertGreater(len(seen),300);self.assertEqual(duplicates,[])
 
+    def test_halved_text_labels_are_translated_and_keep_the_plain_style(self):
+        index=(ROOT/'ui/index.html').read_text();run=(ROOT/'ui/analysis-run.js').read_text()
+        before=index[:index.index('const UI_PATTERN')]
+        for key in ('베타','자동 분석','AI 채팅에 요청','요금·한도: 연결한 AI'):
+            self.assertIn(f"'{key}':",before,key)
+        pairs=re.findall(r"text\('((?:[^'\\]|\\.)*)','((?:[^'\\]|\\.)*)'\)",run)
+        self.assertGreater(len(pairs),100)
+        for ko,en in pairs:
+            self.assertFalse(re.search('[가-힣]',en),en)
+            self.assertTrue(ko and en,(ko,en))
+        for source in (index,run):
+            self.assertIsNone(re.search('해요|이에요|예요|할게요',source))
+
     def test_code_buttons_name_the_code_and_keep_the_existing_selection(self):
         self.check(r'''
  const bar=$('branch');assert(bar.getAttribute('aria-label')===tr('지도에 표시할 버전'),'Code selector has a plain label');
@@ -821,6 +835,20 @@ class Flows(unittest.TestCase):
  await AnalysisRun.check();await wait();
  assert($('makeProgramJobs') && !$('cancelAppAnalysis'),'Polling keeps the selected program visible');
  assert(!calls.some(c=>['analysis_run_start','analysis_run_cancel'].includes(c.command)),'Browsing neither starts nor cancels analysis');
+""")
+
+    def test_full_analysis_board_appears_in_the_panel_and_reads_without_asking_the_model(self):
+        self.check(r"""
+ window.appAnalysisFixture=true;
+ window.unitBoard={repositories:[{repository:'',units:[['route:/items','route','/items',3,'saved','new'],['folder:lib','folder','lib',9,'pending','']],coverage:{tracked:12,in_units:9,indexed:9,excluded:{secret:1},truncated:false}}],totals:{units:2,saved:1,pending:1},calls:1,time_limit_seconds:3600};
+ S.view='sys';render();openAnalysisPanel();await AnalysisRun.check();await wait();
+ const L=(en,ko)=>S.lang==='en'?en:ko,panel=$('insp').innerHTML;
+ assert(panel.includes('unit-board') && panel.includes(L('Full code analysis','전체 코드 분석')) && panel.includes('class="beta"'),'The panel shows the beta board: '+panel.slice(0,200));
+ assert($('startFullAnalysis') && panel.includes(L('Queued','대기')),'Queued units are labeled and the start needs a click');
+ assert(!calls.some(c=>c.command==='analysis_run_start'),'Showing the board starts nothing');
+ $('startFullAnalysis').click();await wait();
+ const sent=calls.filter(c=>c.command==='analysis_run_start').at(-1).args.scope.intent;
+ assert(sent.task==='full' && sent.max_calls===1,'The click sends the displayed call cap');
 """)
 
     def test_on_demand_app_controls_keep_real_targets_and_translations(self):

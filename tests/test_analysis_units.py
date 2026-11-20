@@ -1,0 +1,176 @@
+"""Full-code analysis by units: AI-free catalog, saved-as-you-go results, resume and stale handling. Fake executors only."""
+import json
+from pathlib import Path
+import sys
+import unittest
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0,str(Path(__file__).resolve().parent))
+import analysis_run
+import analysis_units
+import structure_index
+from test_analysis_run import AnalysisRun as _Fixture
+_setup,_git,_raw,_prepare=_Fixture.setUp,_Fixture.git,_Fixture.raw,_Fixture.prepare
+del _Fixture
+
+
+def tracked(*names,size=100):return {name:size for name in names}
+
+
+class Catalog(unittest.TestCase):
+    exclusion=staticmethod(lambda file,size:'secret' if file.startswith('.env') else 'binary' if file.endswith('.png') else 'large' if size>300_000 else None)
+
+    def test_every_tracked_file_is_in_a_unit_or_counted_under_one_reason(self):
+        files=[{'file':f'lib/{i}.py','declarations':[{'name':'f','kind':'function','line':1}]} for i in range(14)]
+        files+=[{'file':'cmd/main.go','declarations':[]},{'file':'packages/a/src/a.ts','declarations':[]},{'file':'app/page.tsx','declarations':[]},
+                {'file':'server/api.py','declarations':[]},{'file':'tools/run.py','declarations':[]}]
+        index={'files':files,'imports':[{'file':'app/page.tsx','target':'server/api.py','line':1}],
+               'workspace_packages':[{'name':'pkg-a','file':'packages/a/package.json'}],
+               'cli_entries':[{'command':'tool sub','file':'cmd/main.go','target':'cmd/main.go'}],
+               'service_flow':{'feature_groups':[],'connections':[],'registered_routes':[{'server':{'file':'server/api.py'}}],
+                               'registered_route_groups':[{'resource':'/api/x','registered_route_indexes':[0]}]},
+               'coverage':{'candidate_files':len(files)+3,'skipped_files':1,'truncated':True}}
+        names=[f['file'] for f in files]+['.env','logo.png','data.json','huge.py','extra.md']
+        sizes={n:100 for n in names};sizes['huge.py']=900_000
+        built=analysis_units.catalog(index,sizes,self.exclusion,
+            screens=[{'file':'app/page.tsx','path':'/','heading':'Home'},{'file':'app/page.tsx','path':'/x','redirect':True}],
+            programs=[{'id':'server','name':'Server','code':['server']},{'id':'pkg','name':'Pkg','code':['packages/a']}])
+        kinds={}
+        for unit in built['units']:kinds.setdefault(unit['kind'],[]).append(unit['name'])
+        self.assertEqual(kinds['route'],['/api/x']);self.assertEqual(kinds['package'],['pkg-a']);self.assertEqual(kinds['cli'],['tool'])
+        self.assertEqual(kinds['screen'],['Home']);self.assertEqual(kinds['program'],['Server'])  # the package already holds its own program
+        self.assertTrue(all(len(u['files'])<=analysis_units.FOLDER_MAX_FILES for u in built['units'] if u['kind']=='folder'))
+        coverage=built['coverage']
+        self.assertEqual(coverage['in_units'],coverage['indexed'])
+        self.assertEqual(coverage['excluded'],{'secret':1,'binary':1,'large':1,'unsupported':1,'limit':1})
+        self.assertTrue(coverage['truncated'])
+        self.assertEqual(coverage['tracked'],len(names))
+
+    def test_large_folders_split_into_bounded_units_without_losing_files(self):
+        files=[{'file':f'src/mod{i%3}/f{i}.py','declarations':[]} for i in range(60)]
+        built=analysis_units.catalog({'files':files,'imports':[]},tracked(*[f['file'] for f in files]),self.exclusion)
+        members=[f for u in built['units'] for f in u['files']]
+        self.assertEqual(sorted(members),sorted(f['file'] for f in files))
+        self.assertTrue(all(u['file_count']<=analysis_units.FOLDER_MAX_FILES or '/' not in u['name'][4:] for u in built['units']))
+
+
+class FullRun(unittest.TestCase):
+    git=_git
+    raw=_raw
+    prepare=_prepare
+    PATHS=('/orders','/reports','/users')
+
+    def setUp(self):
+        _setup(self)
+        (self.repo/'ui.ts').write_text('\n'.join(f"export function {p[1:]}(){{return fetch('{p}')}}" for p in self.PATHS))
+        (self.repo/'api.py').write_text('from fastapi import FastAPI\napp=FastAPI()\n'+'\n'.join(f"@app.get('{p}')\ndef {p[1:]}():pass" for p in self.PATHS))
+        for folder in ('lib','tools'):
+            (self.repo/folder).mkdir()
+            for i in range(3):(self.repo/folder/f'm{i}.py').write_text(f'def {folder}_{i}():\n    return {i}\n')
+        (self.repo/'.env').write_text('TOKEN=secret\n');(self.repo/'logo.png').write_bytes(b'\x89PNG')
+        self.git('add','-A');self.git('commit','-qm','Full analysis fixture')
+        self.publish_index()
+
+    def publish_index(self):
+        repo=analysis_run.store.config('demo')['repositories'][0];raw=self.raw()
+        raw['dev']['structure_index']=structure_index.build(str(self.repo),self.git('rev-parse','HEAD').strip())
+        raw['dev']['commit']=self.git('rev-parse','HEAD').strip()
+        analysis_run.store.publish('demo','service',raw,{'fingerprint':analysis_run.store.fingerprint(repo)})
+
+    def board(self):return analysis_run.unit_board('demo','service','dev','en')
+    def states(self,board=None):
+        board=board or self.board()
+        return {row[0]:row[4] for row in board['repositories'][0]['units']}
+
+    def executor(self,calls,bad=(),after=None):
+        def items(packet):
+            if packet.get('resource') in bad:return [{'name':'x','description':'y','ref':999999}]
+            line=packet['sources'][0]['lines'][0]
+            return [{'name':'Feature','role':'Role','description':'Does something','ref':line['ref']}]
+        def fake(prompt,**kwargs):
+            packet=json.loads(prompt.split('\n',1)[1]);calls.append(packet)
+            if after:after(len(calls))
+            if 'resources' in packet:return {'results':[{'resource':p['resource'],'items':items(p)} for p in packet['resources']]}
+            return {'items':items(packet) if packet.get('resource') else []}
+        return fake
+
+    def intent(self,board=None):return {'task':'full','targets':[],'max_calls':(board or self.board())['calls']}
+
+    def test_board_is_local_and_the_call_cap_must_be_confirmed(self):
+        board=self.board()
+        ids=self.states(board)
+        self.assertTrue(set(ids.values())=={'pending'})
+        self.assertIn('route:/orders',ids);self.assertTrue(any(i.startswith('folder:lib') for i in ids))
+        coverage=board['repositories'][0]['coverage']
+        self.assertEqual(coverage['excluded']['secret'],1);self.assertEqual(coverage['excluded']['binary'],1)
+        with self.assertRaisesRegex(ValueError,'maximum call count'):self.prepare(intent={**self.intent(board),'max_calls':board['calls']-1})
+        self.assertEqual(self.prepare(intent=self.intent(board))['state'],'preparing')
+
+    def test_overview_first_then_units_are_saved_with_isolated_failures_and_resume(self):
+        board=self.board();job=self.prepare(intent=self.intent(board))
+        calls=[];bad='folder:lib'
+        done=analysis_run.run(job['id'],self.executor(calls,bad=(bad,)))
+        self.assertEqual(done['state'],'completed',done.get('error'))
+        self.assertNotIn('resource',calls[0]);self.assertNotIn('resources',calls[0])  # the first overview comes first
+        self.assertLessEqual(len(calls),board['calls']*2)
+        states=self.states(analysis_run.unit_board('demo','service','dev','en'))
+        self.assertEqual(states[bad],'failed')
+        self.assertTrue(all(state=='saved' for key,state in states.items() if key!=bad),states)
+        self.assertEqual([f['attempts'] for f in done['unit_failures']],[analysis_run.UNIT_ATTEMPTS])
+        saved=done['unit_overviews']['service']
+        self.assertTrue(all(unit['version']==analysis_run.SCOPED_OVERVIEW_VERSION and unit['unit']['kind']!='route' for unit in saved.values()))
+        self.assertEqual(next(iter(saved.values()))['items'][0]['role'],'Role')
+        # A new run reuses every saved unit and sends only the one that failed.
+        again=[];second=self.prepare(intent=self.intent())
+        self.assertEqual(second['unit_estimate']['calls'],1)
+        finished=analysis_run.run(second['id'],self.executor(again))
+        self.assertEqual(finished['state'],'completed')
+        self.assertEqual(len(again),1);self.assertEqual(again[0]['resource'],bad)
+        self.assertEqual(set(self.states().values()),{'saved'})
+        nothing=self.prepare(intent={**self.intent(),'max_calls':0})
+        self.assertEqual(analysis_run.run(nothing['id'],lambda *a,**k:self.fail('unexpected call'))['state'],'completed')
+
+    def test_cancel_keeps_saved_units_and_retry_only_asks_for_the_rest(self):
+        job=self.prepare(intent=self.intent());calls=[]
+        def stop(count):
+            if count==3:analysis_run.cancel(job['id'])
+        done=analysis_run.run(job['id'],self.executor(calls,after=stop))
+        self.assertEqual(done['state'],'cancelled')
+        saved=sum(1 for s in self.states().values() if s=='saved')
+        self.assertGreater(saved,0);self.assertLess(saved,len(self.states()))
+        retry=analysis_run.retry(job['id']);rest=[]
+        self.assertEqual(analysis_run.run(retry['id'],self.executor(rest))['state'],'completed')
+        self.assertEqual(set(self.states().values()),{'saved'})
+        self.assertLess(len(rest),len(calls)+len(rest))
+
+    def test_changed_code_marks_only_affected_units_stale_and_keeps_unchanged_ones(self):
+        analysis_run.run(self.prepare(intent=self.intent())['id'],self.executor([]))
+        (self.repo/'lib/m0.py').write_text('def lib_0():\n    return 42\n')
+        self.git('add','-A');self.git('commit','-qm','Change lib');self.publish_index()
+        states=self.states()
+        self.assertEqual(states['folder:lib'],'stale')
+        self.assertEqual(states['folder:tools'],'saved')
+        calls=[];self.assertTrue(analysis_run.run(self.prepare(intent=self.intent())['id'],self.executor(calls))['state']=='completed')
+        self.assertTrue(all('tools' not in json.dumps(p.get('resource') or p.get('resources')) for p in calls))
+        self.assertEqual(set(self.states().values()),{'saved'})
+
+    def test_saved_unit_can_be_read_and_old_code_is_flagged(self):
+        analysis_run.run(self.prepare(intent=self.intent())['id'],self.executor([]))
+        unit=analysis_run.unit_result('demo','service','dev','en','folder:tools')
+        self.assertEqual(unit['unit']['name'],'tools');self.assertNotIn('stale',unit)
+        (self.repo/'tools/m0.py').write_text('def tools_0():\n    return 9\n')
+        self.git('add','-A');self.git('commit','-qm','Change tools');self.publish_index()
+        self.assertTrue(analysis_run.unit_result('demo','service','dev','en','folder:tools')['stale'])
+
+    def test_unit_without_eligible_source_is_skipped_not_failed(self):
+        (self.repo/'blank').mkdir();(self.repo/'blank/only.py').write_text('x\n')
+        self.git('add','-A');self.git('commit','-qm','Tiny file');self.publish_index()
+        calls=[];done=analysis_run.run(self.prepare(intent=self.intent())['id'],self.executor(calls))
+        self.assertEqual(done['state'],'completed',done.get('error'))
+        states=self.states()
+        self.assertEqual(states['folder:blank'],'unavailable')
+        self.assertEqual({v for k,v in states.items() if k!='folder:blank'},{'saved'})
+        # The skipped unit costs no model call, and a later run does not report it as a failure.
+        self.assertEqual(self.prepare(intent=self.intent())['state'],'preparing')
+
+
+if __name__=='__main__':unittest.main()

@@ -10,10 +10,11 @@ const AnalysisRun = (() => {
   const scope = () => ({project:S.project, repository:['make_steps','make_jobs'].includes(S.analysisChoice?.task) ? '' : (S.analysisChoice?.target || S.repository || '').replace(/^\*$/, ''), branch:S.branch, lang:S.lang});
   function intent() {
     const choice=S.analysisChoice || {}, command=choice.task || 'quick_overview';
-    const task=({resource_batch:'resources',scope_overview:'overview',quick_overview:'overview',analysis_plan:'all',analysis_request:'analysis',make_system:'system',suggest_groups:'groups',make_steps:'steps',make_jobs:'jobs',briefing_request:'briefing'})[command] || 'all';
+    const task=({resource_batch:'resources',full_analysis:'full',scope_overview:'overview',quick_overview:'overview',analysis_plan:'all',analysis_request:'analysis',make_system:'system',suggest_groups:'groups',make_steps:'steps',make_jobs:'jobs',briefing_request:'briefing'})[command] || 'all';
     const args={...scope(),...(task==='steps'?{screen:choice.detailTarget}:task==='jobs'?{node:choice.detailTarget}:{})};
     const targets=['steps','jobs'].includes(task) ? (choice.targets || analysisCalls(command,args).map(a=>({repository:a.repository || '',target:a.screen || a.node}))) : [];
     if(task==='resources')return {task,targets:[],max_calls:choice.maxCalls,...(choice.area?{area:choice.area}:{})};
+    if(task==='full')return {task,targets:[],max_calls:choice.maxCalls ?? 0};
     return {task,targets:command==='scope_overview'?[{repository:scope().repository,target:choice.detailTarget}]:targets};
   }
   const key = () => JSON.stringify([scope(), S.analysisChoice, S.loadToken]);
@@ -21,7 +22,7 @@ const AnalysisRun = (() => {
   const shown = () => S.agentPurpose === 'analysis' && S.agentPrompt != null;
   const current = token => token === epoch && scopeKey === key();
   const active = () => !!run && activeStates.has(run.state);
-  const sameScope = () => !!run && Object.entries(scope()).every(([name,value]) => run[name] === value) && (JSON.stringify(run.intent || {task:'all',targets:[]})===JSON.stringify(intent()) || (!S.analysisChoice?.task && (run.intent?.task || 'all')==='all'));
+  const sameScope = () => !!run && Object.entries(scope()).every(([name,value]) => run[name] === value) && (JSON.stringify(run.intent || {task:'all',targets:[]})===JSON.stringify(intent()) || (run.intent?.task==='full' && intent().task==='full') || (!S.analysisChoice?.task && (run.intent?.task || 'all')==='all'));
   const usable = () => provider?.available === true && provider?.authenticated === true && provider?.account && typeof provider.account === 'object';
   function paint() {
     if (shown()) renderAgentPrompt();
@@ -81,7 +82,7 @@ const AnalysisRun = (() => {
     }
     paint();
     // Use the existing analysis-only read: never collect or move change history.
-    if (run?.intent?.task!=='overview' && sameScope() && !active() && (run.state === 'completed' || (run.completed_tasks?.length || Number(run.completed_tasks)>0)) && !loaded.has(run.id)) {
+    if (!['overview','full'].includes(run?.intent?.task) && sameScope() && !active() && (run.state === 'completed' || (run.completed_tasks?.length || Number(run.completed_tasks)>0)) && !loaded.has(run.id)) {
       const id = run.id; loaded.add(id);
       try { await reloadAnalysisOnly(() => current(token) && run?.id === id); }
       catch { if (current(token)) { loaded.delete(id); error = {code:'result_read_failed'}; paint(); } }
@@ -114,6 +115,7 @@ const AnalysisRun = (() => {
         }
       }
       if (current(token) && version === revision) await accept(value, token);
+      if (current(token) && !active() && S.agentPurpose==='analysis') void loadBoard(token);
     } catch (value) { if (current(token) && version === revision) { error = value; paint(); schedule(token); } }
     finally { if (checking === token) checking = null; schedule(token); }
   }
@@ -319,7 +321,9 @@ const AnalysisRun = (() => {
       const item=group.items.find(item=>item.description && endpoints.some(side=>side.file===item.file && side.line===item.line));
       const description=item?.description || members.map(edge=>edge.method+' '+edge.path).join(' · ');
       const key=overviewKey(group)+i,open=openedFeature===key;
-      return `<section class="sect"><button class="btn plain" data-overview-feature="${esc(key)}" aria-expanded="${open}"><strong>${esc(feature.name)}</strong> · ${esc(description)}</button>${open?`${item?.evidence?.length?claimEvidence(item):''}<ul>${members.map(edgeHtml).join('')}</ul>`:''}</section>`;
+      const conditional=members.some(edge=>['path_template','declared_defaults'].includes(edge.basis) || (edge.details || []).some(d=>d.kind==='conditional_filter'));
+      const chips=`${members.slice(0,2).map(edge=>`<code class="route-chip">${esc(edge.method)} ${esc(edge.path)}</code>`).join('')}${members.length>2?`<span class="chip">+${members.length-2}</span>`:''}${conditional?`<span class="chip warn">${text('조건','Conditional')}</span>`:''}`;
+      return `<section class="sect"><button class="feature-row" type="button" data-overview-feature="${esc(key)}" aria-expanded="${open}"><strong>${esc(feature.name)}</strong>${item?.role?`<span class="role">${esc(item.role)}</span>`:''}<span class="chips">${chips}</span></button>${open?`<p>${esc(description)}</p>${item?.evidence?.length?claimEvidence(item):''}<ul>${members.map(edgeHtml).join('')}</ul>`:''}</section>`;
     }).join('');
     const commands=(group.cli_entries || []).filter(entry=>entry.command && entry.registration?.quote && entry.registration.line>0).map(entry=>{
       const cobra=entry.kind==='cobra_subcommand';
@@ -340,19 +344,19 @@ const AnalysisRun = (() => {
     const flow=features && remaining.length?`<details><summary>${title} · ${remaining.length}</summary><ul>${remaining.map(edgeHtml).join('')}</ul></details>`:remainingFlow;
     const sources=`<figure class="overview-tree"><figcaption>${text('파일별 기능 구조도','Feature diagram by source file')}</figcaption><ul>${files}</ul></figure>`;
     const workspace=savedWorkspace(group);
-    return features || commands || workspace?`<section class="overview-tree"><h4>${text('기능별 개요 (베타)','Feature overview (beta)')}</h4>${workspace}${commands}${features}</section>${flow}<details><summary>${text('파일별 근거','Evidence by file')}</summary>${sources}</details>`:`${flow}${sources}`;
+    return features || commands || workspace?`<section class="overview-tree"><h4>${text('기능별 개요','Features')} ${beta()}</h4>${workspace}${commands}${features}</section>${flow}<details><summary>${text('파일별 근거','Evidence by file')}</summary>${sources}</details>`:`${flow}${sources}`;
   }
   function overviewHtml() {
     return savedOverviews().map((group,index)=>{
       const key=overviewKey(group);
       const open=openedOverview===key || (openedOverview===null && group.format==='overview-v1');
       const coverage=group.scope_coverage;
-      const scopeCounts=coverage?.total ? ' · '+text('로컬에서 확인한 요청 경로 묶음 중 ','Verified request scopes sampled: ')+coverage.selected.length+'/'+coverage.total : '';
+      const scopeChip=coverage?.total ? `<span class="chip warn">${text('경로','Paths')} ${coverage.selected.length}/${coverage.total} · ${text('표본','sample')}</span>` : '';
       const resources=open?remainingScopes(group):[];
       const local=resources.length?`<div class="ctl"><label>${text('개요에 포함되지 않은 경로','Paths outside this overview')} <select id="overviewLocalScope${index}">${resources.map(resource=>`<option>${esc(resource)}</option>`).join('')}</select></label><button class="btn quiet" id="overviewOpenScope${index}">${text('지도에서 열기','Open in map')}</button></div>`:'';
-      return `<section class="sect"><button class="btn plain" type="button" id="savedOverview${index}" aria-expanded="${open}">${group.resource?text('저장된 경로 설명','Saved path explanation'):text('저장된 첫 개요','Saved initial overview')} · ${esc(group.repository ? connectionDisplayName(group.repository) : S.project)}</button>
-        <p class="s">${text('파일 '+group.files.length+'개의 일부 코드에서 확인한 항목 '+group.items.length+'개','Items verified: '+group.items.length+' · Files sampled: '+group.files.length)}${esc(scopeCounts)}</p>
-        ${open ? `<div><code>${esc(group.commit.slice(0,8))}</code>${overviewTree(group)}${local}</div>` : ''}</section>`;
+      return `<section class="sect overview-head"><button class="btn plain" type="button" id="savedOverview${index}" aria-expanded="${open}">${group.resource?text('경로 설명','Path explanation'):text('첫 개요','Initial overview')} · ${esc(group.repository ? connectionDisplayName(group.repository) : S.project)}</button>
+        <span class="chips"><code>${esc(group.commit.slice(0,8))}</code><span class="chip">${text('표본 파일','Sampled files')} ${group.files.length}</span><span class="chip">${text('항목','Items')} ${group.items.length}</span>${scopeChip}</span>
+        ${open ? `<div>${overviewTree(group)}${local}</div>` : ''}</section>`;
     }).join('');
   }
   function previewItems() {
@@ -397,6 +401,122 @@ const AnalysisRun = (() => {
     const indexes=map?.structure_indexes || (map?.structure_index?[map.structure_index]:[]);
     return indexes.filter(index=>!repo || index.repository===repo).reduce((n,index)=>n+resourcesIn(index).length,0);
   }
+
+  // ---- Full code analysis: units are saved as they finish and read as a map and cards, not as a wall of text ----
+  const KINDS={route:['경로','Paths'],screen:['화면','Screens'],program:['프로그램','Programs'],package:['패키지','Packages'],cli:['CLI','CLI'],folder:['폴더','Folders']};
+  const UNIT_STATES={saved:['저장됨','Saved'],working:['준비 중','Preparing'],pending:['대기','Queued'],failed:['검증 실패','Failed'],unavailable:['건너뜀','Skipped'],stale:['오래됨','Outdated']};
+  const STATE_ORDER=['working','saved','failed','stale','pending','unavailable'];
+  const REASONS={secret:['비밀 파일','Credential files'],binary:['이미지·바이너리','Binary files'],large:['300KB 초과','Over 300KB'],unsupported:['지원하지 않는 형식','Unsupported formats'],limit:['색인 한도','Index limit']};
+  const SAMPLE_FILES=4;
+  let board=null,boardScope='',boardError=null,unitFilter='all',unitLimit=24,openedUnit=null,loadingBoard=false,unitRows=[];
+  const unitDetails=new Map();
+  const beta=()=>`<span class="beta">${text('베타','Beta')}</span>`;
+  const boardScopeKey=()=>JSON.stringify([scope(),S.loadToken]);
+  const fullRun=()=>!!run && run.intent?.task==='full' && Object.entries(scope()).every(([name,value])=>run[name]===value);
+  const liveBoard=()=>fullRun() && run.unit_board ? run.unit_board : boardScope===boardScopeKey() ? board : null;
+  const unitKey=row=>JSON.stringify([row.repo,row.id]);
+  async function loadBoard(token) {
+    const requested=boardScopeKey();
+    if(!S.project || loadingBoard)return;
+    loadingBoard=true;
+    try {
+      const value=decode(await invoke('analysis_run_status',{scope:scope(),view:'units'}));
+      if(!current(token))return;
+      boardScope=requested;board=Array.isArray(value?.repositories)?value:null;boardError=null;unitDetails.clear();
+    } catch(value) { if(current(token)){boardScope=requested;board=null;boardError=value;} }
+    finally { loadingBoard=false; }
+    if(current(token))paint();
+  }
+  function unitSummary(b) {
+    const cover=b.repositories.reduce((sum,repo)=>{
+      const c=repo.coverage || {};sum.tracked+=c.tracked || 0;sum.inside+=c.in_units || 0;sum.truncated=sum.truncated || !!c.truncated;
+      for(const [reason,count] of Object.entries(c.excluded || {}))sum.excluded[reason]=(sum.excluded[reason] || 0)+count;
+      return sum;
+    },{tracked:0,inside:0,truncated:false,excluded:{}});
+    const out=Object.values(cover.excluded).reduce((a,n)=>a+n,0);
+    const reasons=Object.entries(cover.excluded).map(([reason,count])=>`<li><span>${text(...(REASONS[reason] || [reason,reason]))}</span><b>${count}</b></li>`).join('');
+    return `<details class="unit-scope" data-unit-scope><summary>${text('범위','Scope')} · ${text('파일','Files')} ${cover.inside}/${cover.tracked}${out?` <span class="chip warn">${text('제외','Excluded')} ${out}</span>`:''}${cover.truncated?` <span class="chip warn">${text('색인 한도 도달','Index limit reached')}</span>`:''} <span class="chip">${text('단위당 표본 ≤'+SAMPLE_FILES+'파일','≤'+SAMPLE_FILES+' sampled files per unit')}</span></summary>${reasons?`<ul class="unit-excluded">${reasons}</ul>`:''}</details>`;
+  }
+  function unitDetail(row) {
+    if(['pending','working'].includes(row.state))return '';
+    if(row.state==='failed')return `<p class="s">${text('AI 설명이 근거와 맞지 않아 저장하지 않았습니다.','The AI answer did not match its evidence and was not saved.')}</p>`;
+    if(row.state==='unavailable')return `<p class="s">${text('근거로 읽을 수 있는 코드 줄이 없습니다.','No readable source lines.')}</p>`;
+    const group=unitDetails.get(unitKey(row));
+    if(group===undefined)return `<p class="s">${text('불러오는 중…','Loading…')}</p>`;
+    if(!group || !group.files)return `<p class="s">${text('저장된 설명을 읽지 못했습니다.','Saved explanation unavailable.')}</p>`;
+    return `${group.stale?`<p class="s">${text('이전 코드 기준 · 다시 분석 필요','Based on older code · reanalyze')}</p>`:''}<code>${esc(group.commit.slice(0,8))}</code>${overviewTree(group)}`;
+  }
+  function unitCard(row,index,multi) {
+    const open=openedUnit===unitKey(row),expandable=!['pending','working'].includes(row.state);
+    const state=text(...UNIT_STATES[row.state]);
+    return `<li class="unit-card" data-state="${row.state}" data-unit-card="${index}"><button class="unit-head" type="button" data-unit-open="${index}" aria-expanded="${expandable?open:false}" ${expandable?'':'aria-disabled="true"'}><i class="unit-dot" aria-hidden="true"></i><strong>${esc(row.name)}</strong><span class="chips"><span class="chip">${text(...(KINDS[row.kind] || [row.kind,row.kind]))}</span>${row.count>SAMPLE_FILES?`<span class="chip">${text('표본','Sample')} ${SAMPLE_FILES}/${row.count}</span>`:''}${multi?`<span class="chip">${esc(connectionDisplayName(row.repo))}</span>`:''}${row.detail==='reused'?`<span class="chip">${text('코드 변경 없음','Code unchanged')}</span>`:''}</span><span class="unit-state">${state}</span></button>${open && expandable?unitDetail(row):''}</li>`;
+  }
+  function boardHtml() {
+    const b=liveBoard(),live=fullRun() && active();
+    if(!b) {
+      if(!boardError)return '';
+      const refresh=String(boardError?.message || boardError).includes('Refresh the local structure');
+      return `<section class="sect unit-board" data-unit-board="error"><h3>${text('전체 코드 분석','Full code analysis')} ${beta()}</h3><p class="s">${refresh?text('새로고침 뒤 단위가 계산됩니다.','Units are calculated after a refresh.'):text('단위를 읽지 못했습니다.','Could not read the units.')}</p></section>`;
+    }
+    const t=b.totals,total=t.units || 0;
+    if(!total)return '';
+    const multi=b.repositories.length>1;
+    unitRows=b.repositories.flatMap(repo=>repo.units.map(row=>({repo:repo.repository,id:row[0],kind:row[1],name:row[2],count:row[3],state:row[4],detail:row[5]})));
+    const present=STATE_ORDER.filter(k=>t[k]);
+    const bar=`<div class="unit-bar" role="img" aria-label="${t.saved}/${total}">${present.map(k=>`<i data-state="${k}" style="width:${(t[k]*100/total).toFixed(2)}%"></i>`).join('')}</div>`;
+    const filters=`<div class="unit-legend" role="group" aria-label="${text('상태 필터','State filter')}"><button type="button" data-unit-filter="all" aria-pressed="${unitFilter==='all'}">${text('전체','All')} ${total}</button>${present.map(k=>`<button type="button" data-unit-filter="${k}" data-state="${k}" aria-pressed="${unitFilter===k}"><i aria-hidden="true"></i>${text(...UNIT_STATES[k])} ${t[k]}</button>`).join('')}</div>`;
+    const lanes=Object.keys(KINDS).filter(k=>unitRows.some(r=>r.kind===k)).map(kind=>{
+      const set=unitRows.map((row,i)=>[row,i]).filter(([row])=>row.kind===kind);
+      return `<div class="unit-lane"><span class="unit-kind">${text(...KINDS[kind])}<b>${set.filter(([row])=>row.state==='saved').length}/${set.length}</b></span><span class="unit-cells">${set.map(([row,i])=>`<button class="unit-cell" type="button" data-unit-cell="${i}" data-state="${row.state}" title="${esc(row.name)} · ${text(...UNIT_STATES[row.state])}" aria-label="${esc(row.name)} · ${text(...UNIT_STATES[row.state])}"></button>`).join('')}</span></div>`;
+    }).join('');
+    const rank=row=>STATE_ORDER.indexOf(row.state);
+    const listed=unitRows.map((row,i)=>[row,i]).filter(([row])=>unitFilter==='all' || row.state===unitFilter).sort((a,b)=>rank(a[0])-rank(b[0]) || a[1]-b[1]);
+    const shown=listed.slice(0,unitLimit),opened=unitRows.findIndex(row=>unitKey(row)===openedUnit);
+    if(opened>=0 && !shown.some(([,i])=>i===opened))shown.unshift([unitRows[opened],opened]);
+    const hidden=listed.length-shown.length;
+    const usableNow=usable(),canStart=usableNow && !providerBusy && !busy && !active();
+    const finished=fullRun() && ['failed','cancelled'].includes(run.state);
+    const calls=b.calls,minutes=Math.max(1,Math.round((b.time_limit_seconds || 3600)/60));
+    const label=(t.saved?text('이어서 분석','Continue'):text('분석 시작','Start'))+' · '+text('호출 최대 '+calls+'회','up to '+calls+' calls');
+    const start=live?`<div class="unit-run" role="status" aria-live="polite"><span class="chip">${text('AI 호출','AI calls')} ${run.input_stats?.calls || 0} · ${text('최대','max')} ${run.unit_estimate?.calls ?? calls}</span><span class="chip">${text('경과','Elapsed')} ${Math.max(0,Math.round((Date.now()-Date.parse(run.started_at || run.created_at))/60000)) || 0}${text('분',' min')}</span><button class="btn" id="cancelFullAnalysis" ${busy || run.cancel_requested?'disabled':''}>${text('취소','Cancel')}</button></div>`
+      : calls>0 ? `<div class="unit-start"><span class="chips"><span class="chip">${text('AI 호출 최대','AI calls up to')} ${calls}</span><span class="chip">${text('선택한 코드가 Claude로 전송','Selected code is sent to Claude')}</span><span class="chip">${text('구독 한도 적용','Subscription limit applies')}</span><span class="chip">${text('시간 상한','Time cap')} ${minutes}${text('분',' min')}</span></span><button class="btn primary" id="startFullAnalysis" ${canStart?'':'disabled'}>${label}</button>${usableNow?'':`<button class="btn quiet" id="checkFullAccount">${text('계정 확인','Check account')}</button>`}</div>`
+      : `<p class="s"><span class="chip ok">${text('최신','Up to date')}</span></p>`;
+    const alert=finished?`<p role="alert">${esc(message(run.error || {code:'CANCELLED'}))}</p>`:'';
+    return `<section class="sect unit-board" data-unit-board><h3>${text('전체 코드 분석','Full code analysis')} ${beta()}<span class="unit-count">${t.saved}/${total}</span></h3>${start}${alert}${bar}${filters}<div class="unit-map" role="group" aria-label="${text('단위 구조도','Unit map')}">${lanes}</div>${unitSummary(b)}<ul class="unit-cards">${shown.map(([row,i])=>unitCard(row,i,multi)).join('')}</ul>${hidden>0?`<button class="btn quiet" type="button" id="unitMore">${text('더 보기','Show more')} (${hidden})</button>`:''}</section>`;
+  }
+  async function readUnit(row) {
+    const base={...scope(),repository:row.repo};
+    return decode(row.kind==='route'?await invoke('analysis_run_status',{view:'resource',scope:base,resource:row.name})
+      :await invoke('analysis_run_status',{view:'unit',scope:base,resource:row.id}));
+  }
+  async function openUnit(row) {
+    const key=unitKey(row);
+    if(['pending','working'].includes(row.state)){openedUnit=key;paint();return;}
+    openedUnit=openedUnit===key?null:key;paint();
+    if(openedUnit!==key || unitDetails.has(key) || ['failed','unavailable'].includes(row.state))return;
+    const token=epoch;
+    let group=null;try{group=await readUnit(row);}catch{}
+    if(token!==epoch)return;
+    unitDetails.set(key,group);paint();
+  }
+  function bindBoard() {
+    const root=$('insp');
+    root?.querySelectorAll?.('[data-unit-cell]').forEach(button=>button.onclick=()=>{
+      const row=unitRows[Number(button.dataset.unitCell)];if(!row)return;
+      unitFilter='all';openedUnit=null;void openUnit(row);
+      $('insp')?.querySelector?.(`[data-unit-card="${button.dataset.unitCell}"]`)?.scrollIntoView?.({block:'nearest'});
+    });
+    root?.querySelectorAll?.('[data-unit-open]').forEach(button=>button.onclick=()=>{const row=unitRows[Number(button.dataset.unitOpen)];if(row)void openUnit(row);});
+    root?.querySelectorAll?.('[data-unit-filter]').forEach(button=>button.onclick=()=>{unitFilter=button.dataset.unitFilter;unitLimit=24;paint();});
+    if($('unitMore'))$('unitMore').onclick=()=>{unitLimit+=48;paint();};
+    if($('startFullAnalysis'))$('startFullAnalysis').onclick=()=>{
+      const b=liveBoard();if(!b || active())return;
+      S.analysisChoice={...S.analysisChoice,task:'full_analysis',maxCalls:b.calls};
+      return execute('analysis_run_start');
+    };
+    if($('cancelFullAnalysis'))$('cancelFullAnalysis').onclick=()=>execute('analysis_run_cancel');
+    if($('checkFullAccount'))$('checkFullAccount').onclick=()=>{void providers();};
+  }
   function html(includeOverview=true) {
     if(S.analysisChoice?.task==='scope_overview' && savedOverviews().length && !active())return overviewHtml();
     const account = provider?.account, identity = typeof account === 'string' ? account : account?.email || account?.id;
@@ -431,29 +551,28 @@ const AnalysisRun = (() => {
     const targets=choice.targets.map(t=>[t.repository,t.target].filter(Boolean).map(esc).join(' · '));
     const scoped=S.analysisChoice?.task==='scope_overview';
     const startLabel=batch?text('경로 묶음 설명 생성','Generate path group explanations'):scoped?text('이 경로 설명 생성','Generate path explanation'):choice.task==='overview' ? text('첫 개요 만들기','Create initial overview')
-      : choice.task==='all' ? text('전체 코드 분석 (베타)','Analyze full codebase (beta)')
+      : choice.task==='all' ? text('지도·구성 분석 시작','Analyze map and structure')
       : choice.task==='analysis' ? text('상세 지도 분석 (베타)','Analyze detailed map (beta)')
       : text(names[choice.task]+' 분석 시작','Analyze '+names[choice.task]);
     return `<section class="sect" aria-label="${text('자동 분석 (베타)','Automatic analysis (beta)')}">
       ${includeOverview?overviewHtml():''}
-      <p><strong>Claude Code</strong> · ${esc(identity || text('계정 미확인','Account not verified'))}${account?.subscription_type ? ' · '+esc(account.subscription_type) : ''}</p>
-      <p class="s">${esc(scope().repository ? connectionDisplayName(scope().repository) : text('연결한 코드 전체','All connected repositories'))} · ${esc(S.branch)}${targets.length?' · '+targets.join(', '):''}</p>
-      <p class="s">${text('선택한 코드가 Claude로 전송되며 구독 한도가 적용됩니다.','Claude receives the selected code. Subscription usage limits apply.')}</p>
+      <p class="auto-line"><strong title="${esc(identity || '')}">Claude Code</strong>${account?.subscription_type ? ' · '+esc(account.subscription_type) : identity ? '' : ' · '+text('계정 미확인','Account not verified')}</p>
+      <p class="chips"><span class="chip">${esc(scope().repository ? connectionDisplayName(scope().repository) : text('연결한 코드 전체','All connected repositories'))}</span><span class="chip">${esc(S.branch)}</span>${targets.map(target=>`<span class="chip">${target}</span>`).join('')}<span class="chip">${text('코드가 Claude로 전송 · 구독 한도 적용','Code sent to Claude · subscription limit')}</span></p>
       ${providerBusy ? `<p role="status">${text('Claude Code 계정 확인 중…','Checking the Claude Code account…')}</p>` : provider && !usable() ? `<p role="alert">${esc(message(provider))}</p>` : ''}
-      ${run ? `${!sameScope() || (runAccount && runAccount!==identity) ? `<p class="s">${text('이 분석의 코드','This run analyzes')}: ${esc(runScope)} · ${esc(names[run.intent?.task || 'all'])}${(run.intent?.targets || []).map(t=>' · '+esc(t.repository)+' · '+esc(t.target)).join('')}${runAccount ? ' · '+esc(runAccount) : ''}</p>` : ''}${!sameScope() ? `<p class="s">${text('다른 분석입니다. 실행 중이면 완료 후 시작하거나 취소하세요.','Different analysis selected. Wait for the active run or cancel it.')}</p>` : ''}<div role="status" aria-live="polite"><strong>${esc(stateLabel())}</strong> · ${esc(progress)}${batchRun && cached?' · '+text('재사용 '+cached+'개',cached+' reused'):''}${taskName ? '<div>'+esc(taskName)+'</div>' : ''}</div><progress max="${Math.max(total, 1)}" value="${done}" aria-label="${text('분석 진행률','Analysis progress')}"></progress>${run.blocked?.length ? `<p class="s">${text('먼저 확인할 분석','Analysis requiring attention')}: ${run.blocked.length}</p>` : ''}` : ''}
+      ${run ? `${!sameScope() || (runAccount && runAccount!==identity) ? `<p class="chips"><span class="chip">${text('마지막 실행','Last run')}: ${esc(names[run.intent?.task || 'all'])}</span><span class="chip">${esc(runScope)}</span>${(run.intent?.targets || []).map(t=>`<span class="chip">${esc(t.repository)} · ${esc(t.target)}</span>`).join('')}${runAccount && runAccount!==identity ? `<span class="chip warn">${esc(runAccount)}</span>` : ''}${!sameScope() ? `<span class="chip warn">${text('현재 선택과 다름','Differs from selection')}</span>` : ''}</p>` : ''}<div role="status" aria-live="polite"><strong>${esc(stateLabel())}</strong> · ${esc(progress)}${batchRun && cached?' · '+text('재사용 '+cached+'개',cached+' reused'):''}${taskName ? '<div>'+esc(taskName)+'</div>' : ''}</div><progress max="${Math.max(total, 1)}" value="${done}" aria-label="${text('분석 진행률','Analysis progress')}"></progress>${run.blocked?.length ? `<p class="s">${text('먼저 확인할 분석','Analysis requiring attention')}: ${run.blocked.length}</p>` : ''}` : ''}
       ${stats ? `<details><summary>${text('AI 사용량','AI usage')}</summary><p class="s">${text('입력 호출','Input calls')}: ${stats.calls} · ${text('전송한 입력 바이트','Encoded input bytes')}: ${stats.bytes}${inputProgress ? ' · '+esc(inputProgress) : ''}</p></details>` : ''}
       ${retryWarning?`<p role="alert" id="retryDeliveryWarning">${text('분석이 중단됐습니다. 마지막 요청이 Claude에 전달됐을 수 있습니다. 다시 시도하면 같은 요청이 재전송될 수 있습니다.','Analysis was interrupted. Claude may already have received the last request. Retrying may send it again.')}</p>`:''}
       ${issue ? `<p role="alert">${esc(message(issue))}</p>` : ''}
-      ${!active() && choice.task==='overview' ? `<p class="s" id="overviewLimits">${scoped?text('선택한 경로 · 최대 4개 파일, AI 1회 이내','Selected path: up to 4 files, 1 AI call maximum.'):text('첫 개요 · 연결한 코드마다 최대 4개 파일, AI 1회 이내','Per repository: up to 4 files, 1 AI call maximum.')}</p>` : ''}
+      ${!active() && choice.task==='overview' ? `<p class="s" id="overviewLimits">${scoped?text('선택한 경로 · 최대 4파일 · AI 1회','Selected path: up to 4 files · 1 AI call'):text('연결한 코드마다 최대 4파일 · AI 1회','Per repository: up to 4 files · 1 AI call')}</p>` : ''}
       ${batch && !active()?`<p class="s" id="resourceLimits">${text('경로 묶음 '+choice.max_calls+'개 · AI 최대 '+choice.max_calls+'회','Path groups: '+choice.max_calls+' · Up to '+choice.max_calls+' AI calls')}</p>`:''}
       <div class="ctl">${active() ? `<button class="btn" id="cancelAppAnalysis" ${busy || run.cancel_requested ? 'disabled' : ''}>${text('분석 취소','Cancel analysis')}</button>` : sameScope() && ['failed','cancelled'].includes(run?.state) ? `<button class="btn primary" id="retryAppAnalysis" ${retryWarning?'aria-describedby="retryDeliveryWarning"':''} ${canStart ? '' : 'disabled'}>${text('현재 코드로 다시 시도','Retry with current code')}</button>` : `<button class="btn primary" id="startAppAnalysis" ${batch?'aria-describedby="resourceLimits"':choice.task==='overview' ? 'aria-describedby="overviewLimits"' : ''} ${canStart ? '' : 'disabled'}>${esc(startLabel)}</button>`}
       ${resources && !choice.area && !scoped && (!batch || resources!==choice.max_calls) && !active()?`<button class="btn quiet" id="chooseResourceBatch">${text('경로 묶음별 AI 설명 (베타)','AI explanations by path group (beta)')}</button>`:''}
-      ${!scoped && !active() && intent().task==='overview' ? `<button class="btn quiet" id="startFullAnalysis" ${canStart ? '' : 'disabled'}>${text('전체 코드 분석 (베타)','Analyze full codebase (beta)')}</button>` : ''}
-      <button class="btn quiet" id="checkAppAnalysis" ${busy || providerBusy ? 'disabled' : ''}>${text('계정·상태 다시 확인','Check account and status')}</button>
+      <button class="btn quiet" id="checkAppAnalysis" ${busy || providerBusy ? 'disabled' : ''}>${text('계정 확인','Check account')}</button>
       ${!batchRun && sameScope() && done > 0 && run.intent?.task!=='overview' ? `<button class="btn quiet" id="viewAppAnalysis">${text('저장된 결과 보기','View saved results')}</button>` : ''}</div>
       ${resultPicker}${batch && batchRun && active() && done>savedGroups.length?`<button class="btn quiet" id="refreshSavedBatch">${text('저장된 결과 보기','View saved results')}</button>`:''}${previewHtml()}</section>`;
   }
   function bind() {
+    bindBoard();
     $('insp')?.querySelectorAll?.('[data-overview-feature]').forEach(button=>button.onclick=()=>{
       const key=button.dataset.overviewFeature;openedFeature=openedFeature===key?null:key;paint();
     });
@@ -507,10 +626,6 @@ const AnalysisRun = (() => {
       S.analysisChoice={...S.analysisChoice,task:'resource_batch',detailTarget:'',maxCalls:localResourceCount()};
       syncScope();paint();
     };
-    if ($('startFullAnalysis')) $('startFullAnalysis').onclick = () => {
-      S.analysisChoice={...S.analysisChoice,task:'analysis_plan'};
-      return execute('analysis_run_start');
-    };
     if ($('retryAppAnalysis')) $('retryAppAnalysis').onclick = () => execute('analysis_run_retry');
     if ($('cancelAppAnalysis')) $('cancelAppAnalysis').onclick = () => execute('analysis_run_cancel');
     if ($('checkAppAnalysis')) $('checkAppAnalysis').onclick = () => { void providers(); void check(); };
@@ -526,6 +641,6 @@ const AnalysisRun = (() => {
   function open() { syncScope(); if (!provider && !providerBusy) void providers(); else void check(); }
   window.addEventListener('focus', () => { syncScope(); void check(); });
   document.addEventListener('visibilitychange', () => { clearTimeout(timer); if (!document.hidden) { syncScope(); void check(); } });
-  return {syncScope, open, html, overviewHtml, savedScopeHtml, bind, bindMapResults, stateLabel, check};
+  return {syncScope, open, html, overviewHtml, boardHtml, savedScopeHtml, bind, bindMapResults, stateLabel, check};
 })();
 AnalysisRun.syncScope();

@@ -294,3 +294,57 @@ details .kv { margin:var(--space-3) var(--space-0) var(--space-0); word-break:br
 .flow-tools { display:flex; flex-wrap:wrap; align-items:baseline; gap:var(--space-4) }
 .flow-tools details[open] { flex-basis:100% }
 
+
+/* 베타 표시와 칩. 글 대신 짧은 표식으로 상태·범위·한도를 보인다. */
+.beta { display:inline-block; white-space:nowrap; vertical-align:middle; margin-left:var(--space-2); padding:var(--space-1) var(--space-3); border:var(--border-ai); border-radius:var(--radius-pill); color:var(--color-ai); font:var(--font-micro); letter-spacing:var(--tracking-micro); font-weight:var(--weight-strong) }
+.chip { display:inline-block; padding:var(--space-1) var(--space-3); background:var(--color-bg-group); border-radius:var(--radius-pill); color:var(--color-text-secondary); font:var(--font-secondary); letter-spacing:var(--tracking-secondary); font-weight:var(--weight-regular) }
+.chip.warn { color:var(--color-warn); background:var(--color-warn-tint) }
+.chip.ok { color:var(--color-ok); background:var(--color-ok-tint) }
+h3 > .chip { margin-left:var(--space-2) }
+.auto-line { margin-bottom:var(--space-2) }
+.overview-head > .chips { display:flex; align-items:center; margin:var(--space-2) var(--space-0) var(--space-3) }
+.feature-row { display:flex; flex-wrap:wrap; align-items:baseline; gap:var(--space-2) var(--space-4); width:100%; text-align:left; padding:var(--space-3) var(--space-0); border-top:var(--border-hairline); color:var(--color-text) }
+.feature-row .role { color:var(--color-text-secondary); font:var(--font-secondary) }
+.feature-row .chips { margin-left:auto }
+.route-chip { padding:var(--space-1) var(--space-3); border:var(--border-hairline); border-radius:var(--radius-bar); font:var(--font-secondary); font-family:var(--font-mono) }
+
+/* 전체 코드 분석: 단위 구조도와 카드. 저장된 단위는 바로 읽고, 나머지는 준비 중·대기로 보인다. */
+.unit-board [data-state] { color:var(--color-text-secondary) }
+.unit-board [data-state="saved"] { color:var(--color-ok) }
+.unit-board [data-state="working"] { color:var(--color-accent) }
+.unit-board [data-state="failed"] { color:var(--color-warn) }
+.unit-board [data-state="stale"] { color:var(--color-ai) }
+.unit-card strong { color:var(--color-text) }
+.unit-board > h3 { display:flex; flex-wrap:wrap; align-items:center; gap:var(--space-2) var(--space-0) }
+.unit-count { margin-left:auto; white-space:nowrap; font:var(--font-secondary); font-weight:var(--weight-strong); color:var(--color-text-secondary) }
+.unit-start, .unit-run { display:flex; flex-wrap:wrap; align-items:center; gap:var(--space-3); margin:var(--space-3) var(--space-0) }
+.unit-bar { display:flex; height:var(--size-bar); overflow:hidden; border-radius:var(--radius-bar); background:var(--color-bg-control); margin:var(--space-3) var(--space-0) }
+.unit-bar > i { display:block; height:100%; background:currentColor }
+.unit-bar > i[data-state="pending"], .unit-bar > i[data-state="unavailable"] { background:transparent }
+.unit-legend { display:flex; flex-wrap:wrap; gap:var(--space-2); margin:var(--space-3) var(--space-0) }
+.unit-legend button { display:inline-flex; align-items:center; gap:var(--space-2); padding:var(--space-1) var(--space-3); border:var(--border-hairline); border-radius:var(--radius-pill); font:var(--font-secondary); color:var(--color-text-secondary) }
+.unit-board .unit-legend button[aria-pressed="true"] { background:var(--color-bg-control); font-weight:var(--weight-strong) }
+.unit-legend button > i { width:var(--size-dot); height:var(--size-dot); border-radius:var(--radius-pill); background:currentColor }
+.unit-map { display:grid; gap:var(--space-3); margin:var(--space-4) var(--space-0) }
+.unit-lane { display:flex; flex-wrap:wrap; align-items:flex-start; gap:var(--space-2) var(--space-4) }
+.unit-kind { display:flex; flex:0 0 calc(var(--size-badge) * 4); justify-content:space-between; gap:var(--space-2); font:var(--font-secondary); color:var(--color-text-secondary) }
+.unit-cells { display:flex; flex:1 1 var(--size-column); min-width:var(--space-0); flex-wrap:wrap; gap:var(--space-1) }
+.unit-cell { width:var(--space-5); height:var(--space-5); border:var(--border-hairline); border-radius:var(--radius-bar); background:currentColor }
+.unit-cell[data-state="pending"] { background:transparent }
+.unit-cell[data-state="unavailable"] { background:transparent; border-style:dashed }
+.unit-cell[data-state="working"] { outline:var(--outline-focus); outline-offset:var(--size-hairline) }
+.unit-scope > summary { font:var(--font-secondary); color:var(--color-text-secondary) }
+.unit-excluded { list-style:none; padding:var(--space-0); display:grid; gap:var(--space-2) }
+.unit-excluded li { display:flex; justify-content:space-between; font:var(--font-secondary); color:var(--color-text-secondary) }
+.unit-cards { list-style:none; display:grid; gap:var(--space-2); margin:var(--space-4) var(--space-0); padding:var(--space-0) }
+.unit-card { border:var(--border-hairline); border-radius:var(--radius-step); background:var(--color-bg-card); overflow:hidden }
+.unit-card[data-state="working"] { border-color:var(--color-accent) }
+.unit-card > :not(.unit-head) { margin-left:var(--space-4); margin-right:var(--space-4) }
+.unit-card > :not(.unit-head):last-child { margin-bottom:var(--space-4) }
+.unit-head { display:flex; flex-wrap:wrap; align-items:center; gap:var(--space-3); width:100%; padding:var(--space-3) var(--space-4); text-align:left }
+.unit-head[aria-disabled="true"] { cursor:default }
+.unit-head .chips { flex:1 1 auto }
+.unit-dot { flex:none; width:var(--size-dot); height:var(--size-dot); border-radius:var(--radius-pill); background:currentColor }
+.unit-card[data-state="pending"] .unit-dot { background:transparent; border:var(--border-hairline) }
+.unit-card[data-state="unavailable"] .unit-dot { background:transparent; border:var(--size-hairline) dashed currentColor }
+.unit-state { margin-left:auto; font:var(--font-secondary); color:currentColor }

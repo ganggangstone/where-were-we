@@ -37,10 +37,16 @@ const PLAN_NAMES = {analysis:'상세 지도',system:'서비스 구성 보기'};
 const connectionDisplayName = id => 'Repository '+id;
 const analysisButtonText = () => AnalysisRun.stateLabel();
 elements.insp.querySelectorAll=selector=>{
+ const unit=/^\[data-(unit-[a-z]+)\]$/.exec(selector);
+ if(unit){
+  const key=unit[1].replace(/-([a-z])/g,(_,c)=>c.toUpperCase());
+  const found=[...elements.insp.innerHTML.matchAll(new RegExp('data-'+unit[1]+'="([^"]*)"','g'))].map(hit=>({dataset:{[key]:hit[1]},onclick:null}));
+  (globalThis.unitHandles||(globalThis.unitHandles={}))[unit[1]]=found;return found;
+ }
  const hits=[...elements.insp.innerHTML.matchAll(/data-overview-feature="([^"]+)"/g)];
  globalThis.featureButtons=hits.map(hit=>({dataset:{overviewFeature:hit[1].replaceAll('&quot;','"')}}));return featureButtons;
 };
-function renderAgentPrompt(){elements.insp.innerHTML=AnalysisRun.html();AnalysisRun.bind();}
+function renderAgentPrompt(){elements.insp.innerHTML=AnalysisRun.html()+AnalysisRun.boardHtml();AnalysisRun.bind();}
 function render(){AnalysisRun.syncScope();if(S.agentPrompt!=null && S.agentPurpose==='analysis')renderAgentPrompt();}
 const account = {auth_method:'claude.ai',email:'fictional@example.invalid',subscription_type:'pro'};
 const available = {providers:[{provider:'claude',available:true,authenticated:true,account}]};
@@ -74,6 +80,68 @@ vm.runInContext({json.dumps(source)},context);
 Promise.resolve(vm.runInContext({json.dumps('(async()=>{'+checks+'})()')},context)).catch(e=>{{console.error(e.stack);process.exitCode=1;}});'''
         result = subprocess.run([NODE], input=runner, text=True, capture_output=True, timeout=15)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    BOARD = r"""
+const unitBoard=(extra={})=>({repositories:[{repository:'service',units:[
+ ['route:/orders','route','/orders',3,'saved','new'],
+ ['route:/reports','route','/reports',6,'working',''],
+ ['folder:lib','folder','lib',9,'pending',''],
+ ['folder:tools','folder','tools',3,'failed','']],
+ coverage:{tracked:20,in_units:15,indexed:15,excluded:{secret:1,binary:2},truncated:true}}],
+ totals:{units:4,saved:1,working:1,pending:1,failed:1},calls:3,time_limit_seconds:3600,...extra});
+const serve=(extra)=>{native=(command,args)=>command==='analysis_run_status'&&args.view==='units'?unitBoard(extra):undefined;};
+"""
+
+    def test_idle_board_shows_cost_scope_gaps_and_starts_only_after_a_click(self):
+        self.check_js(self.BOARD + r"""
+serve();status=null;await open();await AnalysisRun.check();await flush();
+const html=$('insp').innerHTML;
+assert(html.includes('Full code analysis') && html.includes('<span class="beta">Beta</span>') && html.includes('1/4'),'Beta board with saved count');
+assert(html.includes('AI calls up to</span>') === false && html.includes('AI calls up to 3') && html.includes('Selected code is sent to Claude') && html.includes('Time cap 60'),'Cost, transmission and time cap before the click');
+assert(html.includes('Excluded 3') && html.includes('Index limit reached') && html.includes('Files 15/20') && html.includes('Credential files'),'Scope gaps, index limit and exclusion reasons');
+assert(html.includes('Preparing') && html.includes('Queued') && html.includes('Failed') && html.includes('Saved'),'Unfinished units show as preparing or queued');
+assert(count('analysis_run_start')===0,'Showing the board costs no model call');
+await $('startFullAnalysis').onclick();await flush();
+const intent=calls.find(c=>c.command==='analysis_run_start').args.scope.intent;
+assert(intent.task==='full' && intent.max_calls===3,'The confirmed call cap is sent with the request');
+""")
+
+    def test_running_board_filters_opens_saved_units_and_cancels(self):
+        self.check_js(self.BOARD + r"""
+await open();
+status=runRecord('running',{intent:{task:'full',targets:[],max_calls:3},unit_board:unitBoard(),input_stats:{calls:1,bytes:10}});
+await AnalysisRun.check();await flush();
+assert($('cancelFullAnalysis') && !$('startFullAnalysis') && $('insp').innerHTML.includes('AI calls 1 · max 3'),'Run strip with cancel and live call count');
+unitHandles['unit-filter'].find(b=>b.dataset.unitFilter==='pending').onclick();
+assert($('insp').innerHTML.includes('data-unit-card="2"') && !$('insp').innerHTML.includes('data-unit-card="0"'),'Filter keeps only queued units');
+unitHandles['unit-filter'].find(b=>b.dataset.unitFilter==='all').onclick();
+native=(command,args)=>command==='analysis_run_status'&&args.view==='resource'?{repository:'service',commit:'abcd1234ef',configuration:'pin',resource:'/orders',files:['api.py'],items:[{name:'List orders',description:'Returns the orders',file:'api.py',line:1,quote:'def orders'}],format:'overview-v1'}:undefined;
+unitHandles['unit-open'].find(b=>b.dataset.unitOpen==='0').onclick();await flush();
+const read=calls.filter(c=>c.command==='analysis_run_status'&&c.args.view==='resource').at(-1);
+assert(read && read.args.resource==='/orders' && $('insp').innerHTML.includes('List orders'),'A saved unit opens its explanation on demand');
+const before=calls.length;
+unitHandles['unit-open'].find(b=>b.dataset.unitOpen==='1').onclick();await flush();
+assert(calls.length===before,'A unit still being prepared reads nothing');
+await $('cancelFullAnalysis').onclick();await flush();
+assert(count('analysis_run_cancel')===1,'Cancel reaches the backend');
+""")
+
+    def test_board_tolerates_other_responses_and_asks_for_a_refresh(self):
+        self.check_js(self.BOARD + r"""
+status=null;await open();await AnalysisRun.check();await flush();
+assert(!$('insp').innerHTML.includes('unit-board'),'A response that is not a board renders nothing');
+native=(command,args)=>{if(command==='analysis_run_status'&&args.view==='units')throw Error('Refresh the local structure before analyzing every unit');};
+S.loadToken++;AnalysisRun.syncScope();await open();await AnalysisRun.check();await flush();
+assert($('insp').innerHTML.includes('Units are calculated after a refresh') && !$('startFullAnalysis'),'No start before the structure exists');
+""")
+
+    def test_korean_board_uses_plain_labels_without_banned_endings(self):
+        self.check_js(self.BOARD + r"""
+S.lang='ko';serve();status=null;await open();await AnalysisRun.check();await flush();
+const html=$('insp').innerHTML;
+for(const word of ['전체 코드 분석','베타','준비 중','대기','저장됨','호출 최대 3','색인 한도 도달','제외 3'])assert(html.includes(word),'Korean label '+word);
+assert(!/해요|이에요|예요|할게요/.test(html),'No informal ending');
+""")
 
     def test_saved_task_and_input_progress_are_distinct_and_intent_is_not_reused(self):
         self.check_js(r'''
@@ -131,18 +199,20 @@ native=(command,args)=>{
 await AnalysisRun.check();assert($('insp').innerHTML.includes('Path groups saved: 2 · Remaining: 1') && $('refreshSavedBatch'),'Compact counts with an on-demand result catalog');
 assert(calls.at(-1).args.view==='progress' && calls.at(-1).args.runId==='run-1','Routine poll only asks for compact progress');
 native=(command,args)=>command==='analysis_run_status'?runRecord('completed',{intent,completed_tasks:3,tasks:0}):undefined;
-await AnalysisRun.check();assert(calls.filter(c=>c.command==='analysis_run_status').at(-1).args.view==='catalog','Terminal transition reads the saved catalog');
+await AnalysisRun.check();assert(calls.filter(c=>c.command==='analysis_run_status' && c.args.view!=='units').at(-1).args.view==='catalog','Terminal transition reads the saved catalog');
 ''')
 
     def test_initial_overview_and_full_analysis_have_distinct_explicit_buttons(self):
         self.check_js(r'''
 await open();
-assert($('startFullAnalysis') && $('insp').innerHTML.includes('1 AI call maximum') && $('insp').innerHTML.includes('Analyze full codebase (beta)'),'Scope and call bound visible');
+assert(!$('startFullAnalysis') && $('insp').innerHTML.includes('1 AI call') && $('insp').innerHTML.includes('Create initial overview'),'Scope and call bound visible');
 await $('startAppAnalysis').onclick();await flush();
 assert(calls.filter(c=>c.command==='analysis_run_start').at(-1).args.scope.intent.task==='overview','Default button requests the bounded overview');
 status=null;await AnalysisRun.check();
-await $('startFullAnalysis').onclick();await flush();
-assert(calls.filter(c=>c.command==='analysis_run_start').at(-1).args.scope.intent.task==='all','Full button requests the complete plan');
+S.analysisChoice={task:'analysis_plan'};AnalysisRun.open();await flush();
+assert($('insp').innerHTML.includes('Analyze map and structure'),'Map and structure analysis keeps its own label');
+await $('startAppAnalysis').onclick();await flush();
+assert(calls.filter(c=>c.command==='analysis_run_start').at(-1).args.scope.intent.task==='all','Map button requests the complete plan');
 ''')
 
     def test_provider_account_and_charge_before_explicit_start(self):
@@ -151,7 +221,7 @@ await flush();assert(count('analysis_run_status')===1,'Startup recovers status')
 assert(count('analysis_run_start')===0 && count('analysis_providers')===0,'Startup cannot launch or probe a CLI');
 await open();
 assert($('insp').innerHTML.includes('fictional@example.invalid'),'Account visible before start');
-assert($('insp').innerHTML.includes('Subscription usage limits apply'),'Usage visible before start');
+assert($('insp').innerHTML.includes('subscription limit'),'Usage visible before start');
 assert(!$('startAppAnalysis').disabled,'Authenticated subscription enables explicit start');
 assert(count('analysis_run_start')===0,'Opening the panel cannot start AI');
 await $('startAppAnalysis').onclick();await flush();
@@ -304,7 +374,7 @@ status=runRecord('cancelled',{saved_overviews:[group],cancel_requested:true});
 await AnalysisRun.check();
 assert($('savedOverview0') && !$('viewAppAnalysis'),'Partial sample is available without completing a map task');
 await $('savedOverview0').onclick();
-assert($('insp').innerHTML.includes('Files sampled: 1') && $('insp').innerHTML.includes('&lt;save>'),'Scoped coverage and escaped evidence');
+assert($('insp').innerHTML.includes('Sampled files 1') && $('insp').innerHTML.includes('&lt;save>'),'Scoped coverage and escaped evidence');
 await AnalysisRun.check();assert($('insp').innerHTML.includes('src/cli:3'),'Expanded overview survives polling');
 S.projectInfo.repositories[0].fingerprint='changed';renderAgentPrompt();
 assert(!$('savedOverview0'),'Hide a sample from previous settings');
@@ -334,7 +404,7 @@ group.connections[0].id=1;
 group.connections.push({...group.connections[0],id:2,path:'/other'});
 group.feature_groups=[{name:'Manage <runs>',connection_ids:[1]}];
 group.items.push({description:'Fetch the current runs',file:'client.ts',line:7,name:'Load',quote:'fetch("/runs")'});
-await AnalysisRun.check();assert(!$('insp').innerHTML.includes('GET /runs'),'Grouped evidence starts collapsed');featureButtons[0].onclick();const grouped=$('insp').innerHTML;
+await AnalysisRun.check();assert(!$('insp').innerHTML.includes('<b>GET /runs</b>'),'Grouped evidence starts collapsed');featureButtons[0].onclick();const grouped=$('insp').innerHTML;
 assert(grouped.includes('Manage &lt;runs>') && grouped.indexOf('Manage &lt;runs>')<grouped.indexOf('GET /runs') && grouped.indexOf('Other requests')<grouped.indexOf('GET /other'),'Named features precede both linked requests and ungrouped requests');
 assert(grouped.includes('Fetch the current runs') && grouped.includes('Evidence by file') && grouped.includes('If the path pattern matches'),'Grounded descriptions, original file evidence and conditions remain available');
 globalThis.flowActions=()=>'';
