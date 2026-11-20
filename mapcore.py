@@ -6,7 +6,7 @@ check_same.js 가 같은 지도에서 두 쪽의 숫자(화면별 서버 요청 
 규칙: 리다이렉트는 빼고 /m/… 모바일 판은 같은 주소의 데스크톱 화면에 붙인다. 화면의 1/3 넘게 들어 있는 부품이 부르는 요청은
 그 화면의 요청에서 뺀다. 세 화면 넘게 똑같이 들어 있는 부품의 링크는 메뉴로 치고 흐름에서 뺀다.
 """
-import fnmatch, json, os, re, shlex, sys
+import fnmatch, functools, json, os, re, shlex, sys
 from collections import defaultdict
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -419,6 +419,38 @@ def tree_inventory(entries, commit):
             'directories': [[name.decode('utf-8', 'backslashreplace'), count]
                             for name, count in sorted(folders.items())]}
 
+
+CACHE_KEEP = 4
+_CODE_FILES = ('extract.py','structure_index.py','service_flow.py','default_flow.py','express_routes.py','react_actions.py',
+               'sqlmodel_steps.py','cobra_commands.py','next_routes.py','mapcore.py')
+
+@functools.lru_cache(maxsize=1)
+def code_digest():
+    """The collector code that decides what a cached read of a commit contains."""
+    import hashlib
+    from pathlib import Path
+    base=Path(__file__).resolve().parent
+    return hashlib.sha1(b''.join((base/name).read_bytes() for name in _CODE_FILES)).hexdigest()
+
+def cache_key(*parts):
+    import hashlib
+    return hashlib.sha1(json.dumps(parts,sort_keys=True,default=str).encode()).hexdigest()
+
+def cache_read(kind,key):
+    """A derived, rebuildable read of one pinned commit (never project data); None when missing or unreadable."""
+    from pathlib import Path
+    try:return json.loads((Path(ROOT)/'.analysis-cache'/f'{kind}-{key}.json').read_text())
+    except (OSError,ValueError):return None
+
+def cache_write(kind,key,value):
+    from pathlib import Path
+    folder=Path(ROOT)/'.analysis-cache'
+    try:
+        folder.mkdir(parents=True,exist_ok=True,mode=0o700)
+        target=folder/f'{kind}-{key}.json';temp=target.with_suffix(f'.{os.getpid()}.tmp')
+        temp.write_text(json.dumps(value,separators=(',',':')));os.chmod(temp,0o600);os.replace(temp,target)
+        for old in sorted(folder.glob(kind+'-*.json'),key=lambda p:p.stat().st_mtime)[:-CACHE_KEEP]:old.unlink(missing_ok=True)
+    except OSError:pass  # a cache only saves time
 
 def extractor_id(home):
     """뽑는 방법의 판. extract.py 와 테스트 규칙이 같으면 같다. 바뀌면 refresh 가 커밋이 그대로여도 다시 뽑는다."""

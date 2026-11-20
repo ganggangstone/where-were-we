@@ -346,6 +346,8 @@ def changes(repo,old,new):
 def basic_catalog(repo,commit,layout):
     """The existing deterministic collector at this exact commit. Its items stay source basic."""
     key=(repo,commit,json.dumps(layout,sort_keys=True))
+    disk=mapcore.cache_key(*key,mapcore.code_digest())
+    if key not in _BASIC and (cached:=mapcore.cache_read('basic',disk)) is not None:_BASIC[key]=cached  # another process already read this commit
     if key not in _BASIC:
         with tempfile.TemporaryDirectory(prefix='where-were-we-basic-') as folder:
             out=Path(folder)/'basic.json'
@@ -355,6 +357,7 @@ def basic_catalog(repo,commit,layout):
             value=json.loads(out.read_text()) if not done.returncode and out.exists() else project.empty_map()
         if len(_BASIC)>8:_BASIC.clear()
         _BASIC[key]=value
+        if not done.returncode:mapcore.cache_write('basic',disk,value)
     value=copy.deepcopy(_BASIC[key]);screens_of=value.get('file_screens',{})
     for s in value['screens']:s.update(source='basic',id=screen_id(s),dependency_files=sorted(f for f,paths in screens_of.items() if s['path'] in paths))
     for r in value['backend_routes']:r.update(source='basic',id=route_id(r))
@@ -395,6 +398,19 @@ def set_review_flag(name,rid,branch,prev,reason):
     state=project.states(name);state.setdefault('@review',{})[rid+':'+branch]={'reason':reason,'map':digest(prev)}
     project.atomic(project.home(name)/'repository-state.json',state)
 
+def map_mode(path,prev,lang,configuration,head,flag=None):
+    """How the next map analysis reads the code, from saved facts only: ('patch', why) reads the changes since the
+    saved map, any other mode reads the whole commit. None when only the collected basic catalog can tell."""
+    a=prev.get('analysis') or {};ai=a.get('source')=='ai'
+    if ai and a.get('language')!=lang:return 'full','language_changed'
+    if not ai:return None
+    if a.get('version',1)<VERSION:return 'review','v1_snapshot'
+    if a.get('configuration')!=configuration:return 'review','configuration_changed'
+    if flag:return 'review',flag
+    if not commit_exists(path,prev.get('commit')):return 'review','base_commit_missing'
+    if prev.get('commit')==head:return 'review','same_commit'
+    return 'patch','changed_files'
+
 def scope(repo,raw,branch,lang,head,configuration,flag=None):
     """What the next analysis must cover. Deterministic, so request and record compute the same base."""
     path=repo['path'];layout=repo['layout'];prev=raw.get(branch) or {};a=prev.get('analysis') or {};ai=a.get('source')=='ai'
@@ -403,14 +419,9 @@ def scope(repo,raw,branch,lang,head,configuration,flag=None):
     basic['backend_routes']=[r for r in basic['backend_routes'] if r['id'] not in dropped]
     routes,screens,functions=ai_catalog(prev) if ai else ([],[],{})
     routes=[r for r in routes if within(r['file'],'backend',layout)];screens=[s for s in screens if within(s['file'],'frontend',layout)]
-    if ai and a.get('language')!=lang:mode,reason='full','language_changed'
-    elif not ai:mode,reason=('review','basic_catalog') if basic['screens'] or basic['backend_routes'] else ('full','no_catalog')
-    elif a.get('version',1)<VERSION:mode,reason='review','v1_snapshot'
-    elif a.get('configuration')!=configuration:mode,reason='review','configuration_changed'
-    elif flag:mode,reason='review',flag
-    elif not commit_exists(path,prev.get('commit')):mode,reason='review','base_commit_missing'
-    elif prev.get('commit')==head:mode,reason='review','same_commit'
-    else:mode,reason='patch','changed_files'
+    known=map_mode(path,prev,lang,configuration,head,flag)
+    if known:mode,reason=known
+    else:mode,reason=('review','basic_catalog') if basic['screens'] or basic['backend_routes'] else ('full','no_catalog')
     recheck=[];inspect=[];deleted=[]
     if mode!='full':
         evidence,_,_=evidence_reader(path,head);changed=set();collected={}
@@ -1022,8 +1033,17 @@ PLAN_TEXT={
        'now':'Tasks needed now and reference values:','tail':'A failed task leaves saved results intact; report which task failed and why. When all are done, tell the user to return to the app, which reads the saved results. Do not call refresh to display the result.'}}
 READ_ERRORS=(ValueError,subprocess.CalledProcessError,OSError)
 
-def plan(name,branch='dev',lang='ko',repository='',overview=False):
-    """Only missing or outdated analysis, for the connected agent to repeat after each save. Reads only."""
+def pin_request(name,branch='dev',repository=''):
+    """The commit and configuration a request would pin, without reading the whole tree (no mode or recheck list)."""
+    with project.locked(name):
+        repo,raw,rid,commit=context(name,repository,branch)
+        fingerprint=project.fingerprint(repo)
+        if rid and project.states(name).get(rid,{}).get('fingerprint')!=fingerprint:raise ValueError('Refresh after configuration changes first')
+    return {'commit':commit,'record_arguments':{'configuration':fingerprint},'mode':None,'reason':None,'recheck':[],'inspect':[]}
+
+def plan(name,branch='dev',lang='ko',repository='',overview=False,light=False):
+    """Only missing or outdated analysis, for the connected agent to repeat after each save. Reads only.
+    light: pins and freshness only; the per-task mode, reason and recheck counts are left empty (no whole-tree read)."""
     import briefing
     if lang not in ('ko','en'):raise ValueError('Choose ko or en')
     repository='' if repository=='*' else repository
@@ -1038,7 +1058,7 @@ def plan(name,branch='dev',lang='ko',repository='',overview=False):
         rid=repo['id'] if repo else ''
         if repo and not repo['refs'].get(branch):skipped.append({'repository':rid,'reason':'no_branch'});continue
         try:
-            req=request(name,branch,lang,rid)
+            req=pin_request(name,branch,rid) if light else request(name,branch,lang,rid)
             with project.locked(name):_,raw,_,head=context(name,rid,branch)
             if head!=req['commit']:raise ValueError('Repository commit changed while preparing; request again')
         except READ_ERRORS as error:blocked.append({'repository':rid,'task':'analysis','reason':str(error)});continue

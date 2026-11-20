@@ -37,7 +37,6 @@ UNIT_BYTES = 16 * 1024
 MAX_READ_ROUNDS = 32
 RESOURCE_PACK_SIZE = 4
 UNIT_ATTEMPTS = 2
-INDEX_CACHE_KEEP = 6
 MAP_TASKS = ('analysis','system','groups')
 PARTIAL_ITEMS = 60
 SIMPLE_RESOURCE_PACK_SIZE = 8
@@ -119,9 +118,14 @@ def _board_totals(repositories):
     totals['units']=sum(totals[k] for k in UNIT_STATES)
     return totals
 
-def _board_calls(repositories):
+def _board_parts(repositories):
+    """What the call limit is made of: first overviews, map-family batches, unit packs and the retry allowance."""
     packs=-(-sum(1 for repo in repositories for row in repo['units'] if row[4] not in ('saved','unavailable') and row[1] not in MAP_KINDS)//RESOURCE_PACK_SIZE)
-    return sum(1 for repo in repositories if repo['overview']!='saved')+sum(repo.get('map_calls',0) for repo in repositories)+packs+-(-packs//2)
+    return {'overview':sum(1 for repo in repositories if repo['overview']!='saved'),'map':sum(repo.get('map_calls',0) for repo in repositories),
+            'units':packs,'retry':-(-packs//2)}
+
+def _board_calls(repositories):
+    return sum(_board_parts(repositories).values())
 
 MAP_KINDS=('map','system','groups')
 
@@ -175,7 +179,8 @@ def _run_board(value):
         blocked=next((t.get('reason') for t in value.get('blocked',[]) if t.get('repository')==rid and t.get('task')=='analysis'),None)
         extra,map_calls=_map_rows(catalog,_map_states(catalog,pending,partial,working,done,blocked))
         repositories.append({'repository':rid,'commit':catalog['commit'],'coverage':catalog['coverage'],'overview':base,'units':rows+extra,'map_calls':map_calls})
-    return {'repositories':repositories,'totals':_board_totals(repositories),'calls':_board_calls(repositories),'map_calls':sum(repo['map_calls'] for repo in repositories)}
+    return {'repositories':repositories,'totals':_board_totals(repositories),'calls':_board_calls(repositories),
+            'calls_parts':_board_parts(repositories),'map_calls':sum(repo['map_calls'] for repo in repositories)}
 
 def _latest_partials(history,rid,pin):
     """Unfinished map-family results of the latest runs on exactly this code and configuration."""
@@ -191,7 +196,7 @@ def unit_board(project,repository='',branch='dev',lang='ko'):
     """Per-unit states for the current code, read from the local index and every saved run. Never calls AI."""
     scope=_scope(project,repository,branch,lang)
     value={'project':project,'branch':branch,'lang':lang,'repository':scope['repository'],'intent':{'task':'full','targets':[],'max_calls':0}}
-    plan=ai_extract.plan(project,branch,lang,scope['repository'],overview=True)
+    plan=ai_extract.plan(project,branch,lang,scope['repository'],overview=True,light=True)
     catalogs=_unit_catalogs(value,plan)
     history=[r for r in _runs() if all(r[k]==scope[k] for k in ('project','lang','branch'))]
     history.sort(key=lambda r:r['created_at'])
@@ -227,8 +232,19 @@ def unit_board(project,repository='',branch='dev',lang='ko'):
         extra,map_calls=_map_rows(catalog,_map_states(catalog,pending,_latest_partials(history,rid,pin),blocked=blocked))
         repositories.append({'repository':rid,'commit':catalog['commit'],'coverage':catalog['coverage'],'overview':overview,'units':rows+extra,'map_calls':map_calls})
     return {'repositories':repositories,'totals':_board_totals(repositories),'calls':_board_calls(repositories),
-            'map_calls':sum(repo['map_calls'] for repo in repositories),
+            'calls_parts':_board_parts(repositories),'map_calls':sum(repo['map_calls'] for repo in repositories),
             'time_limit_seconds':max(MAX_SECONDS,(2*_board_calls(repositories)+1)*TASK_SECONDS)}
+
+def unit_quick(project,repository='',branch='dev',lang='ko'):
+    """The pinned commit and file counts before any unit is calculated, so the board can open at once. Reads git only."""
+    scope=_scope(project,repository,branch,lang)
+    plan=ai_extract.plan(project,branch,lang,scope['repository'],overview=True,light=True)
+    repositories=[]
+    for rid in plan['pins']:
+        conf,_,_,head=ai_extract.context(project,rid,branch)
+        sizes=_tracked(conf['path'],head);reasons=collections.Counter(r for f,z in sizes.items() if (r:=_exclusion(f,z)))
+        repositories.append({'repository':rid,'commit':head,'tracked':len(sizes),'excluded':dict(sorted(reasons.items()))})
+    return {'quick':True,'repositories':repositories}
 
 def unit_result(project,repository,branch,lang,target):
     """One saved unit explanation, flagged when it was made from older code."""
@@ -236,7 +252,7 @@ def unit_result(project,repository,branch,lang,target):
     found=None
     if isinstance(target,str) and target.startswith('task:'):
         # An unfinished map, structure or screen-group result: shown with its evidence, never part of the saved map.
-        plan=ai_extract.plan(project,branch,lang,scope['repository'],overview=True)
+        plan=ai_extract.plan(project,branch,lang,scope['repository'],overview=True,light=True)
         rid=scope['repository'];pin=plan['pins'].get(rid)
         history=[r for r in _runs() if all(r[k]==scope[k] for k in ('project','lang','branch'))]
         entry=_latest_partials(history,rid,pin).get(target[5:]) if pin else None
@@ -247,14 +263,14 @@ def unit_result(project,repository,branch,lang,target):
             for store_name in ('scope_overviews','unit_overviews'):
                 if target in (record.get(store_name,{}).get(scope['repository']) or {}):found=record[store_name][scope['repository']][target]
     if not found:return None
-    plan=ai_extract.plan(project,branch,lang,scope['repository'],overview=True)
+    plan=ai_extract.plan(project,branch,lang,scope['repository'],overview=True,light=True)
     pin=plan['pins'].get(scope['repository'])
     if pin and all(found.get(k)==v for k,v in pin.items()):return found
     if pin and found.get('version')==SCOPED_OVERVIEW_VERSION:
         rid=scope['repository'];contexts={}
         if found.get('resource'):kept=_reuse_scope(found,pin,scope,rid,contexts,False)
         else:
-            catalog=_unit_catalogs({'project':project,'branch':branch},{'pins':{rid:pin}}).get(rid) or {}
+            catalog=_unit_catalogs({'project':project,'branch':branch,'lang':lang},{'pins':{rid:pin}}).get(rid) or {}
             kept=_reuse_unit(found,pin,scope,rid,contexts,next((u for u in catalog.get('units',[]) if u['id']==target),None))
         if kept:return kept
     return {**found,'stale':True}
@@ -402,26 +418,16 @@ def _pinned_index(repo,selected,head):
     """The structure index of the pinned commit, without AI and without writing project data.
 
     A saved index is used when it matches. A legacy project (no saved index) or an older collection
-    is rebuilt from git and cached under .structure-cache, so the next read in another process is free."""
+    is rebuilt from git and cached under .analysis-cache, so the next read in another process is free."""
     import structure_index
     saved=(selected or {}).get('structure_index') or {}
     if saved.get('commit')==head and saved.get('version')==structure_index.VERSION:return saved
-    key=hashlib.sha1(f'{repo}\0{head}\0{structure_index.VERSION}'.encode()).hexdigest()
+    key=mapcore.cache_key(repo,head,structure_index.VERSION,mapcore.code_digest())
     if key in _INDEXES:return _INDEXES[key]
-    folder=Path(mapcore.ROOT)/'.structure-cache'
-    cache=folder/(key+'.json')
-    try:
-        built=json.loads(cache.read_text())
-        if built.get('commit')!=head or built.get('version')!=structure_index.VERSION:built=None
-    except (OSError,ValueError):built=None
-    if built is None:
+    built=mapcore.cache_read('index',key)
+    if not built or built.get('commit')!=head or built.get('version')!=structure_index.VERSION:
         built=structure_index.build(repo,head,excluded=_secret)
-        try:
-            folder.mkdir(parents=True,exist_ok=True,mode=0o700)
-            temp=cache.with_suffix(f'.{os.getpid()}.tmp')
-            temp.write_text(json.dumps(built,separators=(',',':')));os.chmod(temp,0o600);os.replace(temp,cache)
-            for old in sorted(folder.glob('*.json'),key=lambda p:p.stat().st_mtime)[:-INDEX_CACHE_KEEP]:old.unlink(missing_ok=True)
-        except OSError:pass  # the cache only saves time
+        mapcore.cache_write('index',key,built)
     _INDEXES.clear();_INDEXES[key]=built
     return built
 
@@ -438,17 +444,78 @@ def _unit_catalogs(value,plan):
         programs=[{'id':n['id'],'name':n.get('name'),'code':n['code']} for n in nodes if n.get('kind','program')=='program' and n.get('code') and n.get('id')]
         sizes=_tracked(conf['path'],head)
         built=analysis_units.catalog(index,sizes,_exclusion,screens,programs)
-        catalogs[rid]={'commit':head,**built,'map':_map_estimate(sizes,screens)}
+        flag=ai_extract.review_flag(value['project'],rid,value['branch'],selected)
+        catalogs[rid]={'commit':head,**built,'map':_map_estimate(conf['path'],head,selected,sizes,screens,value.get('lang') or 'ko',pin['configuration'],flag)}
     return catalogs
 
-def _map_estimate(sizes,screens):
-    """Upper-ish call estimate of the map, structure and screen-group tasks (they read the whole code in input pieces)."""
-    readable=sum(min(size,MAX_FILE_BYTES) for file,size in sizes.items() if not _exclusion(file,size))
-    names=sum(len(file)+4 for file in sizes)
-    page=MAX_PROMPT_BYTES//2
+SOURCE_ROW_OVERHEAD = 11  # bytes the compact [line,"text"] form adds to each source line
+MAP_USABLE = MAX_PROMPT_BYTES-2*UNIT_BYTES-4096-UNIT_BYTES  # source bytes one batch carries beside the shared protocol (16KB reserve; measured 7KB)
+MAP_FOLLOW_UP = 1.1  # read requests and one evidence retry per batch
+
+def _source_profile(repo,commit,paths=None):
+    """Bytes each exportable file adds to a map batch ({file: serialized bytes}); regular UTF-8 text blobs only.
+    One streamed git read of the pinned commit, so no file is checked out or parsed twice."""
+    entries=[]
+    for entry in _git(repo,'ls-tree','-rz','--full-tree',commit).split(b'\0'):
+        if not entry:continue
+        meta,raw_path=entry.split(b'\t',1);mode,kind,oid=meta.split()
+        if mode not in (b'100644',b'100755') or kind!=b'blob':continue
+        try:file=raw_path.decode('utf-8')
+        except UnicodeError:continue
+        if (paths is None or file in paths) and not _secret(file) and PurePosixPath(file).suffix.lower() not in BINARY_SUFFIXES:entries.append((file,oid))
+    if not entries:return {}
+    process=subprocess.Popen(['git','-C',repo,'cat-file','--batch'],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL)
+    feeder=threading.Thread(target=lambda:(process.stdin.write(b''.join(oid+b'\n' for _,oid in entries)),process.stdin.close()),daemon=True)
+    feeder.start()
+    profile={}
+    try:
+        for file,_ in entries:
+            header=process.stdout.readline().split()
+            if len(header)!=3:continue  # a missing object is not exportable
+            data=process.stdout.read(int(header[2]));process.stdout.read(1)
+            if b'\x00' in data:continue
+            try:data.decode('utf-8')
+            except UnicodeError:continue
+            lines=data.count(b'\n')+(1 if data and not data.endswith(b'\n') else 0)
+            profile[file]=len(data)+lines*SOURCE_ROW_OVERHEAD+data.count(b'"')+data.count(b'\\')+data.count(b'\t')+len(file)+34  # 34: the file wrapper
+    finally:
+        process.stdout.close();process.wait()
+    return profile
+
+def _map_estimate(repo,head,selected,sizes,screens,lang,configuration,flag=None):
+    """Upper bound of the model calls of the map, service structure and screen-group tasks.
+
+    The map reads the whole commit in batches when its saved result cannot be patched, otherwise only the changes
+    since it plus every file its saved items cite. The numbers come from the real file contents at the pin."""
     shown=sum(1 for screen in screens if not screen.get('redirect'))
-    return {'screens':shown,'calls':{'analysis':max(1,-(-readable//page)),'system':max(1,-(-(names+20000)//page)),
-                                     'groups':1+shown//200}}
+    page=MAP_USABLE
+    calls_of=lambda size:max(1,-(-int(size*MAP_FOLLOW_UP)//page))
+    names=sum(len(file)+4 for file in sizes)
+    result={'screens':shown,'mode':'whole','source_bytes':0,'calls':{'groups':1+shown//200}}
+    try:
+        prev=selected or {}
+        mode=ai_extract.map_mode(repo,prev,lang,configuration,head,flag)
+        if mode and mode[0]=='patch':
+            base=prev['commit']
+            changed,deleted,present=ai_extract.changes(repo,base,head)
+            routes,saved_screens,functions=ai_extract.ai_catalog(prev)
+            cited={f for item in routes+saved_screens for f in ai_extract.item_files(item,functions) if f}
+            now=_source_profile(repo,head,set(present)|cited)
+            before=_source_profile(repo,base,changed|set(deleted))
+            size=sum(now.values())+sum(before.values())
+            result.update(mode='patch',source_bytes=size)
+            result['calls']['analysis']=calls_of(size)
+            result['calls']['system']=calls_of(sum(v for f,v in now.items() if f in changed)+sum(before.values())+len(json.dumps(prev.get('screens',[]))) // 8)
+        else:
+            size=sum(_source_profile(repo,head).values())
+            meta=names+20000+len(json.dumps({k:prev.get(k,[]) for k in ('screens','backend_routes','api_functions')},default=str))
+            result.update(source_bytes=size)
+            result['calls']['analysis']=calls_of(size);result['calls']['system']=calls_of(meta)
+    except (RunError,*ai_extract.READ_ERRORS,KeyError,TypeError,ValueError):
+        # Unreadable history: assume the whole commit is read.
+        readable=sum(int(min(size,MAX_FILE_BYTES)*1.4) for file,size in sizes.items() if not _exclusion(file,size))
+        result.update(source_bytes=readable);result['calls'].update(analysis=calls_of(readable),system=calls_of(names+20000))
+    return result
 
 def _unit(value,rid,target):
     for unit in (value.get('units',{}).get(rid) or {}).get('units',[]):
@@ -479,7 +546,7 @@ def _failed_out(value):
 
 def _plan_full(value):
     name,branch,lang,repository=(value[k] for k in ('project','branch','lang','repository'))
-    plan=ai_extract.plan(name,branch,lang,repository,overview=True)
+    plan=ai_extract.plan(name,branch,lang,repository,overview=True,light=True)
     plan['blocked']=[t for t in plan['blocked'] if t['task']=='analysis']
     if 'expected_pins' in value:_check_pins({'pins':value['expected_pins']},plan)
     if value.get('units') is None:value_units=_unit_catalogs(value,plan)
@@ -644,6 +711,7 @@ def prepare(project, branch='dev', lang='ko', repository='', executor='claude', 
 def status(run_id=None, project=None, repository='', branch='dev', lang='ko',view=None,resource=None):
     with locked():
         if view=='units':return unit_board(project,repository,branch,lang)
+        if view=='units_quick':return unit_quick(project,repository,branch,lang)
         if view=='unit':return unit_result(project,repository,branch,lang,resource)
         if view=='progress':return _read_progress(run_id)
         if view=='resource' and (not isinstance(resource,str) or not resource.startswith('/')):raise ValueError('Choose a resource path')
@@ -850,6 +918,12 @@ def export_source(repo, commit, commits=None, cancelled=None, deadline=None, sel
 
 def _request(value,task):
     args=(value['project'],value['branch'],value['lang'],task['repository'])
+    if task['task']=='overview' and (task.get('target') or task.get('pack_targets')) and (value.get('intent') or {}).get('task')=='full':
+        # A unit explanation depends only on the pinned commit and configuration, not on the saved map base:
+        # skip the whole-tree read that the map and first overview need.
+        pin=ai_extract.pin_request(value['project'],value['branch'],task['repository'])
+        return {'commit':pin['commit'],'record_arguments':{'project':value['project'],'repository':task['repository'],'branch':value['branch'],
+                                                          'lang':value['lang'],'commit':pin['commit'],'configuration':pin['record_arguments']['configuration']}}
     if task['task'] in ('analysis','overview'): return ai_extract.request(*args,overview=True)
     if task['task']=='briefing': return briefing.request(value['project'],task['repository'],value['branch'],value['lang'])
     return ai_extract.task_request(value['project'],task['task'],value['branch'],value['lang'],task['repository'],task.get('target',''),overview=True)
@@ -995,15 +1069,25 @@ def _materialize_citations(fragment, programs, context, commit):
             try:visit([program])
             except InvalidClaim:continue  # Optional observations still require a verified quote in _preview.
 
+_REGULAR={}
+
+def _regular_files(repo,commit):
+    """Eligible regular text paths of one pinned commit, read once per process (a commit never changes)."""
+    key=(repo,commit)
+    if key not in _REGULAR:
+        regular=set()
+        for entry in _git(repo,'ls-tree','-rz','--full-tree',commit).split(b'\0'):
+            if not entry:continue
+            meta,raw_file=entry.split(b'\t',1);mode,kind,_=meta.split();file=raw_file.decode('utf-8')
+            if mode in (b'100644',b'100755') and kind==b'blob' and not _secret(file) and PurePosixPath(file).suffix.lower() not in BINARY_SUFFIXES:regular.add(file)
+        _REGULAR.clear();_REGULAR[key]=regular
+    return _REGULAR[key]
+
 def _strict_result(task,data,repo,commit,request=None,raw=None,final=True,context=()):
     """App replies cannot silently lose raw claims in the compatibility parsers."""
     def fail(reason='An analysis claim did not match the task schema'):raise InvalidClaim(reason)
     evidence,cache,rejected=ai_extract.evidence_reader(repo,commit)
-    regular=set()
-    for entry in _git(repo,'ls-tree','-rz','--full-tree',commit).split(b'\0'):
-        if not entry:continue
-        meta,raw_file=entry.split(b'\t',1);mode,kind,_=meta.split();file=raw_file.decode('utf-8')
-        if mode in (b'100644',b'100755') and kind==b'blob' and not _secret(file) and PurePosixPath(file).suffix.lower() not in BINARY_SUFFIXES:regular.add(file)
+    regular=_regular_files(repo,commit)
     for ev in ai_extract.cited(data):
         if not isinstance(ev['file'],str) or ev['file'] not in regular:fail('A citation did not name an eligible tracked file')
         if not evidence(ev):
@@ -2301,7 +2385,7 @@ def main():
     parser.add_argument('command',choices=('prepare','start','status','cancel','retry','worker','providers','active'))
     parser.add_argument('value',nargs='?');parser.add_argument('--project');parser.add_argument('--run-id')
     parser.add_argument('--repository',default='');parser.add_argument('--branch',default='dev');parser.add_argument('--lang',default='ko')
-    parser.add_argument('--view',choices=('progress','catalog','resource','units','unit'));parser.add_argument('--resource')
+    parser.add_argument('--view',choices=('progress','catalog','resource','units','units_quick','unit'));parser.add_argument('--resource')
     parser.add_argument('--intent',type=json.loads);parser.add_argument('--executor',default='claude');parser.add_argument('--expected-account')
     args=parser.parse_args()
     if args.command=='providers': result=providers()

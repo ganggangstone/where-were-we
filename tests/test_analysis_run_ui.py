@@ -116,6 +116,24 @@ await AnalysisRun.check();await flush();
 assert(/class="btn primary" id="startFullAnalysis"/.test($('insp').innerHTML) && count('analysis_run_start')===0,'No model call before the click');
 """)
 
+    def test_board_opens_at_once_with_file_counts_and_the_cost_parts_follow_the_units(self):
+        self.check_js(self.BOARD + r"""
+let release;const gate=new Promise(r=>release=r);
+native=async(command,args)=>{
+ if(command==='analysis_run_status'&&args.view==='units_quick')return {quick:true,repositories:[{repository:'',commit:'abcdef1234567890',tracked:120,excluded:{binary:3,secret:1}}]};
+ if(command==='analysis_run_status'&&args.view==='units'){await gate;return unitBoard({calls:2300,calls_parts:{overview:1,map:1900,units:249,retry:125},time_limit_seconds:3600*40});}
+};
+status=null;await open();await AnalysisRun.check();await flush();
+let html=$('insp').innerHTML;
+assert(html.includes('data-unit-board="loading"') && html.includes('aria-busy="true"') && html.includes('Calculating units. No AI is called.'),'The board is announced while the units are calculated');
+assert(html.includes('Tracked files 120 · excluded 4 · code abcdef12') && !$('startFullAnalysis'),'Quick counts and the pinned code show at once, with no start yet');
+release();await flush();await flush();
+html=$('insp').innerHTML;
+assert(!html.includes('data-unit-board="loading"') && $('startFullAnalysis') && html.includes('up to 2300 calls'),'The units replace the placeholder');
+assert(html.includes('How the call limit is counted') && html.includes('First overview 1 · map and structure 1900 · unit packs 249 · retry allowance 125 = 2300'),'The limit shows what it is made of');
+assert(html.includes('Time cap 40 h'),'Long caps read in hours or days');
+""")
+
     def test_running_board_filters_opens_saved_units_and_cancels(self):
         self.check_js(self.BOARD + r"""
 await open();
@@ -155,7 +173,7 @@ let html=$('insp').innerHTML;
 assert(html.includes('Map') && html.includes('Service structure') && html.includes('Screen groups'),'The three whole-code tasks are units too');
 assert(html.includes('Partial') && html.includes('Input pieces</span> 3/8') === false && html.includes('Input pieces 3/8'),'Partial progress shows how many input pieces are checked');
 assert(html.includes('Unfinished 2') && !html.includes('All saved'),'Unsaved work is never shown as complete');
-assert(html.includes('Map and structure about 4 calls') && html.includes('Screens and programs may be added after the map'),'Cost and the later unit discovery are disclosed before the click');
+assert(html.includes('Map and structure up to 4 calls') && html.includes('Screens and programs may be added after the map'),'Cost and the later unit discovery are disclosed before the click');
 assert(html.includes('11 plain files outside the index included') && html.includes('Generated or lock files'),'Plain files and generated-file exclusions are visible');
 native=(command,args)=>command==='analysis_run_status'&&args.view==='unit'?{task:'analysis',state:'partial',covered:3,total:8,count:3,items:[{kind:'request',name:'GET /items',detail:'list_items',file:'api.py',line:3,quote:'def list_items'},{kind:'screen',name:'Home',detail:'/',file:'ui.ts',line:1,quote:'<home>'}]}:undefined;
 unitHandles['unit-open'].find(b=>b.dataset.unitOpen==='2').onclick();await flush();
@@ -176,7 +194,7 @@ assert($('insp').innerHTML.includes('All saved') && !$('insp').innerHTML.include
         self.check_js(self.MAP_BOARD + r"""
 S.lang='ko';serveMap();status=null;await open();await AnalysisRun.check();await flush();
 const html=$('insp').innerHTML;
-for(const word of ['지도','서비스 구성','화면 묶음','부분 저장','입력 조각 3/8','미완료 2','지도·구성 약 4회','색인 밖 일반 파일 11개 포함','생성·잠금 파일'])assert(html.includes(word),'Korean label '+word);
+for(const word of ['지도','서비스 구성','화면 묶음','부분 저장','입력 조각 3/8','미완료 2','지도·구성 최대 4회','색인 밖 일반 파일 11개 포함','생성·잠금 파일'])assert(html.includes(word),'Korean label '+word);
 assert(!/해요|이에요|예요|할게요/.test(html),'No informal ending');
 status=runRecord('failed',{intent:{task:'full',targets:[],max_calls:6},unit_board:mapBoard(),error:{code:'call_limit',message:'limit'}});
 await AnalysisRun.check();await flush();
@@ -260,7 +278,7 @@ native=(command,args)=>{
 await AnalysisRun.check();assert($('insp').innerHTML.includes('Path groups saved: 2 · Remaining: 1') && $('refreshSavedBatch'),'Compact counts with an on-demand result catalog');
 assert(calls.at(-1).args.view==='progress' && calls.at(-1).args.runId==='run-1','Routine poll only asks for compact progress');
 native=(command,args)=>command==='analysis_run_status'?runRecord('completed',{intent,completed_tasks:3,tasks:0}):undefined;
-await AnalysisRun.check();assert(calls.filter(c=>c.command==='analysis_run_status' && c.args.view!=='units').at(-1).args.view==='catalog','Terminal transition reads the saved catalog');
+await AnalysisRun.check();assert(calls.filter(c=>c.command==='analysis_run_status' && !String(c.args.view).startsWith('units')).at(-1).args.view==='catalog','Terminal transition reads the saved catalog');
 ''')
 
     def test_initial_overview_and_full_analysis_have_distinct_explicit_buttons(self):

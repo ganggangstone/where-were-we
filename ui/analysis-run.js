@@ -410,7 +410,7 @@ const AnalysisRun = (() => {
   const STATE_ORDER=['working','partial','saved','failed','stale','pending','unavailable'];
   const REASONS={secret:['비밀 파일','Credential files'],binary:['이미지·바이너리','Binary files'],large:['300KB 초과','Over 300KB'],generated:['생성·잠금 파일','Generated or lock files']};
   const SAMPLE_FILES=4;
-  let board=null,boardScope='',boardError=null,unitFilter='all',unitLimit=24,openedUnit=null,loadingBoard=false,unitRows=[];
+  let board=null,boardQuick=null,boardScope='',boardError=null,unitFilter='all',unitLimit=24,openedUnit=null,loadingBoard=false,unitRows=[];
   const unitDetails=new Map();
   const beta=()=>`<span class="beta">${text('베타','Beta')}</span>`;
   const boardScopeKey=()=>JSON.stringify([scope(),S.loadToken]);
@@ -420,13 +420,18 @@ const AnalysisRun = (() => {
   async function loadBoard(token) {
     const requested=boardScopeKey();
     if(!S.project || loadingBoard)return;
-    loadingBoard=true;
+    loadingBoard=true;boardQuick=null;
+    // The pinned commit and file counts arrive at once; the units follow as soon as they are calculated.
+    if(!liveBoard())paint();
+    void invoke('analysis_run_status',{scope:scope(),view:'units_quick'}).then(decode).then(value=>{
+      if(current(token) && loadingBoard && Array.isArray(value?.repositories)){boardQuick=value;if(!liveBoard())paint();}
+    }).catch(()=>{});
     try {
       const value=decode(await invoke('analysis_run_status',{scope:scope(),view:'units'}));
       if(!current(token))return;
       boardScope=requested;board=Array.isArray(value?.repositories)?value:null;boardError=null;unitDetails.clear();
     } catch(value) { if(current(token)){boardScope=requested;board=null;boardError=value;} }
-    finally { loadingBoard=false; }
+    finally { loadingBoard=false;boardQuick=null; }
     if(current(token))paint();
   }
   function unitSummary(b) {
@@ -472,6 +477,11 @@ const AnalysisRun = (() => {
   function boardHtml() {
     const b=liveBoard(),live=fullRun() && active();
     if(!b) {
+      if(!boardError && loadingBoard){
+        const quick=boardQuick?.repositories || [],files=quick.reduce((n,r)=>n+r.tracked,0),skipped=quick.reduce((n,r)=>n+Object.values(r.excluded || {}).reduce((a,c)=>a+c,0),0);
+        const known=quick.length?` ${text('추적 파일 '+files+'개 · 제외 '+skipped+'개 · 코드 '+quick[0].commit.slice(0,8),'Tracked files '+files+' · excluded '+skipped+' · code '+quick[0].commit.slice(0,8))}`:'';
+        return `<section class="sect unit-board" data-unit-board="loading" aria-busy="true"><h3>${text('전체 코드 분석','Full code analysis')} ${beta()}</h3><p class="s" role="status">${text('단위를 계산하는 중입니다. AI는 부르지 않습니다.','Calculating units. No AI is called.')}${esc(known)}</p></section>`;
+      }
       if(!boardError)return '';
       const refresh=/\bRefresh\b/.test(String(boardError?.message || boardError));
       return `<section class="sect unit-board" data-unit-board="error"><h3>${text('전체 코드 분석','Full code analysis')} ${beta()}</h3><p class="s">${refresh?text('이 코드를 한 번 새로고침하면 단위가 계산됩니다. 새로고침은 AI를 부르지 않습니다.','Units are calculated after one refresh of this code. Refreshing does not call AI.'):text('단위를 읽지 못했습니다.','Could not read the units.')}</p>${refresh?`<button class="btn primary" type="button" id="refreshForUnits">${text('새로고침하고 단위 계산','Refresh and calculate units')}</button>`:''}</section>`;
@@ -495,13 +505,15 @@ const AnalysisRun = (() => {
     const usableNow=usable(),canStart=usableNow && !providerBusy && !busy && !active();
     const finished=fullRun() && ['failed','cancelled'].includes(run.state);
     const calls=b.calls,minutes=Math.max(1,Math.round((b.time_limit_seconds || 3600)/60));
+    const span=m=>m<180?m+text('분',' min'):m<2880?Math.round(m/60)+text('시간',' h'):Math.round(m/1440)+text('일',' days');
+    const parts=b.calls_parts,partsHtml=parts?`<details class="unit-calls"><summary>${text('호출 상한 계산','How the call limit is counted')}</summary><p class="s">${text('첫 개요 '+parts.overview+' · 지도·구성 '+parts.map+' · 단위 묶음 '+parts.units+' · 재시도 여유 '+parts.retry+' = '+calls+'회','First overview '+parts.overview+' · map and structure '+parts.map+' · unit packs '+parts.units+' · retry allowance '+parts.retry+' = '+calls)}</p></details>`:'';
     const label=(t.saved?text('이어서 분석','Continue'):text('분석 시작','Start'))+' · '+text('호출 최대 '+calls+'회','up to '+calls+' calls');
     const unfinished=['working','partial','failed','stale','pending'].reduce((n,k)=>n+(t[k] || 0),0);
     const status=unfinished?`<span class="chip warn">${text('미완료','Unfinished')} ${unfinished}</span>`:`<span class="chip ok">${text('전체 저장됨','All saved')}${t.unavailable?' · '+text('건너뜀','skipped')+' '+t.unavailable:''}</span>`;
     const mapPending=unitRows.some(row=>MAP_KINDS.includes(row.kind) && ['pending','stale','partial','working'].includes(row.state));
-    const mapChips=(b.map_calls?`<span class="chip" title="${text('입력 조각 수로 추정한 값입니다','Estimated from the number of input pieces')}">${text('지도·구성 약','Map and structure about')} ${b.map_calls}${text('회',' calls')}</span>`:'')+(mapPending?`<span class="chip">${text('지도 뒤 화면·프로그램 단위 추가 가능','Screens and programs may be added after the map')}</span>`:'');
+    const mapChips=(b.map_calls?`<span class="chip" title="${text('저장된 지도가 없거나 오래되면 모든 텍스트 파일을 조각으로 읽는 값입니다. 저장된 지도가 최신에 가까우면 바뀐 파일만 읽습니다.','Counted from the real file contents: the whole commit when the saved map cannot be patched, otherwise only the changes.')}">${text('지도·구성 최대','Map and structure up to')} ${b.map_calls}${text('회',' calls')}</span>`:'')+(mapPending?`<span class="chip">${text('지도 뒤 화면·프로그램 단위 추가 가능','Screens and programs may be added after the map')}</span>`:'');
     const start=live?`<div class="unit-run" role="status" aria-live="polite">${status}<span class="chip">${text('AI 호출','AI calls')} ${run.input_stats?.calls || 0} · ${text('최대','max')} ${run.unit_estimate?.calls ?? calls}</span><span class="chip">${text('경과','Elapsed')} ${Math.max(0,Math.round((Date.now()-Date.parse(run.started_at || run.created_at))/60000)) || 0}${text('분',' min')}</span><button class="btn" id="cancelFullAnalysis" ${busy || run.cancel_requested?'disabled':''}>${text('취소','Cancel')}</button></div>`
-      : calls>0 ? `<div class="unit-start"><span class="chips">${status}<span class="chip">${text('AI 호출 최대','AI calls up to')} ${calls}</span>${mapChips}<span class="chip">${text('선택한 코드가 Claude로 전송','Selected code is sent to Claude')}</span><span class="chip">${text('구독 한도 적용','Subscription limit applies')}</span><span class="chip">${text('시간 상한','Time cap')} ${minutes}${text('분',' min')}</span></span><button class="btn primary" id="startFullAnalysis" ${canStart?'':'disabled'}>${label}</button>${usableNow?'':`<button class="btn quiet" id="checkFullAccount">${text('계정 확인','Check account')}</button>`}</div>`
+      : calls>0 ? `<div class="unit-start"><span class="chips">${status}<span class="chip">${text('AI 호출 최대','AI calls up to')} ${calls}</span>${mapChips}<span class="chip">${text('선택한 코드가 Claude로 전송','Selected code is sent to Claude')}</span><span class="chip">${text('구독 한도 적용','Subscription limit applies')}</span><span class="chip">${text('시간 상한','Time cap')} ${span(minutes)}</span></span><button class="btn primary" id="startFullAnalysis" ${canStart?'':'disabled'}>${label}</button>${usableNow?'':`<button class="btn quiet" id="checkFullAccount">${text('계정 확인','Check account')}</button>`}${partsHtml}</div>`
       : `<p class="s">${status}</p>`;
     const alert=finished?`<p role="alert">${esc(message(run.error || {code:'CANCELLED'}))}</p>`:'';
     return `<section class="sect unit-board" data-unit-board><h3>${text('전체 코드 분석','Full code analysis')} ${beta()}<span class="unit-count">${t.saved}/${total}</span></h3>${start}${alert}${bar}${filters}<div class="unit-map" role="group" aria-label="${text('단위 구조도','Unit map')}">${lanes}</div>${unitSummary(b)}<ul class="unit-cards">${shown.map(([row,i])=>unitCard(row,i,multi)).join('')}</ul>${hidden>0?`<button class="btn quiet" type="button" id="unitMore">${text('더 보기','Show more')} (${hidden})</button>`:''}</section>`;

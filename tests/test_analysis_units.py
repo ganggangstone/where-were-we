@@ -160,7 +160,7 @@ class FullRun(unittest.TestCase):
         self.assertGreater(board['calls'],0);self.assertEqual(board['totals']['units'],board['totals']['pending'])
         self.assertIn('route:/orders',{row[0] for row in board['repositories'][0]['units']})
         self.assertEqual(self.tree(home),before)  # the saved project data is byte-identical
-        cache=list((Path(analysis_run.mapcore.ROOT)/'.structure-cache').glob('*.json'))
+        cache=list((Path(analysis_run.mapcore.ROOT)/'.analysis-cache').glob('index-*.json'))
         self.assertEqual(len(cache),1)
         # Another process reads the cache instead of rebuilding.
         analysis_run._INDEXES.clear()
@@ -192,6 +192,60 @@ class FullRun(unittest.TestCase):
         self.assertNotIn('resource',calls[0]);self.assertNotIn('resources',calls[0])  # first overview, then units
         states={row[0]:row[4] for row in analysis_run.unit_board('legacy','','dev','en')['repositories'][0]['units']}
         self.assertTrue(all(state=='saved' for state in states.values()),states)
+
+    def test_board_reads_pins_without_the_whole_tree_and_reuses_cached_reads_across_processes(self):
+        import ai_extract
+        legacy=self.legacy();del legacy
+        ai_extract._BASIC.clear();analysis_run._INDEXES.clear()
+        original=ai_extract.basic_catalog
+        ai_extract.basic_catalog=lambda *a,**k:self.fail('the board must not read the whole tree for its pins')
+        self.addCleanup(setattr,ai_extract,'basic_catalog',original)
+        board=analysis_run.unit_board('legacy','','dev','en')
+        self.assertGreater(board['calls'],0)
+        quick=analysis_run.unit_quick('legacy','','dev','en')
+        self.assertTrue(quick['quick']);row=quick['repositories'][0]
+        self.assertEqual(row['commit'],self.git('rev-parse','HEAD').strip());self.assertEqual(row['excluded'].get('secret'),1);self.assertGreater(row['tracked'],10)
+        # A disk-cached collector result serves another process without running the collector again.
+        ai_extract.basic_catalog=original;ai_extract._BASIC.clear()
+        repo,_,_,head=ai_extract.context('legacy','','dev')
+        first=ai_extract.basic_catalog(repo['path'],head,repo['layout'])
+        ai_extract._BASIC.clear()
+        real=ai_extract.subprocess.run
+        ai_extract.subprocess.run=lambda *a,**k:self.fail('collector ran again')
+        self.addCleanup(setattr,ai_extract.subprocess,'run',real)
+        self.assertEqual(ai_extract.basic_catalog(repo['path'],head,repo['layout'])['screens'],first['screens'])
+
+    def test_source_profile_matches_what_a_map_batch_really_carries(self):
+        repo=str(self.repo);head=self.git('rev-parse','HEAD').strip()
+        profile=analysis_run._source_profile(repo,head)
+        self.assertNotIn('.env',profile);self.assertNotIn('logo.png',profile)  # credentials and binaries never reach a batch
+        snapshots=analysis_run.export_source(repo,head)
+        header,units=analysis_run._units({'snapshots':snapshots})
+        compact={**header,'source_line_format':'numbered_lines entries are [original one-based line, literal text, optional original character offset].'}
+        empty=len(analysis_run._encoded(analysis_run._batch_payload(compact,[],'a'*64)).encode())
+        real=len(analysis_run._encoded(analysis_run._batch_payload(compact,units,'a'*64)).encode())-empty
+        estimate=sum(profile.values())
+        self.assertLessEqual(estimate,real*1.15);self.assertGreaterEqual(estimate,real*0.7)  # tiny files carry more wrapper bytes; on a 14.8k-file repo the estimate was 3% above the real 101.7MB
+
+    def test_map_estimate_follows_the_saved_map_whole_commit_first_then_only_the_changes(self):
+        self.large_map()
+        whole=self.board()
+        done=analysis_run.run(self.prepare(intent={**self.intent(whole),'max_calls':whole['calls']+60})['id'],self.executor([]))
+        self.assertEqual(done['state'],'completed',done.get('error'))
+        (self.repo/'lib'/'m0.py').write_text('def lib_0():\n    return 100\n');self.git('add','-A');self.git('commit','-qm','Small change')
+        analysis_run._INDEXES.clear()
+        patched=self.board()
+        self.assertEqual(patched['repositories'][0]['commit'],self.git('rev-parse','HEAD').strip())
+        self.assertGreater(whole['map_calls'],3)  # the 6500-line padding file alone fills several batches
+        self.assertLess(patched['map_calls'],whole['map_calls'])  # only the changes and the files the saved map cites are read again
+        repo,raw,_,head=analysis_run.ai_extract.context('demo','service','dev')
+        mode=analysis_run.ai_extract.map_mode(repo['path'],raw['dev'],'en',analysis_run.store.fingerprint(repo),head)
+        self.assertEqual(mode[0],'patch')
+
+    def test_call_limit_parts_add_up_to_the_confirmed_cap(self):
+        board=self.board();parts=board['calls_parts']
+        self.assertEqual(sum(parts.values()),board['calls']);self.assertEqual(parts['retry'],-(-parts['units']//2))
+        self.assertEqual(parts['map'],board['map_calls'])
 
     def test_cancel_keeps_saved_units_and_retry_only_asks_for_the_rest(self):
         job=self.prepare(intent=self.intent());calls=[]
@@ -259,8 +313,11 @@ class FullRun(unittest.TestCase):
         self.assertIsNone(analysis_run.unit_result('demo','service','dev','en','task:analysis'))
 
     def test_call_limit_is_enforced_and_never_reported_as_complete(self):
-        self.large_map();board=self.board()
-        job=self.prepare(intent=self.intent(board));calls=[]
+        self.large_map()
+        from unittest.mock import patch
+        with patch.object(analysis_run,'MAP_USABLE',10**9):  # an estimate far below what the batches really need
+            board=self.board();job=self.prepare(intent=self.intent(board))
+        calls=[]
         done=analysis_run.run(job['id'],self.executor(calls))
         self.assertEqual(done['state'],'failed');self.assertEqual(done['error']['code'],'call_limit')
         self.assertEqual(len(calls),board['calls'])  # exactly the confirmed maximum was spent
