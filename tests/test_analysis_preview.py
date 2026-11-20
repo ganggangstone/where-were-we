@@ -513,19 +513,20 @@ def users(): pass
             self.assertIn(path,overview['items'][0]['quote'])
             self.assertEqual(overview['connections'][0]['id'],1)
 
-    def test_overview_additional_refs_are_unique_and_local_to_the_packet(self):
+    def test_overview_additional_refs_are_local_to_the_packet_and_trimmed(self):
         pin=self.git('rev-parse','HEAD').strip()
-        packet,finish=analysis_run._quick_overview(str(self.repo),{'commit':pin},'en',None,None,None,{},ref_offset=100)
-        refs=[r['ref'] for s in packet['sources'] for r in s['lines']]
-        primary,secondary=refs[:2]
-        def answer(extra):
-            return {'items':[{'name':'Component','description':'A grounded description.',
-                              'ref':primary,'evidence_refs':extra}]}
-        for extra in ([1],[False],[primary],[secondary,secondary],refs[:4],None):
-            with self.subTest(extra=extra),self.assertRaises(analysis_run.InvalidClaim):
-                finish(answer(extra))
-        result=finish(answer([secondary]))
-        evidence,=result['items'][0]['evidence']
+        def run(pick):
+            packet,finish=analysis_run._quick_overview(str(self.repo),{'commit':pin},'en',None,None,None,{},ref_offset=100)
+            refs=[r['ref'] for s in packet['sources'] for r in s['lines']]
+            extra=pick(refs)
+            return finish({'items':[{'name':'Component','description':'A grounded description.',
+                                     'ref':refs[0],'evidence_refs':extra}]})['items'][0]
+        for pick in (lambda r:[1],lambda r:[False],lambda r:None):
+            with self.assertRaises(analysis_run.InvalidClaim):run(pick)
+        # Redundant or surplus citations of real lines are trimmed, not fatal.
+        for pick,count in ((lambda r:[r[0]],0),(lambda r:[r[1],r[1]],1),(lambda r:r[:5],3),(lambda r:[r[1],r[0],r[1]],1)):
+            self.assertEqual(len(run(pick).get('evidence',[])),count)
+        evidence,=run(lambda r:[r[1]])['evidence']
         original=self.git('show',pin+':'+evidence['file']).splitlines()
         self.assertIn(evidence['quote'],original[evidence['line']-1])
 
