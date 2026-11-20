@@ -6,14 +6,14 @@ import AppKit
 let states = ["", "<div class=sect><h2>x</h2></div>", "<div class=hint>pick</div>", "", "<div class=sect><h2>y</h2></div>"]
 let measure = "(()=>{const r=document.getElementById('insp').getBoundingClientRect(),m=document.getElementById('map').getBoundingClientRect();return JSON.stringify({map_w:Math.round(m.width),insp_x:Math.round(r.x),insp_y:Math.round(r.y),insp_w:Math.round(r.width)})})()"
 
+// Detached view: no window is shown, the app never activates, and the shared desktop and pointer stay untouched.
+NSApplication.shared.setActivationPolicy(.prohibited)
+
 class Probe: NSObject, WKNavigationDelegate {
   var web: WKWebView!
   var index = 0
   func start() {
     web = WKWebView(frame: NSRect(x: 0, y: 0, width: 1446, height: 870))
-    let window = NSWindow(contentRect: web.frame, styleMask: [.titled], backing: .buffered, defer: false)
-    window.contentView = web
-    window.orderFrontRegardless()
     web.navigationDelegate = self
     web.loadFileURL(URL(fileURLWithPath: CommandLine.arguments[1]), allowingReadAccessTo: URL(fileURLWithPath: "/"))
   }

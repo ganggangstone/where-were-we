@@ -109,6 +109,7 @@
   --size-inspector:var(--app-inspector-width); --size-column:var(--app-column-width); --size-node:var(--app-node-width); --size-search:var(--app-search-width); --size-status-max:var(--app-status-max);
   --size-dot:var(--app-dot); --size-badge:var(--app-badge); --size-bar:var(--app-bar); --size-bar-min:var(--app-bar-min); --size-bar-inline:var(--app-bar-inline); --size-desc-min:var(--app-desc-min);
   --size-wire:var(--app-focus-width);
+  --size-hairline:var(--app-hairline-width); --size-flow:var(--app-flow-width);
   --lane-indent-1:var(--app-lane-indent-1); --lane-indent-2:var(--app-lane-indent-2); --lane-indent-3:var(--app-lane-indent-3);
   --opacity-dim:var(--app-opacity-dim); --opacity-off:var(--app-opacity-off); --opacity-disabled:var(--app-opacity-disabled);
 }

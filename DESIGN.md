@@ -299,6 +299,7 @@ app:
   column-width: 216px
   node-width: 184px
   search-width: 240px
+  flow-width: 1060px
   status-max: 36vw
   dot: 8px
   badge: 20px
