@@ -36,7 +36,7 @@ try{
   assert(!text.includes('legacy'),'Internal legacy label must not be displayed');
   const limit=tr('일부 자료 누락 가능');assert(text.split(limit).length-1===2,'One limit warning per code connection, not per collection part');
   assert(text.includes('Lumen')&&text.includes('Worker'),'Connection display names must remain distinct');
-  assert(text.includes(tr('수집에 실패했습니다. 다시 수집해 주세요.')),'An actionable collection failure remains visible');
+  assert(text.includes(tr('수집 실패 · 다시 수집')),'An actionable collection failure remains visible');
   const rule=tr('같은 문제의 PR은 묶고, 다른 문제를 푼 PR은 나눠 설명합니다.');
   assert(!text.includes(rule),'Method explanation should be collapsed');
   assert(!pane.textContent.includes(rule),'Repeated method explanations are removed, not moved into another fold');
@@ -47,7 +47,7 @@ try{
   card.remaining={text:'Fictional unresolved fact',unknown:true,evidence:[]};
   S.briefings.dev[lang]={state:'saved',warnings,result:{cards:[card],pr_count:1,branch:'dev',input:{repositories:[{id:'worker',since:'2026-10-01T00:00:00Z',at:'2026-10-21T00:00:00Z',refs:{dev:'feature/work'},commits:{from:'aaaa1111',to:'bbbb2222'}}]},unknown:[]}};
   pane.innerHTML=briefingPanel();text=visibleText(pane);
-  assert(text.includes(tr('확인이 필요한 내용')+' 1'),'Unknown claims retain a visible count');
+  assert(text.includes(tr('미확인')+' 1'),'Unknown claims retain a visible count');
   const extra=pane.querySelector('.change-details');assert(extra&&!extra.open&&extra.textContent.includes('Fictional unresolved fact'),'Extra claims retained behind one disclosure');
   assert(!pane.querySelector('details details'),'No nested disclosures');assert(pane.textContent.includes('Independent fictional term evidence'),'Term evidence retained in the single detail area');
   assert(pane.querySelector('.section-heading .heading-actions #requestBriefing'),'Primary action stays beside the heading');
@@ -64,17 +64,17 @@ try{
   text=visibleText(pane);const visibleButtons=()=>[...pane.querySelectorAll('button')].filter(b=>b.checkVisibility());
   assert(visibleButtons().filter(b=>b.classList.contains('primary')).map(b=>b.id).join()==='cpAgent'&&text.includes(tr('요청 복사')),'One primary copy action');
   assert(!pane.querySelector('.request-steps')&&!/[123]\. /.test(text),'No numbered step cards');
-  assert(text.split(tr('작업하던 AI 채팅에 요청을 붙여 넣으세요.')).length===2,'Paste guidance appears once');
+  assert(!pane.querySelector('.request-flow'),'The flow is replaced by request status after selection');
   assert(!visibleButtons().some(b=>b.dataset.analysisTask),'Other analyses are collapsed after a request is prepared');
   assert(visibleButtons().includes($('checkAnalysisResults'))&&!$('checkAnalysisResults').classList.contains('primary'),'Result refresh is visible and secondary before copying');
   assert(!text.includes(tr('결과만 읽습니다. 새로고침이 아니며 바뀐 것과 비교 시작점은 유지됩니다.')),'Repeated policy text is collapsed');assert(!pane.querySelector('details details'),'Analysis help does not nest disclosures');
-  S.analysisRequest.copied=true;renderAgentPrompt();text=visibleText(pane);assert(text.includes(tr('복사했습니다. 작업하던 AI 채팅에 붙여 넣고, AI가 끝나면 앱으로 돌아오세요.'))&&!/분석 중|Analyzing/.test(text),'After copy it asks to paste and return without claiming the AI runs');
+  S.analysisRequest.copied=true;renderAgentPrompt();text=visibleText(pane);assert(text.includes(tr('요청 복사됨 · AI 채팅에 붙여넣기'))&&!/분석 중|Analyzing/.test(text),'After copy it asks to paste and return without claiming the AI runs');
   S.analysisRequest.state='saved';renderAgentPrompt();assert(visibleButtons().filter(b=>b.classList.contains('primary')).map(b=>b.id).join()==='viewAnalysisResults'&&$('cpAgent')&&!$('cpAgent').classList.contains('primary'),'Saved results become the primary action; copy stays secondary');
   S.analysisRequest={state:'error',error:'synthetic read failure',handoff:'SYNTHETIC RAW REQUEST'};renderAgentPrompt();
   assert(visibleButtons().filter(b=>b.classList.contains('primary')).map(b=>b.id).join()==='checkAnalysisResults'&&$('checkAnalysisResults').onclick===checkAnalysisResults,'A failed read has one primary retry that only reads results');
   assert(!visibleButtons().some(b=>b.dataset.analysisTask)&&!visibleText(pane).includes('SYNTHETIC RAW REQUEST')&&![...pane.querySelectorAll('details')].some(d=>d.open),'Raw request and other analyses stay collapsed on error');
   assert($('cpAgent')&&!$('cpAgent').classList.contains('primary')&&pane.querySelectorAll('#checkAnalysisResults').length===1,'Copy stays secondary and IDs are unique');
-  S.analysisRequest=null;renderAgentPrompt();assert(visibleButtons().some(b=>b.dataset.analysisTask==='analysis_plan'&&b.classList.contains('primary')),'Without a request the first action is visible');
+  S.analysisRequest=null;renderAgentPrompt();assert(visibleButtons().some(b=>b.dataset.analysisTask==='analysis_plan'&&b.classList.contains('primary'))&&pane.querySelector('.request-flow'),'Without a request, the primary action and copy flow are visible');
   renderSettings();assert(document.getElementById($('settings-dialog').getAttribute('aria-labelledby')),'Settings dialog keeps an accessible title');assert(!visibleText($('settings-dialog')).includes(tr('각 레포의 Git 작성자 이메일로 커밋을 찾습니다.')),'Settings implementation detail is collapsed');assert($('sinceTime')&&$('saveSt'),'Comparison settings remain editable');
   editProject(true);assert(!visibleText($('project-dialog')).includes(tr('서비스 하나에 웹 화면·서버·작업 프로그램의 코드를 함께 연결하세요. 코드가 나뉘어 있어도 됩니다.')),'Repeated project tutorial is collapsed');assert($('saveProject')&&$('addRepository'),'Registration actions remain available');$('project-dialog').close();
   S.agentPurpose='connection';S.connectionDiagnostic={feature:'detail',challenge:'synthetic',fresh_server:{state:'ready'},registration:{state:'not_inspected'},connection:{state:'not_verified'},app:{app_version:'test',python:'/synthetic/python3',server:'/synthetic/mcp_server.py'},handoff:'Synthetic repair'};

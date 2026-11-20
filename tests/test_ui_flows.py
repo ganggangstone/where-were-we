@@ -271,7 +271,7 @@ class Guide(unittest.TestCase):
  assert(window.calls.filter(c=>c.command==='refresh').length===1 && !$('guideRefresh') && $('guideAnalysis') && !$('guideFinish'),'One explicit refresh makes the basic map ready, not the first analysis');
  $('guideAnalysis').click();await wait();
  assert(!$('guide').open && !window.calls.some(c=>c.command==='analysis_request'),'Analysis opens the request panel without running');
- assert($('insp').textContent.includes(tr('AI로 자세한 지도 만들기')),'The existing analysis panel is shown');
+ assert($('insp').textContent.includes(tr('자세한 지도')),'The existing analysis panel is shown');
 """)
 
     def test_copy_step_explains_one_request_and_ai_cost_before_copying(self):
@@ -722,8 +722,8 @@ class Flows(unittest.TestCase):
  assert(S.project==='lumen-web' && window.savedProjects.includes('lumen-web'),'An empty service name falls back to the first code name: '+S.project);
  assert($('manageRepositories').textContent===tr('코드 추가·수정'),'The code bar button says add or edit code');
  $('manageRepositories').click();assert(d.querySelector('h2').textContent===tr('살펴보는 코드') && !d.textContent.includes(tr('기본값: 첫 코드 이름')),'Editing names the explored code without the default hint');d.close();
- assert($('analyzeMap').textContent.startsWith(tr('AI로 자세한 지도 만들기')),'The AI button says what the AI makes: '+$('analyzeMap').textContent);
- $('analyzeMap').click();assert(pane().includes(tr('AI로 자세한 지도 만들기')) && pane().includes(tr('AI 채팅에 붙여 넣어 실행합니다.')),'The panel keeps the explicit handoff');
+ assert($('analyzeMap').textContent.startsWith(tr('AI 지도')),'The AI button says what the AI makes: '+$('analyzeMap').textContent);
+ $('analyzeMap').click();assert(pane().includes(tr('자세한 지도')) && pane().querySelector('.request-flow')?.textContent.includes(tr('AI 채팅')),'The panel shows the copy-to-chat flow');
 ''',query='&empty=1')
 
     def test_dictionary_has_no_duplicate_interface_keys(self):
@@ -895,7 +895,7 @@ class Flows(unittest.TestCase):
  assert(!calls.some(c=>c.command==='refresh'),'Checking results never refreshes');
  S.view='sys';render();$('remakeSys').click();await wait();
  document.querySelector('[data-analysis-task="analysis_plan"]').click();await wait();
- assert(pane().includes(tr('모든 분석 결과가 최신입니다. 새로 요청할 것이 없습니다.')) && !$('cpAgent'),'Nothing to do reports up to date without a copy step');
+ assert(pane().includes(tr('최신 결과')) && !$('cpAgent'),'Nothing to do reports up to date without a copy step');
  $('analysisTarget').value='*';$('analysisTarget').dispatchEvent(new Event('change'));
  document.querySelector('[data-analysis-task="analysis_plan"]').click();await wait();
  assert(calls.filter(c=>c.command==='analysis_plan').every(c=>c.args.repository!=='*'),'The advanced selector never sends a wildcard to the plan');
@@ -1392,7 +1392,7 @@ class AutoRead(unittest.TestCase):
  assert($('cpAgent').compareDocumentPosition($('automaticAnalysis')) & Node.DOCUMENT_POSITION_FOLLOWING,'Existing AI request comes before automatic execution');
  await back();
  assert(S.analysisRequest.state==='saved' && reads()===n+1,'Focus read the saved result: '+S.analysisRequest.state);
- assert(pane().includes(tr('새 결과가 저장된 것을 확인했습니다.')) && $('viewAnalysisResults'),'The panel shows the saved state and the result button');
+ assert(pane().includes(tr('결과 저장됨')) && $('viewAnalysisResults'),'The panel shows the saved state and the result button');
  assert($('checkAnalysisResults'),'The manual check stays as a recovery path');
  await back();assert(reads()===n+1,'A saved request is not read again');
  document.dispatchEvent(new Event('visibilitychange'));await wait(60);assert(reads()===n+1,'Nor on visibility');
