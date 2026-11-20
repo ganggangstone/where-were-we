@@ -106,6 +106,16 @@ const intent=calls.find(c=>c.command==='analysis_run_start').args.scope.intent;
 assert(intent.task==='full' && intent.max_calls===3,'The confirmed call cap is sent with the request');
 """)
 
+    def test_full_analysis_is_the_main_action_and_the_overview_button_is_secondary(self):
+        self.check_js(self.BOARD + r"""
+serve();status=null;await open();await AnalysisRun.check();await flush();
+let html=$('insp').innerHTML;
+assert(/class="btn primary" id="startFullAnalysis"/.test(html),'Full analysis is the primary button');
+assert(/class="btn quiet" id="startAppAnalysis"/.test(html) && html.includes('Create initial overview'),'The initial overview stays available as a secondary button');
+await AnalysisRun.check();await flush();
+assert(/class="btn primary" id="startFullAnalysis"/.test($('insp').innerHTML) && count('analysis_run_start')===0,'No model call before the click');
+""")
+
     def test_running_board_filters_opens_saved_units_and_cancels(self):
         self.check_js(self.BOARD + r"""
 await open();
@@ -179,7 +189,11 @@ status=null;await open();await AnalysisRun.check();await flush();
 assert(!$('insp').innerHTML.includes('unit-board'),'A response that is not a board renders nothing');
 native=(command,args)=>{if(command==='analysis_run_status'&&args.view==='units')throw Error('Refresh the local structure before analyzing every unit');};
 S.loadToken++;AnalysisRun.syncScope();await open();await AnalysisRun.check();await flush();
-assert($('insp').innerHTML.includes('Units are calculated after a refresh') && !$('startFullAnalysis'),'No start before the structure exists');
+assert($('insp').innerHTML.includes('Units are calculated after one refresh') && $('insp').innerHTML.includes('does not call AI') && !$('startFullAnalysis'),'No start before the structure exists');
+assert($('refreshForUnits') && $('insp').innerHTML.includes('Refresh and calculate units'),'A plain refresh action is offered');
+let refreshed=0;elements.refresh={click(){refreshed++;}};
+AnalysisRun.bind();$('refreshForUnits').onclick();assert(refreshed===1,'The action presses the normal refresh');
+assert(!calls.some(c=>['analysis_run_start','analysis_request'].includes(c.command)),'Refreshing never starts AI work');
 """)
 
     def test_korean_board_uses_plain_labels_without_banned_endings(self):

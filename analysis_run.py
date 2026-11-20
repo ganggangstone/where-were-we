@@ -37,6 +37,7 @@ UNIT_BYTES = 16 * 1024
 MAX_READ_ROUNDS = 32
 RESOURCE_PACK_SIZE = 4
 UNIT_ATTEMPTS = 2
+INDEX_CACHE_KEEP = 6
 MAP_TASKS = ('analysis','system','groups')
 PARTIAL_ITEMS = 60
 SIMPLE_RESOURCE_PACK_SIZE = 8
@@ -395,16 +396,43 @@ def _tracked(repo,commit):
         except (UnicodeError,ValueError):continue
     return files
 
+_INDEXES={}
+
+def _pinned_index(repo,selected,head):
+    """The structure index of the pinned commit, without AI and without writing project data.
+
+    A saved index is used when it matches. A legacy project (no saved index) or an older collection
+    is rebuilt from git and cached under .structure-cache, so the next read in another process is free."""
+    import structure_index
+    saved=(selected or {}).get('structure_index') or {}
+    if saved.get('commit')==head and saved.get('version')==structure_index.VERSION:return saved
+    key=hashlib.sha1(f'{repo}\0{head}\0{structure_index.VERSION}'.encode()).hexdigest()
+    if key in _INDEXES:return _INDEXES[key]
+    folder=Path(mapcore.ROOT)/'.structure-cache'
+    cache=folder/(key+'.json')
+    try:
+        built=json.loads(cache.read_text())
+        if built.get('commit')!=head or built.get('version')!=structure_index.VERSION:built=None
+    except (OSError,ValueError):built=None
+    if built is None:
+        built=structure_index.build(repo,head,excluded=_secret)
+        try:
+            folder.mkdir(parents=True,exist_ok=True,mode=0o700)
+            temp=cache.with_suffix(f'.{os.getpid()}.tmp')
+            temp.write_text(json.dumps(built,separators=(',',':')));os.chmod(temp,0o600);os.replace(temp,cache)
+            for old in sorted(folder.glob('*.json'),key=lambda p:p.stat().st_mtime)[:-INDEX_CACHE_KEEP]:old.unlink(missing_ok=True)
+        except OSError:pass  # the cache only saves time
+    _INDEXES.clear();_INDEXES[key]=built
+    return built
+
 def _unit_catalogs(value,plan):
     """Freeze the AI-free unit catalog of every pinned repository for this run."""
-    import structure_index
     catalogs={}
     for rid,pin in plan['pins'].items():
         conf,raw,_,head=ai_extract.context(value['project'],rid,value['branch'])
         selected=raw[value['branch']]
-        index=selected.get('structure_index') or {}
-        if head!=pin['commit'] or index.get('commit')!=head or index.get('version')!=structure_index.VERSION:
-            raise ValueError('Refresh the local structure before analyzing every unit')
+        if head!=pin['commit']:raise ValueError('Refresh the local structure before analyzing every unit')
+        index=_pinned_index(conf['path'],selected,head)
         screens=selected.get('screens',[]) if ai_extract.same(selected.get('commit'),head) else []
         nodes=((store.branch_bundle(raw,value['branch']).get('system') or {}).get('nodes',[]))
         programs=[{'id':n['id'],'name':n.get('name'),'code':n['code']} for n in nodes if n.get('kind','program')=='program' and n.get('code') and n.get('id')]
@@ -1526,8 +1554,11 @@ def _reuse_scope(overview,pin,scope,rid,contexts,docs_only=True):
     try:
         if rid not in contexts:contexts[rid]=ai_extract.context(scope['project'],rid,scope['branch'])
         repo,raw,_,head=contexts[rid]
-        index=(raw.get(scope['branch']) or {}).get('structure_index') or {}
-        if head!=pin['commit'] or index.get('commit')!=head or index.get('version')!=structure_index.VERSION:return None
+        if head!=pin['commit']:return None
+        if docs_only:  # path-group views keep requiring a refreshed local index
+            index=(raw.get(scope['branch']) or {}).get('structure_index') or {}
+            if index.get('commit')!=head or index.get('version')!=structure_index.VERSION:return None
+        else:index=_pinned_index(repo['path'],raw.get(scope['branch']),head)  # full runs may rebuild it without AI
         pair=(rid,overview['commit'],head,docs_only)
         if pair not in contexts:
             changes=_git(repo['path'],'diff-tree','--no-renames','--no-commit-id','--name-only','-r','-z',overview['commit'],head)
@@ -1634,10 +1665,7 @@ def _unit_anchors(index,unit):
 def _quick_overview(repo,request,language,invoke,cancelled,deadline,raw,resource=None,ref_offset=0,unit=None):
     """One bounded call per repository. A reference selects an actual pinned line."""
     commit=request['commit']
-    import structure_index
-    index=raw.get('structure_index') or {}
-    if index.get('commit')!=commit or index.get('version')!=structure_index.VERSION:
-        index=structure_index.build(repo,commit,excluded=_secret)
+    index=_pinned_index(repo,raw,commit)
     if unit:anchors,flows,total_scopes=_unit_anchors(index,unit),[],0
     else:anchors,flows,total_scopes=_overview_anchors(index,resource)
     plain=resource is None and not unit

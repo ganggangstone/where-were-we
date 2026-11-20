@@ -473,8 +473,8 @@ const AnalysisRun = (() => {
     const b=liveBoard(),live=fullRun() && active();
     if(!b) {
       if(!boardError)return '';
-      const refresh=String(boardError?.message || boardError).includes('Refresh the local structure');
-      return `<section class="sect unit-board" data-unit-board="error"><h3>${text('전체 코드 분석','Full code analysis')} ${beta()}</h3><p class="s">${refresh?text('새로고침 뒤 단위가 계산됩니다.','Units are calculated after a refresh.'):text('단위를 읽지 못했습니다.','Could not read the units.')}</p></section>`;
+      const refresh=/\bRefresh\b/.test(String(boardError?.message || boardError));
+      return `<section class="sect unit-board" data-unit-board="error"><h3>${text('전체 코드 분석','Full code analysis')} ${beta()}</h3><p class="s">${refresh?text('이 코드를 한 번 새로고침하면 단위가 계산됩니다. 새로고침은 AI를 부르지 않습니다.','Units are calculated after one refresh of this code. Refreshing does not call AI.'):text('단위를 읽지 못했습니다.','Could not read the units.')}</p>${refresh?`<button class="btn primary" type="button" id="refreshForUnits">${text('새로고침하고 단위 계산','Refresh and calculate units')}</button>`:''}</section>`;
     }
     const t=b.totals,total=t.units || 0;
     if(!total)return '';
@@ -535,6 +535,7 @@ const AnalysisRun = (() => {
       S.analysisChoice={...S.analysisChoice,task:'full_analysis',maxCalls:b.calls};
       return execute('analysis_run_start');
     };
+    if($('refreshForUnits'))$('refreshForUnits').onclick=()=>$('refresh')?.click();
     if($('cancelFullAnalysis'))$('cancelFullAnalysis').onclick=()=>execute('analysis_run_cancel');
     if($('checkFullAccount'))$('checkFullAccount').onclick=()=>{void providers();};
   }
@@ -571,6 +572,7 @@ const AnalysisRun = (() => {
     const resultPicker=savedGroups.length?`<div class="ctl"><label>${text('저장된 경로 설명','Saved path explanations')} <select id="batchSavedResource">${savedGroups.map((group,i)=>`<option value="${i}">${esc([group.repository,group.resource].filter(Boolean).join(' · '))}</option>`).join('')}</select></label><button class="btn quiet" id="openBatchSaved">${text('설명 열기','Open explanation')}</button></div>`:'';
     const targets=choice.targets.map(t=>[t.repository,t.target].filter(Boolean).map(esc).join(' · '));
     const scoped=S.analysisChoice?.task==='scope_overview';
+    const fullReady=choice.task==='overview' && !scoped && !active() && !!liveBoard()?.calls;  // the full analysis starts with the same overview and is the main action
     const startLabel=batch?text('경로 묶음 설명 생성','Generate path group explanations'):scoped?text('이 경로 설명 생성','Generate path explanation'):choice.task==='overview' ? text('첫 개요 만들기','Create initial overview')
       : choice.task==='all' ? text('지도·구성 분석 시작','Analyze map and structure')
       : choice.task==='analysis' ? text('상세 지도 분석 (베타)','Analyze detailed map (beta)')
@@ -586,7 +588,7 @@ const AnalysisRun = (() => {
       ${issue ? `<p role="alert">${esc(message(issue))}</p>` : ''}
       ${!active() && choice.task==='overview' ? `<p class="s" id="overviewLimits">${scoped?text('선택한 경로 · 최대 4파일 · AI 1회','Selected path: up to 4 files · 1 AI call'):text('연결한 코드마다 최대 4파일 · AI 1회','Per repository: up to 4 files · 1 AI call')}</p>` : ''}
       ${batch && !active()?`<p class="s" id="resourceLimits">${text('경로 묶음 '+choice.max_calls+'개 · AI 최대 '+choice.max_calls+'회','Path groups: '+choice.max_calls+' · Up to '+choice.max_calls+' AI calls')}</p>`:''}
-      <div class="ctl">${active() ? `<button class="btn" id="cancelAppAnalysis" ${busy || run.cancel_requested ? 'disabled' : ''}>${text('분석 취소','Cancel analysis')}</button>` : sameScope() && ['failed','cancelled'].includes(run?.state) ? `<button class="btn primary" id="retryAppAnalysis" ${retryWarning?'aria-describedby="retryDeliveryWarning"':''} ${canStart ? '' : 'disabled'}>${text('현재 코드로 다시 시도','Retry with current code')}</button>` : `<button class="btn primary" id="startAppAnalysis" ${batch?'aria-describedby="resourceLimits"':choice.task==='overview' ? 'aria-describedby="overviewLimits"' : ''} ${canStart ? '' : 'disabled'}>${esc(startLabel)}</button>`}
+      <div class="ctl">${active() ? `<button class="btn" id="cancelAppAnalysis" ${busy || run.cancel_requested ? 'disabled' : ''}>${text('분석 취소','Cancel analysis')}</button>` : sameScope() && ['failed','cancelled'].includes(run?.state) ? `<button class="btn primary" id="retryAppAnalysis" ${retryWarning?'aria-describedby="retryDeliveryWarning"':''} ${canStart ? '' : 'disabled'}>${text('현재 코드로 다시 시도','Retry with current code')}</button>` : `<button class="btn ${fullReady?'quiet':'primary'}" id="startAppAnalysis" ${batch?'aria-describedby="resourceLimits"':choice.task==='overview' ? 'aria-describedby="overviewLimits"' : ''} ${canStart ? '' : 'disabled'}>${esc(startLabel)}</button>`}
       ${resources && !choice.area && !scoped && (!batch || resources!==choice.max_calls) && !active()?`<button class="btn quiet" id="chooseResourceBatch">${text('경로 묶음별 AI 설명 (베타)','AI explanations by path group (beta)')}</button>`:''}
       <button class="btn quiet" id="checkAppAnalysis" ${busy || providerBusy ? 'disabled' : ''}>${text('계정 확인','Check account')}</button>
       ${!batchRun && sameScope() && done > 0 && run.intent?.task!=='overview' ? `<button class="btn quiet" id="viewAppAnalysis">${text('저장된 결과 보기','View saved results')}</button>` : ''}</div>

@@ -1,4 +1,6 @@
 """Full-code analysis by units: AI-free catalog, saved-as-you-go results, resume and stale handling. Fake executors only."""
+import copy
+import hashlib
 import json
 from pathlib import Path
 import sys
@@ -140,6 +142,56 @@ class FullRun(unittest.TestCase):
         self.assertEqual(set(self.states().values()),{'saved'})
         nothing=self.prepare(intent={**self.intent(),'max_calls':0})
         self.assertEqual(analysis_run.run(nothing['id'],lambda *a,**k:self.fail('unexpected call'))['state'],'completed')
+
+    def legacy(self,mutate=None):
+        """A project saved before structure indexes existed: only dev.json (repo and ref), no project.json."""
+        bundle=copy.deepcopy(self.raw()['dev']);bundle.pop('structure_index',None)
+        if mutate:mutate(bundle)
+        home=analysis_run.store.home('legacy');home.mkdir(parents=True,exist_ok=True)
+        (home/'dev.json').write_text(json.dumps(bundle))
+        return home
+
+    def tree(self,home):
+        return {str(p.relative_to(home)):hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(home.rglob('*')) if p.is_file() and p.name!='.project.lock'}  # an empty lock file is not data
+
+    def test_legacy_project_without_a_saved_index_gets_units_without_refresh_ai_or_data_changes(self):
+        home=self.legacy();before=self.tree(home)
+        board=analysis_run.unit_board('legacy','','dev','en')
+        self.assertGreater(board['calls'],0);self.assertEqual(board['totals']['units'],board['totals']['pending'])
+        self.assertIn('route:/orders',{row[0] for row in board['repositories'][0]['units']})
+        self.assertEqual(self.tree(home),before)  # the saved project data is byte-identical
+        cache=list((Path(analysis_run.mapcore.ROOT)/'.structure-cache').glob('*.json'))
+        self.assertEqual(len(cache),1)
+        # Another process reads the cache instead of rebuilding.
+        analysis_run._INDEXES.clear()
+        original=structure_index.build
+        structure_index.build=lambda *a,**k:self.fail('rebuilt')
+        self.addCleanup(setattr,structure_index,'build',original)
+        again=analysis_run.unit_board('legacy','','dev','en')
+        self.assertEqual(again['totals'],board['totals'])
+
+    def test_index_from_an_older_version_or_commit_is_replaced_in_memory_only(self):
+        for name,change in (('version',lambda ix:ix.update(version=ix['version']-1)),('commit',lambda ix:ix.update(commit='0'*40))):
+            raw=self.raw();change(raw['dev']['structure_index'])
+            repo=analysis_run.store.config('demo')['repositories'][0]
+            analysis_run.store.publish('demo','service',raw,{'fingerprint':analysis_run.store.fingerprint(repo)})
+            saved=json.dumps(self.raw()['dev']['structure_index'],sort_keys=True)
+            analysis_run._INDEXES.clear()
+            board=self.board()
+            self.assertGreater(board['calls'],0,name);self.assertIn('route:/orders',self.states(board),name)
+            self.assertEqual(json.dumps(self.raw()['dev']['structure_index'],sort_keys=True),saved,name)  # not rewritten
+
+    def test_legacy_project_full_run_starts_with_the_overview_then_saves_every_unit(self):
+        self.legacy()
+        board=analysis_run.unit_board('legacy','','dev','en')
+        job=analysis_run.prepare('legacy',lang='en',intent={'task':'full','targets':[],'max_calls':board['calls']})
+        self.assertEqual(job['state'],'preparing')
+        calls=[]
+        done=analysis_run.run(job['id'],self.executor(calls))
+        self.assertEqual(done['state'],'completed',done.get('error'))
+        self.assertNotIn('resource',calls[0]);self.assertNotIn('resources',calls[0])  # first overview, then units
+        states={row[0]:row[4] for row in analysis_run.unit_board('legacy','','dev','en')['repositories'][0]['units']}
+        self.assertTrue(all(state=='saved' for state in states.values()),states)
 
     def test_cancel_keeps_saved_units_and_retry_only_asks_for_the_rest(self):
         job=self.prepare(intent=self.intent());calls=[]
