@@ -259,11 +259,12 @@ window.__TAURI__={core:{invoke:async(command,args)=>{
  assert(S.analysisRequest.remaining.every(t=>t.task!=='briefing') && S.analysisRequest.state==='partial','The recorded briefing is done; codes that could not be read keep it partial');
  assert(S.changes===changes && S.settings===settings && S.chi===3,'Preserve changes and the comparison baseline');
  $('viewAnalysisResults').click();
- // The counts are a definition list (dt label, dd value): read the row, not a spaced string.
- const prs=[...$('map').querySelectorAll('dl.metadata div')].find(row=>row.querySelector('dt')?.textContent==='Related PRs')?.querySelector('dd')?.textContent;
- assert(S.view==='changes' && prs==='2','Cards and PRs are counted independently: '+prs);
+ // The scope summary carries both counts: change cards and related PRs.
+ const summary=$('map').querySelector('.briefing-context summary')?.textContent||'';
+ const prs=summary.match(/PR (\d+)/)?.[1],cards=summary.match(/(\d+) changes/)?.[1];
+ assert(S.view==='changes' && prs==='2' && Number(cards)===$('map').querySelectorAll('.change-card').length,'Cards and PRs are counted independently: '+summary);
  assert($('map').textContent.includes('Before') && $('map').textContent.includes('Data impact'),'Show the before/after and impact fields');
- assert($('map').textContent.includes('Deployment & behavior unverified'),'Do not turn merged PRs into deployment confirmation');
+ assert($('map').textContent.includes('Deployment and runtime unverified'),'Do not turn merged PRs into deployment confirmation');
  assert(!document.querySelector('[data-injected]') && !document.body.dataset.injected,'Escape generated descriptions');
  const sourceButton=$('map').querySelector('[data-url]');sourceButton.click();
  assert(calls.includes('open_url'),'Original evidence links remain available');
