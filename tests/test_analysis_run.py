@@ -222,7 +222,8 @@ class AnalysisRun(unittest.TestCase):
             result=test_ai_extract.agent_answer({'mode':p['mode'],'inspect':p.get('inspect',[]),'recheck':p.get('recheck',[])},data)
             # Absence in a partial source unit does not establish a deletion.
             if 'batch' in p:result.pop('removed',None)
-        elif 'nodes' in schema:result=self.SYSTEM if 'server/items.go' in files or any(ev.get('quote')==self.EV['quote'] for ev in ai_extract.cited(p.get('input',{}))) else {'nodes':[],'links':[],'externals':[],'others':[],'unknown':[]}
+        # A full analysis sends a compact map that names the file but carries no quote.
+        elif 'nodes' in schema:result=self.SYSTEM if 'server/items.go' in files or any(ev.get('quote')==self.EV['quote'] for ev in ai_extract.cited(p.get('input',{}))) or 'server/items.go' in json.dumps(p.get('input',{}).get('map',{})) else {'nodes':[],'links':[],'externals':[],'others':[],'unknown':[]}
         else:return self.fake(prompt,**kwargs)
         return {'batch':p['batch']['id'],'covered':p['batch']['units'],'result':result} if 'batch' in p else result
 
@@ -320,7 +321,7 @@ class AnalysisRun(unittest.TestCase):
         done=analysis_run.run(self.prepare()['id'],self.fake);self.assertEqual(done['state'],'completed')
         (self.repo/'changed.source').write_text('independent source line\n'*13000)
         self.git('add','.');self.git('commit','-qm','Large independent changed source')
-        for fault in ('missing','duplicate','quote','method','needs_type','cancel','commit'):
+        for fault in ('missing','duplicate','quote','method','cancel','commit'):
             with self.subTest(fault=fault):
                 before=self.raw();value=self.prepare();calls=[]
                 def executor(prompt,**kwargs):
@@ -330,7 +331,6 @@ class AnalysisRun(unittest.TestCase):
                         if fault=='duplicate':answer['covered']*=2
                         if fault=='quote':answer['result']['inspected']=[{'file':'changed.source','line':1,'quote':'invented content'}]
                         if fault=='method':answer['result']['backend_routes']=[{'file':'server/items.go','line':4,'quote':'router.POST("/items", SaveItem)','method':'BAD','path':'/items','function':'SaveItem'}]
-                        if fault=='needs_type':answer['needs']={}
                         if fault=='cancel':analysis_run.cancel(value['id'])
                         if fault=='commit':
                             f=self.repo/'changed.source';f.write_text(f.read_text()+'more\n');self.git('add','.');self.git('commit','-qm','Change during batch')
@@ -481,6 +481,20 @@ class AnalysisRun(unittest.TestCase):
         done=analysis_run.run(self.prepare()['id'],searching)
         self.assertEqual(done['state'],'completed',done.get('error'))
         self.assertTrue(any(page['value'].get('query')=='db.Table' and page['value']['total']==1 for p in calls for page in p.get('context_pages',[]) if isinstance(page['value'],dict)))
+
+    def test_a_batch_that_keeps_requesting_reads_ends_with_what_it_found_and_says_so(self):
+        (self.repo/'big.source').write_text('p'*150000)
+        self.git('add','.');self.git('commit','-qm','Input large enough to be sent in batches')
+        rounds=[]
+        def endless(prompt,**kwargs):
+            p=json.loads(prompt.split('\n',1)[1])
+            if 'screens' not in p['schema'] or 'batch' not in p:return self.fake(prompt,**kwargs)
+            answer=self.source_fake(prompt,**kwargs);rounds.append(1)
+            answer['needs']=[{'query':'zz'+str(len(rounds)),'start':1,'limit':1}]
+            return answer
+        with patch.object(analysis_run,'MAX_READ_ROUNDS',2):done=analysis_run.run(self.prepare()['id'],endless)
+        self.assertEqual(done['state'],'completed',done.get('error'))
+        self.assertTrue(any('read rounds allowed' in str(u) for u in self.raw()['dev']['analysis']['unknown']))
 
     def test_literal_searches_in_one_analysis_do_not_reread_pinned_blobs(self):
         import subprocess
@@ -719,6 +733,9 @@ class AnalysisRun(unittest.TestCase):
         self.assertEqual(self.read_source(commit,{'query':'needle','start':2,'limit':1},blobs),[('pages.txt',3,'needle two')])
         self.assertEqual(self.read_source(commit,{'file':'pages.txt'},blobs),[('pages.txt',1,'needle one'),('pages.txt',2,'plain'),('pages.txt',3,'needle two')])
         self.assertEqual(self.read_source(commit,{'query':'needle'},blobs),[('pages.txt',1,'needle one'),('pages.txt',3,'needle two')])
+        # A sloppy range from the model is clamped to a bounded read instead of failing the run.
+        for bad in ({'start':0,'limit':999},{'start':-3,'limit':0},{'start':'2','limit':None},{'start':True,'limit':1.5}):
+            self.assertEqual(self.read_source(commit,{'file':'pages.txt',**bad},blobs)[0][:2],('pages.txt',1))
 
     def test_selected_initial_source_does_not_limit_a_later_full_search(self):
         (self.repo/'chosen.txt').write_text('needle chosen\n');(self.repo/'other.txt').write_text('needle other\n')
@@ -751,8 +768,8 @@ class AnalysisRun(unittest.TestCase):
         self.assertEqual(self.read_source(commit,{'query':'needle'},blobs),[('plain.txt',1,text)])
         omitted={x['file']:x['reason'] for x in analysis_run.export_source(str(self.repo),commit,blobs=blobs)[0]['omitted']}
         self.assertEqual({k:omitted[k] for k in ('.env','photo.png','link.txt')},{'.env':'credential_file','photo.png':'binary_asset','link.txt':'not_regular_source'})
-        for name in ('.env','photo.png','link.txt'):
-            with self.assertRaisesRegex(analysis_run.RunError,'not eligible'):self.read_source(commit,{'file':name},blobs)
+        with self.assertRaisesRegex(analysis_run.RunError,'not eligible'):self.read_source(commit,{'file':'.env'},blobs)  # a credential path is refused outright
+        for name in ('photo.png','link.txt'):self.assertEqual(self.read_source(commit,{'file':name},blobs),[])  # other excluded paths are answered as unavailable, nothing is read
 
     def test_reused_binary_blob_stays_omitted_without_rereading(self):
         (self.repo/'data.bin').write_bytes(b'needle\x00')

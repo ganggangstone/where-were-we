@@ -36,6 +36,8 @@ GENERATED_SUFFIXES = ('.lock','.min.js','.min.css','.map')
 MAX_PROMPT_BYTES = 128 * 1024
 UNIT_BYTES = 16 * 1024
 MAX_READ_ROUNDS = 32
+SYSTEM_READ_ROUNDS = 8  # the structure task's input pieces are all delivered as batch units, so extra reads past this many rounds are not needed to cover them
+SYSTEM_DELTA_FILES = 64  # a full analysis reads the structure from the compact listing when more files than this changed since the saved structure
 RESOURCE_PACK_SIZE = 4
 UNIT_PACK_BYTES = 108 * 1024  # sample bytes of the plain units one call explains, packet overhead included; the prompt cap stays the hard limit
 UNIT_PACK_MAX = 24
@@ -1098,6 +1100,9 @@ def _payload(value,task,request,cancelled=None,deadline=None,blobs=None,deferred
         if head!=request['commit']: raise RunError('pins_changed','Code changed; start again')
         previous=request.get('base_commit');selected=None;files=set()
         m=raw[value['branch']]
+        # Rereading every file changed since an old saved structure is not the full analysis: its size is the whole diff.
+        delta_too_large=(task['task']=='system' and (value.get('intent') or {}).get('task')=='full' and (value.get('intent') or {}).get('coverage','signal')=='signal'
+                         and len(request['input']['changed_files'] or [])>SYSTEM_DELTA_FILES)
         routes,screens,functions=ai_extract.ai_catalog(m)
         if request.get('mode')=='patch':
             files.update(request['inspect']);wanted={x['id'] for x in request['recheck']}
@@ -1118,7 +1123,7 @@ def _payload(value,task,request,cancelled=None,deadline=None,blobs=None,deferred
                    if any(c in ('','.') or f==c.rstrip('/') or f.startswith(c.rstrip('/')+'/') for c in code)}
             files.update(ai_extract.files_in(request['input']['node']))
             selected={head:files}
-        elif task['task']=='system' and request['input']['changed_files'] is not None:
+        elif task['task']=='system' and request['input']['changed_files'] is not None and not delta_too_large:
             selected_bundle=store.branch_bundle(raw,value['branch'])
             previous_system=(selected_bundle.get('system.ai') if (selected_bundle.get('system.ai') or {}).get('source')=='ai' else selected_bundle.get('system')) or {}
             payload['input']={**request['input'],'previous':previous_system}
@@ -1130,13 +1135,20 @@ def _payload(value,task,request,cancelled=None,deadline=None,blobs=None,deferred
             # retrieved through the same pinned, bounded needs protocol.
             tree=sorted(ai_extract.tree_blobs(repo['path'],head))
             extra={}
-            if (value.get('intent') or {}).get('task')=='full' and (value.get('intent') or {}).get('coverage','signal')=='signal':
+            signal_run=(value.get('intent') or {}).get('task')=='full' and (value.get('intent') or {}).get('coverage','signal')=='signal'
+            if signal_run:
                 rows=_signals(repo['path'],head)
                 tree,counts=_listing(rows,tree)
                 payload['coverage']={**_coverage_note(_window_plan(rows,_cited_files(m))[1]),'file_list':'paths of code and configuration files; other files only as per-directory counts in other_files'}
                 payload['prompt']=payload.get('prompt','')+' input.files lists code and configuration paths only. Documents, data, tests, vendored and binary files appear as counts per directory in input.other_files; every one of them can be read or searched with needs.'
                 extra={'other_files':counts}
-            payload['input']={**request['input'],'map':{k:m.get(k,[]) for k in ('screens','backend_routes','api_functions')},'files':tree,**extra}
+            saved_map={k:m.get(k,[]) for k in ('screens','backend_routes','api_functions')}
+            if signal_run:
+                # The structure needs the map's shape, not each item's evidence quotes (hundreds of KB); every claim is still cited from source it reads.
+                saved_map={'screens':[[x.get('path'),x.get('file'),x.get('heading')] for x in saved_map['screens']],
+                           'backend_routes':[[x.get('method'),x.get('path'),x.get('file'),x.get('function'),x.get('tables') or [],x.get('services') or []] for x in saved_map['backend_routes']]}
+                payload['prompt']=payload.get('prompt','')+' input.map is compact: screens are [path, file, heading] and backend_routes are [method, path, file, function, tables, services]. It carries no evidence quotes; cite source you read with needs.'
+            payload['input']={**request['input'],**({'changed_files':None} if delta_too_large else {}),'map':saved_map,'files':tree,**extra}
             selected={head:set()}
         if _windowed(value,task,request):
             plan,report=_window_plan(_signals(repo['path'],head),_cited_files(m))
@@ -1287,19 +1299,20 @@ def _strict_result(task,data,repo,commit,request=None,raw=None,final=True,contex
         if any(not group.get('screens') for group in rows(data,'groups')):fail()
     elif task=='system':
         nodes=rows(data,'nodes');externals=rows(data,'externals');ids={n.get('id') for n in nodes};ext={x.get('id') for x in externals}
-        if len(ids)!=len(nodes) or len(ext)!=len(externals) or any(not isinstance(x,str) or not x for x in ids|ext):fail()
+        if len(ids)!=len(nodes) or len(ext)!=len(externals) or any(not isinstance(x,str) or not x for x in ids|ext):fail('Node or external IDs were missing, not text, or repeated in this reply')
         for key in ('nodes','links','externals','others'):
             for item in rows(data,key):
-                if not item.get('ev') or any(not evidence(ev) for ev in item['ev']):fail()
-                if key=='links' and (item.get('from')==item.get('to') or not item.get('from') or not item.get('to')):fail()
-                if key in ('nodes','externals','others') and not item.get('name'):fail()
-        if data.get('keep')=='all' and any(data.get(k) for k in ('nodes','links','externals','others')):fail()
+                label=str(item.get('id') or item.get('name') or (str(item.get('from'))+' -> '+str(item.get('to'))))[:80]
+                if not item.get('ev') or any(not evidence(ev) for ev in item['ev']):fail(f'A {key} entry ({label}) had no evidence or a citation that did not match the exact source line and quote')
+                if key in ('nodes','externals','others') and not item.get('name'):fail(f'A {key} entry ({label}) had no name')
+        if data.get('keep')=='all' and any(data.get(k) for k in ('nodes','links','externals','others')):fail('keep:"all" cannot be combined with returned entries')
         for node in nodes:
-            if node.get('kind','program') not in ('user','program','store','copy'):fail()
-            if node.get('origin','repo') not in ('repo','other','copy','none'):fail()
-            if not isinstance(node.get('uses',[]),list):fail()
+            # The saved structure coerces these two labels to its defaults; do not fail a long batch for a label it would accept.
+            if node.get('kind','program') not in ('user','program','store','copy'):node['kind']='program'
+            if node.get('origin','repo') not in ('repo','other','copy','none'):node['origin']='repo'
+            if not isinstance(node.get('uses',[]),list):fail(f"Node {node.get('id')}: uses must be a list of external IDs")
             code=node.get('code',[])
-            if not isinstance(code,list) or any(not isinstance(c,str) or c.startswith('/') or '..' in PurePosixPath(c).parts for c in code):fail()
+            if not isinstance(code,list) or any(not isinstance(c,str) or c.startswith('/') or '..' in PurePosixPath(c).parts for c in code):fail(f"Node {node.get('id')}: code must list repository-relative folders")
             if 'jobs' in node:_strict_jobs(node,code,raw,evidence,fail)
         if final and (any(l.get('from') not in ids or l.get('to') not in ids for l in rows(data,'links')) or any(set(n.get('uses',[]))-ext for n in nodes)):fail()
         # Cross-batch link endpoints are checked against the final union below.
@@ -1328,12 +1341,33 @@ def _strict_jobs(payload,code,raw,evidence,fail):
                 if key=='steps' and (not item.get('text') or not within(item)):fail()
                 if key=='made_by' and any(k not in routes or item['file'] not in [routes[k]['file'],*routes[k].get('services',[])] for k in item.get('routes',[])):fail()
 
-def _combine(a,b,key=''):
-    """Evidence-preserving union. Conflicting identity/scalars never use last-wins."""
+def _mount_file(route):
+    """The file the route's identity takes its mount from (its first dependency that names one)."""
+    return next((d['file'] for d in route.get('dependencies') or [] if isinstance(d,dict) and d.get('file')),'')
+
+# List items that are one thing per identity (a screen per path, a route per registration, a program per id...). A later batch can describe the same
+# identity again from another file; its details are merged, and where a value differs the first batch's value stays.
+KEEP_FIRST = ('screens','backend_routes','nodes','externals','groups','cards')
+
+def _spelling(value):
+    """An ID with case, dashes and underscores ignored: independent batches name one program 'image_worker' and 'image-worker'."""
+    return re.sub(r'[^a-z0-9]','',str(value).lower()) or None
+
+def _combine(a,b,key='',trail='',notes=None):
+    """Evidence-preserving union. A conflicting scalar never silently becomes last-wins: it fails, except inside the
+    KEEP_FIRST items, where the first value is kept and the difference is added to the result's own `unknown` list.
+    trail names where a conflict was found (field names and the identity of the list item), so a failure is diagnosable."""
     if a==b:return copy.deepcopy(a)
     if isinstance(a,dict) and isinstance(b,dict):
+        top=notes is None and not trail
+        if top:notes=[]
         out=copy.deepcopy(a)
-        for k,v in b.items():out[k]=_combine(out[k],v,k) if k in out else copy.deepcopy(v)
+        for k,v in b.items():out[k]=_combine(out[k],v,k,trail+'/'+k,notes) if k in out else copy.deepcopy(v)
+        if top and notes:
+            # The structure task writes unknown facts as {text, needs}; the map writes plain strings.
+            wrap=(lambda n:{'text':n,'needs':'read'}) if 'nodes' in out else (lambda n:n)
+            known=out.get('unknown') or []
+            out['unknown']=[*known,*(wrap(n) for n in dict.fromkeys(notes) if wrap(n) not in known)]
         return out
     if isinstance(a,list) and isinstance(b,list):
         out=copy.deepcopy(a)
@@ -1341,26 +1375,71 @@ def _combine(a,b,key=''):
             if not isinstance(item,dict):return None
             if key=='backend_routes':return ai_extract.route_id(item)
             if key=='screens':return item.get('path')
-            if key in ('nodes','externals','cards'):return item.get('id')
+            if key in ('nodes','externals'):return _spelling(item.get('id'))
+            if key=='cards':return item.get('id')
             if key=='groups':return item.get('name')
             if key=='accounted':return item.get('file')
             return None
         for item in b:
             if item in out:continue
             name=identity(item);old=next((x for x in out if name is not None and identity(x)==name),None)
+            if old is None and key=='backend_routes' and isinstance(item,dict):
+                # One registration seen by two batches that listed different mount evidence first. The path is the full mounted
+                # path, so the same method, path, file and handler is one endpoint; the first batch's dependency order is kept.
+                registration=lambda r:tuple(r.get(k) for k in ('method','path','file','function'))
+                old=next((x for x in out if isinstance(x,dict) and registration(x)==registration(item)),None)
             if old is None:out.append(copy.deepcopy(item));continue
             if key=='accounted':
                 levels={'none':0,'affects':1,'items':2}
                 if old.get('kind') not in levels or item.get('kind') not in levels:raise RunError('invalid_result','Invalid file accounting')
                 old['kind']=max((old['kind'],item['kind']),key=levels.get)
                 if 'ids' in item:old['ids']=list(dict.fromkeys(old.get('ids',[])+item['ids']))
+            elif key in KEEP_FIRST and notes is not None:
+                merged=copy.deepcopy(old);differ=[]
+                for field,value in item.items():
+                    if field=='id' and key in ('nodes','externals'):continue  # same program spelled differently; the first spelling stays
+                    if field not in merged:merged[field]=copy.deepcopy(value);continue
+                    try:merged[field]=_combine(merged[field],value,field,trail+'['+str(name)[:80]+']/'+field,notes)
+                    except RunError:differ.append(field)
+                if differ:
+                    where=f"; the other one is {item.get('file')}:{item.get('line')}" if 'file' in differ else ''
+                    notes.append(f"{key} {str(name)[:80]}: {', '.join(differ)} differ between analysis batches; the first values were kept{where}")
+                out[out.index(old)]=merged
             else:
                 # route_id uses the FIRST dependency as its mount identity.
                 # Preserve its position; never sort or replace it when unioning.
-                if key=='backend_routes' and old.get('dependencies') and item.get('dependencies') and old['dependencies'][0]!=item['dependencies'][0]:raise RunError('invalid_result','Conflicting mount anchors in analysis fragments')
-                out[out.index(old)]=_combine(old,item,key)
+                out[out.index(old)]=_combine(old,item,key,trail+'['+str(name)[:80]+']',notes)
         return out
-    raise RunError('invalid_result','Conflicting analysis fragments; saved results were retained')
+    raise RunError('invalid_result','Conflicting analysis fragments at '+(trail or '/')+'; saved results were retained')
+
+def _unkeep(task,result):
+    """keep:"all" says nothing was returned to change. Rounds of one batch can union an early "keep all" with the nodes a later read found."""
+    if task=='system' and result.get('keep')=='all' and any(result.get(k) for k in ('nodes','links','externals','others')):result.pop('keep')
+    return result
+
+def _prune_dangling(task,result):
+    """Rounds of one structure batch can name a link endpoint or an external that no round defined. Drop those references and say so in unknown."""
+    if task!='system':return result
+    ids={n.get('id') for n in result.get('nodes',[]) if isinstance(n,dict)};ext={x.get('id') for x in result.get('externals',[]) if isinstance(x,dict)}
+    node_by={_spelling(i):i for i in ids};ext_by={_spelling(i):i for i in ext}
+    for link in result.get('links',[]):
+        for end in ('from','to'):
+            if isinstance(link,dict) and link.get(end) not in ids and _spelling(link.get(end)) in node_by:link[end]=node_by[_spelling(link[end])]
+    for node in result.get('nodes',[]):
+        node['uses']=list(dict.fromkeys(u if u in ext else ext_by.get(_spelling(u),u) for u in node.get('uses',[])))
+    links=result.get('links',[]);kept=[l for l in links if isinstance(l,dict) and l.get('from') in ids and l.get('to') in ids and l['from']!=l['to']]
+    notes=[]
+    if len(kept)!=len(links):
+        gone=sorted({f"{l.get('from')} -> {l.get('to')}" for l in links if l not in kept},key=str)
+        notes.append('Links dropped because an endpoint is not a node any batch defined, or both ends are the same node: '+', '.join(gone[:30])+(f' (+{len(gone)-30} more)' if len(gone)>30 else ''))
+        result['links']=kept
+    for node in result.get('nodes',[]):
+        unknown=[u for u in node.get('uses',[]) if u not in ext]
+        if unknown:
+            notes.append(f"{node.get('id')}: uses of externals no batch defined were dropped: {', '.join(map(str,unknown))}")
+            node['uses']=[u for u in node['uses'] if u in ext]
+    if notes:result['unknown']=[*(result.get('unknown') or []),*({'text':n,'needs':'read'} for n in notes)]
+    return result
 
 def _units(payload):
     """Lossless private input pages, including oversized metadata and UTF-8 lines."""
@@ -1568,22 +1647,33 @@ def _literal_page(repo,commit,query,start,limit,cancelled,deadline,blobs):
 
 def _needed(repo,commit,needs,cancelled,deadline,payload,blobs=None):
     """Only immutable, eligible blobs; model read requests do not grant path access."""
-    if not isinstance(needs,list) or len(needs)>16:raise RunError('invalid_result','Invalid analysis read requests')
+    # Request shape only sizes what is read; a sloppy list is trimmed and a malformed entry is answered, never fatal to a long run.
+    needs=needs[:16] if isinstance(needs,list) else []
     out=[]
+    def refused(why,subject):return {'id':ai_extract.digest(['request_refused',subject,why]),'kind':'metadata','value':{'path':['read_page'],'value':{'request':subject,'error':why}}}
     for need in needs:
-        if not isinstance(need,dict) or set(need)-{'file','query','metadata','start','limit'} or sum(k in need for k in ('file','query','metadata'))!=1:raise RunError('invalid_result','Invalid analysis read request')
+        if not isinstance(need,dict) or set(need)-{'file','query','metadata','start','limit'} or sum(k in need for k in ('file','query','metadata'))!=1:
+            out.append(refused('A read request has exactly one of file, query or metadata, plus optional start and limit',json.dumps(need,ensure_ascii=False,default=str)[:200]));continue
+        # A page range only sizes a bounded read and grants no access, so a sloppy range is clamped, not fatal.
         start=need.get('start',1);limit=need.get('limit',200)
-        if type(start)!=int or type(limit)!=int or start<1 or not 1<=limit<=200:raise RunError('invalid_result','Invalid analysis read range')
+        start=start if type(start)==int and start>=1 else 1
+        limit=min(max(limit,1),200) if type(limit)==int else 200
         if 'metadata' in need:
             path=need['metadata'];value=payload
-            if not isinstance(path,list) or not path or path[0] not in ('known','recheck','inspect','deleted','input','sources','provisional_result'):raise RunError('invalid_result','Choose existing analysis metadata')
+            def missing(reason):
+                # The model is told what is not there and answers from what it has; one bad request must not end a long run.
+                return {'id':ai_extract.digest(['metadata_missing',path,reason]),'kind':'metadata','value':{'path':['read_page'],'value':{'metadata':path,'error':reason}}}
+            if not isinstance(path,list) or not path or path[0] not in ('known','recheck','inspect','deleted','input','sources','provisional_result'):
+                out.append(missing('Not an existing analysis metadata path'));continue
             try:
                 for key in path:
                     if type(key) not in (str,int) or type(key)==int and key<0:raise KeyError()
                     value=value[key]
-            except (KeyError,IndexError,TypeError):raise RunError('invalid_result','Choose existing analysis metadata') from None
-            if isinstance(value,dict):value=list(value.items())
-            if not isinstance(value,(list,str)):raise RunError('invalid_result','Choose paged analysis metadata')
+            except (KeyError,IndexError,TypeError):
+                out.append(missing('Not an existing analysis metadata path'));continue
+            if isinstance(value,dict):value=[list(pair) for pair in value.items()]  # pages are built from lists; a tuple larger than one page was refused
+            if not isinstance(value,(list,str)):
+                out.append(missing('This metadata is not paged; request a path inside it'));continue
             selected=value[start-1:start-1+limit]
             header,pages=_units({'metadata_read':selected})
             if 'metadata_read' in header:pages=[{'id':ai_extract.digest(['metadata',path,start,selected]),'kind':'metadata','value':{'path':path,'value':selected}}]
@@ -1597,12 +1687,16 @@ def _needed(repo,commit,needs,cancelled,deadline,payload,blobs=None):
             file=need['file']
             if not isinstance(file,str) or not file or PurePosixPath(file).is_absolute() or '..' in PurePosixPath(file).parts or _secret(file):raise RunError('invalid_result','Read request is not eligible source')
             snaps=export_source(repo,commit,cancelled=cancelled,deadline=deadline,selected={commit:{file}},blobs=blobs)
-            if not snaps[0]['files']:raise RunError('invalid_result','Read request is not eligible source')
+            if not snaps[0]['files']:
+                # Not a tracked regular text file at this commit: tell the model, as nothing was read.
+                out.append({'id':ai_extract.digest(['file_unavailable',file]),'kind':'metadata','value':{'path':['read_page'],'value':{'file':file,'error':'Not an eligible tracked source file at the pinned commit'}}})
+                continue
             snaps[0]['files'][0]['lines']=snaps[0]['files'][0]['lines'][start-1:start-1+limit]
             _,units=_units({'snapshots':snaps});out.extend(units)
         else:
             query=need['query']
-            if not isinstance(query,str) or not 1<=len(query)<=200 or '\n' in query:raise RunError('invalid_result','Invalid literal source search')
+            if not isinstance(query,str) or not 1<=len(query)<=200 or '\n' in query:
+                out.append(refused('A literal search is one line of 1 to 200 characters',str(query)[:100]));continue
             files,page=_literal_page(repo,commit,query,start,limit,cancelled,deadline,blobs if blobs is not None else {})
             _,units=_units({'snapshots':[{'commit':commit,'files':files,'omitted':[]}],'read_page':page})
             units.insert(0,{'id':ai_extract.digest(['search',query,start]),'kind':'metadata','value':{'path':['read_page'],'value':page}})
@@ -2077,6 +2171,42 @@ def _pack_envelope(candidate):
         envelope['resources']=[{k:v for k,v in packet.items() if k not in ('prompt','schema')} for packet in candidate]
     return envelope
 
+def _undisposed(result,request):
+    """Recheck IDs that the settled batches neither re-emitted, replaced, removed nor dropped."""
+    rows=[x for k in ('backend_routes','screens') for x in result.get(k,[]) if isinstance(x,dict)]
+    done={ai_extract.route_id(x) for x in result.get('backend_routes',[]) if isinstance(x,dict)}|{ai_extract.screen_id(x) for x in result.get('screens',[]) if isinstance(x,dict)}
+    done|={x.get('replaces') for x in rows}|set(result.get('drop') or [])|set(result.get('removed') or [])
+    return [r['id'] for r in request.get('recheck',[]) if isinstance(r,dict) and r.get('id') not in done]
+
+def _recheck_windows(repo,commit,raw,layout,missing,cancelled,deadline,blobs):
+    """Source around the saved evidence of recheck targets no batch could judge. A unit boundary can separate a decorator from its definition and mount."""
+    routes,screens,_=ai_extract.ai_catalog(raw);basic=ai_extract.basic_catalog(repo,commit,layout)
+    items={x['id']:x for x in routes+screens+basic['backend_routes']+basic['screens']}
+    needs=[]
+    for target in missing:
+        item=items.get(target) or {}
+        for ev in [item,*ai_extract.cited(item)]:
+            file,line=ev.get('file'),ev.get('line')
+            need={'file':file,'start':max(1,line-40),'limit':120} if isinstance(file,str) and type(line)==int else None
+            if need and need not in needs:needs.append(need)
+    units=[]
+    for need in needs[:16]:
+        try:units.extend(_needed(repo,commit,[need],cancelled,deadline,{},blobs))
+        except RunError:continue  # a file that is no longer eligible source cannot support a disposition
+    return units
+
+def _supersede(result,request,raw,repo,commit,layout):
+    """A re-emitted registration (same method, path, file, handler) whose mount evidence changed has a new ID. Name the saved item it succeeds."""
+    missing=_undisposed(result,request)
+    if not missing:return
+    routes,_,_=ai_extract.ai_catalog(raw);basic=ai_extract.basic_catalog(repo,commit,layout)
+    items={x['id']:x for x in routes+basic['backend_routes']}
+    identity=lambda r:tuple(r.get(k) for k in ('method','path','file','function'))
+    for target in missing:
+        old=items.get(target)
+        found=[r for r in result.get('backend_routes',[]) if old and isinstance(r,dict) and identity(r)==identity(old) and 'replaces' not in r]
+        if len(found)==1:found[0]['replaces']=target
+
 def generate(value,task,request,executor,cancelled,deadline,check,blobs=None):
     deferred=[]
     repo=None;raw=None
@@ -2162,7 +2292,7 @@ def generate(value,task,request,executor,cancelled,deadline,check,blobs=None):
     extra=[];provisional={}
     if not deferred and len(_encoded(payload).encode())<=MAX_PROMPT_BYTES:
         result=invoke(payload);needs=result.pop('needs',[])
-        if not isinstance(needs,list):raise RunError('invalid_result','Invalid analysis read requests')
+        needs=needs if isinstance(needs,list) else []
         programs=result.pop('preview_programs',None)
         validate(result,final=not bool(needs))
         if not needs:
@@ -2206,8 +2336,20 @@ def generate(value,task,request,executor,cancelled,deadline,check,blobs=None):
         checkpoint_dir=root()/'checkpoints'/family/scope_key
     windowed=_windowed(value,task,request)
     wide_batches=bool(deferred) or windowed
+    windowed_system=task['task']=='system' and (value.get('intent') or {}).get('task')=='full' and (value.get('intent') or {}).get('coverage','signal')=='signal'
+    settled=[False]
+    def settle():
+        """Once, after every batch: read the saved evidence of recheck targets that no batch could judge."""
+        if settled[0] or not windowed or request.get('mode') not in ('review','patch'):return False
+        settled[0]=True
+        missing=_undisposed(result,request)
+        if not missing:return False
+        known={u['id'] for u in units}
+        fresh=[u for u in _recheck_windows(repo,request['commit'],raw,conf['layout'],missing,cancelled,deadline,blobs) if u['id'] not in known]
+        units.extend(fresh);pending.extend(fresh)
+        return bool(fresh)
     progress()
-    while pending or deferred:
+    while pending or deferred or settle():
         if deferred and index:
             repo_path,head,previous,first=deferred.pop()
             snapshots=export_source(repo_path,head,[previous] if previous else [],cancelled,deadline,
@@ -2241,7 +2383,7 @@ def generate(value,task,request,executor,cancelled,deadline,check,blobs=None):
                 if not batch:raise RunError('source_too_large','Analysis metadata could not fit a bounded input')
                 break
             batch.append(pending.pop(0))
-        ids=[u['id'] for u in batch];context=list(batch);prior={};reads=[]
+        ids=[u['id'] for u in batch];context=list(batch);prior={};reads=[];accumulated=prior;programs=None
         checkpoint=None
         if checkpoint_dir:
             checkpoint=checkpoint_dir/(ai_extract.digest([batch_id,ids])+'.json')
@@ -2250,8 +2392,10 @@ def generate(value,task,request,executor,cancelled,deadline,check,blobs=None):
                 except (ValueError,OSError):cached=None
                 if isinstance(cached,dict) and 'data' in cached and ai_extract.digest(cached['data'])==cached.get('digest'):
                     data=cached['data']
-                    validate(data['fragment'],False)
-                    result=_combine(result,data['fragment'])
+                    # A settled packet saved by an older merge can hold one registration twice (with and without its mount).
+                    fragment=_unkeep(task['task'],_combine({'backend_routes':[]} if task['task']=='analysis' else {},data['fragment']))
+                    validate(fragment,False)
+                    result=_combine(result,fragment)
                     covered.update(ids)
                     with locked():
                         current=read(value['id'])
@@ -2266,7 +2410,8 @@ def generate(value,task,request,executor,cancelled,deadline,check,blobs=None):
         claim_feedback=None
         explained_read=False
         satisfied_needs=None
-        for round in range(MAX_READ_ROUNDS):
+        read_rounds=SYSTEM_READ_ROUNDS if windowed_system else MAX_READ_ROUNDS
+        for round in range(read_rounds):
             packet=_batch_payload(batch_header,context,batch_id,prior)
             if task['task']=='analysis':
                 packet['batch']['rules']+=' Optionally return top-level preview_programs: [{name,file,line}] for entry points directly evidenced in this context, including CLI commands and workers.'
@@ -2291,18 +2436,20 @@ def generate(value,task,request,executor,cancelled,deadline,check,blobs=None):
             try:
                 if task['task']=='analysis':
                     _materialize_citations(fragment,programs,context,request['commit'])
-                validate(fragment,False,context if task['task']=='analysis' else ())
+                validate(fragment,False,context if task['task'] in ('analysis','system') else ())
             except InvalidClaim as error:
-                if claim_retry_used or task['task']!='analysis':raise
+                if claim_retry_used or task['task'] not in ('analysis','system'):raise
                 claim_retry_used=True
                 claim_feedback=(f'Your previous fragment failed validation: {error}. '
                                 'Resubmit this batch with covered equal to units and only supported schema entries. '
-                                'Select its supplied file and one-based line; include offset when shown. The app supplies the quote. '
-                                'Use unknown for unsupported facts. Return {batch,covered,result,needs}.')
+                                +('Select its supplied file and one-based line; include offset when shown. The app supplies the quote. '
+                                  if task['task']=='analysis' else
+                                  'Cite only tracked source files supplied in this packet, each with its exact one-based line and a literal quote copied from that line. ')
+                                +'Use unknown for unsupported facts. Return {batch,covered,result,needs}.')
                 continue
             accumulated=_combine(prior,fragment)
             needs=answer.get('needs',[])
-            if not isinstance(needs,list):raise RunError('invalid_result','Invalid analysis read requests')
+            needs=needs if isinstance(needs,list) else []
             requested_here=[]
             if needs:
                 if not repo and any('metadata' not in need for need in needs):raise RunError('invalid_result','This task cannot request source reads')
@@ -2347,12 +2494,21 @@ def generate(value,task,request,executor,cancelled,deadline,check,blobs=None):
             while reads and len(_encoded(_batch_payload(batch_header,context+[reads[0]],batch_id,prior)).encode())<=MAX_PROMPT_BYTES:
                 context.append(reads.pop(0))
             if len(context)==before_reads:raise RunError('source_too_large','Analysis continuation metadata could not fit a bounded input')
-        else:raise RunError('invalid_result','Analysis source reads did not settle')
+        else:
+            # The model kept asking for more material. Keep what this batch established and say what was not read.
+            note=f'One batch kept requesting more source than its {read_rounds} read rounds allowed; {len(reads)} requested pieces were not read, so findings that depend on them are unconfirmed'
+            accumulated=_combine(accumulated,{'unknown':[{'text':note,'needs':'read'} if task['task']=='system' else note]})
+            result=_combine(result,accumulated)
+            if checkpoint:
+                current=read(value['id'])
+                data={'fragment':accumulated,'preview':current.get('preview'),'overview':current.get('overviews',{}).get(task['repository'])}
+                store.atomic(checkpoint,{'data':data,'digest':ai_extract.digest(data)})
         if covered.intersection(ids):raise RunError('invalid_result','Duplicate analysis coverage')
         covered.update(ids)
         progress()
     if covered!={u['id'] for u in units}:raise RunError('invalid_result','Analysis source coverage was incomplete')
-    validate(result)
+    validate(_prune_dangling(task['task'],_unkeep(task['task'],result)))
+    if windowed and request.get('mode') in ('review','patch'):_supersede(result,request,raw,repo,request['commit'],conf['layout'])
     if task['task']=='system':
         ids={n['id'] for n in result.get('nodes',[])};ext={x['id'] for x in result.get('externals',[])}
         if any(l.get('from') not in ids or l.get('to') not in ids for l in result.get('links',[])) or any(set(n.get('uses',[]))-ext for n in result.get('nodes',[])):raise RunError('invalid_result','Analysis links named unknown targets')

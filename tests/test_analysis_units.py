@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import sys
 import unittest
+from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0,str(Path(__file__).resolve().parent))
 import analysis_run
@@ -429,6 +430,103 @@ class FullRun(unittest.TestCase):
         self.assertEqual(ready['signals'],'ready');self.assertTrue(ready['repositories'][0]['map_coverage']['files'])
         self.assertLessEqual(ready['modes']['signal']['calls'],opened['modes']['signal']['calls'])  # the pending number is an upper bound
         self.assertEqual(ready['totals'],opened['totals'])
+
+    def test_batches_that_describe_the_same_identity_differently_keep_the_first_and_say_so_while_identity_conflicts_still_fail(self):
+        first={'screens':[{'path':'/p/{}','heading':'A','file':'f1.tsx','line':3,'actions':[{'kind':'nav','to':'/a'}]}],'unknown':['kept']}
+        second={'screens':[{'path':'/p/{}','heading':'B','file':'f2.tsx','line':9,'component':'C','actions':[{'kind':'nav','to':'/b'}]}]}
+        merged=analysis_run._combine(first,second)
+        screen=merged['screens'][0]
+        self.assertEqual((screen['heading'],screen['file'],screen['component']),('A','f1.tsx','C'))  # first wins, new fields join
+        self.assertEqual([a['to'] for a in screen['actions']],['/a','/b'])  # lists are unioned
+        self.assertEqual(merged['unknown'][0],'kept');self.assertIn('f2.tsx:9',merged['unknown'][1])  # the divergence is stated, never silent
+        route=lambda name,mount='m.py':{'backend_routes':[{'method':'GET','path':'/x','file':'a.py','function':'f','name':name,'dependencies':[{'file':mount}]}]}
+        kept=analysis_run._combine(route('one'),route('two'))  # the same registration seen by two batches: the label differs, the registration is one
+        self.assertEqual(kept['backend_routes'][0]['name'],'one');self.assertIn('name differ',kept['unknown'][0])
+        bare={'backend_routes':[{'method':'GET','path':'/x','file':'a.py','function':'f'}]}  # the same registration where no mount was found
+        joined=analysis_run._combine(bare,route('one'))['backend_routes'];self.assertEqual(len(joined),1);self.assertEqual(joined[0]['dependencies'],[{'file':'m.py'}])
+        self.assertEqual(len(analysis_run._combine(route('one'),bare)['backend_routes']),1)
+        again=route('one');again['backend_routes'][0]['dependencies']=[{'file':'m.py','line':7,'quote':'mounted here too'}]  # same mount file, other evidence line
+        both=analysis_run._combine(route('one'),again)['backend_routes'][0]
+        self.assertEqual([d.get('line') for d in both['dependencies']],[None,7]);self.assertEqual(analysis_run.ai_extract.route_id(both),analysis_run.ai_extract.route_id(route('one')['backend_routes'][0]))  # the identity keeps its first anchor
+        # The path is the full mounted path: another mount listed first is the same endpoint, and the first batch's mount stays first.
+        merged=analysis_run._combine(route('one'),route('one','other.py'))['backend_routes']
+        self.assertEqual(len(merged),1);self.assertEqual(analysis_run._mount_file(merged[0]),analysis_run._mount_file(route('one')['backend_routes'][0]))
+        with self.assertRaisesRegex(analysis_run.RunError,r'at /count'):analysis_run._combine({'count':1},{'count':2})  # a conflicting scalar outside an identity item still fails
+        nodes=analysis_run._combine({'nodes':[{'id':'api','name':'A'}]},{'nodes':[{'id':'api','name':'B'}]})
+        self.assertEqual(nodes['nodes'][0]['name'],'A');self.assertEqual(nodes['unknown'][0]['needs'],'read')  # the structure task's unknown shape
+
+    def test_recheck_targets_no_batch_judged_are_found_from_the_merged_result(self):
+        kept={'method':'GET','path':'/a','file':'a.py','function':'f'};moved={'method':'GET','path':'/b','file':'b.py','function':'g'}
+        request={'recheck':[{'id':analysis_run.ai_extract.route_id(kept)},{'id':'r:gone'},{'id':'r:old'},{'id':'s:'+'x'*4},{'id':analysis_run.ai_extract.screen_id({'path':'/p'})}]}
+        result={'backend_routes':[kept,{**moved,'replaces':'r:old'}],'screens':[{'path':'/p'}],'removed':['r:gone']}
+        self.assertEqual(analysis_run._undisposed(result,request),['s:xxxx'])
+
+    def test_a_reemitted_registration_with_a_new_mount_names_the_saved_item_it_succeeds(self):
+        from unittest.mock import patch
+        old={'method':'GET','path':'/a','file':'a.py','function':'f','dependencies':[{'file':'main.py'}]}
+        new={'method':'GET','path':'/a','file':'a.py','function':'f','dependencies':[{'file':'a.py'}]}
+        target=analysis_run.ai_extract.route_id(old);raw={'commit':'c','backend_routes':[{**old,'source':'ai'}],'analysis':{'commit':'c'}}
+        result={'backend_routes':[new]}
+        with patch.object(analysis_run.ai_extract,'basic_catalog',return_value={'backend_routes':[],'screens':[]}):
+            analysis_run._supersede(result,{'recheck':[{'id':target}]},raw,'repo','c',{})
+        self.assertEqual(new.get('replaces'),target);self.assertEqual(analysis_run._undisposed(result,{'recheck':[{'id':target}]}),[])
+
+    def test_a_metadata_request_for_a_missing_path_is_answered_not_fatal(self):
+        payload={'input':{'routes':['a']}}
+        for path in (['input','changes'],['nowhere'],['input','routes',9],['input']):
+            units=analysis_run._needed('repo','c',[{'metadata':path}],None,None,payload)
+            self.assertEqual(len(units),1 if path!=['input'] else len(units));self.assertTrue(units)
+        self.assertEqual(analysis_run._needed('repo','c',[{'metadata':['nowhere']}],None,None,payload)[0]['value']['value']['error'],'Not an existing analysis metadata path')
+
+    def test_keep_all_from_an_early_round_does_not_survive_nodes_found_by_a_later_round(self):
+        union=analysis_run._combine({'keep':'all','nodes':[]},{'nodes':[{'id':'api'}]})
+        self.assertEqual(analysis_run._unkeep('system',union),{'nodes':[{'id':'api'}]})
+        self.assertEqual(analysis_run._unkeep('system',{'keep':'all','nodes':[]}),{'keep':'all','nodes':[]})
+        self.assertEqual(analysis_run._unkeep('analysis',{'keep':'all','nodes':[1]}),{'keep':'all','nodes':[1]})
+
+    def test_references_no_round_defined_are_dropped_and_named_in_unknown(self):
+        result={'nodes':[{'id':'api','uses':['db','ghost']},{'id':'web'}],'externals':[{'id':'db'}],'links':[{'from':'web','to':'api'},{'from':'api','to':'folder'}],'unknown':[]}
+        out=analysis_run._prune_dangling('system',result)
+        self.assertEqual(out['links'],[{'from':'web','to':'api'}]);self.assertEqual(out['nodes'][0]['uses'],['db'])
+        self.assertEqual(len(out['unknown']),2);self.assertIn('api -> folder',out['unknown'][0]['text']);self.assertIn('ghost',out['unknown'][1]['text'])
+        clean={'nodes':[{'id':'a'}],'externals':[],'links':[],'unknown':[]};self.assertEqual(analysis_run._prune_dangling('system',dict(clean)),clean)
+        self.assertEqual(analysis_run._prune_dangling('analysis',{'links':[{'from':'x','to':'y'}]}),{'links':[{'from':'x','to':'y'}]})
+
+    def test_structure_labels_the_saved_structure_would_coerce_do_not_fail_validation(self):
+        node={'id':'db','name':'DB','kind':'database','origin':'external','code':[],'ev':[]}
+        with patch.object(analysis_run,'_regular_files',return_value={'a.go'}),patch.object(analysis_run.ai_extract,'evidence_reader',return_value=(lambda ev:True,{},lambda:0)):
+            data={'nodes':[node],'links':[],'externals':[],'others':[]};node['ev']=[{'file':'a.go','line':1,'quote':'package main'}]
+            analysis_run._strict_result('system',data,'repo','c',None,{},False)
+        self.assertEqual((node['kind'],node['origin']),('program','repo'))
+
+    def test_a_dict_valued_metadata_entry_larger_than_one_page_is_paged_not_refused(self):
+        payload={'input':{'map':{'api_functions':['x'*40000],'small':[1]}}}
+        units=analysis_run._needed('repo','c',[{'metadata':['input','map']}],None,None,payload)
+        self.assertGreater(len(units),2);self.assertTrue(all(u['kind']=='metadata' for u in units))
+
+    def test_a_file_read_for_a_path_that_is_not_tracked_source_is_answered_but_secrets_and_traversal_still_fail(self):
+        units=analysis_run._needed(str(Path(__file__).resolve().parent.parent),'HEAD',[{'file':'no/such/file.txt'}],None,None,{})
+        self.assertEqual(units[0]['value']['value']['error'],'Not an eligible tracked source file at the pinned commit')
+        for bad in ('../outside','/etc/passwd','.env'):
+            with self.assertRaises(analysis_run.RunError):analysis_run._needed(str(Path(__file__).resolve().parent.parent),'HEAD',[{'file':bad}],None,None,{})
+
+    def test_malformed_read_request_lists_are_trimmed_or_answered_not_fatal(self):
+        payload={'input':{'a':['x']}}
+        units=analysis_run._needed('repo','c',[{'metadata':['input','a']}]*20,None,None,payload)
+        self.assertTrue(units);self.assertEqual(analysis_run._needed('repo','c','not a list',None,None,payload),[])
+        for bad in ({},{'file':'a','query':'b'},{'query':'two\nlines'},{'query':'x'*300},'text'):
+            out=analysis_run._needed('repo','c',[bad],None,None,payload);self.assertEqual(len(out),1);self.assertIn('error',out[0]['value']['value'])
+
+    def test_batches_naming_one_program_differently_merge_by_spelling_and_references_follow(self):
+        first={'nodes':[{'id':'image_worker','name':'Engine','code':['x']}],'externals':[{'id':'media_store','name':'Work'}],'links':[]}
+        second={'nodes':[{'id':'image-worker','name':'Image worker','code':['y']},{'id':'api','uses':['media-store']}],
+                'externals':[{'id':'media-store','name':'Work folder'}],'links':[{'from':'api','to':'image-worker'}]}
+        merged=analysis_run._combine(first,second)
+        self.assertEqual([n['id'] for n in merged['nodes']],['image_worker','api']);self.assertEqual(merged['nodes'][0]['code'],['x','y'])
+        self.assertEqual(len(merged['externals']),1)
+        self.assertFalse([u for u in merged.get('unknown',[]) if 'id differ' in str(u)])  # the spelling is not reported as a conflict
+        out=analysis_run._prune_dangling('system',merged)
+        self.assertEqual(out['links'],[{'from':'api','to':'image_worker'}]);self.assertEqual(out['nodes'][1]['uses'],['media_store'])
 
     def test_a_saved_map_that_can_be_patched_never_needs_the_scan(self):
         self.large_map()
