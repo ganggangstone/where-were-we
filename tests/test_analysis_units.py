@@ -203,6 +203,25 @@ class FullRun(unittest.TestCase):
         states={row[0]:row[4] for row in analysis_run.unit_board('legacy','','dev','en')['repositories'][0]['units']}
         self.assertTrue(all(state=='saved' for state in states.values()),states)
 
+    def test_a_saved_unit_overview_for_other_files_is_outdated_even_on_the_same_commit_and_a_retired_unit_is_not_counted(self):
+        self.legacy()
+        board=analysis_run.unit_board('legacy','','dev','en')
+        job=analysis_run.prepare('legacy',lang='en',intent={'task':'full','targets':[],'max_calls':board['calls']})
+        self.assertEqual(analysis_run.run(job['id'],self.executor([]))['state'],'completed')
+        record=analysis_run.read(job['id']);units=record['unit_overviews']['']
+        victim=next(t for t in units if t.startswith('folder:lib'))
+        units[victim]['unit']={**units[victim]['unit'],'digest':'0'*64,'file_count':99}  # the unit holds other files now
+        units['folder:gone']={**units[victim],'unit':{**units[victim]['unit'],'id':'folder:gone'}}  # a unit of an older structure
+        analysis_run.write(record)
+        board=analysis_run.unit_board('legacy','','dev','en');states=self.states(board)
+        self.assertEqual(states[victim],'stale');self.assertEqual(board['totals']['stale'],1)
+        self.assertEqual(board['totals']['saved']+1,board['totals']['units'])  # every other unit is still saved
+        retired=board['repositories'][0]['retired'];self.assertIn('folder:gone',retired);self.assertEqual(board['totals']['retired'],len(retired))
+        self.assertFalse(set(retired)&set(states))  # kept in history, never counted as units
+        # A new run does not take that explanation as cached.
+        again=analysis_run.prepare('legacy',lang='en',intent={'task':'full','targets':[],'max_calls':board['calls']})
+        self.assertIn(victim,[t.get('target') for t in again['tasks']])
+
     def test_board_reads_pins_without_the_whole_tree_and_reuses_cached_reads_across_processes(self):
         import ai_extract
         legacy=self.legacy();del legacy
@@ -615,13 +634,77 @@ class FullRun(unittest.TestCase):
     def test_unit_without_eligible_source_is_skipped_not_failed(self):
         (self.repo/'blank').mkdir();(self.repo/'blank/only.py').write_text('x\n')
         self.git('add','-A');self.git('commit','-qm','Tiny file');self.publish_index()
-        calls=[];done=analysis_run.run(self.prepare(intent=self.intent())['id'],self.executor(calls))
+        job=self.prepare(intent={**self.intent(),'max_calls':self.intent()['max_calls']+1})  # +1: the map discovers program:api
+        calls=[];done=analysis_run.run(job['id'],self.executor(calls))
         self.assertEqual(done['state'],'completed',done.get('error'))
         states=self.states()
         self.assertEqual(states['folder:blank'],'unavailable')
         self.assertEqual({v for k,v in states.items() if k!='folder:blank'},{'saved'})
         # The skipped unit costs no model call, and a later run does not report it as a failure.
         self.assertEqual(self.prepare(intent=self.intent())['state'],'preparing')
+
+
+class StructureRepair(unittest.TestCase):
+    """Duplicate nodes saved before spelling-based merging existed: merged only when the content says they are one thing."""
+    def node(self,id,name,code=(),kind='program',ev=(),uses=()):
+        return {'id':id,'name':name,'kind':kind,'code':list(code),'uses':list(uses),'ev':[{'file':f,'line':l,'quote':q,'ok':True} for f,l,q in ev],'unknown':[]}
+    def link(self,a,b,label,ev=()):return {'from':a,'to':b,'label':label,'style':'','sure':'code','ev':[{'file':f,'line':l,'quote':q,'ok':True} for f,l,q in ev]}
+    def system(self):
+        return {'language':'en','commit':'c','nodes':[
+            self.node('web_api','API server',['api'],ev=[('api/app.py',1,'app=App()')],uses=['pg']),
+            self.node('web-api','API server (v2)',['api','api/db'],ev=[('api/app.py',1,'app=App()'),('api/db.py',3,'conn')],uses=['p_g']),
+            self.node('queue_worker','Queue worker',['api'],ev=[('compose.yml',9,'worker:')]),
+            self.node('queue-worker','Queue worker',['api'],ev=[('compose.yml',9,'worker:')]),
+            self.node('old_job','Old job',['legacy'],ev=[('a.py',1,'x')]),
+            self.node('old-job','New job',['api'],ev=[('b.py',1,'y')]),   # same spelling, different thing: kept apart
+            self.node('database','Database',kind='store',ev=[('compose.yml',3,'db:')])],
+            'externals':[{'id':'pg','name':'Postgres','ev':[{'file':'c.py','line':1,'quote':'pg'}]},{'id':'p_g','name':'Postgres','ev':[{'file':'c.py','line':2,'quote':'pg2'}]}],
+            'links':[self.link('web_api','database','reads',[('api/db.py',3,'conn')]),self.link('web-api','database','reads',[('api/db.py',7,'read')]),
+                     self.link('queue-worker','web_api','calls',[('compose.yml',9,'worker:')]),self.link('web_api','web-api','same',[('z',1,'z')]),
+                     self.link('old-job','database','writes',[('b.py',2,'w')])],
+            'others':[{'text':'x'}],'unknown':[{'text':'old note','needs':'read'}]}
+
+    def test_only_identity_checked_duplicates_merge_and_nothing_is_lost(self):
+        before=self.system();fresh=copy.deepcopy(before)
+        merged,report=analysis_run.merge_duplicate_structure(before)
+        self.assertEqual(before,fresh)  # the input is never changed in place
+        self.assertEqual(report['before'],{'nodes':7,'externals':2,'links':5});self.assertEqual(report['after'],{'nodes':5,'externals':1,'links':3})
+        ids=[n['id'] for n in merged['nodes']]
+        self.assertIn('web_api',ids);self.assertNotIn('web-api',ids);self.assertEqual(len({'queue_worker','queue-worker'}&set(ids)),1)  # the linked copy keeps its id
+        self.assertTrue({'old_job','old-job'}<=set(ids))  # contradicting code folders: ambiguous, kept apart
+        self.assertEqual([a['ids'] for a in report['ambiguous']],[['old_job','old-job']])
+        api=next(n for n in merged['nodes'] if n['id']=='web_api')
+        self.assertEqual(api['code'],['api','api/db']);self.assertEqual(len(api['ev']),2);self.assertEqual(sorted(api['uses']),['pg'])
+        self.assertTrue(any('API server (v2)' in u['text'] for u in api['unknown']))  # the other name is kept in unknown
+        reads=[l for l in merged['links'] if l['label']=='reads'];self.assertEqual(len(reads),1);self.assertEqual(len(reads[0]['ev']),2)
+        self.assertEqual(next(l for l in merged['links'] if l['label']=='calls')['from'],'queue-worker');self.assertEqual(next(l for l in merged['links'] if l['label']=='calls')['to'],'web_api')
+        self.assertEqual(report['dropped_self_links'],1);self.assertTrue(any('same' in u['text'] for u in merged['unknown']))  # a link between the two copies is noted, not silently lost
+        self.assertEqual(merged['others'],before['others'])
+        ids=set(ids)|{x['id'] for x in merged['externals']}
+        self.assertTrue(all(l['from'] in ids and l['to'] in ids for l in merged['links']))
+        again,second=analysis_run.merge_duplicate_structure(merged);self.assertEqual(second['merged'],[]);self.assertEqual(again,merged)  # a second repair changes nothing
+
+    def test_repair_keeps_a_copy_writes_a_record_and_leaves_the_hand_written_structure_and_other_data_alone(self):
+        import tempfile
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as root:
+            home=Path(root)/'demo';home.mkdir()
+            dev={'commit':'c','task_outputs':{'system':self.system(),'groups':{'groups':[]},'jobs':{'nodes':{}}}}
+            (home/'dev.json').write_text(json.dumps(dev));(home/'system.hand.json').write_text('{"nodes":[]}')
+            digest=lambda:{p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in home.iterdir() if p.is_file() and p.name!='.project.lock'}
+            with patch.object(analysis_run.mapcore,'ROOT',root),patch.object(analysis_run,'active',lambda:{'active':False}):
+                before=digest();report=analysis_run.repair_structure('demo')
+                self.assertFalse(report['applied']);self.assertEqual(digest(),before)  # a dry run writes nothing
+                with patch.object(analysis_run,'active',lambda:{'active':True}),self.assertRaisesRegex(analysis_run.RunError,'running'):analysis_run.repair_structure('demo',apply=True)
+                self.assertEqual(digest(),before)
+                report=analysis_run.repair_structure('demo',apply=True)
+                self.assertTrue(report['applied']);self.assertEqual(json.loads((home/report['backup']).read_text()),dev)  # the original is kept as it was
+                saved=json.loads((home/'dev.json').read_text())
+                self.assertEqual(len(saved['task_outputs']['system']['nodes']),5)
+                self.assertEqual({k:v for k,v in saved['task_outputs'].items() if k!='system'},{k:v for k,v in dev['task_outputs'].items() if k!='system'})
+                self.assertEqual(digest()['system.hand.json'],before['system.hand.json'])
+                self.assertEqual(len(list(home.glob('structure-repair-*.json'))),1)
+                self.assertEqual(analysis_run.repair_structure('demo',apply=True)['merged'],[])  # nothing left to repair
 
 
 class RepositoryTypes(unittest.TestCase):
