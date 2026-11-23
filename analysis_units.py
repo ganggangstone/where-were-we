@@ -8,13 +8,20 @@ under one named exclusion reason, so missing coverage is visible instead of impl
 Files outside the structure index (documents, configuration, scripts, languages the
 indexer does not read, files past its limit) are plain files: they stay in folder units
 and are sampled from their text, so only secrets, binaries and oversized files are excluded.
+
+Folders that hold only documents, data, tests or vendored code become `local` units: they are
+counted and listed from the local read, and the AI explains them only when the user chooses to
+send every text file. Import edges between units are kept as links, so the board can draw how
+units connect without asking the AI.
 """
 import hashlib
 import posixpath
 from collections import defaultdict
 
-VERSION = 2
+VERSION = 3
 FOLDER_MAX_FILES = 12
+LOCAL_MAX_FILES = 200   # a local unit costs no call, so one card can stand for a whole documents or tests area
+LINKS_PER_UNIT = 6
 STORED_FILES = 64
 KINDS = ('route', 'package', 'cli', 'screen', 'program', 'folder')
 
@@ -40,16 +47,16 @@ def _under(indexed, prefixes):
     return sorted(f for f in indexed if any(f == p or f.startswith(p + '/') for p in prefixes))
 
 
-def _folders(files):
+def _folders(files, limit=FOLDER_MAX_FILES):
     units = []
 
     def emit(prefix, members, direct_only):
         base = (prefix.rstrip('/') or '(root)') + ('/*' if direct_only and prefix else '')
         members = sorted(members)
         # A flat folder cannot split by directory; consecutive name ranges keep every unit small.
-        for start in range(0, len(members), FOLDER_MAX_FILES):
-            part = members[start:start + FOLDER_MAX_FILES]
-            name = base if len(members) <= FOLDER_MAX_FILES else f'{base} [{start + 1}-{start + len(part)}]'
+        for start in range(0, len(members), limit):
+            part = members[start:start + limit]
+            name = base if len(members) <= limit else f'{base} [{start + 1}-{start + len(part)}]'
             units.append({'id': 'folder:' + name, 'kind': 'folder', 'name': name, 'files': part})
 
     def split(prefix, members):
@@ -61,7 +68,7 @@ def _folders(files):
                 subtree[rest.split('/', 1)[0]].append(file)
             else:
                 direct.append(file)
-        if not subtree or (prefix and len(members) <= FOLDER_MAX_FILES):
+        if not subtree or (prefix and len(members) <= limit):
             emit(prefix, members, False)
             return
         if direct:
@@ -74,9 +81,10 @@ def _folders(files):
     return units
 
 
-def catalog(index, tracked, exclusion, screens=(), programs=()):
+def catalog(index, tracked, exclusion, screens=(), programs=(), local=None):
     """index: pinned structure index. tracked: {path: bytes} of regular tracked blobs.
-    exclusion(path, size) -> reason or None. screens/programs come from the saved map when it exists."""
+    exclusion(path, size) -> reason or None. screens/programs come from the saved map when it exists.
+    local(path) -> True for a document, data, test or vendored file that is read locally only."""
     eligible = {file for file, size in tracked.items() if not exclusion(file, size)}
     indexed = {row['file'] for row in index.get('files', []) if row['file'] in eligible}
     weight = defaultdict(int)
@@ -126,16 +134,34 @@ def catalog(index, tracked, exclusion, screens=(), programs=()):
         if inside and not set(inside) <= package_files:
             add('program', program['id'], program.get('name') or program['id'], inside)
     claimed = set().union(*owned.values()) if owned else set()
-    for unit in _folders(sorted(eligible - claimed)):
+    rest = eligible - claimed
+    aside = {f for f in rest if local and local(f)}
+    for unit in _folders(sorted(rest - aside)):
         add('folder', unit['id'][7:], unit['name'], unit['files'])
+    for unit in _folders(sorted(aside), LOCAL_MAX_FILES):
+        # The name says what it is, so a documents area never collides with the code folder beside it.
+        add('folder', 'local:' + unit['id'][7:], unit['name'], unit['files'], reading='local')
     in_units = set().union(*owned.values()) if owned else set()
+    # Import edges between units, strongest first. A file in several units links each of them.
+    owners = defaultdict(list)
+    for unit_id, files in owned.items():
+        for file in files:
+            owners[file].append(unit_id)
+    edges = defaultdict(lambda: defaultdict(int))
+    for file, targets in imports.items():
+        for target in targets:
+            for a in owners[file]:
+                for b in owners[target]:
+                    if a != b:
+                        edges[a][b] += 1
+    links = {a: [[b, n] for b, n in sorted(row.items(), key=lambda x: (-x[1], x[0]))[:LINKS_PER_UNIT]] for a, row in sorted(edges.items())}
     reasons = defaultdict(int)
     for file, size in tracked.items():
         if file not in eligible:
             reasons[exclusion(file, size)] += 1
     counts = index.get('coverage', {})
-    return {'version': VERSION, 'units': units,
+    return {'version': VERSION, 'units': units, 'links': links,
             'coverage': {'tracked': len(tracked), 'indexed': len(indexed), 'plain': len(eligible) - len(indexed),
-                         'in_units': len(in_units), 'excluded': {k: v for k, v in sorted(reasons.items()) if v},
+                         'in_units': len(in_units), 'local': len(aside), 'excluded': {k: v for k, v in sorted(reasons.items()) if v},
                          'truncated': bool(counts.get('truncated')),
                          'index_candidates': counts.get('candidate_files'), 'index_skipped': counts.get('skipped_files', 0)}}

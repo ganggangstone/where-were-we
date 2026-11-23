@@ -93,6 +93,8 @@ def _kind(path):
         return 'structured'
     return 'code'
 
+kind = _kind  # the tier of a path alone: 'doc', 'support', 'structured' or 'code'
+
 
 LONG_LINE = 1600     # a longer line is sent as one clipped segment around the first signal, with its character offset
 CLIP_BEFORE = 200

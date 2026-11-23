@@ -56,6 +56,16 @@ class Catalog(unittest.TestCase):
         self.assertEqual(coverage['tracked'],len(names))
         self.assertTrue(all(u['digest'] for u in built['units']))
 
+    def test_import_edges_between_units_become_links_and_documents_and_tests_become_local_units(self):
+        files=[{'file':'app/a.py','declarations':[]},{'file':'core/b.py','declarations':[]},{'file':'core/c.py','declarations':[]}]
+        index={'files':files,'imports':[{'file':'app/a.py','target':'core/b.py','line':1},{'file':'app/a.py','target':'core/c.py','line':2}],'coverage':{}}
+        names=[f['file'] for f in files]+['docs/a.md','docs/b.md','tests/test_a.py']
+        built=analysis_units.catalog(index,tracked(*names),self.exclusion,local=lambda f:f.startswith(('docs/','tests/')))
+        self.assertEqual(built['links'],{'folder:app':[['folder:core',2]]})
+        local={u['name']:u for u in built['units'] if u.get('reading')=='local'}
+        self.assertEqual(set(local),{'docs','tests'});self.assertEqual(local['docs']['id'],'folder:local:docs');self.assertEqual(built['coverage']['local'],3)
+        self.assertEqual(built['coverage']['in_units'],len(names))
+
     def test_large_folders_split_into_bounded_units_without_losing_files(self):
         files=[{'file':f'src/mod{i%3}/f{i}.py','declarations':[]} for i in range(60)]
         built=analysis_units.catalog({'files':files,'imports':[]},tracked(*[f['file'] for f in files]),self.exclusion)
@@ -117,6 +127,21 @@ class FullRun(unittest.TestCase):
         board=board or self.board()
         return {'task':'full','targets':[],'max_calls':board['modes'][coverage]['calls'],'coverage':coverage}
 
+    def only(self,*targets,rid='service',**extra):
+        """The intent of opening cards: explain exactly these units. The cap is one call per pack plus half again for the retry."""
+        n=len(targets);return {'task':'full','targets':[],'coverage':'signal','max_calls':n+-(-n//2),'only':[{'repository':rid,'target':t} for t in targets],**extra}
+
+    def cards(self,*targets,calls=None,bad=(),after=None,project='demo',rid='service'):
+        job=analysis_run.prepare(project,lang='en',intent=self.only(*targets,rid=rid))
+        return analysis_run.run(job['id'],self.executor([] if calls is None else calls,bad=bad,after=after))
+
+    def unit_ids(self,board=None):return [r[0] for r in (board or self.board())['repositories'][0]['units'] if not r[0].startswith('task:')]
+
+    def explain_everything(self,calls=None):
+        """A full analysis, then a card opened for every unit."""
+        analysis_run.run(self.prepare(intent=self.intent())['id'],self.executor([]))
+        return self.cards(*self.unit_ids(),calls=calls)
+
     def map_calls(self,board,coverage='signal'):return board['modes'][coverage]['calls_parts']['map']
 
     def test_board_is_local_and_the_call_cap_must_be_confirmed(self):
@@ -129,29 +154,42 @@ class FullRun(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'maximum call count'):self.prepare(intent={**self.intent(board),'max_calls':board['calls']-1})
         self.assertEqual(self.prepare(intent=self.intent(board))['state'],'preparing')
 
-    def test_overview_first_then_units_are_saved_with_isolated_failures_and_resume(self):
-        board=self.board();job=self.prepare(intent={**self.intent(board),'max_calls':board['calls']+1})  # +1: the map discovers one more unit (program:api)
-        calls=[];bad='folder:lib'
-        done=analysis_run.run(job['id'],self.executor(calls,bad=(bad,)))
+    def test_a_full_run_asks_no_unit_and_cards_explain_exactly_the_chosen_units_with_isolated_failures(self):
+        board=self.board();calls=[]
+        done=analysis_run.run(self.prepare(intent=self.intent(board))['id'],self.executor(calls))
         self.assertEqual(done['state'],'completed',done.get('error'))
         self.assertNotIn('resource',calls[0]);self.assertNotIn('resources',calls[0])  # the first overview comes first
-        self.assertLessEqual(len(calls),board['calls']*2)
-        states=self.states(analysis_run.unit_board('demo','service','dev','en'))
-        self.assertEqual(states[bad],'failed')
-        self.assertTrue(all(state=='saved' for key,state in states.items() if key!=bad),states)
+        self.assertFalse(any('resource' in c or 'resources' in c for c in calls));self.assertLessEqual(len(calls),board['calls'])
+        self.assertEqual({v for k,v in self.states().items() if not k.startswith('task:')},{'pending'})
+        bad='folder:lib';asked=[]
+        done=self.cards('route:/orders','folder:tools',bad,calls=asked,bad=(bad,))
+        self.assertEqual(done['state'],'completed',done.get('error'))
+        states=self.states()
+        self.assertEqual(states[bad],'failed');self.assertEqual((states['route:/orders'],states['folder:tools']),('saved','saved'))
+        self.assertEqual(states['route:/users'],'pending')  # only the chosen units were asked
         self.assertEqual([f['attempts'] for f in done['unit_failures']],[analysis_run.UNIT_ATTEMPTS])
-        saved=done['unit_overviews']['service']
+        saved=done['unit_overviews']['service'];self.assertEqual(set(saved),{'folder:tools'})
         self.assertTrue(all(unit['version']==analysis_run.SCOPED_OVERVIEW_VERSION and unit['unit']['kind']!='route' for unit in saved.values()))
         self.assertEqual(next(iter(saved.values()))['items'][0]['role'],'Role')
-        # A new run reuses every saved unit and sends only the one that failed.
-        again=[];second=self.prepare(intent=self.intent())
-        self.assertEqual([t.get('target') for t in second['tasks']],[bad]);self.assertEqual(second['unit_estimate']['calls'],2)  # one retry plus the allowance for a repeat
+        # The run's own board and the opened board agree, and a new request sends only the failed one.
+        self.assertEqual(analysis_run._run_board(done)['totals'],self.board()['totals'])
+        again=[];second=analysis_run.prepare('demo',lang='en',intent=self.only(bad))
+        self.assertEqual([t.get('target') for t in second['tasks']],[bad]);self.assertEqual(second['unit_estimate']['calls'],2)  # one ask plus the allowance for a repeat
         finished=analysis_run.run(second['id'],self.executor(again))
-        self.assertEqual(finished['state'],'completed')
-        self.assertEqual(len(again),1);self.assertEqual(again[0]['resource'],bad)
-        self.assertEqual(set(self.states().values()),{'saved'})
-        nothing=self.prepare(intent={**self.intent(),'max_calls':0})
+        self.assertEqual(finished['state'],'completed');self.assertEqual(len(again),1);self.assertEqual(again[0]['resource'],bad)
+        self.assertEqual(self.states()[bad],'saved')
+        nothing=analysis_run.prepare('demo',lang='en',intent={**self.only(bad),'max_calls':0})
         self.assertEqual(analysis_run.run(nothing['id'],lambda *a,**k:self.fail('unexpected call'))['state'],'completed')
+
+    def test_the_units_to_explain_are_validated_against_the_catalog_and_the_cap(self):
+        for bad in ([],[{'repository':'service','target':''}],[{'repository':'service'}],'x',[{'repository':'service','target':f'folder:{i}'} for i in range(25)]):
+            with self.assertRaisesRegex(ValueError,'1 to 24 units'):self.prepare(intent={**self.only('folder:lib'),'only':bad})
+        with self.assertRaisesRegex(ValueError,'current catalog'):self.prepare(intent=self.only('folder:nowhere'))
+        with self.assertRaisesRegex(ValueError,'maximum call count'):self.prepare(intent={**self.only('folder:lib'),'max_calls':1})
+        job=self.prepare(intent=self.only('folder:lib'))  # a run of this kind never joins or disturbs a full analysis family
+        self.assertEqual(job['family'],job['id']);self.assertEqual([t.get('target') for t in job['tasks']],['folder:lib'])
+        self.assertEqual(analysis_run.run(job['id'],self.executor([]))['state'],'completed')
+        self.assertIsNone(self.board()['budget'])
 
     def legacy(self,mutate=None):
         """A project saved before structure indexes existed: only dev.json (repo and ref), no project.json."""
@@ -191,7 +229,7 @@ class FullRun(unittest.TestCase):
             self.assertGreater(board['calls'],0,name);self.assertIn('route:/orders',self.states(board),name)
             self.assertEqual(json.dumps(self.raw()['dev']['structure_index'],sort_keys=True),saved,name)  # not rewritten
 
-    def test_legacy_project_full_run_starts_with_the_overview_then_saves_every_unit(self):
+    def test_legacy_project_full_run_starts_with_the_overview_then_the_map_and_a_card_saves_a_unit(self):
         self.legacy()
         board=analysis_run.unit_board('legacy','','dev','en')
         job=analysis_run.prepare('legacy',lang='en',intent={'task':'full','targets':[],'max_calls':board['calls']})
@@ -200,13 +238,16 @@ class FullRun(unittest.TestCase):
         done=analysis_run.run(job['id'],self.executor(calls))
         self.assertEqual(done['state'],'completed',done.get('error'))
         self.assertNotIn('resource',calls[0]);self.assertNotIn('resources',calls[0])  # first overview, then units
+        self.assertFalse(any('resource' in c for c in calls))
+        ids=[row[0] for row in analysis_run.unit_board('legacy','','dev','en')['repositories'][0]['units'] if not row[0].startswith('task:')]
+        self.assertEqual(self.cards(ids[0],project='legacy',rid='')['state'],'completed')
         states={row[0]:row[4] for row in analysis_run.unit_board('legacy','','dev','en')['repositories'][0]['units']}
-        self.assertTrue(all(state=='saved' for state in states.values()),states)
+        self.assertEqual(states[ids[0]],'saved');self.assertTrue(all(states[i]=='pending' for i in ids[1:]),states)
 
     def test_a_saved_unit_overview_for_other_files_is_outdated_even_on_the_same_commit_and_a_retired_unit_is_not_counted(self):
         self.legacy()
         board=analysis_run.unit_board('legacy','','dev','en')
-        job=analysis_run.prepare('legacy',lang='en',intent={'task':'full','targets':[],'max_calls':board['calls']})
+        job=analysis_run.prepare('legacy',lang='en',intent=self.only(*self.unit_ids(board),rid=''))
         self.assertEqual(analysis_run.run(job['id'],self.executor([]))['state'],'completed')
         record=analysis_run.read(job['id']);units=record['unit_overviews']['']
         victim=next(t for t in units if t.startswith('folder:lib'))
@@ -215,11 +256,11 @@ class FullRun(unittest.TestCase):
         analysis_run.write(record)
         board=analysis_run.unit_board('legacy','','dev','en');states=self.states(board)
         self.assertEqual(states[victim],'stale');self.assertEqual(board['totals']['stale'],1)
-        self.assertEqual(board['totals']['saved']+1,board['totals']['units'])  # every other unit is still saved
+        self.assertEqual(board['totals']['saved']+1+board['totals']['pending'],board['totals']['units'])  # every other unit is saved (the three map rows are not asked yet)
         retired=board['repositories'][0]['retired'];self.assertIn('folder:gone',retired);self.assertEqual(board['totals']['retired'],len(retired))
         self.assertFalse(set(retired)&set(states))  # kept in history, never counted as units
         # A new run does not take that explanation as cached.
-        again=analysis_run.prepare('legacy',lang='en',intent={'task':'full','targets':[],'max_calls':board['calls']})
+        again=analysis_run.prepare('legacy',lang='en',intent=self.only(victim,rid=''))
         self.assertIn(victim,[t.get('target') for t in again['tasks']])
 
     def test_board_reads_pins_without_the_whole_tree_and_reuses_cached_reads_across_processes(self):
@@ -274,10 +315,10 @@ class FullRun(unittest.TestCase):
 
     def test_call_limit_parts_add_up_to_the_confirmed_cap(self):
         board=self.board();parts=board['calls_parts']
-        self.assertEqual(sum(parts.values()),board['calls']);self.assertEqual(parts['retry'],-(-parts['units']//2))
+        self.assertEqual(sum(parts.values()),board['calls']);self.assertEqual(parts['retry'],1+(parts['overview']+parts['map'])//8)
         self.assertEqual(parts['map'],board['map_calls'])
 
-    def test_cancel_keeps_saved_units_and_retry_only_asks_for_the_rest(self):
+    def test_cancel_keeps_saved_map_tasks_and_retry_only_asks_for_the_rest(self):
         job=self.prepare(intent=self.intent());calls=[]
         def stop(count):
             if count==3:analysis_run.cancel(job['id'])
@@ -287,11 +328,11 @@ class FullRun(unittest.TestCase):
         self.assertGreater(saved,0);self.assertLess(saved,len(self.states()))
         retry=analysis_run.retry(job['id']);rest=[]
         self.assertEqual(analysis_run.run(retry['id'],self.executor(rest))['state'],'completed')
-        self.assertEqual(set(self.states().values()),{'saved'})
+        self.assertEqual({v for k,v in self.states().items() if k.startswith('task:')},{'saved'})
         self.assertLess(len(rest),len(calls)+len(rest))
 
     def test_changed_code_marks_only_affected_units_stale_and_keeps_unchanged_ones(self):
-        analysis_run.run(self.prepare(intent=self.intent())['id'],self.executor([]))
+        self.explain_everything()
         (self.repo/'lib/m0.py').write_text('def lib_0():\n    return 42\n')
         self.git('add','-A');self.git('commit','-qm','Change lib');self.publish_index()
         states=self.states()
@@ -299,10 +340,9 @@ class FullRun(unittest.TestCase):
         self.assertEqual(states['folder:tools'],'saved')
         # A path explanation survives a change in files it never cited: its model input is identical.
         self.assertTrue(all(states[f'route:{p}']=='saved' for p in self.PATHS),states)
-        calls=[];self.assertTrue(analysis_run.run(self.prepare(intent=self.intent())['id'],self.executor(calls))['state']=='completed')
+        calls=[];self.assertEqual(self.cards('folder:lib',calls=calls)['state'],'completed')
         self.assertTrue(all('tools' not in json.dumps(p.get('resource') or p.get('resources')) for p in calls))
-        self.assertTrue(all('route' not in json.dumps(p.get('resource') or p.get('resources')) for p in calls))
-        self.assertEqual(set(self.states().values()),{'saved'})
+        self.assertEqual({v for k,v in self.states().items() if not k.startswith('task:')},{'saved'})
         # Changing a cited file invalidates exactly the paths that cite it.
         (self.repo/'api.py').write_text((self.repo/'api.py').read_text()+'\n# changed\n')
         self.git('add','-A');self.git('commit','-qm','Change api');self.publish_index()
@@ -337,7 +377,7 @@ class FullRun(unittest.TestCase):
         self.assertEqual(shown['state'],'partial');self.assertEqual(shown['items'],part['items'])
         again=[];done=analysis_run.run(analysis_run.retry(job['id'])['id'],self.executor(again))
         self.assertEqual(done['state'],'completed',done.get('error'))
-        self.assertEqual(set(self.states().values()),{'saved'})
+        self.assertEqual({v for k,v in self.states().items() if k.startswith('task:')},{'saved'})
         self.assertEqual(done['partial_results']['service']['analysis']['state'],'published')
         self.assertEqual([r['path'] for r in self.raw()['dev']['backend_routes']],['/items'])
         self.assertIsNone(analysis_run.unit_result('demo','service','dev','en','task:analysis'))
@@ -354,7 +394,7 @@ class FullRun(unittest.TestCase):
         self.assertNotEqual(self.states()['task:analysis'],'saved')
         self.assertTrue(done['partial_results']['service']['analysis']['covered']>0)
         # The unit explanations saved before the map started stay saved.
-        self.assertTrue(all(v=='saved' for k,v in self.states().items() if k.startswith(('route:','folder:'))))
+        self.assertEqual({v for k,v in self.states().items() if not k.startswith('task:')},{'pending','local'})  # a full run explains no unit
 
     def signal_fixture(self):
         """A route file buried in padding, a long document, a test and a plain module without any signal."""
@@ -547,17 +587,16 @@ class FullRun(unittest.TestCase):
         out=analysis_run._prune_dangling('system',merged)
         self.assertEqual(out['links'],[{'from':'api','to':'image_worker'}]);self.assertEqual(out['nodes'][1]['uses'],['media_store'])
 
-    def test_a_saved_map_that_can_be_patched_never_needs_the_scan(self):
+    def test_a_saved_map_that_can_be_patched_still_waits_for_the_scan_only_to_tell_text_from_binary(self):
         self.large_map()
         whole=self.board()
         done=analysis_run.run(self.prepare(intent={**self.intent(whole,'all'),'max_calls':whole['modes']['all']['calls']+60})['id'],self.executor([]))
         self.assertEqual(done['state'],'completed',done.get('error'))
         (self.repo/'lib'/'m0.py').write_text('def lib_0():\n    return 100\n');self.git('add','-A');self.git('commit','-qm','Small change');analysis_run._INDEXES.clear()
-        original=analysis_run.source_signals.scan_commit
-        analysis_run.source_signals.scan_commit=lambda repo,commit,entries,overhead,signals=True:self.fail('a patch run reads changes, not the whole commit') if signals else original(repo,commit,entries,overhead,signals)
-        self.addCleanup(setattr,analysis_run.source_signals,'scan_commit',original)
-        self.assertEqual(analysis_run.unit_board('demo','service','dev','en')['signals'],'ready')
+        # The unit catalog needs the scan to tell text from binary, so the board waits for it even when the map only needs a patch.
+        self.assertEqual(analysis_run.unit_board('demo','service','dev','en')['signals'],'pending')
         self.assertTrue(analysis_run.unit_signals('demo','service','dev','en')['ready'])
+        self.assertEqual(analysis_run.unit_board('demo','service','dev','en')['signals'],'ready')
 
     def test_signal_windows_over_several_batches_save_progress_cancel_and_resume_without_resending(self):
         (self.repo/'mods').mkdir()
@@ -601,8 +640,7 @@ class FullRun(unittest.TestCase):
         self.assertLessEqual(sum(1 for c in calls if 'resources' in c),board['calls_parts']['units'])
 
     def test_a_failing_unit_is_asked_exactly_as_often_as_the_attempt_limit_allows(self):
-        board=self.board();calls=[]
-        done=analysis_run.run(self.prepare(intent={**self.intent(board),'max_calls':board['calls']+3})['id'],self.executor(calls,bad=('folder:lib',)))
+        calls=[];done=self.cards('folder:lib','folder:tools',calls=calls,bad=('folder:lib',))
         self.assertEqual(done['state'],'completed',done.get('error'))
         asked=sum(1 for c in calls for r in (c.get('resources') or [c]) if r.get('resource')=='folder:lib')
         self.assertEqual(asked,analysis_run.UNIT_ATTEMPTS)
@@ -616,15 +654,16 @@ class FullRun(unittest.TestCase):
         joined=[p for page in pages for p in page['value']];self.assertEqual(joined,paths)
         self.assertEqual([page['offset'] for page in pages],[sum(len(q['value']) for q in pages[:i]) for i in range(len(pages))])
 
-    def test_units_discovered_by_the_saved_map_and_structure_are_analyzed_too(self):
+    def test_units_discovered_by_the_saved_map_and_structure_are_listed_not_asked_and_a_card_can_explain_them(self):
         self.assertNotIn('program:api',self.states())
-        done=analysis_run.run(self.prepare(intent=self.intent())['id'],self.executor([]))
+        calls=[];done=analysis_run.run(self.prepare(intent=self.intent())['id'],self.executor(calls))
         self.assertEqual(done['state'],'completed',done.get('error'))
-        self.assertTrue(done['catalog_refreshed'])
-        states=self.states();self.assertEqual(states['program:api'],'saved');self.assertEqual(set(states.values()),{'saved'})
+        self.assertTrue(done['catalog_refreshed']);self.assertFalse(any('resource' in c or 'resources' in c for c in calls))
+        self.assertEqual(self.states()['program:api'],'pending')
+        self.assertEqual(self.cards('program:api')['state'],'completed');self.assertEqual(self.states()['program:api'],'saved')
 
     def test_saved_unit_can_be_read_and_old_code_is_flagged(self):
-        analysis_run.run(self.prepare(intent=self.intent())['id'],self.executor([]))
+        self.assertEqual(self.cards('folder:tools')['state'],'completed')
         unit=analysis_run.unit_result('demo','service','dev','en','folder:tools')
         self.assertEqual(unit['unit']['name'],'tools');self.assertNotIn('stale',unit)
         (self.repo/'tools/m0.py').write_text('def tools_0():\n    return 9\n')
@@ -634,15 +673,151 @@ class FullRun(unittest.TestCase):
     def test_unit_without_eligible_source_is_skipped_not_failed(self):
         (self.repo/'blank').mkdir();(self.repo/'blank/only.py').write_text('x\n')
         self.git('add','-A');self.git('commit','-qm','Tiny file');self.publish_index()
-        job=self.prepare(intent={**self.intent(),'max_calls':self.intent()['max_calls']+1})  # +1: the map discovers program:api
-        calls=[];done=analysis_run.run(job['id'],self.executor(calls))
-        self.assertEqual(done['state'],'completed',done.get('error'))
-        states=self.states()
-        self.assertEqual(states['folder:blank'],'unavailable')
-        self.assertEqual({v for k,v in states.items() if k!='folder:blank'},{'saved'})
-        # The skipped unit costs no model call, and a later run does not report it as a failure.
-        self.assertEqual(self.prepare(intent=self.intent())['state'],'preparing')
+        calls=[];done=self.cards('folder:blank',calls=calls)
+        self.assertEqual(done['state'],'completed',done.get('error'));self.assertEqual(self.states()['folder:blank'],'unavailable')
+        # The skipped unit costs no model call, and asking again is free.
+        self.assertEqual(calls,[]);again=analysis_run.prepare('demo',lang='en',intent=self.only('folder:blank'))
+        self.assertEqual((again['tasks'],again['unit_estimate']['calls']),([],0))
 
+    def local_fixture(self):
+        (self.repo/'docs').mkdir()
+        for i in range(3):(self.repo/'docs'/f'g{i}.md').write_text(f'# Guide {i}\nsome words about the product\n')
+        (self.repo/'lib/blob.dat').write_bytes(b'\xff\xfe\x00\x01binary payload\xff')
+        self.git('add','-A');self.git('commit','-qm','Docs and a binary blob');self.publish_index()
+
+    def test_local_units_are_counted_and_listed_and_a_card_explains_one_when_the_user_asks(self):
+        self.local_fixture()
+        board=self.board();self.assertEqual(self.states(board)['folder:local:docs'],'local')
+        self.assertEqual(board['totals']['local'],1)
+        calls=[];done=analysis_run.run(self.prepare(intent=self.intent(board))['id'],self.executor(calls))
+        self.assertEqual(done['state'],'completed',done.get('error'))
+        self.assertFalse(any('resource' in c or 'resources' in c for c in calls))
+        self.assertEqual(self.states()['folder:local:docs'],'local')
+        shown=analysis_run.unit_result('demo','service','dev','en','folder:local:docs')
+        self.assertEqual((shown['local'],shown['file_count']),(True,3))
+        # The user asked for this unit, so it is explained whatever the coverage choice is.
+        asked=[];card=self.cards('folder:local:docs','folder:lib',calls=asked)
+        self.assertEqual(card['state'],'completed',card.get('error'));self.assertTrue(any('folder:local:docs' in json.dumps(c.get('resource') or c.get('resources')) for c in asked))
+        self.assertEqual(self.states()['folder:local:docs'],'saved');self.assertEqual(self.board()['totals']['local'],0)
+        self.assertEqual(analysis_run._run_board(card)['totals'],self.board()['totals'])  # the run's board and the opened board agree
+        self.assertEqual(analysis_run.unit_result('demo','service','dev','en','folder:local:docs')['unit']['id'],'folder:local:docs')
+
+    def test_a_file_the_scan_cannot_read_as_text_is_excluded_as_binary_once_the_scan_is_cached(self):
+        self.local_fixture()
+        board=self.board();self.assertGreaterEqual(board['repositories'][0]['coverage']['excluded'].get('binary',0),2)  # logo.png and lib/blob.dat
+        units=analysis_run._unit_catalogs({'project':'demo','branch':'dev','lang':'en'},analysis_run.ai_extract.plan('demo','dev','en','service',overview=True,light=True))
+        self.assertNotIn('lib/blob.dat',{f for u in units['service']['units'] for f in u['files']})
+        self.assertNotIn('pending_signals',units['service'])
+
+    def test_the_call_limit_confirmed_at_the_start_is_shared_by_a_cancelled_run_and_its_continuation(self):
+        board=self.board();intent=self.intent(board);job=self.prepare(intent=intent);calls=[]
+        def stop(count):
+            if count==3:analysis_run.cancel(job['id'])
+        self.assertEqual(analysis_run.run(job['id'],self.executor(calls,after=stop))['state'],'cancelled')
+        self.assertEqual(self.board()['budget']['used'],3)
+        more=analysis_run.retry(job['id']);self.assertEqual(more['budget'],{'limit':intent['max_calls'],'used_before':3})
+        rest=[];done=analysis_run.run(more['id'],self.executor(rest))
+        self.assertEqual(done['state'],'completed',done.get('error'));self.assertLessEqual(len(calls)+len(rest),intent['max_calls'])
+        self.assertEqual(analysis_run._run_board(done)['budget']['used'],len(calls)+len(rest))
+
+    def test_a_used_up_limit_stops_the_continuation_and_only_a_confirmed_renewal_starts_a_new_one(self):
+        self.large_map()
+        with patch.object(analysis_run,'MAP_USABLE',10**9):
+            board=self.board();job=self.prepare(intent=self.intent(board,'all'))
+        done=analysis_run.run(job['id'],self.executor([]))
+        self.assertEqual(done['error']['code'],'call_limit')
+        with self.assertRaises(analysis_run.RunError) as stopped:analysis_run.retry(job['id'])
+        self.assertEqual(stopped.exception.code,'call_limit')
+        with self.assertRaises(analysis_run.RunError):self.prepare(intent=self.intent(board,'all'))  # a new request on the same code continues the same analysis
+        with patch.object(analysis_run,'MAP_USABLE',10**9):
+            renewed=self.prepare(intent={**self.intent(board,'all'),'max_calls':board['modes']['all']['calls']+20,'renew':True})
+        self.assertEqual(renewed['budget'],{'limit':board['modes']['all']['calls']+20,'used_before':0});self.assertEqual(renewed['family'],renewed['id'])
+        analysis_run.cancel(renewed['id']);self.assertNotIn('renew',analysis_run.retry(renewed['id'])['intent'])  # a retry never renews by itself
+
+    def test_a_new_request_continues_the_settled_map_batches_of_an_interrupted_analysis(self):
+        (self.repo/'mods').mkdir()
+        for i in range(420):
+            (self.repo/'mods'/f'm{i}.py').write_text('\n'.join([f'a{i} = {n}' for n in range(30)]+[f"@app.get('/m{i}')",f'def m{i}():']+[f"    step_{n} = 'padding text of window {i} line {n} to widen the rows'" for n in range(12)])+'\n')
+        self.git('add','-A');self.git('commit','-qm','Many route files');self.publish_index()
+        board=self.board();intent={**self.intent(board),'max_calls':board['calls']+30};job=self.prepare(intent=intent);calls=[]
+        def stop(_):
+            if self.batches(calls)==3:analysis_run.cancel(job['id'])
+        self.assertEqual(analysis_run.run(job['id'],self.executor(calls,after=stop))['state'],'cancelled')
+        sent=[c['batch']['id'] for c in calls if 'batch' in c and 'screens' in c['schema']]
+        again=[];follow=self.prepare(intent=intent);self.assertEqual(follow['family'],job['id'])
+        done=analysis_run.run(follow['id'],self.executor(again));self.assertEqual(done['state'],'completed',done.get('error'))
+        resent=[c['batch']['id'] for c in again if 'batch' in c and 'screens' in c['schema']]
+        self.assertFalse(set(resent)&set(sent[:2]),'a settled batch is not asked again')
+        self.assertLessEqual(len(calls)+len(again),intent['max_calls'])
+
+    def test_a_failure_of_the_final_merge_clears_the_settled_batches_so_they_are_asked_again_within_the_limit(self):
+        self.large_map();board=self.board();job=self.prepare(intent={**self.intent(board,'all'),'max_calls':board['modes']['all']['calls']+60});calls=[]
+        with patch.object(analysis_run,'_save',side_effect=ValueError('merge')):
+            done=analysis_run.run(job['id'],self.executor(calls))
+        self.assertEqual(done['state'],'failed');self.assertGreater(self.batches(calls),1)
+        self.assertFalse((analysis_run.root()/'checkpoints'/job['id']).exists())
+
+    def test_the_structure_packets_carry_the_verified_unit_evidence_and_an_answer_citing_it_needs_no_read(self):
+        self.assertEqual(self.cards('folder:lib','folder:tools')['state'],'completed')  # explanations the user asked for earlier
+        calls=[];seen=[]
+        base=self.executor(calls)
+        def fake(prompt,**kwargs):
+            packet=json.loads(prompt.split('\n',1)[1])
+            if 'nodes' in packet.get('schema',{}):
+                text=prompt
+                seen.append(text) if 'verified_units' in text else None
+                rows=packet.get('input',{}).get('verified_units')
+                if rows:
+                    file,line,quote=rows[0][1][0][2][0]
+                    return {'nodes':[{'id':'lib','name':'Lib','kind':'program','code':['lib'],'ev':[{'file':file,'line':line,'quote':quote}],'jobs':[]}],'links':[],'externals':[],'others':[],'unknown':[]}
+            return base(prompt,**kwargs)
+        done=analysis_run.run(self.prepare(intent=self.intent())['id'],fake)
+        self.assertEqual(done['state'],'completed',done.get('error'));self.assertTrue(seen,'the structure packet carries verified_units')
+        self.assertIn('without reading them again',seen[0])
+        self.assertEqual(len(seen),1,'one structure round: the cited lines needed no read')
+        self.assertIn('lib',[n['id'] for n in analysis_run.store.branch_bundle(self.raw(),'dev').get('system',{}).get('nodes',[])])
+
+    def same_board(self,done):
+        live=analysis_run._run_board(done);opened=self.board()
+        self.assertEqual(live['totals'],opened['totals']);self.assertEqual(live['repositories'][0]['units'],opened['repositories'][0]['units'])
+        self.assertEqual(live['repositories'][0]['links'],opened['repositories'][0]['links'])
+
+    def test_the_run_board_equals_the_reopened_board_after_a_failure_a_cancel_and_a_completion_that_adds_a_program_unit(self):
+        self.large_map();board=self.board();job=self.prepare(intent={**self.intent(board,'all'),'max_calls':board['modes']['all']['calls']+20})
+        def stop(_):
+            if self.batches(calls)==1:analysis_run.cancel(job['id'])
+        calls=[];cancelled=analysis_run.run(job['id'],self.executor(calls,after=stop))
+        self.assertEqual(cancelled['state'],'cancelled');self.same_board(cancelled)
+        with patch.object(analysis_run,'_save',side_effect=ValueError('merge')):
+            failed=analysis_run.run(analysis_run.retry(job['id'])['id'],self.executor([]))
+        self.assertEqual(failed['state'],'failed');self.same_board(failed)
+        done=analysis_run.run(analysis_run.retry(failed['id'])['id'],self.executor([]))
+        self.assertEqual(done['state'],'completed',done.get('error'));self.same_board(done)
+        self.assertIn('program:api',self.states())  # the structure introduced a unit, and both boards list it in the same place
+
+    def test_records_saved_before_budgets_and_local_units_still_open_continue_and_retry(self):
+        job=self.prepare(intent=self.intent());calls=[]
+        def stop(count):
+            if count==3:analysis_run.cancel(job['id'])
+        analysis_run.run(job['id'],self.executor(calls,after=stop))
+        with analysis_run.locked():
+            old=analysis_run.read(job['id']);old.pop('family');old.pop('budget')
+            for catalog in old['units'].values():
+                catalog.pop('links',None);catalog['coverage'].pop('local',None)
+                for unit in catalog['units']:unit.pop('reading',None)
+            analysis_run.write(old)
+        self.assertIsNone(self.board()['budget']);self.assertEqual(analysis_run._run_board(analysis_run.read(job['id']))['budget'],None)
+        again=analysis_run.retry(job['id']);self.assertEqual(again['budget'],{'limit':again['intent']['max_calls'],'used_before':0})
+        self.assertEqual(analysis_run.run(again['id'],self.executor([]))['state'],'completed')
+
+    def test_after_a_change_a_card_asks_only_for_the_affected_unit(self):
+        first=[];self.explain_everything(first)
+        (self.repo/'lib/m0.py').write_text('def lib_0():\n    return 42\n')
+        self.git('add','-A');self.git('commit','-qm','Change lib');self.publish_index()
+        second=[];done=self.cards(*[i for i,s in self.states().items() if not i.startswith('task:') and s!='saved'],calls=second)
+        self.assertEqual(done['state'],'completed',done.get('error'))
+        asked={r['resource'] for c in second for r in (c.get('resources') or [c])}
+        self.assertEqual(asked,{'folder:lib'},asked)
 
 class StructureRepair(unittest.TestCase):
     """Duplicate nodes saved before spelling-based merging existed: merged only when the content says they are one thing."""

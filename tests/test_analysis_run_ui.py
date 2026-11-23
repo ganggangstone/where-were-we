@@ -100,22 +100,22 @@ const serve=(extra)=>{native=(command,args)=>command==='analysis_run_status'&&ar
         self.check_js(self.BOARD + r"""
 serve();status=null;await open();await AnalysisRun.check();await flush();
 const html=$('insp').innerHTML;
-assert(html.includes('Full code analysis') && html.includes('<span class="beta">Beta</span>') && html.includes('1/4'),'Beta board with saved count');
-assert(html.includes('AI calls up to</span>') === false && html.includes('AI calls up to 3') && html.includes('Selected code is sent to Claude') && html.includes('Time cap 60'),'Cost, transmission and time cap before the click');
+assert(html.includes('Full code analysis') && html.includes('<span class="beta">Beta</span>') && html.includes('Explained 1'),'Beta board with saved count');
+assert(html.includes('AI calls up to</span>') === false && html.includes('AI calls up to 3') && html.includes('Code sent to Claude') && html.includes('Time cap 60'),'Cost, transmission and time cap before the click');
 assert(html.includes('Excluded 3') && html.includes('Index limit reached') && html.includes('Files 15/20') && html.includes('Credential files'),'Scope gaps, index limit and exclusion reasons');
-assert(html.includes('Preparing') && html.includes('Queued') && html.includes('Failed') && html.includes('Saved'),'Unfinished units show as preparing or queued');
+assert(html.includes('Analyzing') && html.includes('No explanation') && html.includes('Failed') && html.includes('Saved'),'Unfinished units show as preparing or queued');
 assert(count('analysis_run_start')===0,'Showing the board costs no model call');
 await $('startFullAnalysis').onclick();await flush();
 const intent=calls.find(c=>c.command==='analysis_run_start').args.scope.intent;
 assert(intent.task==='full' && intent.max_calls===3,'The confirmed call cap is sent with the request');
 """)
 
-    def test_full_analysis_is_the_main_action_and_the_overview_button_is_secondary(self):
+    def test_full_analysis_is_the_main_action_and_has_no_separate_overview_button(self):
         self.check_js(self.BOARD + r"""
 serve();status=null;await open();await AnalysisRun.check();await flush();
 let html=$('insp').innerHTML;
 assert(/class="btn primary" id="startFullAnalysis"/.test(html),'Full analysis is the primary button');
-assert(/class="btn quiet" id="startAppAnalysis"/.test(html) && html.includes('Create initial overview'),'The initial overview stays available as a secondary button');
+assert(!html.includes('id="startAppAnalysis"') && !html.includes('Create initial overview'),'No separate overview button when the full board is ready');
 await AnalysisRun.check();await flush();
 assert(/class="btn primary" id="startFullAnalysis"/.test($('insp').innerHTML) && count('analysis_run_start')===0,'No model call before the click');
 """)
@@ -125,7 +125,7 @@ assert(/class="btn primary" id="startFullAnalysis"/.test($('insp').innerHTML) &&
 let release;const gate=new Promise(r=>release=r);
 native=async(command,args)=>{
  if(command==='analysis_run_status'&&args.view==='units_quick')return {quick:true,repositories:[{repository:'',commit:'abcdef1234567890',tracked:120,excluded:{binary:3,secret:1}}]};
- if(command==='analysis_run_status'&&args.view==='units'){await gate;return unitBoard({calls:2300,calls_parts:{overview:1,map:1900,units:249,retry:125},time_limit_seconds:3600*40});}
+ if(command==='analysis_run_status'&&args.view==='units'){await gate;return unitBoard({calls:2300,calls_parts:{overview:1,map:1900,units:249,retry:125,later:25},time_limit_seconds:3600*40});}
 };
 status=null;await open();await AnalysisRun.check();await flush();
 let html=$('insp').innerHTML;
@@ -134,7 +134,7 @@ assert(html.includes('Tracked files 120 · excluded 4 · code abcdef12') && !$('
 release();await flush();await flush();
 html=$('insp').innerHTML;
 assert(!html.includes('data-unit-board="loading"') && $('startFullAnalysis') && html.includes('up to 2300 calls'),'The units replace the placeholder');
-assert(html.includes('How the call limit is counted') && html.includes('First overview 1 · map and structure 1900 · unit packs 249 · retry allowance 125 = 2300'),'The limit shows what it is made of');
+assert(html.includes('How the limit is counted') && html.includes('First overview 1 · Map and structure 1900 · Unit packs 249 · Retry allowance 125 · Units added later 25 = 2300') && !html.includes('Units added later 0'),'The limit shows what it is made of');
 assert(html.includes('Time cap 40 h'),'Long caps read in hours or days');
 """)
 
@@ -153,12 +153,12 @@ native=async(command,args)=>{
 };
 status=null;await open();await AnalysisRun.check();await flush();
 let html=$('insp').innerHTML;
-assert(html.includes('/orders') && html.includes('1/4'),'The unit list shows before the scan ends');
-assert(html.includes('Scanning signals locally') && /id="startFullAnalysis" disabled/.test(html) && !html.includes('AI calls up to') && !html.includes('data-map-coverage'),'No call limit, no choice and no start until the scan ends');
+assert(html.includes('/orders') && html.includes('Explained 1'),'The unit list shows before the scan ends');
+assert(html.includes('Scanning signals') && /id="startFullAnalysis" disabled/.test(html) && !html.includes('AI calls up to') && !html.includes('data-map-coverage'),'No call limit, no choice and no start until the scan ends');
 assert(count('analysis_run_start')===0,'Waiting costs no model call');
 release();await flush();await flush();await flush();
 html=$('insp').innerHTML;
-assert(!html.includes('Scanning signals locally') && html.includes('up to 12 calls') && html.includes('data-map-coverage="signal"') && !/id="startFullAnalysis" disabled/.test(html),'The exact limit and the coverage choice replace the waiting note');
+assert(!html.includes('Scanning signals') && html.includes('up to 12 calls') && html.includes('data-map-coverage="signal"') && !/id="startFullAnalysis" disabled/.test(html),'The exact limit and the coverage choice replace the waiting note');
 assert(calls.filter(c=>c.args && c.args.view==='signals').length===1 && units===2,'One scan request, then the board is read again');
 """)
 
@@ -172,8 +172,8 @@ native=(command,args)=>command==='analysis_run_status'&&args.view==='units'?boar
 status=null;await open();await AnalysisRun.check();await flush();
 let html=$('insp').innerHTML;
 assert(html.includes('data-map-coverage="signal"') && html.includes('Signal-based reading (default)') && html.includes('up to 30 calls'),'Signal-based reading is the default and shows its own cap');
-assert(html.includes('Read and indexed locally 1000') && html.includes('AI-interpreted around signals 90') && html.includes('no signal (local index only) 300') && html.includes('documents and data (local index only) 450') && html.includes('tests and vendored code (local index only) 150'),'Read, indexed and AI-interpreted counts are separate');
-assert(html.includes('about 2.0 MB of 50 MB of source text'),'Sent and total source sizes are shown');
+assert(html.includes('Indexed locally 1000') && html.includes('around signals 90') && html.includes('no signal 300') && html.includes('documents and data 450') && html.includes('tests and vendored code 150'),'Read, indexed and AI-interpreted counts are separate');
+assert(html.includes('sends about 2.0 MB of 50 MB'),'Sent and total source sizes are shown');
 assert(coverageHandles.length===2,'Both choices are offered');
 await coverageHandles.find(h=>h.value==='all').onchange();await flush();
 html=$('insp').innerHTML;
@@ -203,6 +203,100 @@ await $('cancelFullAnalysis').onclick();await flush();
 assert(count('analysis_run_cancel')===1,'Cancel reaches the backend');
 """)
 
+    LOCAL_BOARD = r"""
+const localBoard=(extra={})=>({repositories:[{repository:'service',units:[
+ ['route:/a','route','/a',3,'saved',''],['route:/b','route','/b',2,'saved',''],['route:/c','route','/c',2,'pending',''],
+ ['folder:local:docs','folder','docs',5,'local','']],
+ links:[[0,1,2],[2,0,1]],
+ coverage:{tracked:20,in_units:12,local:5,excluded:{binary:2}},map_coverage:{files:18,windows:3,whole:1,local:1,docs:5,support:0,text_bytes:100,sent_bytes:50}}],
+ totals:{units:4,saved:2,pending:1,local:1},calls:4,modes:{signal:{calls:4},all:{calls:5}},time_limit_seconds:3600,...extra});
+const serveLocal=(extra)=>{native=(command,args)=>command==='analysis_run_status'&&args.view==='units'?localBoard(extra):command==='analysis_run_status'&&args.view==='unit'?{local:true,commit:'abcd1234',files:['docs/a.md'],file_count:5,kinds:{doc:5}}:undefined;};
+"""
+
+    def test_local_units_links_budget_and_renew(self):
+        self.check_js(self.LOCAL_BOARD + r"""
+serveLocal({budget:{limit:4,used:4,left:0}});status=null;await open();await AnalysisRun.check();await flush();
+let html=$('insp').innerHTML;
+assert(html.includes('Explained 2') && html.includes('Checked locally 1') && html.includes('data-state="local"'),'Saved AI units over AI units, local counted apart');
+assert(html.includes('Read locally 18') && html.includes('AI range 7') && html.includes('Local only 5'),'Scope chips come from coverage');
+assert($('renewFullAnalysis') && !$('startFullAnalysis') && html.includes('Confirm a new limit · up to 4 calls'),'No limit left offers a renewal');
+await $('renewFullAnalysis').onclick();await flush();
+let intent=calls.find(c=>c.command==='analysis_run_start').args.scope.intent;
+assert(intent.renew===true && intent.max_calls===4,'Renew is sent with the board call count');
+status=null;serveLocal({budget:{limit:6,used:4,left:2}});calls.length=0;await AnalysisRun.check();await flush();
+html=$('insp').innerHTML;
+assert(html.includes('Continue · 2/6 calls left') && html.includes('Only part fits'),'Continue label and partial warn chip');
+await $('startFullAnalysis').onclick();await flush();
+intent=calls.find(c=>c.command==='analysis_run_start').args.scope.intent;
+assert(!intent.renew && intent.max_calls===6,'Continuing keeps the confirmed limit');
+""")
+
+    def test_open_card_shows_link_chips_marks_cells_and_local_card_lists_files(self):
+        self.check_js(self.LOCAL_BOARD + r"""
+serveLocal();status=null;await open();await AnalysisRun.check();await flush();
+unitHandles['unit-open'].find(b=>b.dataset.unitOpen==='0').onclick();await flush();
+let html=$('insp').innerHTML;
+assert(html.includes('Uses →') && html.includes('data-unit-link="1"') && html.includes('← Used by') && html.includes('data-unit-link="2"'),'Both link rows');
+assert((html.match(/data-linked="1"/g) || []).length===2,'Linked cells are marked in the map');
+unitHandles['unit-open'].find(b=>b.dataset.unitOpen==='3').onclick();await flush();
+html=$('insp').innerHTML;
+assert(html.includes('docs/a.md') && html.includes('Documents 5') && html.includes('AI did not read it'),'Local card lists files and kinds');
+unitHandles['unit-filter'].find(b=>b.dataset.unitFilter==='local').onclick();
+assert($('insp').innerHTML.includes('data-unit-card="3"') && !$('insp').innerHTML.includes('data-unit-card="0"'),'Local legend filter');
+""")
+
+    def test_every_text_file_choice_turns_local_units_into_queued(self):
+        self.check_js(self.LOCAL_BOARD + r"""
+serveLocal();status=null;await open();await AnalysisRun.check();await flush();
+const all=coverageHandles.find(h=>h.value==='all');all.value='all';all.onchange();
+const html=$('insp').innerHTML;
+assert(!html.includes('Checked locally 1') && html.includes('No explanation 2'),'Local rows count as queued in all mode');
+""")
+
+    def test_card_is_the_only_detail_place_and_asks_one_unit_at_a_time(self):
+        self.check_js(self.LOCAL_BOARD + r"""
+serveLocal({calls_parts:{overview:1,map:3,units:0,retry:0,later:0}});status=null;await open();await AnalysisRun.check();await flush();
+let html=$('insp').innerHTML;
+for(const id of ['startAppAnalysis','viewAppAnalysis','chooseResourceBatch','openBatchSaved','checkAppAnalysis'])assert(!$(id),'Removed button '+id);
+assert(!html.includes('Create initial overview') && !html.includes('Units added later') && !html.includes('Unit packs'),'No overview button and no zero parts');
+assert(html.includes('Analyze · up to 4 calls') && html.includes('Code sent to Claude') && html.includes('Subscription limit') && /<details class="unit-calls" data-read-scope>/.test(html),'One action with decision facts and a collapsed reading range');
+const before=calls.length;
+unitHandles['unit-open'].find(b=>b.dataset.unitOpen==='2').onclick();await flush();
+html=$('insp').innerHTML;
+assert(count('analysis_run_start')===0 && html.includes('AI explanation · 1 call') && html.includes('data-unit-explain="2"'),'Opening a card starts nothing and offers one request');
+assert(!calls.slice(before).some(c=>c.command==='analysis_run_start'),'Card open makes no run');
+await unitHandles['unit-explain'].find(b=>b.dataset.unitExplain==='2').onclick();await flush();
+const intent=calls.find(c=>c.command==='analysis_run_start').args.scope.intent;
+assert(intent.task==='full' && intent.max_calls===2 && JSON.stringify(intent.only)===JSON.stringify([{repository:'service',target:'route:/c'}]) && !intent.renew,'The card sends the only intent with 2 calls');
+status=runRecord('running',{intent,unit_board:localBoard()});await AnalysisRun.check();await flush();
+assert(!$('startFullAnalysis') && !$('insp').innerHTML.includes('data-unit-explain') || /data-unit-explain="2" disabled/.test($('insp').innerHTML),'Buttons are off while a run is active');
+""")
+
+    def test_saved_card_has_no_ask_button_and_a_stale_one_asks_again(self):
+        self.check_js(self.LOCAL_BOARD + r"""
+serveLocal();status=null;await open();await AnalysisRun.check();await flush();
+native=(command,args)=>command==='analysis_run_status'&&args.view==='units'?localBoard():command==='analysis_run_status'&&args.view==='unit'?{repository:'service',commit:'abcd1234ef',configuration:'pin',resource:'/a',files:['a.py'],items:[{name:'List',description:'Lists',file:'a.py',line:1,quote:'def a'}],format:'overview-v1'}:undefined;
+unitHandles['unit-open'].find(b=>b.dataset.unitOpen==='0').onclick();await flush();
+let html=$('insp').innerHTML;
+assert(html.includes('List') && !html.includes('data-unit-explain="0"'),'A saved explanation replaces the button');
+""")
+
+    def test_live_card_run_board_has_no_calls_or_modes_and_keeps_the_static_numbers(self):
+        self.check_js(self.LOCAL_BOARD + r"""
+serveLocal();status=null;await open();await AnalysisRun.check();await flush();
+await unitHandles['unit-open'].find(b=>b.dataset.unitOpen==='2').onclick();await flush();
+await unitHandles['unit-explain'].find(b=>b.dataset.unitExplain==='2').onclick();await flush();
+const intent=calls.find(c=>c.command==='analysis_run_start').args.scope.intent;
+assert(intent.only.length===1 && intent.renew===undefined && intent.max_calls===2,'No renew with only');
+const live=localBoard({only:true,calls:0,modes:{},calls_parts:{overview:0,map:0,units:0,retry:0,later:0}});live.repositories[0].units[2][4]='working';
+status=runRecord('running',{intent,unit_board:live,input_stats:{calls:1,bytes:5}});await AnalysisRun.check();await flush();
+let html=$('insp').innerHTML;
+assert($('cancelFullAnalysis') && !$('startFullAnalysis') && html.includes('Analyzing') && !html.includes('max 0'),'Live card run shows working and no empty limit');
+status=runRecord('completed',{intent,unit_board:live});await AnalysisRun.check();await flush();await flush();
+html=$('insp').innerHTML;
+assert($('startFullAnalysis') && html.includes('Analyze · up to 4 calls'),'After it ends the main action reads the static board again');
+""")
+
     MAP_BOARD = r"""
 const mapBoard=(extra={})=>({repositories:[{repository:'service',units:[
  ['route:/orders','route','/orders',3,'saved','new'],
@@ -221,8 +315,8 @@ serveMap();status=null;await open();await AnalysisRun.check();await flush();
 let html=$('insp').innerHTML;
 assert(html.includes('Map') && html.includes('Service structure') && html.includes('Screen groups'),'The three whole-code tasks are units too');
 assert(html.includes('Partial') && html.includes('Input pieces</span> 3/8') === false && html.includes('Input pieces 3/8'),'Partial progress shows how many input pieces are checked');
-assert(html.includes('Unfinished 2') && !html.includes('All saved'),'Unsaved work is never shown as complete');
-assert(html.includes('Map and structure up to 4 calls') && html.includes('Screens and programs may be added after the map'),'Cost and the later unit discovery are disclosed before the click');
+assert(html.includes('Overview, map, structure, groups 1/4') && !html.includes('Unfinished') && !html.includes('All saved'),'Unsaved work is never shown as complete');
+assert(html.includes('AI calls up to 6') && !html.includes('Map and structure up to'),'Cost and the later unit discovery are disclosed before the click');
 assert(html.includes('11 plain files outside the index included') && html.includes('Generated or lock files'),'Plain files and generated-file exclusions are visible');
 native=(command,args)=>command==='analysis_run_status'&&args.view==='unit'?{task:'analysis',state:'partial',covered:3,total:8,count:3,items:[{kind:'request',name:'GET /items',detail:'list_items',file:'api.py',line:3,quote:'def list_items'},{kind:'screen',name:'Home',detail:'/',file:'ui.ts',line:1,quote:'<home>'}]}:undefined;
 unitHandles['unit-open'].find(b=>b.dataset.unitOpen==='2').onclick();await flush();
@@ -236,14 +330,14 @@ unitHandles['unit-open'].find(b=>b.dataset.unitOpen==='3').onclick();await flush
 assert(calls.length===before,'A queued task reads nothing');
 serveMap({repositories:[{repository:'service',units:[['task:analysis','map','analysis',0,'saved','']],coverage:{tracked:1,in_units:1,plain:0,excluded:{},truncated:false}}],totals:{units:1,saved:1},calls:0,map_calls:0});
 S.loadToken++;AnalysisRun.syncScope();await open();await AnalysisRun.check();await flush();
-assert($('insp').innerHTML.includes('All saved') && !$('insp').innerHTML.includes('Unfinished'),'Only a fully saved board says so');
+assert($('insp').innerHTML.includes('Nothing left to analyze') && !$('insp').innerHTML.includes('Unfinished'),'Only a board with nothing left says so');
 """)
 
     def test_map_rows_are_localized_and_the_call_limit_has_a_plain_message(self):
         self.check_js(self.MAP_BOARD + r"""
 S.lang='ko';serveMap();status=null;await open();await AnalysisRun.check();await flush();
 const html=$('insp').innerHTML;
-for(const word of ['지도','서비스 구성','화면 묶음','부분 저장','입력 조각 3/8','미완료 2','지도·구성 최대 4회','색인 밖 일반 파일 11개 포함','생성·잠금 파일'])assert(html.includes(word),'Korean label '+word);
+for(const word of ['지도','서비스 구성','화면 묶음','부분 저장','입력 조각 3/8','개요·지도·구성·묶음 1/4','읽기 범위','색인 밖 일반 파일 11개 포함','생성·잠금 파일'])assert(html.includes(word),'Korean label '+word);
 assert(!/해요|이에요|예요|할게요/.test(html),'No informal ending');
 status=runRecord('failed',{intent:{task:'full',targets:[],max_calls:6},unit_board:mapBoard(),error:{code:'call_limit',message:'limit'}});
 await AnalysisRun.check();await flush();
@@ -267,7 +361,7 @@ assert(!calls.some(c=>['analysis_run_start','analysis_request'].includes(c.comma
         self.check_js(self.BOARD + r"""
 S.lang='ko';serve();status=null;await open();await AnalysisRun.check();await flush();
 const html=$('insp').innerHTML;
-for(const word of ['전체 코드 분석','베타','준비 중','대기','저장됨','호출 최대 3','색인 한도 도달','제외 3'])assert(html.includes(word),'Korean label '+word);
+for(const word of ['전체 코드 분석','베타','분석 중','설명 없음','저장됨','호출 최대 3','색인 한도 도달','제외 3'])assert(html.includes(word),'Korean label '+word);
 assert(!/해요|이에요|예요|할게요/.test(html),'No informal ending');
 """)
 
@@ -304,7 +398,7 @@ assert(started.scope.repository==='backend' && started.scope.intent.task==='over
     def test_batch_requires_separate_confirmation_and_discloses_fixed_call_limit(self):
         self.check_js(r'''
 S.maps={dev:{structure_indexes:[{repository:'web',service_flow:{feature_groups:[{resource:'/one'},{resource:'/two'}]}}]}};
-await open();await flush();$('chooseResourceBatch').onclick();
+S.analysisChoice={task:'resource_batch',detailTarget:'',maxCalls:2};await open();await flush();
 assert(count('analysis_run_start')===0 && $('insp').innerHTML.includes('Path groups: 2 · Up to 2 AI calls'),'The batch shows its cost boundary before starting');
 S.maps.dev.structure_indexes[0].service_flow.feature_groups.push({resource:'/three'});
 await $('startAppAnalysis').onclick();
@@ -324,7 +418,7 @@ await $('startAppAnalysis').onclick();const intent=calls.find(c=>c.command==='an
 native=(command,args)=>{
  if(command==='analysis_run_status' && args.view==='progress')return runRecord('running',{intent,completed_tasks:2,tasks:1});
 };
-await AnalysisRun.check();assert($('insp').innerHTML.includes('Path groups saved: 2 · Remaining: 1') && $('refreshSavedBatch'),'Compact counts with an on-demand result catalog');
+await AnalysisRun.check();assert($('insp').innerHTML.includes('Path groups saved: 2 · Remaining: 1'),'Compact counts without a separate result button');
 assert(calls.at(-1).args.view==='progress' && calls.at(-1).args.runId==='run-1','Routine poll only asks for compact progress');
 native=(command,args)=>command==='analysis_run_status'?runRecord('completed',{intent,completed_tasks:3,tasks:0}):undefined;
 await AnalysisRun.check();assert(calls.filter(c=>c.command==='analysis_run_status' && !String(c.args.view).startsWith('units') && c.args.view!=='signals').at(-1).args.view==='catalog','Terminal transition reads the saved catalog');
@@ -367,7 +461,7 @@ await open();assert($('startAppAnalysis').disabled,'Missing CLI cannot start');
 assert($('insp').innerHTML.includes('Install Claude Code'),'Missing CLI has an actionable message');
 await $('startAppAnalysis').onclick();assert(count('analysis_run_start')===0,'Guard works even if disabled handler called');
 provider={providers:[{provider:'claude',available:true,authenticated:false,error_code:'CLI_NOT_AUTHENTICATED'}]};
-await $('checkAppAnalysis').onclick();await flush();assert($('startAppAnalysis').disabled,'Signed out cannot start');
+AnalysisRun.checkAccount();await flush();assert($('startAppAnalysis').disabled,'Signed out cannot start');
 S.lang='ko';AnalysisRun.syncScope();renderAgentPrompt();
 assert($('insp').innerHTML.includes('구독 계정에 로그인'),'Korean sign-in guidance');
 assert(!calls.some(c=>['analysis_run_start','analysis_run_retry'].includes(c.command)),'Account check never starts a run');
@@ -383,7 +477,7 @@ status=runRecord('completed',{tasks:[],completed_tasks:[{task:'analysis'},{task:
 await tick();assert(reads===1,'Completion reads saved results once');
 assert(timers.size===0,'Completed runs stop polling');
 assert(S.changes===baseline && S.settings===settings && S.chi===3,'Existing read preserves history, comparison and selection');
-assert($('viewAppAnalysis'),'Saved results can be opened');
+assert($('viewAppAnalysis'),'A single-task result keeps its one way to open');
 await AnalysisRun.check();assert(reads===1,'Repeated status does not repeatedly reload results');
 assert(!calls.some(c=>c.command==='refresh'),'Result reads never collect');
 ''')
@@ -398,7 +492,7 @@ for(const [code,en,ko] of [
  ['CANCELLED','Analysis was cancelled','분석이 취소']
 ]){
  provider={providers:[{provider:'claude',available:false,authenticated:false,error_code:code}]};
- S.lang='en';await $('checkAppAnalysis').onclick();await flush();
+ S.lang='en';AnalysisRun.checkAccount();await flush();
  assert($('insp').innerHTML.includes(en),'English error '+code);
  S.lang='ko';renderAgentPrompt();assert($('insp').innerHTML.includes(ko),'Korean error '+code);
  assert($('startAppAnalysis').disabled,'Failure cannot enable paid run '+code);
@@ -445,7 +539,7 @@ assert(calls.find(c=>c.command==='analysis_run_retry').args.expectedAccount.emai
 await $('cancelAppAnalysis').onclick();await flush();assert(AnalysisRun.stateLabel()==='Cancelled','Cancel state is shown');
 assert(timers.size===0,'Cancelled run stops polling');
 provider={providers:[{provider:'claude',available:true,authenticated:true,account:{...account,email:'new@example.invalid'}}]};
-await $('checkAppAnalysis').onclick();await flush();
+AnalysisRun.checkAccount();await flush();
 native=(command,args)=>{if(command==='analysis_run_retry')throw JSON.stringify({error:{code:'CLI_ACCOUNT_CHANGED'}});};
 await $('retryAppAnalysis').onclick();await flush();
 assert($('insp').innerHTML.includes('account changed'),'Account race has actionable guidance');

@@ -14,7 +14,7 @@ const AnalysisRun = (() => {
     const args={...scope(),...(task==='steps'?{screen:choice.detailTarget}:task==='jobs'?{node:choice.detailTarget}:{})};
     const targets=['steps','jobs'].includes(task) ? (choice.targets || analysisCalls(command,args).map(a=>({repository:a.repository || '',target:a.screen || a.node}))) : [];
     if(task==='resources')return {task,targets:[],max_calls:choice.maxCalls,...(choice.area?{area:choice.area}:{})};
-    if(task==='full')return {task,targets:[],max_calls:choice.maxCalls ?? 0,coverage:choice.coverage || 'signal'};
+    if(task==='full')return {task,targets:[],max_calls:choice.maxCalls ?? 0,coverage:choice.coverage || 'signal',...(Array.isArray(choice.only)?{only:choice.only}:choice.renew===true?{renew:true}:{})};
     return {task,targets:command==='scope_overview'?[{repository:scope().repository,target:choice.detailTarget}]:targets};
   }
   const key = () => JSON.stringify([scope(), S.analysisChoice, S.loadToken]);
@@ -61,7 +61,7 @@ const AnalysisRun = (() => {
       analysis_blocked:['먼저 확인할 분석이 있습니다. 기존 AI 요청의 안내에서 수집 상태·코드 설정·AI 제안을 확인하세요.','Some analysis needs attention. Check collection, code settings, and AI proposals in the existing request instructions.'],
       timeout:['분석 제한 시간에 도달했습니다. 저장된 결과는 유지됩니다. 다시 시도하면 남은 분석을 실행합니다.','Analysis reached its time limit. Saved results are retained. Retry to finish the remaining analysis.'],
       task_limit:['분석 작업 한도에 도달했습니다. 다시 시도하면 남은 분석을 실행합니다.','Analysis reached its task limit. Retry to finish the remaining analysis.'],
-      call_limit:['확인한 AI 호출 상한에 도달했습니다. 저장된 결과는 그대로 남아 있고, 이어서 분석하면 나머지를 처리합니다.','The confirmed AI call limit was reached. Saved results are kept; continue to process the rest.'],
+      call_limit:['확인한 AI 호출 상한에 도달했습니다. 저장된 결과는 그대로 남아 있고, 이어서 분석하면 나머지를 처리합니다. 남은 상한이 없으면 상한을 다시 확인하세요.','The confirmed AI call limit was reached. Saved results are kept; continue to process the rest, or confirm a new limit if none is left.'],
       result_read_failed:['저장된 결과를 읽지 못했습니다. 계정·상태 다시 확인을 누르세요.','Could not read saved results. Click Check account and status.'],
       worker_start_failed:['분석을 시작하지 못했습니다. 다시 시도하세요.','Could not start the analysis worker. Retry the analysis.']
     };
@@ -406,8 +406,10 @@ const AnalysisRun = (() => {
   // ---- Full code analysis: units are saved as they finish and read as a map and cards, not as a wall of text ----
   const KINDS={route:['경로','Paths'],screen:['화면','Screens'],program:['프로그램','Programs'],package:['패키지','Packages'],cli:['CLI','CLI'],folder:['폴더','Folders'],map:['지도','Map'],system:['서비스 구성','Service structure'],groups:['화면 묶음','Screen groups']};
   const MAP_KINDS=['map','system','groups'];
-  const UNIT_STATES={saved:['저장됨','Saved'],working:['준비 중','Preparing'],partial:['부분 저장','Partial'],pending:['대기','Queued'],failed:['검증 실패','Failed'],unavailable:['건너뜀','Skipped'],stale:['오래됨','Outdated']};
-  const STATE_ORDER=['working','partial','saved','failed','stale','pending','unavailable'];
+  const UNIT_STATES={saved:['저장됨','Saved'],working:['분석 중','Analyzing'],local:['로컬 확인','Checked locally'],partial:['부분 저장','Partial'],pending:['설명 없음','No explanation'],failed:['검증 실패','Failed'],unavailable:['확인 불가','Unavailable'],stale:['오래됨','Outdated']};
+  const STATE_ORDER=['working','partial','saved','local','failed','stale','pending','unavailable'];
+  const LOCAL_KINDS={doc:['문서','Documents'],data:['데이터','Data'],support:['테스트·외부 코드','Tests and vendored code']};
+  let unitEdges=new Map(),linkStore={scope:'',repos:{}};
   const REASONS={secret:['비밀 파일','Credential files'],binary:['이미지·바이너리','Binary files'],large:['300KB 초과','Over 300KB'],generated:['생성·잠금 파일','Generated or lock files']};
   const SAMPLE_FILES=4;
   let board=null,boardQuick=null,mapCoverage='signal',boardScope='',boardError=null,unitFilter='all',unitLimit=24,openedUnit=null,loadingBoard=false,unitRows=[];
@@ -415,7 +417,7 @@ const AnalysisRun = (() => {
   const beta=()=>`<span class="beta">${text('베타','Beta')}</span>`;
   const boardScopeKey=()=>JSON.stringify([scope(),S.loadToken]);
   const fullRun=()=>!!run && run.intent?.task==='full' && Object.entries(scope()).every(([name,value])=>run[name]===value);
-  const liveBoard=()=>fullRun() && run.unit_board ? run.unit_board : boardScope===boardScopeKey() ? board : null;
+  const liveBoard=()=>fullRun() && run.unit_board && (active() || !run.unit_board.only) ? run.unit_board : boardScope===boardScopeKey() ? board : null;
   const unitKey=row=>JSON.stringify([row.repo,row.id]);
   async function loadBoard(token) {
     const requested=boardScopeKey();
@@ -444,13 +446,16 @@ const AnalysisRun = (() => {
   }
   function unitSummary(b) {
     const cover=b.repositories.reduce((sum,repo)=>{
-      const c=repo.coverage || {};sum.tracked+=c.tracked || 0;sum.inside+=c.in_units || 0;sum.plain+=c.plain || 0;sum.truncated=sum.truncated || !!c.truncated;
+      const c=repo.coverage || {};sum.tracked+=c.tracked || 0;sum.inside+=c.in_units || 0;sum.plain+=c.plain || 0;sum.local+=c.local || 0;sum.truncated=sum.truncated || !!c.truncated;
       for(const [reason,count] of Object.entries(c.excluded || {}))sum.excluded[reason]=(sum.excluded[reason] || 0)+count;
       return sum;
-    },{tracked:0,inside:0,plain:0,truncated:false,excluded:{}});
+    },{tracked:0,inside:0,plain:0,local:0,truncated:false,excluded:{}});
     const out=Object.values(cover.excluded).reduce((a,n)=>a+n,0);
+    const reports=b.repositories.map(r=>r.map_coverage).filter(Boolean);
+    const readLocal=reports.length?reports.reduce((n,r)=>n+(r.files || 0),0):cover.tracked-out;
+    const ai=Math.max(0,cover.inside-cover.local);
     const reasons=Object.entries(cover.excluded).map(([reason,count])=>`<li><span>${text(...(REASONS[reason] || [reason,reason]))}</span><b>${count}</b></li>`).join('');
-    return `<details class="unit-scope" data-unit-scope><summary>${text('범위','Scope')} · ${text('파일','Files')} ${cover.inside}/${cover.tracked}${out?` <span class="chip warn">${text('제외','Excluded')} ${out}</span>`:''}${cover.plain?` <span class="chip">${text('색인 밖 일반 파일 '+cover.plain+'개 포함',cover.plain+' plain files outside the index included')}</span>`:''}${cover.truncated?` <span class="chip warn">${text('색인 한도 도달','Index limit reached')}</span>`:''} <span class="chip">${text('단위당 표본 ≤'+SAMPLE_FILES+'파일','≤'+SAMPLE_FILES+' sampled files per unit')}</span></summary>${reasons?`<ul class="unit-excluded">${reasons}</ul>`:''}</details>`;
+    return `<div class="unit-scope" data-unit-scope><p class="chips"><span class="chip">${text('파일','Files')} ${cover.inside}/${cover.tracked}</span> <span class="chip">${text('추적 파일','Tracked')} ${cover.tracked}</span> <span class="chip">${text('로컬에서 확인','Read locally')} ${readLocal}</span> <span class="chip">${text('AI 범위','AI range')} ${ai}</span> <span class="chip">${text('로컬만','Local only')} ${cover.local}</span>${out?` <span class="chip warn">${text('제외','Excluded')} ${out}</span>`:''}${cover.plain?` <span class="chip">${text('색인 밖 일반 파일 '+cover.plain+'개 포함',cover.plain+' plain files outside the index included')}</span>`:''}${cover.truncated?` <span class="chip warn">${text('색인 한도 도달','Index limit reached')}</span>`:''} <span class="chip">${text('단위당 표본 ≤'+SAMPLE_FILES+'파일','≤'+SAMPLE_FILES+' sampled files per unit')}</span></p>${reasons?`<ul class="unit-excluded">${reasons}</ul>`:''}</div>`;
   }
   const ITEM_KINDS={screen:['화면','Screen'],request:['서버 요청','Server request'],program:['프로그램','Program'],external:['외부 서비스','External service'],group:['화면 묶음','Screen group']};
   function partialDetail(group) {
@@ -458,29 +463,50 @@ const AnalysisRun = (() => {
     const rows=items.map(item=>`<li><span class="chip">${text(...(ITEM_KINDS[item.kind] || [item.kind,item.kind]))}</span> <b>${esc(item.name || '')}</b>${item.detail?` <span class="s">${esc(item.detail)}</span>`:''}${item.file?`<details data-claim-evidence><summary>${text('코드 근거','Code evidence')}</summary><div class="s"><code>${esc(item.file)}:${esc(item.line)}</code></div><pre>${esc(item.quote)}</pre></details>`:''}</li>`).join('');
     return `<p class="s">${text('입력 조각 '+group.covered+'/'+group.total+' 확인 · 아직 저장된 결과에 반영되지 않았습니다','Input pieces '+group.covered+'/'+group.total+' checked · not in the saved result yet')}</p><ul class="unit-partial">${rows}</ul>${group.count>items.length?`<p class="s">+${group.count-items.length}</p>`:''}`;
   }
+  function localDetail(group) {
+    const kinds=Object.entries(group.kinds || {}).map(([k,n])=>`<span class="chip">${text(...(LOCAL_KINDS[k] || [k,k]))} ${n}</span>`).join('');
+    const files=(group.files || []).map(f=>`<li><code>${esc(f)}</code></li>`).join('');
+    const more=group.file_count>(group.files || []).length?`<p class="s">+${group.file_count-group.files.length}</p>`:'';
+    return `<p class="chips">${kinds}<span class="chip">${text('파일','Files')} ${group.file_count}</span></p><p class="s">${text('로컬에서 읽고 세었습니다. AI는 읽지 않았습니다. 포함하려면 위에서 「모든 텍스트 파일」을 고르세요.','Read and counted locally. The AI did not read it. To include it, choose "every text file" above.')}</p><details><summary>${text('파일 목록','Files')}</summary><ul class="unit-files">${files}</ul>${more}</details>`;
+  }
+  function linkChips(index) {
+    const e=unitEdges.get(index);if(!e || !(e.out.length+e.in.length))return '';
+    const chips=list=>list.map(i=>`<button class="chip" type="button" data-unit-link="${i}">${esc(unitRows[i].name)}</button>`).join('');
+    return `<div class="unit-links">${e.out.length?`<p class="chips"><span class="s">${text('사용 →','Uses →')}</span>${chips(e.out)}</p>`:''}${e.in.length?`<p class="chips"><span class="s">${text('← 사용됨','← Used by')}</span>${chips(e.in)}</p>`:''}</div>`;
+  }
   function unitDetail(row) {
-    if(['pending','working'].includes(row.state))return '';
+    if(row.state==='working')return '';
     if(MAP_KINDS.includes(row.kind)) {
+      if(row.state==='pending')return '';
       if(row.state==='unavailable')return `<p class="s">${row.detail==='no screens'?text('화면이 없어 묶을 것이 없습니다.','No screens, so there is nothing to group.'):text('이 코드는 분석할 수 없습니다: ','Cannot be analyzed: ')+esc(row.detail)}</p>`;
       if(row.state!=='partial')return '';
       const group=unitDetails.get(unitKey(row));
       if(group===undefined)return `<p class="s">${text('불러오는 중…','Loading…')}</p>`;
       return group && group.items?partialDetail(group):`<p class="s">${text('부분 결과를 읽지 못했습니다.','Partial result unavailable.')}</p>`;
     }
+    if(row.state==='pending')return `<p class="chips"><span class="chip">${text('파일','Files')} ${row.count}</span></p>`;
     if(row.state==='failed')return `<p class="s">${text('AI 설명이 근거와 맞지 않아 저장하지 않았습니다.','The AI answer did not match its evidence and was not saved.')}</p>`;
     if(row.state==='unavailable')return `<p class="s">${text('근거로 읽을 수 있는 코드 줄이 없습니다.','No readable source lines.')}</p>`;
     const group=unitDetails.get(unitKey(row));
     if(group===undefined)return `<p class="s">${text('불러오는 중…','Loading…')}</p>`;
+    if(group?.local)return localDetail(group);
     if(!group || !group.files)return `<p class="s">${text('저장된 설명을 읽지 못했습니다.','Saved explanation unavailable.')}</p>`;
-    return `${group.stale?`<p class="s">${text('이전 코드 기준 · 다시 분석 필요','Based on older code · reanalyze')}</p>`:''}<code>${esc(group.commit.slice(0,8))}</code>${overviewTree(group)}`;
+    return `${group.stale?`<p class="s">${text('이전 코드 기준','Based on older code')}</p>`:''}<code>${esc(group.commit.slice(0,8))}</code>${overviewTree(group)}`;
+  }
+  const canExplain=()=>usable() && !providerBusy && !busy && !active();
+  function explainButton(row,index) {
+    if(MAP_KINDS.includes(row.kind) || !['pending','failed','local','stale'].includes(row.state))return '';
+    const label=['stale','failed'].includes(row.state)?text('다시 설명 · 호출 1회','Explain again · 1 call'):text('AI 설명 · 호출 1회','AI explanation · 1 call');
+    return `<p class="unit-ask"><button class="btn" type="button" data-unit-explain="${index}" ${canExplain()?'':'disabled'}>${label}</button><span class="chip">${text('코드가 Claude로 전송','Code sent to Claude')}</span>${beta()}</p>`;
   }
   function unitCard(row,index,multi) {
-    const mapRow=MAP_KINDS.includes(row.kind);
-    const open=openedUnit===unitKey(row),expandable=!['pending','working'].includes(row.state) && (!mapRow || ['partial','unavailable'].includes(row.state));
+    const mapRow=MAP_KINDS.includes(row.kind),navigates=mapRow && row.state==='saved';
+    const open=openedUnit===unitKey(row),expandable=row.state!=='working' && (!mapRow || ['partial','unavailable'].includes(row.state));
     const state=text(...UNIT_STATES[row.state]);
     const title=mapRow?text(...KINDS[row.kind]):esc(row.name);
     const pieces=mapRow && /^\d+\/\d+$/.test(row.detail)?`<span class="chip">${text('입력 조각','Input pieces')} ${esc(row.detail)}</span>`:'';
-    return `<li class="unit-card" data-state="${row.state}" data-unit-card="${index}"><button class="unit-head" type="button" data-unit-open="${index}" aria-expanded="${expandable?open:false}" ${expandable?'':'aria-disabled="true"'}><i class="unit-dot" aria-hidden="true"></i><strong>${title}</strong><span class="chips">${mapRow?'':`<span class="chip">${text(...(KINDS[row.kind] || [row.kind,row.kind]))}</span>`}${pieces}${!mapRow && row.count>SAMPLE_FILES?`<span class="chip">${text('표본','Sample')} ${SAMPLE_FILES}/${row.count}</span>`:''}${multi?`<span class="chip">${esc(connectionDisplayName(row.repo))}</span>`:''}${row.detail==='reused'?`<span class="chip">${text('코드 변경 없음','Code unchanged')}</span>`:''}</span><span class="unit-state">${state}</span></button>${open && expandable?unitDetail(row):''}</li>`;
+    const body=open && expandable?(mapRow?'':linkChips(index))+unitDetail(row)+explainButton(row,index):'';
+    return `<li class="unit-card" data-state="${row.state}" data-unit-card="${index}"><button class="unit-head" type="button" data-unit-open="${index}" aria-expanded="${expandable?open:false}" ${expandable||navigates?'':'aria-disabled="true"'}><i class="unit-dot" aria-hidden="true"></i><strong>${title}</strong><span class="chips">${mapRow?'':`<span class="chip">${text(...(KINDS[row.kind] || [row.kind,row.kind]))}</span>`}${pieces}${multi?`<span class="chip">${esc(connectionDisplayName(row.repo))}</span>`:''}${row.detail==='reused'?`<span class="chip">${text('코드 변경 없음','Code unchanged')}</span>`:''}</span><span class="unit-state">${state}</span></button>${body}</li>`;
   }
   function boardHtml() {
     const b=liveBoard(),live=fullRun() && active();
@@ -494,16 +520,30 @@ const AnalysisRun = (() => {
       const refresh=/\bRefresh\b/.test(String(boardError?.message || boardError));
       return `<section class="sect unit-board" data-unit-board="error"><h3>${text('전체 코드 분석','Full code analysis')} ${beta()}</h3><p class="s">${refresh?text('이 코드를 한 번 새로고침하면 단위가 계산됩니다. 새로고침은 AI를 부르지 않습니다.','Units are calculated after one refresh of this code. Refreshing does not call AI.'):text('단위를 읽지 못했습니다.','Could not read the units.')}</p>${refresh?`<button class="btn primary" type="button" id="refreshForUnits">${text('새로고침하고 단위 계산','Refresh and calculate units')}</button>`:''}</section>`;
     }
-    const t=b.totals,total=t.units || 0;
+    const mode=live?(run.intent?.coverage || b.coverage || 'signal'):(b.modes?.[mapCoverage]?mapCoverage:'signal'),picked=b.modes?.[mode];
+    const toAI=!live && mode==='all';  // "send every text file" makes the local folders part of the run
+    const t={...b.totals},total=t.units || 0;
     if(!total)return '';
-    const multi=b.repositories.length>1;
-    unitRows=b.repositories.flatMap(repo=>repo.units.map(row=>({repo:repo.repository,id:row[0],kind:row[1],name:row[2],count:row[3],state:row[4],detail:row[5]})));
+    if(toAI && t.local){t.pending=(t.pending || 0)+t.local;t.local=0;}
+    const multi=b.repositories.length>1,starts={};
+    if(!live){linkStore={scope:boardScopeKey(),repos:{}};for(const repo of b.repositories)if(repo.links)linkStore.repos[repo.repository]=repo.links;}
+    else if(linkStore.scope!==boardScopeKey())linkStore={scope:'',repos:{}};
+    let at=0;
+    unitRows=b.repositories.flatMap(repo=>{starts[repo.repository]=at;at+=repo.units.length;return repo.units.map((row,ri)=>({repo:repo.repository,ri,id:row[0],kind:row[1],name:row[2],count:row[3],state:toAI && row[4]==='local'?'pending':row[4],detail:row[5]}));});
+    unitEdges=new Map();
+    for(const [repo,links] of Object.entries(linkStore.repos))for(const [from,to] of links){
+      const a=starts[repo]+from,c=starts[repo]+to;if(!unitRows[a] || !unitRows[c])continue;
+      for(const [x,y,k] of [[a,c,'out'],[c,a,'in']]){if(!unitEdges.has(x))unitEdges.set(x,{out:[],in:[]});unitEdges.get(x)[k].push(y);}
+    }
+    const openIndex=unitRows.findIndex(row=>unitKey(row)===openedUnit),linkedSet=new Set(openIndex>=0?[...(unitEdges.get(openIndex)?.out || []),...(unitEdges.get(openIndex)?.in || [])]:[]);
+    const aiTotal=total-(t.local || 0);
+    const mapRows=unitRows.filter(r=>MAP_KINDS.includes(r.kind)),mapDone=mapRows.filter(r=>['saved','unavailable'].includes(r.state)).length+(savedOverviews().length?1:0),explained=unitRows.filter(r=>!MAP_KINDS.includes(r.kind) && r.state==='saved').length;
     const present=STATE_ORDER.filter(k=>t[k]);
-    const bar=`<div class="unit-bar" role="img" aria-label="${t.saved}/${total}">${present.map(k=>`<i data-state="${k}" style="width:${(t[k]*100/total).toFixed(2)}%"></i>`).join('')}</div>`;
+    const bar=`<div class="unit-bar" role="img" aria-label="${t.saved || 0}/${aiTotal}">${present.map(k=>`<i data-state="${k}" style="width:${(t[k]*100/total).toFixed(2)}%"></i>`).join('')}</div>`;
     const filters=`<div class="unit-legend" role="group" aria-label="${text('상태 필터','State filter')}"><button type="button" data-unit-filter="all" aria-pressed="${unitFilter==='all'}">${text('전체','All')} ${total}</button>${present.map(k=>`<button type="button" data-unit-filter="${k}" data-state="${k}" aria-pressed="${unitFilter===k}"><i aria-hidden="true"></i>${text(...UNIT_STATES[k])} ${t[k]}</button>`).join('')}</div>${t.retired?`<p class="s unit-retired">${text('현재 구조에 없는 이전 단위 '+t.retired+'개의 설명은 기록에만 남아 있고 위 개수에 넣지 않습니다.',t.retired+' explanations of earlier units that the current structure no longer has stay in history only and are not counted above.')}</p>`:''}`;
     const lanes=Object.keys(KINDS).filter(k=>unitRows.some(r=>r.kind===k)).map(kind=>{
       const set=unitRows.map((row,i)=>[row,i]).filter(([row])=>row.kind===kind);
-      return `<div class="unit-lane"><span class="unit-kind">${text(...KINDS[kind])}<b>${set.filter(([row])=>row.state==='saved').length}/${set.length}</b></span><span class="unit-cells">${set.map(([row,i])=>`<button class="unit-cell" type="button" data-unit-cell="${i}" data-state="${row.state}" title="${esc(row.name)} · ${text(...UNIT_STATES[row.state])}" aria-label="${esc(row.name)} · ${text(...UNIT_STATES[row.state])}"></button>`).join('')}</span></div>`;
+      return `<div class="unit-lane"><span class="unit-kind">${text(...KINDS[kind])}<b>${set.filter(([row])=>row.state==='saved').length}/${set.filter(([row])=>row.state!=='local').length}</b></span><span class="unit-cells">${set.map(([row,i])=>`<button class="unit-cell" type="button" data-unit-cell="${i}" data-state="${row.state}" ${linkedSet.has(i)?'data-linked="1"':''} title="${esc(row.name)} · ${text(...UNIT_STATES[row.state])}" aria-label="${esc(row.name)} · ${text(...UNIT_STATES[row.state])}"></button>`).join('')}</span></div>`;
     }).join('');
     const rank=row=>STATE_ORDER.indexOf(row.state);
     const listed=unitRows.map((row,i)=>[row,i]).filter(([row])=>unitFilter==='all' || row.state===unitFilter).sort((a,b)=>rank(a[0])-rank(b[0]) || a[1]-b[1]);
@@ -513,30 +553,31 @@ const AnalysisRun = (() => {
     const scanning=!live && b.signals==='pending';
     const usableNow=usable(),canStart=usableNow && !providerBusy && !busy && !active() && !scanning;
     const finished=fullRun() && ['failed','cancelled'].includes(run.state);
-    const mode=live?(run.intent?.coverage || b.coverage || 'signal'):(b.modes?.[mapCoverage]?mapCoverage:'signal'),picked=b.modes?.[mode];
     const calls=picked?.calls ?? b.calls,minutes=Math.max(1,Math.round((picked?.time_limit_seconds ?? b.time_limit_seconds ?? 3600)/60));
     const span=m=>m<180?m+text('분',' min'):m<2880?Math.round(m/60)+text('시간',' h'):Math.round(m/1440)+text('일',' days');
-    const parts=picked?.calls_parts ?? b.calls_parts,partsHtml=parts?`<details class="unit-calls"><summary>${text('호출 상한 계산','How the call limit is counted')}</summary><p class="s">${text('첫 개요 '+parts.overview+' · 지도·구성 '+parts.map+' · 단위 묶음 '+parts.units+' · 재시도 여유 '+parts.retry+' = '+calls+'회','First overview '+parts.overview+' · map and structure '+parts.map+' · unit packs '+parts.units+' · retry allowance '+parts.retry+' = '+calls)}</p></details>`:'';
-    const label=(t.saved?text('이어서 분석','Continue'):text('분석 시작','Start'))+' · '+text('호출 최대 '+calls+'회','up to '+calls+' calls');
-    const unfinished=['working','partial','failed','stale','pending'].reduce((n,k)=>n+(t[k] || 0),0);
-    const status=unfinished?`<span class="chip warn">${text('미완료','Unfinished')} ${unfinished}</span>`:`<span class="chip ok">${text('전체 저장됨','All saved')}${t.unavailable?' · '+text('건너뜀','skipped')+' '+t.unavailable:''}</span>`;
-    const mapPending=unitRows.some(row=>MAP_KINDS.includes(row.kind) && ['pending','stale','partial','working'].includes(row.state));
-    const mapCalls=parts?.map ?? b.map_calls;
-    const mapChips=(mapCalls?`<span class="chip" title="${text('저장된 지도가 없거나 오래되면 위에서 고른 읽기 범위(신호 줄 주변 또는 모든 텍스트 파일)의 코드 크기로 센 값입니다. 저장된 지도가 최신에 가까우면 바뀐 파일만 읽습니다.','Counted from the code size of the reading range chosen above (lines around signals, or every text file) when the saved map cannot be patched; otherwise only the changes.')}">${text('지도·구성 최대','Map and structure up to')} ${mapCalls}${text('회',' calls')}</span>`:'')+(mapPending?`<span class="chip">${text('지도 뒤 화면·프로그램 단위 추가 가능','Screens and programs may be added after the map')}</span>`:'');
+    const parts=picked?.calls_parts ?? b.calls_parts;
+    const budget=(live?run.unit_board?.budget:b.budget) || null,noneLeft=!!budget && budget.left<=0;
+    const label=budget?text('이어서 분석 · 남은 호출 '+budget.left+'/'+budget.limit,'Continue · '+budget.left+'/'+budget.limit+' calls left'):text('분석하기 · 호출 최대 '+calls+'회','Analyze · up to '+calls+' calls');
+    const budgetChip=budget && budget.left>0 && budget.left<calls?`<span class="chip warn">${text('남은 상한으로 일부만 가능','Only part fits in the remaining limit')}</span>`:'';
+    const mainButton=noneLeft?`<button class="btn primary" id="renewFullAnalysis" ${canStart?'':'disabled'}>${text('상한 다시 확인 · 최대 '+calls+'회','Confirm a new limit · up to '+calls+' calls')}</button>`:`<button class="btn primary" id="startFullAnalysis" ${canStart?'':'disabled'}>${label}</button>`;
+    const partList=parts?[['overview','첫 개요','First overview'],['map','지도·구성','Map and structure'],['units','단위 묶음','Unit packs'],['retry','재시도 여유','Retry allowance'],['later','나중에 생길 단위 여유','Units added later']].filter(([k])=>parts[k]>0).map(([k,ko,en])=>text(ko,en)+' '+parts[k]).join(' · '):'';
+    const partsHtml=partList?`<p class="s">${text('호출 상한 계산','How the limit is counted')}: ${partList} = ${calls}</p>`:'';
     const mb=n=>n<1048576?Math.max(1,Math.round(n/1024))+' KB':(n/1048576).toFixed(n<10485760?1:0)+' MB';
     const reports=b.repositories.map(r=>r.map_coverage).filter(Boolean),sum=k=>reports.reduce((n,r)=>n+(r[k] || 0),0);
     const modeLabel=(key,ko,en)=>{const m=b.modes?.[key];return `<label class="unit-mode"><input type="radio" name="mapCoverage" value="${key}" ${mode===key?'checked':''} ${live||!canStart?'disabled':''}> <span><b>${text(ko,en)}</b>${m?` · ${text('호출 최대 '+m.calls+'회','up to '+m.calls+' calls')}`:''}</span></label>`;};
     const coverageHtml=reports.length&&b.modes?`<div class="unit-coverage" data-map-coverage="${mode}"><div role="radiogroup" aria-label="${text('지도·구성 읽기 범위','What the map and structure read')}">${modeLabel('signal','신호 기반 읽기 (기본)','Signal-based reading (default)')}${modeLabel('all','모든 텍스트 파일 원문을 AI가 읽기','Send every text file to the AI')}</div>
       <p class="s">${mode==='signal'
-        ?text('모든 텍스트 파일을 로컬에서 읽고 색인했습니다. 지도·구성은 라우트·요청·저장소·외부 서비스·진입점 신호가 있는 줄 주변만 AI가 읽고, 나머지는 AI가 필요할 때 파일 범위나 문자열 검색으로 요청합니다.','Every text file is read and indexed locally. The map and structure send only the lines around route, request, storage, external service and entry-point signals; the AI asks for more of a file or a search when it needs it.')
-        :text('신호와 관계없이 모든 텍스트 파일의 원문을 조각으로 AI에 보냅니다. 호출과 전송량이 가장 큽니다.','Every text file is sent as pieces whatever its signals. This costs the most calls and data.')}</p>
-      <details class="unit-calls"><summary>${text('읽음·색인·AI 해석 범위','Read, indexed and AI-interpreted')}</summary><p class="s">${text('로컬로 읽고 색인 '+sum('files')+'개 · AI가 신호 줄 주변 해석 '+sum('windows')+'개 · 저장된 지도가 인용해 전체 전송 '+sum('whole')+'개 · 신호 없음(로컬 색인만) '+sum('local')+'개 · 문서·데이터(로컬 색인만) '+sum('docs')+'개 · 테스트·외부 코드(로컬 색인만) '+sum('support')+'개. 지도·구성 전송 약 '+mb(b.modes[mode]?.source_bytes ?? sum('sent_bytes'))+' / 전체 원문 '+mb(sum('text_bytes'))+'. 바이너리·비밀·생성·300KB 초과 파일은 단위 제외 사유에 셉니다.','Read and indexed locally '+sum('files')+' · AI-interpreted around signals '+sum('windows')+' · sent whole because the saved map cites them '+sum('whole')+' · no signal (local index only) '+sum('local')+' · documents and data (local index only) '+sum('docs')+' · tests and vendored code (local index only) '+sum('support')+'. Map and structure send about '+mb(b.modes[mode]?.source_bytes ?? sum('sent_bytes'))+' of '+mb(sum('text_bytes'))+' of source text. Binary, secret, generated and oversized files are counted under the unit exclusion reasons.')}</p></details></div>`:'';
-    const start=live?`<div class="unit-run" role="status" aria-live="polite">${status}<span class="chip">${text('AI 호출','AI calls')} ${run.input_stats?.calls || 0} · ${text('최대','max')} ${run.unit_estimate?.calls ?? calls}</span><span class="chip">${text('경과','Elapsed')} ${Math.max(0,Math.round((Date.now()-Date.parse(run.started_at || run.created_at))/60000)) || 0}${text('분',' min')}</span><button class="btn" id="cancelFullAnalysis" ${busy || run.cancel_requested?'disabled':''}>${text('취소','Cancel')}</button></div>`
-      : scanning ? `<div class="unit-start"><span class="chips">${status}<span class="chip" role="status">${text('로컬 신호 수집 중 · 호출 상한은 끝난 뒤 표시','Scanning signals locally · the call limit appears when done')}</span></span><button class="btn primary" id="startFullAnalysis" disabled>${text('분석 시작','Start')}</button></div>`
-      : calls>0 ? `<div class="unit-start"><span class="chips">${status}<span class="chip">${text('AI 호출 최대','AI calls up to')} ${calls}</span>${mapChips}<span class="chip">${text('선택한 코드가 Claude로 전송','Selected code is sent to Claude')}</span><span class="chip">${text('구독 한도 적용','Subscription limit applies')}</span><span class="chip">${text('시간 상한','Time cap')} ${span(minutes)}</span></span><button class="btn primary" id="startFullAnalysis" ${canStart?'':'disabled'}>${label}</button>${usableNow?'':`<button class="btn quiet" id="checkFullAccount">${text('계정 확인','Check account')}</button>`}${partsHtml}</div>`
-      : `<p class="s">${status}</p>`;
+        ?text('모든 텍스트 파일을 로컬에서 읽고 색인했습니다. AI는 신호(라우트·요청·저장소·외부 서비스·진입점)가 있는 줄 주변만 읽고, 더 필요하면 파일 범위나 검색을 요청합니다.','Every text file is read and indexed locally. The AI reads only lines around signals (routes, requests, storage, external services, entry points) and asks for a file range or search when it needs more.')
+        :text('신호와 관계없이 모든 텍스트 파일 원문을 조각으로 보냅니다. 호출과 전송량이 가장 큽니다.','Every text file is sent as pieces whatever its signals. This costs the most calls and data.')}</p>
+      <p class="s">${text('로컬 색인 '+sum('files')+' · 신호 줄 주변 '+sum('windows')+' · 지도가 인용해 전체 전송 '+sum('whole')+' · 신호 없음 '+sum('local')+' · 문서·데이터 '+sum('docs')+' · 테스트·외부 코드 '+sum('support')+' · 전송 약 '+mb(b.modes[mode]?.source_bytes ?? sum('sent_bytes'))+' / 원문 '+mb(sum('text_bytes')),'Indexed locally '+sum('files')+' · around signals '+sum('windows')+' · sent whole (cited by the map) '+sum('whole')+' · no signal '+sum('local')+' · documents and data '+sum('docs')+' · tests and vendored code '+sum('support')+' · sends about '+mb(b.modes[mode]?.source_bytes ?? sum('sent_bytes'))+' of '+mb(sum('text_bytes')))}</p></div>`:'';
+    const scopeHtml=`<details class="unit-calls" data-read-scope><summary>${text('읽기 범위','Reading range')}</summary>${coverageHtml}<p class="chips"><span class="chip">${text('시간 상한','Time cap')} ${span(minutes)}</span></p>${partsHtml}${unitSummary(b)}</details>`;
+    const progress=`<span class="unit-count"><span class="chip">${text('개요·지도·구성·묶음','Overview, map, structure, groups')} ${mapDone}/${mapRows.length+1}</span><span class="chip">${text('설명 저장','Explained')} ${explained}</span>${t.local?`<span class="chip" data-state="local">${text('로컬 확인','Checked locally')} ${t.local}</span>`:''}</span>`;
+    const start=live?`<div class="unit-run" role="status" aria-live="polite"><span class="chip">${text('AI 호출','AI calls')} ${run.unit_board?.budget?run.unit_board.budget.used+'/'+run.unit_board.budget.limit:(run.input_stats?.calls || 0)+((run.unit_estimate?.calls ?? calls)?' · '+text('최대','max')+' '+(run.unit_estimate?.calls ?? calls):'')}</span><span class="chip">${text('경과','Elapsed')} ${Math.max(0,Math.round((Date.now()-Date.parse(run.started_at || run.created_at))/60000)) || 0}${text('분',' min')}</span><button class="btn" id="cancelFullAnalysis" ${busy || run.cancel_requested?'disabled':''}>${text('취소','Cancel')}</button></div>`
+      : scanning ? `<div class="unit-start"><span class="chips"><span class="chip" role="status">${text('신호 수집 중','Scanning signals')}</span></span><button class="btn primary" id="startFullAnalysis" disabled>${text('분석하기','Analyze')}</button></div>`
+      : calls>0 ? `<div class="unit-start"><span class="chips"><span class="chip">${text('AI 호출 최대','AI calls up to')} ${calls}</span>${budgetChip}<span class="chip">${text('코드가 Claude로 전송','Code sent to Claude')}</span><span class="chip">${text('구독 한도 적용','Subscription limit')}</span></span>${mainButton}${usableNow?'':`<button class="btn quiet" id="checkFullAccount">${text('계정 확인','Check account')}</button>`}</div>`
+      : `<p class="chips"><span class="chip ok">${text('분석할 단계 없음','Nothing left to analyze')}</span></p>`;
     const alert=finished?`<p role="alert">${esc(message(run.error || {code:'CANCELLED'}))}</p>`:'';
-    return `<section class="sect unit-board" data-unit-board><h3>${text('전체 코드 분석','Full code analysis')} ${beta()}<span class="unit-count">${t.saved}/${total}</span></h3>${start}${coverageHtml}${alert}${bar}${filters}<div class="unit-map" role="group" aria-label="${text('단위 구조도','Unit map')}">${lanes}</div>${unitSummary(b)}<ul class="unit-cards">${shown.map(([row,i])=>unitCard(row,i,multi)).join('')}</ul>${hidden>0?`<button class="btn quiet" type="button" id="unitMore">${text('더 보기','Show more')} (${hidden})</button>`:''}</section>`;
+    return `<section class="sect unit-board" data-unit-board><h3>${text('전체 코드 분석','Full code analysis')} ${beta()}${progress}</h3>${start}${scopeHtml}${alert}${bar}${filters}<div class="unit-map" role="group" aria-label="${text('단위 구조도','Unit map')}">${lanes}</div><ul class="unit-cards">${shown.map(([row,i])=>unitCard(row,i,multi)).join('')}</ul>${hidden>0?`<button class="btn quiet" type="button" id="unitMore">${text('더 보기','Show more')} (${hidden})</button>`:''}</section>`;
   }
   async function readUnit(row) {
     const base={...scope(),repository:row.repo};
@@ -544,9 +585,10 @@ const AnalysisRun = (() => {
   }
   async function openUnit(row) {
     const key=unitKey(row);
-    if(['pending','working'].includes(row.state) || MAP_KINDS.includes(row.kind) && !['partial','unavailable'].includes(row.state)){openedUnit=key;paint();return;}
+    if(MAP_KINDS.includes(row.kind) && row.state==='saved'){S.agentPrompt=null;S.view=row.kind==='groups'?'feat':'sys';render();return;}
+    if(row.state==='working' || MAP_KINDS.includes(row.kind) && !['partial','unavailable'].includes(row.state)){openedUnit=key;paint();return;}
     openedUnit=openedUnit===key?null:key;paint();
-    if(openedUnit!==key || unitDetails.has(key) || ['failed','unavailable'].includes(row.state))return;
+    if(openedUnit!==key || unitDetails.has(key) || ['pending','failed','unavailable'].includes(row.state))return;
     const token=epoch;
     let group=null;try{group=await readUnit(row);}catch{}
     if(token!==epoch)return;
@@ -564,7 +606,19 @@ const AnalysisRun = (() => {
     if($('unitMore'))$('unitMore').onclick=()=>{unitLimit+=48;paint();};
     if($('startFullAnalysis'))$('startFullAnalysis').onclick=()=>{
       const b=liveBoard();if(!b || active())return;
-      S.analysisChoice={...S.analysisChoice,task:'full_analysis',maxCalls:(b.modes?.[mapCoverage] || b).calls,coverage:b.modes?.[mapCoverage]?mapCoverage:'signal'};
+      S.analysisChoice={...S.analysisChoice,task:'full_analysis',maxCalls:b.budget?.left>0?b.budget.limit:(b.modes?.[mapCoverage] || b).calls,coverage:b.modes?.[mapCoverage]?mapCoverage:'signal',renew:false,only:undefined};
+      return execute('analysis_run_start');
+    };
+    root?.querySelectorAll?.('[data-unit-explain]').forEach(button=>button.onclick=()=>{
+      const b=liveBoard(),row=unitRows[Number(button.dataset.unitExplain)];if(!b || !row || !canExplain())return;
+      S.analysisChoice={...S.analysisChoice,task:'full_analysis',maxCalls:2,coverage:b.modes?.[mapCoverage]?mapCoverage:'signal',only:[{repository:row.repo,target:row.id}],renew:false};
+      unitDetails.delete(unitKey(row));
+      return execute('analysis_run_start');
+    });
+    root?.querySelectorAll?.('[data-unit-link]').forEach(button=>button.onclick=()=>{const row=unitRows[Number(button.dataset.unitLink)];if(row){unitFilter='all';void openUnit(row);}});
+    if($('renewFullAnalysis'))$('renewFullAnalysis').onclick=()=>{
+      const b=liveBoard();if(!b || active())return;
+      S.analysisChoice={...S.analysisChoice,task:'full_analysis',maxCalls:(b.modes?.[mapCoverage] || b).calls,coverage:b.modes?.[mapCoverage]?mapCoverage:'signal',renew:true,only:undefined};
       return execute('analysis_run_start');
     };
     root?.querySelectorAll?.('input[name="mapCoverage"]').forEach(input=>input.onchange=()=>{mapCoverage=input.value;paint();});
@@ -601,15 +655,20 @@ const AnalysisRun = (() => {
     const runAccount = run?.account?.email || run?.account?.id;
     const choice=intent();
     const cached=run?.resource_estimate?.cached || 0;
-    const savedGroups=batch && batchRun?savedBatchGroups():[];
-    const resultPicker=savedGroups.length?`<div class="ctl"><label>${text('저장된 경로 설명','Saved path explanations')} <select id="batchSavedResource">${savedGroups.map((group,i)=>`<option value="${i}">${esc([group.repository,group.resource].filter(Boolean).join(' · '))}</option>`).join('')}</select></label><button class="btn quiet" id="openBatchSaved">${text('설명 열기','Open explanation')}</button></div>`:'';
     const targets=choice.targets.map(t=>[t.repository,t.target].filter(Boolean).map(esc).join(' · '));
     const scoped=S.analysisChoice?.task==='scope_overview';
-    const fullReady=choice.task==='overview' && !scoped && !active() && !!liveBoard()?.calls;  // the full analysis starts with the same overview and is the main action
+    const fullReady=['overview','full'].includes(choice.task) && !scoped && !!liveBoard()?.repositories;  // the board owns the one main action; this panel keeps only account problems, errors and redelivery warnings
     const startLabel=batch?text('경로 묶음 설명 생성','Generate path group explanations'):scoped?text('이 경로 설명 생성','Generate path explanation'):choice.task==='overview' ? text('첫 개요 만들기','Create initial overview')
       : choice.task==='all' ? text('지도·구성 분석 시작','Analyze map and structure')
       : choice.task==='analysis' ? text('상세 지도 분석 (베타)','Analyze detailed map (beta)')
       : text(names[choice.task]+' 분석 시작','Analyze '+names[choice.task]);
+    if(fullReady){
+      const parts=[providerBusy?`<p role="status">${text('계정 확인 중…','Checking the account…')}</p>`:provider && !usable()?`<p role="alert">${esc(message(provider))}</p><button class="btn quiet" id="checkAppAnalysis">${text('계정 확인','Check account')}</button>`:'',
+        retryWarning?`<p role="alert" id="retryDeliveryWarning">${text('분석이 중단됐습니다. 마지막 요청이 Claude에 전달됐을 수 있어, 다시 시도하면 재전송될 수 있습니다.','Analysis was interrupted. Claude may already have received the last request; retrying may send it again.')}</p>`:'',
+        issue?`<p role="alert">${esc(message(issue))}</p>`:'',
+        retryWarning && sameScope() && ['failed','cancelled'].includes(run?.state)?`<button class="btn" id="retryAppAnalysis" aria-describedby="retryDeliveryWarning" ${canStart?'':'disabled'}>${text('현재 코드로 다시 시도','Retry with current code')}</button>`:''].join('');
+      return parts?`<section class="sect" aria-label="${text('자동 분석 (베타)','Automatic analysis (beta)')}">${parts}</section>`:'';
+    }
     return `<section class="sect" aria-label="${text('자동 분석 (베타)','Automatic analysis (beta)')}">
       ${includeOverview?overviewHtml():''}
       <p class="auto-line"><strong title="${esc(identity || '')}">Claude Code</strong>${account?.subscription_type ? ' · '+esc(account.subscription_type) : identity ? '' : ' · '+text('계정 미확인','Account not verified')}</p>
@@ -619,13 +678,12 @@ const AnalysisRun = (() => {
       ${stats ? `<details><summary>${text('AI 사용량','AI usage')}</summary><p class="s">${text('입력 호출','Input calls')}: ${stats.calls} · ${text('전송한 입력 바이트','Encoded input bytes')}: ${stats.bytes}${inputProgress ? ' · '+esc(inputProgress) : ''}</p></details>` : ''}
       ${retryWarning?`<p role="alert" id="retryDeliveryWarning">${text('분석이 중단됐습니다. 마지막 요청이 Claude에 전달됐을 수 있습니다. 다시 시도하면 같은 요청이 재전송될 수 있습니다.','Analysis was interrupted. Claude may already have received the last request. Retrying may send it again.')}</p>`:''}
       ${issue ? `<p role="alert">${esc(message(issue))}</p>` : ''}
-      ${!active() && choice.task==='overview' ? `<p class="s" id="overviewLimits">${scoped?text('선택한 경로 · 최대 4파일 · AI 1회','Selected path: up to 4 files · 1 AI call'):text('연결한 코드마다 최대 4파일 · AI 1회','Per repository: up to 4 files · 1 AI call')}</p>` : ''}
+      ${!active() && !fullReady && choice.task==='overview' ? `<p class="s" id="overviewLimits">${scoped?text('선택한 경로 · 최대 4파일 · AI 1회','Selected path: up to 4 files · 1 AI call'):text('연결한 코드마다 최대 4파일 · AI 1회','Per repository: up to 4 files · 1 AI call')}</p>` : ''}
       ${batch && !active()?`<p class="s" id="resourceLimits">${text('경로 묶음 '+choice.max_calls+'개 · AI 최대 '+choice.max_calls+'회','Path groups: '+choice.max_calls+' · Up to '+choice.max_calls+' AI calls')}</p>`:''}
-      <div class="ctl">${active() ? `<button class="btn" id="cancelAppAnalysis" ${busy || run.cancel_requested ? 'disabled' : ''}>${text('분석 취소','Cancel analysis')}</button>` : sameScope() && ['failed','cancelled'].includes(run?.state) ? `<button class="btn primary" id="retryAppAnalysis" ${retryWarning?'aria-describedby="retryDeliveryWarning"':''} ${canStart ? '' : 'disabled'}>${text('현재 코드로 다시 시도','Retry with current code')}</button>` : `<button class="btn ${fullReady?'quiet':'primary'}" id="startAppAnalysis" ${batch?'aria-describedby="resourceLimits"':choice.task==='overview' ? 'aria-describedby="overviewLimits"' : ''} ${canStart ? '' : 'disabled'}>${esc(startLabel)}</button>`}
-      ${resources && !choice.area && !scoped && (!batch || resources!==choice.max_calls) && !active()?`<button class="btn quiet" id="chooseResourceBatch">${text('경로 묶음별 AI 설명 (베타)','AI explanations by path group (beta)')}</button>`:''}
-      <button class="btn quiet" id="checkAppAnalysis" ${busy || providerBusy ? 'disabled' : ''}>${text('계정 확인','Check account')}</button>
-      ${!batchRun && sameScope() && done > 0 && run.intent?.task!=='overview' ? `<button class="btn quiet" id="viewAppAnalysis">${text('저장된 결과 보기','View saved results')}</button>` : ''}</div>
-      ${resultPicker}${batch && batchRun && active() && done>savedGroups.length?`<button class="btn quiet" id="refreshSavedBatch">${text('저장된 결과 보기','View saved results')}</button>`:''}${previewHtml()}</section>`;
+      <div class="ctl">${active() ? `<button class="btn" id="cancelAppAnalysis" ${busy || run.cancel_requested ? 'disabled' : ''}>${text('분석 취소','Cancel analysis')}</button>` : sameScope() && ['failed','cancelled'].includes(run?.state) ? `<button class="btn primary" id="retryAppAnalysis" ${retryWarning?'aria-describedby="retryDeliveryWarning"':''} ${canStart ? '' : 'disabled'}>${text('현재 코드로 다시 시도','Retry with current code')}</button>` : `${fullReady?'':`<button class="btn primary" id="startAppAnalysis" ${batch?'aria-describedby="resourceLimits"':choice.task==='overview' ? 'aria-describedby="overviewLimits"' : ''} ${canStart ? '' : 'disabled'}>${esc(startLabel)}</button>`}`}
+      ${!batchRun && sameScope() && done > 0 && !['overview','full'].includes(run.intent?.task) ? `<button class="btn quiet" id="viewAppAnalysis">${text('저장된 결과 보기','View saved results')}</button>` : ''}
+      ${usable()?'':`<button class="btn quiet" id="checkAppAnalysis" ${busy || providerBusy ? 'disabled' : ''}>${text('계정 확인','Check account')}</button>`}</div>
+      ${previewHtml()}</section>`;
   }
   function bind() {
     bindBoard();
@@ -672,16 +730,6 @@ const AnalysisRun = (() => {
       };
     });
     if ($('startAppAnalysis')) $('startAppAnalysis').onclick = () => execute('analysis_run_start');
-    if($('refreshSavedBatch'))$('refreshSavedBatch').onclick=()=>check(true);
-    if ($('openBatchSaved')) $('openBatchSaved').onclick=()=>{
-      const groups=savedBatchGroups();
-      const selected=groups[Number($('batchSavedResource').value)];
-      if(selected)openAnalysisPanel('scope_overview',selected.resource,selected.repository);
-    };
-    if ($('chooseResourceBatch')) $('chooseResourceBatch').onclick=()=>{
-      S.analysisChoice={...S.analysisChoice,task:'resource_batch',detailTarget:'',maxCalls:localResourceCount()};
-      syncScope();paint();
-    };
     if ($('retryAppAnalysis')) $('retryAppAnalysis').onclick = () => execute('analysis_run_retry');
     if ($('cancelAppAnalysis')) $('cancelAppAnalysis').onclick = () => execute('analysis_run_cancel');
     if ($('checkAppAnalysis')) $('checkAppAnalysis').onclick = () => { void providers(); void check(); };
@@ -697,6 +745,6 @@ const AnalysisRun = (() => {
   function open() { syncScope(); if (!provider && !providerBusy) void providers(); else void check(); }
   window.addEventListener('focus', () => { syncScope(); void check(); });
   document.addEventListener('visibilitychange', () => { clearTimeout(timer); if (!document.hidden) { syncScope(); void check(); } });
-  return {syncScope, open, html, overviewHtml, boardHtml, savedScopeHtml, bind, bindMapResults, stateLabel, check};
+  return {syncScope, open, html, overviewHtml, boardHtml, savedScopeHtml, bind, bindMapResults, stateLabel, check, checkAccount:()=>{void providers();void check();}};
 })();
 AnalysisRun.syncScope();

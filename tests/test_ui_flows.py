@@ -640,7 +640,7 @@ class Flows(unittest.TestCase):
     def test_all_code_is_explained_and_one_code_keeps_its_configured_server_links(self):
         self.check(r'''
  const note=()=>$('repository-bar').querySelector('[data-code-scope]')?.textContent || '';
- assert(note()===tr('연결한 코드 전체'),'All code is explained beside the selector: '+note());
+ assert(note()===tr('전체 코드'),'All code is explained beside the selector: '+note());
  $('repository').value='web';$('repository').dispatchEvent(new Event('change'));for(let i=0;i<50 && S.repository!=='web';i++)await wait();await wait();
  assert(note()===tr('이 코드만 · 서버 연결 유지'),'One code says what stays linked: '+note());
  window.mutateBundle=b=>{b.project.repositories=b.project.repositories.slice(0,1);};await loadProject('Second',false,'');await wait();
@@ -711,8 +711,8 @@ class Flows(unittest.TestCase):
         self.check(r'''
  if($('guide').open)closeGuide('skipped');
  // One first entry: explore my code. Both ways are explained, and nothing runs AI by itself.
- assert(main().includes(tr('내 코드 살펴보기')) && !main().includes(tr('어떤 코드를 살펴볼까요?')),'Entry offers the two choices without a duplicate prompt: '+main());
- assert(main().includes(tr('AI 분석은 직접 요청할 때만 실행됩니다.')),'No automatic AI execution is stated');
+ assert(main().includes(tr('내 코드 살펴보기')) && !main().includes(tr('살펴볼 코드 선택')),'Entry offers the two choices without a duplicate prompt: '+main());
+ assert(main().includes(tr('AI 분석은 요청할 때만 실행됩니다.')),'No automatic AI execution is stated');
  assert($('startWithAI').textContent===tr('작업하던 AI에게 맡기기') && $('startProject').textContent===tr('코드 위치를 직접 입력'),'The two ways name what each one does');
  assert($('newProject').title===tr('다른 서비스 추가'),'The header plus adds another service');
  $('startProject').click();const d=$('project-dialog');assert(d.open && d.querySelector('h2').textContent===tr('살펴볼 코드 추가'),'The editor is about code to explore');
@@ -844,7 +844,7 @@ class Flows(unittest.TestCase):
  S.view='sys';render();openAnalysisPanel();await AnalysisRun.check();await wait();
  const L=(en,ko)=>S.lang==='en'?en:ko,panel=$('insp').innerHTML;
  assert(panel.includes('unit-board') && panel.includes(L('Full code analysis','전체 코드 분석')) && panel.includes('class="beta"'),'The panel shows the beta board: '+panel.slice(0,200));
- assert($('startFullAnalysis') && panel.includes(L('Queued','대기')),'Queued units are labeled and the start needs a click');
+ assert($('startFullAnalysis') && panel.includes(L('No explanation','설명 없음')),'Queued units are labeled and the start needs a click');
  assert(!calls.some(c=>c.command==='analysis_run_start'),'Showing the board starts nothing');
  $('startFullAnalysis').click();await wait();
  const sent=calls.filter(c=>c.command==='analysis_run_start').at(-1).args.scope.intent;
@@ -1682,7 +1682,7 @@ class UxWriting(unittest.TestCase):
  const shown=()=>{const n=$('baselineNotice');return !!n && !n.hidden;};
  assert(!shown(),'Fixed time hides the notice');
  const last=$('settings-dialog').querySelector('input[value=last_refresh]');last.checked=true;last.dispatchEvent(new Event('change'));
- assert(shown() && $('baselineNotice').textContent===tr('새로고침마다 시작점 이동') && $('baselineNotice').title===notice,'Moving baseline has a short visible label and full accessible title');
+ assert(shown() && $('baselineNotice').textContent===tr('시작점 이동') && $('baselineNotice').title===notice,'Moving baseline has a short visible label and full accessible title');
  assert($('settings-dialog').textContent.includes(tr('서비스를 열 때 새로고침')),'Automatic refresh names service switches too');
  $('settings-dialog').close();
  const save=async since=>{renderSettings();$('settings-dialog').showModal();const r=$('settings-dialog').querySelector('input[value='+since+']');r.checked=true;r.dispatchEvent(new Event('change'));$('sinceTime').value='2026-09-01T00:00';await $('saveSt').onclick();};

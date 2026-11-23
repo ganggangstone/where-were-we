@@ -356,3 +356,8 @@ h3 > .chip { margin-left:var(--space-2) }
 .unit-card[data-state="pending"] .unit-dot { background:transparent; border:var(--border-hairline) }
 .unit-card[data-state="unavailable"] .unit-dot { background:transparent; border:var(--size-hairline) dashed currentColor }
 .unit-state { margin-left:auto; font:var(--font-secondary); color:currentColor }
+.unit-cell[data-linked] { outline:var(--outline-focus); outline-offset:var(--size-hairline); border-color:var(--color-accent) }
+.unit-links { display:grid; gap:var(--space-2); margin-top:var(--space-3) }
+.unit-links button.chip { cursor:pointer }
+.unit-files { list-style:none; padding:var(--space-0); display:grid; gap:var(--space-1); font:var(--font-secondary) }
+.unit-ask { display:flex; flex-wrap:wrap; align-items:center; gap:var(--space-3) }
