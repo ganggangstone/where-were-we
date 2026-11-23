@@ -22,7 +22,7 @@ import time
 parser=argparse.ArgumentParser()
 parser.add_argument('--code',required=True);parser.add_argument('--root',required=True);parser.add_argument('--repo',required=True)
 parser.add_argument('--project-data');parser.add_argument('--ref',default='HEAD');parser.add_argument('--coverage',default='signal')
-parser.add_argument('--fail-at',type=int,default=0,help='interrupt the first run at this call (0: at a third of the limit)')
+parser.add_argument('--fail-at',type=int,default=0,help='interrupt the first run at this call (0: at a third of the limit, -1: never)')
 parser.add_argument('--hollow-system',action='store_true',help='the fake structure answers ask every round for pages that do not exist (a missing metadata key, a missing file, ever further page ranges)')
 parser.add_argument('--skip-run',action='store_true');parser.add_argument('--no-change',action='store_true',help='skip the changed_code step')
 args=parser.parse_args()
@@ -174,12 +174,15 @@ def totals_equal(job_id):
 
 if not args.skip_run:
     cap=out['board']['calls'];intent={'task':'full','targets':[],'max_calls':cap,'coverage':args.coverage}
-    limit[0]=args.fail_at or max(2,cap//3)
+    limit[0]=0 if args.fail_at<0 else args.fail_at or max(2,cap//3)
     t0=time.monotonic();job=analysis_run.prepare(NAME,'dev','ko',RID,intent=intent);prepared=time.monotonic()
     done,seconds=run_once(job)
     out['time_to_first_call']={'prepare_seconds':round(prepared-t0,2),'local_seconds_before_first_ai_call':round((first_call[0] or time.monotonic())-t0,2),
                                'note':'fake executor: real AI latency is not measured'}
-    out['interrupted']={'state':done['state'],'error':(done.get('error') or {}).get('code'),'calls':total(),'local_seconds':seconds,'first_calls':order[:3]}
+    record=analysis_run.read(job['id'])
+    out['interrupted']={'state':done['state'],'error':(done.get('error') or {}).get('code'),'calls':total(),'local_seconds':seconds,'first_calls':order[:3],
+                        'by_stage':(record.get('input_stats') or {}).get('by_stage'),'map_scope':record.get('map_scope'),'stage_unavailable':record.get('stage_unavailable'),
+                        'plan':{k:record.get('budget',{}).get(k) for k in ('floor','extra','retry','plan_seconds')}}
     reopened=analysis_run.unit_board(NAME,RID,'dev','ko')
     live=analysis_run._run_board(analysis_run.read(job['id'])) if 'units' in analysis_run.read(job['id']) else None
     out['reopen_after_interrupt']={'board':reopened['totals'],'run':live and live['totals'],'match':bool(live) and reopened['totals']==live['totals'],
