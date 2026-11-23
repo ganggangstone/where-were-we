@@ -338,6 +338,10 @@ class FullRun(unittest.TestCase):
         floor=parts['overview']+sum(r['map_floor_by']['signal'] for r in board['repositories'])
         self.assertEqual(sum(parts.values()),board['calls']);self.assertEqual(parts['retry'],1+floor//8)  # the allowance is over first calls only
         self.assertEqual(parts['map'],board['map_calls'])
+        plan=analysis_run.ai_extract.plan('demo','dev','en','service',overview=True,light=True)
+        for mode in ('signal','all'):  # the board read every stage plan of both choices from the cache the scan filled, none fell back to a rough count
+            value={'project':'demo','branch':'dev','lang':'en','intent':{'task':'full','coverage':mode}}
+            self.assertTrue(all(analysis_run._planned(value,t,False) for t in plan['tasks'] if t['task'] in ('analysis','groups')))
         for mode in ('signal','all'):
             # prepare() reserves exactly what the board shows: one first call per batch, the extra share per batch and the allowance.
             job=self.prepare(intent=self.intent(board,mode));budget=job['budget']

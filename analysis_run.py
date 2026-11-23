@@ -1226,18 +1226,22 @@ def _coverage_note(report):
 
 VERIFIED_UNITS_BYTES=64_000
 
+def _verified_sources(value,rid):
+    """[(unit id, saved explanation)] the structure may cite: the first overview of this run, then every saved unit explanation."""
+    found={}
+    for record in sorted(_runs(),key=lambda r:r['created_at']):  # explanations of earlier runs on this project; the citations are verified again in _verified_units
+        if all(record[k]==value[k] for k in ('project','lang','branch')):found.update((record.get('unit_overviews',{}).get(rid) or {}))
+    found.update(value.get('unit_overviews',{}).get(rid) or {})
+    saved=sorted(found.items())
+    if (value.get('overviews') or {}).get(rid):saved.insert(0,('overview',value['overviews'][rid]))  # the first overview of the repository
+    return saved
+
 def _verified_units(value,rid,path,commit):
     """The first overview and the unit explanations already saved for this code (none is required), as [unit id, [[name, role, [[file, line, quote]]]]] (two items per unit,
     at most VERIFIED_UNITS_BYTES in all). Each quote is checked against the pinned commit again, so the structure may cite it unread."""
     evidence,_,_=ai_extract.evidence_reader(path,commit)
     rows=[];size=2
-    found={}
-    for record in sorted(_runs(),key=lambda r:r['created_at']):  # explanations of earlier runs on this project; the citations are verified again below
-        if all(record[k]==value[k] for k in ('project','lang','branch')):found.update((record.get('unit_overviews',{}).get(rid) or {}))
-    found.update(value.get('unit_overviews',{}).get(rid) or {})
-    saved=sorted(found.items())
-    if (value.get('overviews') or {}).get(rid):saved.insert(0,('overview',value['overviews'][rid]))  # the first overview of the repository
-    for unit_id,overview in saved:
+    for unit_id,overview in _verified_sources(value,rid):
         items=[]
         for item in (overview.get('items') or [])[:2]:
             cites=[[e['file'],e['line'],e['quote']] for e in [item,*(item.get('evidence') or [])] if isinstance(e,dict) and evidence(e)]
@@ -2695,14 +2699,17 @@ def _plan_key(value,task):
     """What a stage's batches depend on, read without building them: the pinned commit and saved bundle, coverage, language and this code."""
     conf,raw,_,head=ai_extract.context(value['project'],task['repository'],value['branch'])
     return mapcore.cache_key(PLAN_VERSION,CHECKPOINT_VERSION,mapcore.code_digest(),(value.get('intent') or {}).get('coverage','signal'),value['lang'],
-                             conf['path'],head,task['task'],ai_extract.digest(json.loads(json.dumps(raw.get(value['branch']),default=str))),'plan')
+                             conf['path'],head,task['task'],ai_extract.digest(json.loads(json.dumps(raw.get(value['branch']),default=str))),
+                             ai_extract.digest(json.loads(json.dumps(_verified_sources(value,task['repository']),default=str))) if task['task']=='system' else None,'plan')
 
 def _stage_plan(value,task,build=True):
     """The batches one map-family task of a full analysis sends: {'direct': one plain call} or {'scope', 'keys'} of its batches,
     with 'left' the batches no settled checkpoint answers yet. Cached; build=False returns None instead of building it
     (the board opens without reading every file). ValueError: the stage cannot be planned yet (it needs the map saved first)."""
     key=_plan_key(value,task)
-    plan=mapcore.cache_read('plans',key)
+    # One cache kind per stage and coverage: the cache keeps a few entries per kind, and a board needs all six plans of a repository.
+    kind=f"plans-{task['task']}-{(value.get('intent') or {}).get('coverage','signal')}"
+    plan=mapcore.cache_read(kind,key)
     if not isinstance(plan,dict) or plan.get('version')!=PLAN_VERSION:
         if not build:return None
         request=_request(value,task)
@@ -2715,7 +2722,7 @@ def _stage_plan(value,task,build=True):
             batch_header,budget=_full_shape(task,header,units,payload)
             batches,unfit=plan_batches(batch_header,units,budget)
             plan={'version':PLAN_VERSION,'scope':_scope_key(request,header,{}),'keys':[ai_extract.digest([i,[u['id'] for u in b]]) for i,b in enumerate(batches,1)],'unfit':len(unfit)}
-        mapcore.cache_write('plans',key,plan)
+        mapcore.cache_write(kind,key,plan)
     if plan.get('direct'):return {**plan,'batches':1,'left':1}
     return {**plan,'batches':len(plan['keys']),'left':sum(1 for k in plan['keys'] if not (_checkpoints()/plan['scope']/(k+'.json')).exists())}
 
