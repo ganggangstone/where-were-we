@@ -156,12 +156,16 @@ def _board_parts(repositories,coverage='signal'):
     overview=sum(1 for repo in repositories if repo['overview']!='saved');maps=sum(repo['map_calls_by'][coverage] for repo in repositories)
     return {'overview':overview,'map':maps,'units':0,'retry':_retry_allowance(overview+maps),'later':0}
 
+def _board_map_by(repositories,coverage='signal'):
+    """The map calls still to make, by stage (map, service structure, screen groups)."""
+    return {task:sum(repo['map_tasks'][coverage][task] for repo in repositories) for task in MAP_TASKS}
+
 def _board_calls(repositories,coverage='signal'):
     return sum(_board_parts(repositories,coverage).values())
 
 def _board_modes(repositories):
     """The call limit of each coverage choice (signal windows or every text file), so the user can compare before starting."""
-    return {mode:{'calls':_board_calls(repositories,mode),'calls_parts':_board_parts(repositories,mode),
+    return {mode:{'calls':_board_calls(repositories,mode),'calls_parts':_board_parts(repositories,mode),'map_by':_board_map_by(repositories,mode),
                   'time_limit_seconds':max(MAX_SECONDS,(2*_board_calls(repositories,mode)+1)*TASK_SECONDS)} for mode in COVERAGE}
 
 MAP_KINDS=('map','system','groups')
@@ -184,8 +188,16 @@ def _map_states(catalog,pending,partial,working=(),done=(),blocked=None):
 
 def _map_rows(catalog,states):
     rows=[[f'task:{task}','map' if task=='analysis' else task,task,0,*states[task]] for task in MAP_TASKS]
-    calls={mode:sum(_mode_calls(catalog['map'],mode)[task] for task in MAP_TASKS if states[task][0] in ('pending','stale','partial','working')) for mode in COVERAGE}
-    return rows,calls
+    def left(task,mode):
+        """Calls still to make for one map stage: all of them, or for a partial stage the share of its input pieces not yet covered."""
+        state,detail=states[task]
+        if state not in ('pending','stale','partial','working'):return 0
+        calls=_mode_calls(catalog['map'],mode)[task]
+        covered,_,total=detail.partition('/') if state=='partial' else ('','','')
+        if covered.isdigit() and total.isdigit() and int(total)>0:calls=-(-calls*max(0,int(total)-int(covered))//int(total))
+        return calls
+    tasks={mode:{task:left(task,mode) for task in MAP_TASKS} for mode in COVERAGE}
+    return rows,{mode:sum(tasks[mode].values()) for mode in COVERAGE},tasks
 
 def _only_board(value):
     """The board of a run that explains chosen units: the board as it was opened, with those units' own progress."""
@@ -242,10 +254,10 @@ def _run_board(value):
         working={current['task']} if value.get('state') in ACTIVE and current.get('repository')==rid and current.get('task') in MAP_TASKS else set()
         done={t['task'] for t in value.get('completed_tasks',[]) if t['repository']==rid and t['task'] in MAP_TASKS}
         blocked=next((t.get('reason') for t in value.get('blocked',[]) if t.get('repository')==rid and t.get('task')=='analysis'),None)
-        extra,by=_map_rows(catalog,_map_states(catalog,pending,partial,working,done,blocked))
-        repositories.append({'repository':rid,'commit':catalog['commit'],'coverage':catalog['coverage'],'map_coverage':catalog['map'].get('coverage'),'overview':base,'units':rows+extra,'map_calls_by':by})
+        extra,by,by_task=_map_rows(catalog,_map_states(catalog,pending,partial,working,done,blocked))
+        repositories.append({'repository':rid,'commit':catalog['commit'],'coverage':catalog['coverage'],'map_coverage':catalog['map'].get('coverage'),'overview':base,'units':rows+extra,'map_calls_by':by,'map_tasks':by_task})
     return {'repositories':repositories,'totals':_board_totals(repositories),'calls':_board_calls(repositories,coverage),'coverage':coverage,'budget':_budget(value),
-            'calls_parts':_board_parts(repositories,coverage),'map_calls':sum(repo['map_calls_by'][coverage] for repo in repositories),'modes':_board_modes(repositories)}
+            'calls_parts':_board_parts(repositories,coverage),'map_by':_board_map_by(repositories,coverage),'map_calls':sum(repo['map_calls_by'][coverage] for repo in repositories),'modes':_board_modes(repositories)}
 
 def _open_family(history,scope,pins):
     """The unfinished full analysis of exactly this code, if any. Continuing it keeps the call limit confirmed at its
@@ -320,16 +332,16 @@ def unit_board(project,repository='',branch='dev',lang='ko'):
         overview='saved' if base and base.get('version')==OVERVIEW_VERSION and all(base.get(k)==v for k,v in pin.items()) else 'pending'
         pending={t['task']:bool(t.get('before')) for t in plan['tasks'] if t['repository']==rid and t['task'] in MAP_TASKS}
         blocked=next((t.get('reason') for t in plan['blocked'] if t.get('repository')==rid and t.get('task')=='analysis'),None)
-        extra,by=_map_rows(catalog,_map_states(catalog,pending,_latest_partials(history,rid,pin),blocked=blocked))
+        extra,by,by_task=_map_rows(catalog,_map_states(catalog,pending,_latest_partials(history,rid,pin),blocked=blocked))
         position={u['id']:i for i,u in enumerate(catalog['units'])}
         links=[[position[a],position[b],n] for a,row in (catalog.get('links') or {}).items() if a in position for b,n in row if b in position]
-        repositories.append({'repository':rid,'commit':catalog['commit'],'coverage':catalog['coverage'],'map_coverage':catalog['map'].get('coverage'),'overview':overview,'units':rows+extra,'map_calls_by':by,'retired':retired,
+        repositories.append({'repository':rid,'commit':catalog['commit'],'coverage':catalog['coverage'],'map_coverage':catalog['map'].get('coverage'),'overview':overview,'units':rows+extra,'map_calls_by':by,'map_tasks':by_task,'retired':retired,
                              'links':links})
     pending=any(c.get('pending_signals') for c in catalogs.values())
     family=_open_family(history,scope,plan['pins'])
     return {'repositories':repositories,'totals':_board_totals(repositories),'calls':_board_calls(repositories),'coverage':'signal','signals':'pending' if pending else 'ready',
             'budget':_family_budget(history,family) if family else None,
-            'calls_parts':_board_parts(repositories),'map_calls':sum(repo['map_calls_by']['signal'] for repo in repositories),'modes':_board_modes(repositories),
+            'calls_parts':_board_parts(repositories),'map_by':_board_map_by(repositories),'map_calls':sum(repo['map_calls_by']['signal'] for repo in repositories),'modes':_board_modes(repositories),
             'time_limit_seconds':max(MAX_SECONDS,(2*_board_calls(repositories)+1)*TASK_SECONDS)}
 
 def unit_signals(project,repository='',branch='dev',lang='ko'):
@@ -676,6 +688,7 @@ def _map_estimate(repo,head,selected,sizes,screens,lang,configuration,flag=None,
     shown=sum(1 for screen in screens if not screen.get('redirect'))
     page=MAP_USABLE
     calls_of=lambda size:max(1,-(-int(size*MAP_FOLLOW_UP)//page))
+    rounds=lambda size:calls_of(size)*SYSTEM_READ_ROUNDS  # each structure batch may use every one of its read rounds (the signal run's limit)
     names=sum(len(file)+4 for file in sizes)
     result={'screens':shown,'mode':'whole','source_bytes':0,'calls':{'groups':1+shown//200}}
     try:
@@ -690,21 +703,26 @@ def _map_estimate(repo,head,selected,sizes,screens,lang,configuration,flag=None,
             size=sum(now.values())+sum(before.values())
             result.update(mode='patch',source_bytes=size)
             result['calls']['analysis']=calls_of(size)
-            result['calls']['system']=calls_of(sum(v for f,v in now.items() if f in changed)+sum(before.values())+len(json.dumps(prev.get('screens',[]))) // 8)
+            result['calls']['system']=rounds(sum(v for f,v in now.items() if f in changed)+sum(before.values())+len(json.dumps(prev.get('screens',[]))) // 8)
         else:
             rows=_signals(repo,head,wait=not defer)
             plan,report=_window_plan(rows,_cited_files(prev))
             all_size=report['text_bytes']
             meta=names+20000+len(json.dumps({k:prev.get(k,[]) for k in ('screens','backend_routes','api_functions')},default=str))
-            system=calls_of(meta)
+            # The signal run's structure input is the compact one its payload carries (code paths, per-folder counts, compact map), not every file name.
+            listed,other=_listing(rows,sorted(sizes))
+            compact={'files':listed,'other_files':other,'map':{'screens':[[x.get('path'),x.get('file'),x.get('heading')] for x in prev.get('screens',[])],
+                     'backend_routes':[[x.get('method'),x.get('path'),x.get('file'),x.get('function'),x.get('tables') or [],x.get('services') or []] for x in prev.get('backend_routes',[])]}}
+            system=rounds(len(json.dumps(compact,default=str))+20000)
+            system_all=rounds(meta)
             modes={'signal':{'source_bytes':report['sent_bytes'],'calls':{'analysis':calls_of(report['sent_bytes']),'system':system,'groups':result['calls']['groups']}},
-                   'all':{'source_bytes':all_size,'calls':{'analysis':calls_of(all_size),'system':system,'groups':result['calls']['groups']}}}
+                   'all':{'source_bytes':all_size,'calls':{'analysis':calls_of(all_size),'system':system_all,'groups':result['calls']['groups']}}}
             result.update(source_bytes=modes['signal']['source_bytes'],modes=modes,coverage=report)
             result['calls']=dict(modes['signal']['calls'])
     except (SignalsPending,RunError,*ai_extract.READ_ERRORS,KeyError,TypeError,ValueError) as error:
         # Unreadable history, or a signal scan still running: assume the whole commit is read (an upper bound, flagged when pending).
         readable=sum(int(min(size,MAX_FILE_BYTES)*1.4) for file,size in sizes.items() if not _exclusion(file,size))
-        result.update(source_bytes=readable);result['calls'].update(analysis=calls_of(readable),system=calls_of(names+20000))
+        result.update(source_bytes=readable);result['calls'].update(analysis=calls_of(readable),system=rounds(names+20000))
         if isinstance(error,SignalsPending):result['pending_signals']=True
     return result
 
@@ -1925,6 +1943,21 @@ def _literal_page(repo,commit,query,start,limit,cancelled,deadline,blobs):
     return files,{'query':query,'start':start,'total':total,'next':start+limit if start+limit<=total else None}
 
 
+def _paged_paths(payload):
+    """The metadata paths of this request a read can name: the listed top-level keys, and the keys one level inside input, that hold something to page."""
+    out=[]
+    for key in ('known','recheck','inspect','deleted','input','sources','provisional_result'):
+        value=payload.get(key) if isinstance(payload,dict) else None
+        if isinstance(value,dict) and key=='input':out.extend(f'input.{k}' for k,v in value.items() if isinstance(v,(list,dict,str)) and v)
+        elif isinstance(value,(list,dict,str)) and value:out.append(key)
+    return out[:24]
+
+def _refusal(unit):
+    """What a read answered when it could not serve the request (nothing was read), else None."""
+    page=unit['value'] if unit['kind']=='metadata' else None
+    row=page.get('value') if isinstance(page,dict) and page.get('path')==['read_page'] else None
+    return row if isinstance(row,dict) and 'error' in row else None
+
 def _needed(repo,commit,needs,cancelled,deadline,payload,blobs=None):
     """Only immutable, eligible blobs; model read requests do not grant path access."""
     # Request shape only sizes what is read; a sloppy list is trimmed and a malformed entry is answered, never fatal to a long run.
@@ -1942,7 +1975,7 @@ def _needed(repo,commit,needs,cancelled,deadline,payload,blobs=None):
             path=need['metadata'];value=payload
             def missing(reason):
                 # The model is told what is not there and answers from what it has; one bad request must not end a long run.
-                return {'id':ai_extract.digest(['metadata_missing',path,reason]),'kind':'metadata','value':{'path':['read_page'],'value':{'metadata':path,'error':reason}}}
+                return {'id':ai_extract.digest(['metadata_missing',path,reason]),'kind':'metadata','value':{'path':['read_page'],'value':{'metadata':path,'error':reason,'requestable_paths':_paged_paths(payload)}}}
             if not isinstance(path,list) or not path or path[0] not in ('known','recheck','inspect','deleted','input','sources','provisional_result'):
                 out.append(missing('Not an existing analysis metadata path'));continue
             try:
@@ -1954,6 +1987,8 @@ def _needed(repo,commit,needs,cancelled,deadline,payload,blobs=None):
             if isinstance(value,dict):value=[list(pair) for pair in value.items()]  # pages are built from lists; a tuple larger than one page was refused
             if not isinstance(value,(list,str)):
                 out.append(missing('This metadata is not paged; request a path inside it'));continue
+            if start>len(value) and start>1:  # a page past the end is no page: one answer, however far the model asks
+                out.append(missing(f'Nothing starts at item {start}; this path holds {len(value)} items'));continue
             selected=value[start-1:start-1+limit]
             header,pages=_units({'metadata_read':selected})
             if 'metadata_read' in header:pages=[{'id':ai_extract.digest(['metadata',path,start,selected]),'kind':'metadata','value':{'path':path,'value':selected}}]
@@ -1971,6 +2006,9 @@ def _needed(repo,commit,needs,cancelled,deadline,payload,blobs=None):
                 # Not a tracked regular text file at this commit: tell the model, as nothing was read.
                 out.append({'id':ai_extract.digest(['file_unavailable',file]),'kind':'metadata','value':{'path':['read_page'],'value':{'file':file,'error':'Not an eligible tracked source file at the pinned commit'}}})
                 continue
+            if start>len(snaps[0]['files'][0]['lines']) and start>1:
+                out.append({'id':ai_extract.digest(['file_past_end',file,len(snaps[0]['files'][0]['lines'])]),'kind':'metadata','value':{'path':['read_page'],'value':{'file':file,'error':f'Nothing starts at line {start}; the file has {len(snaps[0]["files"][0]["lines"])} lines'}}})
+                continue
             snaps[0]['files'][0]['lines']=snaps[0]['files'][0]['lines'][start-1:start-1+limit]
             _,units=_units({'snapshots':snaps});out.extend(units)
         else:
@@ -1978,6 +2016,8 @@ def _needed(repo,commit,needs,cancelled,deadline,payload,blobs=None):
             if not isinstance(query,str) or not 1<=len(query)<=200 or '\n' in query:
                 out.append(refused('A literal search is one line of 1 to 200 characters',str(query)[:100]));continue
             files,page=_literal_page(repo,commit,query,start,limit,cancelled,deadline,blobs if blobs is not None else {})
+            if start>1 and start>page['total']:
+                out.append({'id':ai_extract.digest(['search_past_end',query,page['total']]),'kind':'metadata','value':{'path':['read_page'],'value':{'query':query,'error':f'Nothing starts at match {start}; the search has {page["total"]} matches'}}});continue
             _,units=_units({'snapshots':[{'commit':commit,'files':files,'omitted':[]}],'read_page':page})
             units.insert(0,{'id':ai_extract.digest(['search',query,start]),'kind':'metadata','value':{'path':['read_page'],'value':page}})
             out.extend(units)
@@ -2669,6 +2709,7 @@ def generate(value,task,request,executor,cancelled,deadline,check,blobs=None):
                 break
             batch.append(pending.pop(0))
         ids=[u['id'] for u in batch];context=list(batch);prior={};reads=[];accumulated=prior;programs=None
+        refused={}  # reads that cannot be served, told to the model in every later round
         checkpoint=None
         if checkpoint_dir:
             checkpoint=checkpoint_dir/(ai_extract.digest([batch_id,ids])+'.json')
@@ -2711,6 +2752,9 @@ def generate(value,task,request,executor,cancelled,deadline,check,blobs=None):
                 if len(_encoded(packet).encode())>MAX_PROMPT_BYTES:
                     packet['batch'].pop('prior',None)
                 satisfied_needs=None
+            if refused:
+                packet['batch']['unavailable_requests']=[{k:(str(v)[:300] if k=='error' else v) for k,v in row.items()} for row in list(refused.values())[-12:]]
+                packet['batch']['rules']+=' Reads listed in unavailable_requests cannot be served and are never answered; do not request them again, and record what they would have settled in unknown.'
             if claim_feedback is not None:
                 packet['batch']['rules']=claim_feedback
                 claim_feedback=None
@@ -2742,24 +2786,33 @@ def generate(value,task,request,executor,cancelled,deadline,check,blobs=None):
                 # be requested again after they fall outside the context budget.
                 present = {u['id'] for u in context}
                 queued = {u['id'] for u in reads}
+                refused_now=False
                 for unit in _needed(repo,request['commit'],needs,cancelled,deadline,payload,blobs):
-                    if unit['id'] in present and unit['id'] not in ids:
+                    why=_refusal(unit)
+                    if why is not None:
+                        refused[unit['id']]=why;refused_now=True
+                    elif unit['id'] in present and unit['id'] not in ids:
                         requested_here.append(unit)
                     elif unit['id'] not in present and unit['id'] not in queued:
                         reads.append(unit)
                         queued.add(unit['id'])
-                if not reads:
+                if not reads and refused_now and explained_read:
+                    # Nothing new can be given and the model was told so once: keep what this batch established and say what stayed unread.
+                    note=f'The model kept requesting {len(refused)} pieces that cannot be read from this request, so findings that depend on them are unconfirmed'
+                    accumulated=_combine(accumulated,{'unknown':[{'text':note,'needs':'read'} if task['task']=='system' else note]})
+                elif not reads:
                     if explained_read:
                         raise RunError('invalid_result','Requested material was already supplied and identified in this batch')
                     explained_read=True
                     satisfied_needs=needs
                     prior=accumulated
                     continue
-                transition = (frozenset(present), tuple(u['id'] for u in reads),
-                              ai_extract.digest(accumulated))
-                if transition in read_transitions:
-                    raise RunError('invalid_result','Analysis repeated a continuation cycle without new findings')
-                read_transitions.add(transition)
+                if reads:
+                    transition = (frozenset(present), tuple(u['id'] for u in reads),
+                                  ai_extract.digest(accumulated))
+                    if transition in read_transitions:
+                        raise RunError('invalid_result','Analysis repeated a continuation cycle without new findings')
+                    read_transitions.add(transition)
             if not reads:
                 result=_combine(result,accumulated)
                 _preview(value,task,request['commit'],accumulated,programs,context)

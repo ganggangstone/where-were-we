@@ -23,6 +23,7 @@ parser=argparse.ArgumentParser()
 parser.add_argument('--code',required=True);parser.add_argument('--root',required=True);parser.add_argument('--repo',required=True)
 parser.add_argument('--project-data');parser.add_argument('--ref',default='HEAD');parser.add_argument('--coverage',default='signal')
 parser.add_argument('--fail-at',type=int,default=0,help='interrupt the first run at this call (0: at a third of the limit)')
+parser.add_argument('--hollow-system',action='store_true',help='the fake structure answers ask every round for pages that do not exist (a missing metadata key, a missing file, ever further page ranges)')
 parser.add_argument('--skip-run',action='store_true');parser.add_argument('--no-change',action='store_true',help='skip the changed_code step')
 args=parser.parse_args()
 os.environ['WHERE_WERE_WE_ROOT']=args.root
@@ -108,6 +109,11 @@ def repo_evidence():
 def structure():
     ev=repo_evidence()
     return {'nodes':[{'id':'app','name':'App','kind':'program','code':[ev['file'].split('/')[0] if '/' in ev['file'] else '.'],'ev':[ev]}],'links':[],'externals':[],'others':[],'unknown':[]}
+def hollow(p,answer):
+    """The requests a model keeps repeating when material is missing: nothing in them can be served."""
+    if args.hollow_system:answer['needs']=[{'metadata':['changed_files']},{'file':'does/not/exist.py'},{'metadata':['input','files'],'start':1+200*stats['structure'][0]}]
+    return answer
+ROUNDS=collections.Counter()  # structure calls per batch id: how many read rounds each batch used
 class Stop(Exception):pass
 limit=[0]
 first_call=[None]
@@ -116,8 +122,10 @@ def fake(prompt,**kwargs):
     p=json.loads(prompt.split('\n',1)[1]);k=kind(p)
     if limit[0] and sum(v[0] for v in stats.values())>=limit[0]:raise Stop()
     stats[k][0]+=1;stats[k][1]+=len(prompt.encode());order.append(k)
+    if k=='structure' and 'batch' in p:ROUNDS[p['batch']['id']]+=1
     if 'batch' in p:
         result=structure() if k=='structure' else {}
+        needs=hollow(p,{})['needs'] if k=='structure' and args.hollow_system else []
         if k=='map':
             result={'inspected':cite(p),'unknown':['fake executor']}
             if p.get('mode')=='review':
@@ -127,7 +135,7 @@ def fake(prompt,**kwargs):
                 for r in p.get('recheck',[]):  # a short recheck list rides in every packet's header: dispose it once
                     if isinstance(r,dict) and r.get('id') not in _DROPPED:_DROPPED.add(r['id']);ids.append(r['id'])
                 result.update(keep='all',**({'drop':ids} if ids else {}))
-        return {'batch':p['batch']['id'],'covered':p['batch']['units'],'result':result,'needs':[]}
+        return {'batch':p['batch']['id'],'covered':p['batch']['units'],'result':result,'needs':needs}
     if 'resources' in p:return {'results':[{'resource':r['resource'],'items':items(r)} for r in p['resources']]}
     if k in ('units','overview'):return {'items':items(p)}
     if k=='map':
@@ -135,7 +143,7 @@ def fake(prompt,**kwargs):
         if p.get('mode')=='review':base['keep']='all'
         if p.get('mode')=='patch':base.update(removed=[],accounted=[{'file':f,'kind':'none'} for f in p.get('inspect',[])])
         return base
-    if k=='structure':return structure()
+    if k=='structure':return hollow(p,structure())
     return {'groups':[],'names':{},'request_names':{}}
 
 def run_once(job):
@@ -223,4 +231,5 @@ if not args.skip_run:
                                  'by_stage':{k:{'calls':v['calls']-snap.get(k,{'calls':0})['calls'],'bytes':v['bytes']-snap.get(k,{'bytes':0})['bytes']} for k,v in after.items()},
                                  'units_saved_after_change':sum(1 for r in rows if r[4]=='saved'),'units_stale_after_change':sum(1 for r in rows if r[4]=='stale'),
                                  'units_total':len(rows),'totals_after_change':changed['totals']}
+out['structure_rounds_per_batch']=sorted(ROUNDS.values(),reverse=True)
 print(json.dumps(out,ensure_ascii=False))

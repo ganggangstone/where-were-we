@@ -560,7 +560,8 @@ const AnalysisRun = (() => {
     const label=budget?text('이어서 분석 · 남은 호출 '+budget.left+'/'+budget.limit,'Continue · '+budget.left+'/'+budget.limit+' calls left'):text('분석하기 · 호출 최대 '+calls+'회','Analyze · up to '+calls+' calls');
     const budgetChip=budget && budget.left>0 && budget.left<calls?`<span class="chip warn">${text('남은 상한으로 일부만 가능','Only part fits in the remaining limit')}</span>`:'';
     const mainButton=noneLeft?`<button class="btn primary" id="renewFullAnalysis" ${canStart?'':'disabled'}>${text('상한 다시 확인 · 최대 '+calls+'회','Confirm a new limit · up to '+calls+' calls')}</button>`:`<button class="btn primary" id="startFullAnalysis" ${canStart?'':'disabled'}>${label}</button>`;
-    const partList=parts?[['overview','첫 개요','First overview'],['map','지도·구성','Map and structure'],['units','단위 묶음','Unit packs'],['retry','재시도 여유','Retry allowance'],['later','나중에 생길 단위 여유','Units added later']].filter(([k])=>parts[k]>0).map(([k,ko,en])=>text(ko,en)+' '+parts[k]).join(' · '):'';
+    const mapBy=picked?.map_by ?? b.map_by,mapStages=mapBy?[['analysis','지도','Map'],['system','서비스 구성','Service structure'],['groups','화면 묶음','Screen groups']].map(([k,ko,en])=>[k,ko,en,mapBy[k]]):[['map','지도·구성','Map and structure',parts?.map]];
+    const partList=parts?[['overview','첫 개요','First overview'],...mapStages.map(([,ko,en,n],i)=>['map'+i,ko,en,n]),['units','단위 묶음','Unit packs'],['retry','재시도 여유','Retry allowance'],['later','나중에 생길 단위 여유','Units added later']].map(([k,ko,en,n])=>[ko,en,n ?? parts[k]]).filter(([,,n])=>n>0).map(([ko,en,n])=>text(ko,en)+' '+n).join(' · '):'';
     const partsHtml=partList?`<p class="s">${text('호출 상한 계산','How the limit is counted')}: ${partList} = ${calls}</p>`:'';
     const mb=n=>n<1048576?Math.max(1,Math.round(n/1024))+' KB':(n/1048576).toFixed(n<10485760?1:0)+' MB';
     const reports=b.repositories.map(r=>r.map_coverage).filter(Boolean),sum=k=>reports.reduce((n,r)=>n+(r[k] || 0),0);

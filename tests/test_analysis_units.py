@@ -154,6 +154,26 @@ class FullRun(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'maximum call count'):self.prepare(intent={**self.intent(board),'max_calls':board['calls']-1})
         self.assertEqual(self.prepare(intent=self.intent(board))['state'],'preparing')
 
+    def test_structure_batches_that_repeat_unservable_reads_end_early_and_stay_within_the_shown_limit(self):
+        """A model that asks every round for pages that do not exist must not use up every read round of every structure batch."""
+        board=self.board();calls=[];system=[];inner=self.executor(calls)
+        cap=board['modes']['signal']['calls']
+        self.assertGreaterEqual(board['modes']['signal']['map_by']['system'],analysis_run.SYSTEM_READ_ROUNDS)  # the limit counts the rounds
+        def hollow(prompt,**kwargs):
+            answer=inner(prompt,**kwargs);packet=calls[-1]
+            if 'nodes' in packet.get('schema',{}):
+                if 'batch' in packet:system.append(packet)
+                answer['needs']=[{'metadata':['changed_files']},{'file':'does/not/exist.py'},{'metadata':['input','files'],'start':1+200*len(calls)}]  # a page range further out every round
+            return answer
+        done=analysis_run.run(self.prepare(intent=self.intent(board))['id'],hollow)
+        self.assertEqual(done['state'],'completed',done.get('error'))
+        batches={p['batch']['id'] for p in system}
+        self.assertLess(len(system),analysis_run.SYSTEM_READ_ROUNDS*len(batches))  # not every round of every batch
+        self.assertTrue(all(len([p for p in system if p['batch']['id']==b])<=3 for b in batches))
+        self.assertTrue(any('unavailable_requests' in p['batch'] for p in system))
+        self.assertTrue(all(len(p['batch']['unavailable_requests'])<=12 for p in system if 'unavailable_requests' in p['batch']))
+        self.assertLessEqual(len(calls),cap)
+
     def test_a_full_run_asks_no_unit_and_cards_explain_exactly_the_chosen_units_with_isolated_failures(self):
         board=self.board();calls=[]
         done=analysis_run.run(self.prepare(intent=self.intent(board))['id'],self.executor(calls))
@@ -373,6 +393,9 @@ class FullRun(unittest.TestCase):
         self.assertEqual(states['task:analysis'],'partial');self.assertEqual(states['task:system'],'pending')
         row=next(r for r in self.board()['repositories'][0]['units'] if r[0]=='task:analysis')
         self.assertEqual(row[5],f"{part['covered']}/{part['total']}")
+        left=self.board()['modes']['all']['map_by'];full=board['modes']['all']['map_by']  # the processed share is not asked for again, and each stage is named
+        self.assertLess(left['analysis'],full['analysis']);self.assertEqual({k:left[k] for k in ('system','groups')},{k:full[k] for k in ('system','groups')})
+        self.assertEqual(sum(left.values()),self.map_calls(self.board(),'all'))
         shown=analysis_run.unit_result('demo','service','dev','en','task:analysis')
         self.assertEqual(shown['state'],'partial');self.assertEqual(shown['items'],part['items'])
         again=[];done=analysis_run.run(analysis_run.retry(job['id'])['id'],self.executor(again))
@@ -385,7 +408,7 @@ class FullRun(unittest.TestCase):
     def test_call_limit_is_enforced_and_never_reported_as_complete(self):
         self.large_map()
         from unittest.mock import patch
-        with patch.object(analysis_run,'MAP_USABLE',10**9):  # an estimate far below what the batches really need
+        with patch.object(analysis_run,'MAP_USABLE',10**9),patch.object(analysis_run,'SYSTEM_READ_ROUNDS',1):  # an estimate far below what the batches really need
             board=self.board();job=self.prepare(intent=self.intent(board,'all'))
         calls=[]
         done=analysis_run.run(job['id'],self.executor(calls))
@@ -722,14 +745,14 @@ class FullRun(unittest.TestCase):
 
     def test_a_used_up_limit_stops_the_continuation_and_only_a_confirmed_renewal_starts_a_new_one(self):
         self.large_map()
-        with patch.object(analysis_run,'MAP_USABLE',10**9):
+        with patch.object(analysis_run,'MAP_USABLE',10**9),patch.object(analysis_run,'SYSTEM_READ_ROUNDS',1):
             board=self.board();job=self.prepare(intent=self.intent(board,'all'))
         done=analysis_run.run(job['id'],self.executor([]))
         self.assertEqual(done['error']['code'],'call_limit')
         with self.assertRaises(analysis_run.RunError) as stopped:analysis_run.retry(job['id'])
         self.assertEqual(stopped.exception.code,'call_limit')
         with self.assertRaises(analysis_run.RunError):self.prepare(intent=self.intent(board,'all'))  # a new request on the same code continues the same analysis
-        with patch.object(analysis_run,'MAP_USABLE',10**9):
+        with patch.object(analysis_run,'MAP_USABLE',10**9),patch.object(analysis_run,'SYSTEM_READ_ROUNDS',1):
             renewed=self.prepare(intent={**self.intent(board,'all'),'max_calls':board['modes']['all']['calls']+20,'renew':True})
         self.assertEqual(renewed['budget'],{'limit':board['modes']['all']['calls']+20,'used_before':0});self.assertEqual(renewed['family'],renewed['id'])
         analysis_run.cancel(renewed['id']);self.assertNotIn('renew',analysis_run.retry(renewed['id'])['intent'])  # a retry never renews by itself

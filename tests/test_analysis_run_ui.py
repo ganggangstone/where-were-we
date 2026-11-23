@@ -142,7 +142,7 @@ assert(html.includes('Time cap 40 h'),'Long caps read in hours or days');
         self.check_js(self.BOARD + r"""
 let release;const gate=new Promise(r=>release=r);
 const report={files:10,windows:2,whole:0,local:3,docs:3,support:2,truncated:0,text_bytes:1048576,sent_bytes:65536,clipped:0};
-const modes={signal:{calls:12,calls_parts:{overview:1,map:3,units:6,retry:2},time_limit_seconds:3600,source_bytes:65536},all:{calls:40,calls_parts:{overview:1,map:30,units:6,retry:3},time_limit_seconds:3600,source_bytes:1048576}};
+const modes={signal:{calls:12,calls_parts:{overview:1,map:3,units:6,retry:2},map_by:{analysis:1,system:1,groups:1},time_limit_seconds:3600,source_bytes:65536},all:{calls:40,calls_parts:{overview:1,map:30,units:6,retry:3},time_limit_seconds:3600,source_bytes:1048576}};
 const pending=unitBoard({calls:40,modes:{signal:modes.all,all:modes.all},signals:'pending'});
 const ready=unitBoard({calls:12,calls_parts:modes.signal.calls_parts,modes,coverage:'signal',signals:'ready'});ready.repositories[0].map_coverage=report;
 let units=0;
@@ -159,6 +159,7 @@ assert(count('analysis_run_start')===0,'Waiting costs no model call');
 release();await flush();await flush();await flush();
 html=$('insp').innerHTML;
 assert(!html.includes('Scanning signals') && html.includes('up to 12 calls') && html.includes('data-map-coverage="signal"') && !/id="startFullAnalysis" disabled/.test(html),'The exact limit and the coverage choice replace the waiting note');
+assert(html.includes('First overview 1 · Map 1 · Service structure 1 · Screen groups 1 · Unit packs 6 · Retry allowance 2 = 12'),'The remaining map calls are named by stage');
 assert(calls.filter(c=>c.args && c.args.view==='signals').length===1 && units===2,'One scan request, then the board is read again');
 """)
 
