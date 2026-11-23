@@ -214,22 +214,22 @@ const localBoard=(extra={})=>({repositories:[{repository:'service',units:[
 const serveLocal=(extra)=>{native=(command,args)=>command==='analysis_run_status'&&args.view==='units'?localBoard(extra):command==='analysis_run_status'&&args.view==='unit'?{local:true,commit:'abcd1234',files:['docs/a.md'],file_count:5,kinds:{doc:5}}:undefined;};
 """
 
-    def test_local_units_links_budget_and_renew(self):
+    def test_local_units_links_and_the_start_sends_the_board_count(self):
         self.check_js(self.LOCAL_BOARD + r"""
-serveLocal({budget:{limit:4,used:4,left:0}});status=null;await open();await AnalysisRun.check();await flush();
+serveLocal();status=null;await open();await AnalysisRun.check();await flush();
 let html=$('insp').innerHTML;
 assert(html.includes('Explained 2') && html.includes('Checked locally 1') && html.includes('data-state="local"'),'Saved AI units over AI units, local counted apart');
 assert(html.includes('Read locally 18') && html.includes('AI range 7') && html.includes('Local only 5'),'Scope chips come from coverage');
-assert($('renewFullAnalysis') && !$('startFullAnalysis') && html.includes('Confirm a new limit · up to 4 calls'),'No limit left offers a renewal');
-await $('renewFullAnalysis').onclick();await flush();
-let intent=calls.find(c=>c.command==='analysis_run_start').args.scope.intent;
-assert(intent.renew===true && intent.max_calls===4,'Renew is sent with the board call count');
-status=null;serveLocal({budget:{limit:6,used:4,left:2}});calls.length=0;await AnalysisRun.check();await flush();
-html=$('insp').innerHTML;
-assert(html.includes('Continue · 2/6 calls left') && html.includes('Only part fits'),'Continue label and partial warn chip');
+assert(!$('renewFullAnalysis') && html.includes('Analyze · up to 4 calls'),'One start button with the board count');
 await $('startFullAnalysis').onclick();await flush();
-intent=calls.find(c=>c.command==='analysis_run_start').args.scope.intent;
-assert(!intent.renew && intent.max_calls===6,'Continuing keeps the confirmed limit');
+const intent=calls.find(c=>c.command==='analysis_run_start').args.scope.intent;
+assert(intent.max_calls===4 && !('renew' in intent),'The start sends the number the board shows');
+""")
+
+    def test_a_completed_run_with_unread_parts_says_so(self):
+        self.check_js(self.LOCAL_BOARD + r"""
+serveLocal();status=runRecord('completed',{intent:{task:'full',targets:[],max_calls:4},map_gaps:true});await open();await AnalysisRun.check();await flush();
+assert($('insp').innerHTML.includes('Completed · some parts unconfirmed'),'A run that closed batches is not shown as plainly complete');
 """)
 
     def test_open_card_shows_link_chips_marks_cells_and_local_card_lists_files(self):
@@ -342,7 +342,7 @@ for(const word of ['지도','서비스 구성','화면 묶음','부분 저장','
 assert(!/해요|이에요|예요|할게요/.test(html),'No informal ending');
 status=runRecord('failed',{intent:{task:'full',targets:[],max_calls:6},unit_board:mapBoard(),error:{code:'call_limit',message:'limit'}});
 await AnalysisRun.check();await flush();
-assert($('insp').innerHTML.includes('AI 호출 상한에 도달했습니다') && !$('insp').innerHTML.includes('전체 저장됨'),'A stopped run names the limit and is not complete');
+assert($('insp').innerHTML.includes('AI 호출 상한 안에서 남은 단계를 처리하지 못했습니다') && !$('insp').innerHTML.includes('전체 저장됨'),'A stopped run names the limit and is not complete');
 """)
 
     def test_board_tolerates_other_responses_and_asks_for_a_refresh(self):

@@ -14,7 +14,7 @@ const AnalysisRun = (() => {
     const args={...scope(),...(task==='steps'?{screen:choice.detailTarget}:task==='jobs'?{node:choice.detailTarget}:{})};
     const targets=['steps','jobs'].includes(task) ? (choice.targets || analysisCalls(command,args).map(a=>({repository:a.repository || '',target:a.screen || a.node}))) : [];
     if(task==='resources')return {task,targets:[],max_calls:choice.maxCalls,...(choice.area?{area:choice.area}:{})};
-    if(task==='full')return {task,targets:[],max_calls:choice.maxCalls ?? 0,coverage:choice.coverage || 'signal',...(Array.isArray(choice.only)?{only:choice.only}:choice.renew===true?{renew:true}:{})};
+    if(task==='full')return {task,targets:[],max_calls:choice.maxCalls ?? 0,coverage:choice.coverage || 'signal',...(Array.isArray(choice.only)?{only:choice.only}:{})};
     return {task,targets:command==='scope_overview'?[{repository:scope().repository,target:choice.detailTarget}]:targets};
   }
   const key = () => JSON.stringify([scope(), S.analysisChoice, S.loadToken]);
@@ -61,7 +61,7 @@ const AnalysisRun = (() => {
       analysis_blocked:['먼저 확인할 분석이 있습니다. 기존 AI 요청의 안내에서 수집 상태·코드 설정·AI 제안을 확인하세요.','Some analysis needs attention. Check collection, code settings, and AI proposals in the existing request instructions.'],
       timeout:['분석 제한 시간에 도달했습니다. 저장된 결과는 유지됩니다. 다시 시도하면 남은 분석을 실행합니다.','Analysis reached its time limit. Saved results are retained. Retry to finish the remaining analysis.'],
       task_limit:['분석 작업 한도에 도달했습니다. 다시 시도하면 남은 분석을 실행합니다.','Analysis reached its task limit. Retry to finish the remaining analysis.'],
-      call_limit:['확인한 AI 호출 상한에 도달했습니다. 저장된 결과는 그대로 남아 있고, 이어서 분석하면 나머지를 처리합니다. 남은 상한이 없으면 상한을 다시 확인하세요.','The confirmed AI call limit was reached. Saved results are kept; continue to process the rest, or confirm a new limit if none is left.'],
+      call_limit:['확인한 AI 호출 상한 안에서 남은 단계를 처리하지 못했습니다. 저장된 결과는 유지되고, 다시 분석하면 남은 부분만 새 상한으로 셉니다.','The rest did not fit the confirmed AI call limit. Saved results are kept; analyzing again counts only what is left, under a new limit.'],
       result_read_failed:['저장된 결과를 읽지 못했습니다. 계정·상태 다시 확인을 누르세요.','Could not read saved results. Click Check account and status.'],
       worker_start_failed:['분석을 시작하지 못했습니다. 다시 시도하세요.','Could not start the analysis worker. Retry the analysis.']
     };
@@ -69,7 +69,7 @@ const AnalysisRun = (() => {
   }
   const stateLabel = () => run?.cancel_requested && active() ? text('취소 중…','Cancelling…') : ({
     preparing:text('준비 중…','Preparing…'), running:text('분석 중…','Running…'), saving:text('저장 중…','Saving…'),
-    completed:text('완료','Completed'), failed:text('실패','Failed'), cancelled:text('취소됨','Cancelled')
+    completed:run?.map_gaps?text('완료 · 일부 확인 불가','Completed · some parts unconfirmed'):text('완료','Completed'), failed:text('실패','Failed'), cancelled:text('취소됨','Cancelled')
   })[run?.state] || '';
   function schedule(token) {
     clearTimeout(timer);
@@ -556,10 +556,7 @@ const AnalysisRun = (() => {
     const calls=picked?.calls ?? b.calls,minutes=Math.max(1,Math.round((picked?.time_limit_seconds ?? b.time_limit_seconds ?? 3600)/60));
     const span=m=>m<180?m+text('분',' min'):m<2880?Math.round(m/60)+text('시간',' h'):Math.round(m/1440)+text('일',' days');
     const parts=picked?.calls_parts ?? b.calls_parts;
-    const budget=(live?run.unit_board?.budget:b.budget) || null,noneLeft=!!budget && budget.left<=0;
-    const label=budget?text('이어서 분석 · 남은 호출 '+budget.left+'/'+budget.limit,'Continue · '+budget.left+'/'+budget.limit+' calls left'):text('분석하기 · 호출 최대 '+calls+'회','Analyze · up to '+calls+' calls');
-    const budgetChip=budget && budget.left>0 && budget.left<calls?`<span class="chip warn">${text('남은 상한으로 일부만 가능','Only part fits in the remaining limit')}</span>`:'';
-    const mainButton=noneLeft?`<button class="btn primary" id="renewFullAnalysis" ${canStart?'':'disabled'}>${text('상한 다시 확인 · 최대 '+calls+'회','Confirm a new limit · up to '+calls+' calls')}</button>`:`<button class="btn primary" id="startFullAnalysis" ${canStart?'':'disabled'}>${label}</button>`;
+    const mainButton=`<button class="btn primary" id="startFullAnalysis" ${canStart?'':'disabled'}>${text('분석하기 · 호출 최대 '+calls+'회','Analyze · up to '+calls+' calls')}</button>`;
     const mapBy=picked?.map_by ?? b.map_by,mapStages=mapBy?[['analysis','지도','Map'],['system','서비스 구성','Service structure'],['groups','화면 묶음','Screen groups']].map(([k,ko,en])=>[k,ko,en,mapBy[k]]):[['map','지도·구성','Map and structure',parts?.map]];
     const partList=parts?[['overview','첫 개요','First overview'],...mapStages.map(([,ko,en,n],i)=>['map'+i,ko,en,n]),['units','단위 묶음','Unit packs'],['retry','재시도 여유','Retry allowance'],['later','나중에 생길 단위 여유','Units added later']].map(([k,ko,en,n])=>[ko,en,n ?? parts[k]]).filter(([,,n])=>n>0).map(([ko,en,n])=>text(ko,en)+' '+n).join(' · '):'';
     const partsHtml=partList?`<p class="s">${text('호출 상한 계산','How the limit is counted')}: ${partList} = ${calls}</p>`:'';
@@ -575,9 +572,9 @@ const AnalysisRun = (() => {
     const progress=`<span class="unit-count"><span class="chip">${text('개요·지도·구성·묶음','Overview, map, structure, groups')} ${mapDone}/${mapRows.length+1}</span><span class="chip">${text('설명 저장','Explained')} ${explained}</span>${t.local?`<span class="chip" data-state="local">${text('로컬 확인','Checked locally')} ${t.local}</span>`:''}</span>`;
     const start=live?`<div class="unit-run" role="status" aria-live="polite"><span class="chip">${text('AI 호출','AI calls')} ${run.unit_board?.budget?run.unit_board.budget.used+'/'+run.unit_board.budget.limit:(run.input_stats?.calls || 0)+((run.unit_estimate?.calls ?? calls)?' · '+text('최대','max')+' '+(run.unit_estimate?.calls ?? calls):'')}</span><span class="chip">${text('경과','Elapsed')} ${Math.max(0,Math.round((Date.now()-Date.parse(run.started_at || run.created_at))/60000)) || 0}${text('분',' min')}</span><button class="btn" id="cancelFullAnalysis" ${busy || run.cancel_requested?'disabled':''}>${text('취소','Cancel')}</button></div>`
       : scanning ? `<div class="unit-start"><span class="chips"><span class="chip" role="status">${text('신호 수집 중','Scanning signals')}</span></span><button class="btn primary" id="startFullAnalysis" disabled>${text('분석하기','Analyze')}</button></div>`
-      : calls>0 ? `<div class="unit-start"><span class="chips"><span class="chip">${text('AI 호출 최대','AI calls up to')} ${calls}</span>${budgetChip}<span class="chip">${text('코드가 Claude로 전송','Code sent to Claude')}</span><span class="chip">${text('구독 한도 적용','Subscription limit')}</span></span>${mainButton}${usableNow?'':`<button class="btn quiet" id="checkFullAccount">${text('계정 확인','Check account')}</button>`}</div>`
+      : calls>0 ? `<div class="unit-start"><span class="chips"><span class="chip">${text('AI 호출 최대','AI calls up to')} ${calls}</span><span class="chip">${text('코드가 Claude로 전송','Code sent to Claude')}</span><span class="chip">${text('구독 한도 적용','Subscription limit')}</span></span>${mainButton}${usableNow?'':`<button class="btn quiet" id="checkFullAccount">${text('계정 확인','Check account')}</button>`}</div>`
       : `<p class="chips"><span class="chip ok">${text('분석할 단계 없음','Nothing left to analyze')}</span></p>`;
-    const alert=finished?`<p role="alert">${esc(message(run.error || {code:'CANCELLED'}))}</p>`:'';
+    const alert=finished?`<p role="alert">${esc(message(run.error || {code:'CANCELLED'}))}</p>`:fullRun() && run.state==='completed' && run.map_gaps?`<p class="s" role="status">${esc(stateLabel())}</p>`:'';
     return `<section class="sect unit-board" data-unit-board><h3>${text('전체 코드 분석','Full code analysis')} ${beta()}${progress}</h3>${start}${scopeHtml}${alert}${bar}${filters}<div class="unit-map" role="group" aria-label="${text('단위 구조도','Unit map')}">${lanes}</div><ul class="unit-cards">${shown.map(([row,i])=>unitCard(row,i,multi)).join('')}</ul>${hidden>0?`<button class="btn quiet" type="button" id="unitMore">${text('더 보기','Show more')} (${hidden})</button>`:''}</section>`;
   }
   async function readUnit(row) {
@@ -607,21 +604,16 @@ const AnalysisRun = (() => {
     if($('unitMore'))$('unitMore').onclick=()=>{unitLimit+=48;paint();};
     if($('startFullAnalysis'))$('startFullAnalysis').onclick=()=>{
       const b=liveBoard();if(!b || active())return;
-      S.analysisChoice={...S.analysisChoice,task:'full_analysis',maxCalls:b.budget?.left>0?b.budget.limit:(b.modes?.[mapCoverage] || b).calls,coverage:b.modes?.[mapCoverage]?mapCoverage:'signal',renew:false,only:undefined};
+      S.analysisChoice={...S.analysisChoice,task:'full_analysis',maxCalls:(b.modes?.[mapCoverage] || b).calls,coverage:b.modes?.[mapCoverage]?mapCoverage:'signal',only:undefined};
       return execute('analysis_run_start');
     };
     root?.querySelectorAll?.('[data-unit-explain]').forEach(button=>button.onclick=()=>{
       const b=liveBoard(),row=unitRows[Number(button.dataset.unitExplain)];if(!b || !row || !canExplain())return;
-      S.analysisChoice={...S.analysisChoice,task:'full_analysis',maxCalls:2,coverage:b.modes?.[mapCoverage]?mapCoverage:'signal',only:[{repository:row.repo,target:row.id}],renew:false};
+      S.analysisChoice={...S.analysisChoice,task:'full_analysis',maxCalls:2,coverage:b.modes?.[mapCoverage]?mapCoverage:'signal',only:[{repository:row.repo,target:row.id}]};
       unitDetails.delete(unitKey(row));
       return execute('analysis_run_start');
     });
     root?.querySelectorAll?.('[data-unit-link]').forEach(button=>button.onclick=()=>{const row=unitRows[Number(button.dataset.unitLink)];if(row){unitFilter='all';void openUnit(row);}});
-    if($('renewFullAnalysis'))$('renewFullAnalysis').onclick=()=>{
-      const b=liveBoard();if(!b || active())return;
-      S.analysisChoice={...S.analysisChoice,task:'full_analysis',maxCalls:(b.modes?.[mapCoverage] || b).calls,coverage:b.modes?.[mapCoverage]?mapCoverage:'signal',renew:true,only:undefined};
-      return execute('analysis_run_start');
-    };
     root?.querySelectorAll?.('input[name="mapCoverage"]').forEach(input=>input.onchange=()=>{mapCoverage=input.value;paint();});
     if($('refreshForUnits'))$('refreshForUnits').onclick=()=>$('refresh')?.click();
     if($('cancelFullAnalysis'))$('cancelFullAnalysis').onclick=()=>execute('analysis_run_cancel');
