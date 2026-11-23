@@ -8,6 +8,7 @@ import fcntl
 import hashlib
 import collections
 import json
+import math
 import os
 from pathlib import Path, PurePosixPath
 import re
@@ -36,7 +37,6 @@ GENERATED_SUFFIXES = ('.lock','.min.js','.min.css','.map')
 MAX_PROMPT_BYTES = 128 * 1024
 UNIT_BYTES = 16 * 1024
 MAX_READ_ROUNDS = 32
-SYSTEM_READ_ROUNDS = 8  # the structure task's input pieces are all delivered as batch units, so extra reads past this many rounds are not needed to cover them
 SYSTEM_DELTA_FILES = 64  # a full analysis reads the structure from the compact listing when more files than this changed since the saved structure
 RESOURCE_PACK_SIZE = 4
 UNIT_PACK_BYTES = 108 * 1024  # sample bytes of the plain units one call explains, packet overhead included; the prompt cap stays the hard limit
@@ -105,7 +105,7 @@ def _cancellation_probe(run_id):
 
 def _progress(value):
     excluded={'scope_overviews','overviews','program_observations','resource_targets','saved_overviews','saved_scope_overviews',
-              'unit_overviews','units','unit_targets','unit_failures','partial_results','board_base','final_board'}
+              'unit_overviews','units','unit_targets','unit_failures','partial_results','board_base'}
     result={k:v for k,v in value.items() if k not in excluded}
     if (value.get('intent') or {}).get('task')=='full' and 'units' in value:result['unit_board']=_run_board(value)
     completed=value.get('completed_tasks',[])
@@ -113,8 +113,13 @@ def _progress(value):
     if value.get('intent',{}).get('task')=='resources':
         done={(t['repository'],t.get('target')) for t in completed}
         tasks=[t for t in tasks if (t['repository'],t.get('target')) not in done]
-    result.update(completed_tasks=len(completed),tasks=len(tasks))
+    result.update(completed_tasks=len(completed),tasks=len(tasks),map_gaps=_map_gaps(value))
     return result
+
+def _map_gaps(value):
+    """Whether a stage of a full analysis closed without finishing, or a saved stage left input batches unread."""
+    return bool(value.get('stage_unavailable')) or any(scope.get('unread') or scope.get('isolated')
+                                                      for stages in (value.get('map_scope') or {}).values() for scope in stages.values())
 
 def _packs(rows):
     """Group the pending unit targets, in order, into calls: path groups four at a time as before, every other unit by the
@@ -151,10 +156,11 @@ def _retry_allowance(calls):
     return 1+calls//8 if calls else 0
 
 def _board_parts(repositories,coverage='signal'):
-    """What the call limit of a full analysis is made of: first overviews, map-family batches and the retry allowance.
-    Unit explanations are asked for one unit at a time (`only`), so the unit parts stay 0."""
-    overview=sum(1 for repo in repositories if repo['overview']!='saved');maps=sum(repo['map_calls_by'][coverage] for repo in repositories)
-    return {'overview':overview,'map':maps,'units':0,'retry':_retry_allowance(overview+maps),'later':0}
+    """What the call limit of a full analysis is made of (the same sum as _call_plan): first overviews, the map-family batches
+    with their extra calls, and the retry allowance over the first calls. Unit explanations are asked one unit at a time (`only`)."""
+    overview=sum(1 for repo in repositories if repo['overview'] not in ('saved','working'));maps=sum(repo['map_calls_by'][coverage] for repo in repositories)
+    floor=overview+sum(repo['map_floor_by'][coverage] for repo in repositories)
+    return {'overview':overview,'map':maps,'units':0,'retry':_retry_allowance(floor),'later':0}
 
 def _board_map_by(repositories,coverage='signal'):
     """The map calls still to make, by stage (map, service structure, screen groups)."""
@@ -186,18 +192,32 @@ def _map_states(catalog,pending,partial,working=(),done=(),blocked=None):
         out['groups']=('unavailable','no screens')
     return out
 
-def _map_rows(catalog,states):
+def _extra_of(task,batches):return math.ceil(EXTRA_PER_BATCH.get(task,0)*batches-1e-9) if batches else 0
+
+def _map_calls(value,tasks,states,catalog,build=False):
+    """{mode: {task: [first calls, extra calls]}} of the map stages still to run, counted from the batches they will send
+    (batches a settled checkpoint answers cost nothing)."""
+    out={}
+    for mode in COVERAGE:
+        scoped={**value,'intent':{**(value.get('intent') or {}),'task':'full','coverage':mode}};row={}
+        for task in MAP_TASKS:
+            t=next((t for t in tasks if t['task']==task),None)
+            if t is None or states[task][0] not in ('pending','stale','partial','working'):row[task]=[0,0];continue
+            plan=_planned(scoped,t,build)
+            left=plan['left'] if plan else _rough_batches(catalog,task,mode)
+            row[task]=[left,_extra_of(task,left)]
+        out[mode]=row
+    return out
+
+def _planned(value,task,build=True):
+    try:return _stage_plan(value,task,build)
+    except (ValueError,RunError,*ai_extract.READ_ERRORS):return None
+
+def _map_rows(states,calls):
     rows=[[f'task:{task}','map' if task=='analysis' else task,task,0,*states[task]] for task in MAP_TASKS]
-    def left(task,mode):
-        """Calls still to make for one map stage: all of them, or for a partial stage the share of its input pieces not yet covered."""
-        state,detail=states[task]
-        if state not in ('pending','stale','partial','working'):return 0
-        calls=_mode_calls(catalog['map'],mode)[task]
-        covered,_,total=detail.partition('/') if state=='partial' else ('','','')
-        if covered.isdigit() and total.isdigit() and int(total)>0:calls=-(-calls*max(0,int(total)-int(covered))//int(total))
-        return calls
-    tasks={mode:{task:left(task,mode) for task in MAP_TASKS} for mode in COVERAGE}
-    return rows,{mode:sum(tasks[mode].values()) for mode in COVERAGE},tasks
+    tasks={mode:{task:sum(calls[mode][task]) for task in MAP_TASKS} for mode in COVERAGE}
+    floor={mode:sum(calls[mode][task][0] for task in MAP_TASKS) for mode in COVERAGE}
+    return rows,{mode:sum(tasks[mode].values()) for mode in COVERAGE},tasks,floor
 
 def _only_board(value):
     """The board of a run that explains chosen units: the board as it was opened, with those units' own progress."""
@@ -224,8 +244,11 @@ def _only_board(value):
 
 def _run_board(value):
     """Compact per-unit states of one full run, cheap enough to ride along with every progress poll."""
-    if value.get('state') in TERMINAL and value.get('final_board'):return {**value['final_board'],'budget':_budget(value)}
     if (value.get('intent') or {}).get('only') and value.get('board_base'):return _only_board(value)
+    if value.get('state') in TERMINAL and not value.get('seal_error'):
+        # One board: an ended run shows what the board opened now shows, so its counts equal what is saved.
+        # A board that could not open when the run ended (seal_error) is shown from the run's own record below.
+        return {**unit_board(value['project'],value['repository'],value['branch'],value['lang']),'budget':_budget(value)}
     working=set()
     current=value.get('current_task') or {}
     if value.get('state') in ACTIVE and current:
@@ -254,26 +277,12 @@ def _run_board(value):
         working={current['task']} if value.get('state') in ACTIVE and current.get('repository')==rid and current.get('task') in MAP_TASKS else set()
         done={t['task'] for t in value.get('completed_tasks',[]) if t['repository']==rid and t['task'] in MAP_TASKS}
         blocked=next((t.get('reason') for t in value.get('blocked',[]) if t.get('repository')==rid and t.get('task')=='analysis'),None)
-        extra,by,by_task=_map_rows(catalog,_map_states(catalog,pending,partial,working,done,blocked))
-        repositories.append({'repository':rid,'commit':catalog['commit'],'coverage':catalog['coverage'],'map_coverage':catalog['map'].get('coverage'),'overview':base,'units':rows+extra,'map_calls_by':by,'map_tasks':by_task})
+        states=_map_states(catalog,pending,partial,working,done,blocked)
+        extra,by,by_task,floor=_map_rows(states,_map_calls(value,[t for t in value.get('tasks',[]) if t['repository']==rid],states,catalog))
+        repositories.append({'repository':rid,'commit':catalog['commit'],'coverage':catalog['coverage'],'map_coverage':catalog['map'].get('coverage'),'overview':base,'units':rows+extra,
+                             'map_calls_by':by,'map_tasks':by_task,'map_floor_by':floor})
     return {'repositories':repositories,'totals':_board_totals(repositories),'calls':_board_calls(repositories,coverage),'coverage':coverage,'budget':_budget(value),
             'calls_parts':_board_parts(repositories,coverage),'map_by':_board_map_by(repositories,coverage),'map_calls':sum(repo['map_calls_by'][coverage] for repo in repositories),'modes':_board_modes(repositories)}
-
-def _open_family(history,scope,pins):
-    """The unfinished full analysis of exactly this code, if any. Continuing it keeps the call limit confirmed at its
-    start and its settled batches; a finished analysis or changed code starts a new one with a new confirmation."""
-    rows=[r for r in history if (r.get('intent') or {}).get('task')=='full' and not r['intent'].get('only') and r.get('pins')==pins
-          and all(r[k]==scope[k] for k in ('project','lang','branch'))]  # pins name the repositories, however the request spelled them
-    if not rows:return None
-    last=max(rows,key=lambda r:r['created_at'])
-    return None if last['state']=='completed' or not last.get('budget') else last['family']
-
-def _family_budget(history,family):
-    """Calls confirmed and used by every run of one family, so retries and automatic corrections share one limit."""
-    rows=[r for r in history if r.get('family')==family]
-    used=sum((r.get('input_stats') or {}).get('calls',0) for r in rows)
-    first=min(rows,key=lambda r:r['created_at'])
-    return {'limit':first['budget']['limit'],'used':used,'left':max(0,first['budget']['limit']-used),'runs':len(rows),'coverage':first['intent'].get('coverage','signal')}
 
 def _budget(value):
     budget=value.get('budget')
@@ -332,15 +341,15 @@ def unit_board(project,repository='',branch='dev',lang='ko'):
         overview='saved' if base and base.get('version')==OVERVIEW_VERSION and all(base.get(k)==v for k,v in pin.items()) else 'pending'
         pending={t['task']:bool(t.get('before')) for t in plan['tasks'] if t['repository']==rid and t['task'] in MAP_TASKS}
         blocked=next((t.get('reason') for t in plan['blocked'] if t.get('repository')==rid and t.get('task')=='analysis'),None)
-        extra,by,by_task=_map_rows(catalog,_map_states(catalog,pending,_latest_partials(history,rid,pin),blocked=blocked))
+        states=_map_states(catalog,pending,_latest_partials(history,rid,pin),blocked=blocked)
+        extra,by,by_task,floor=_map_rows(states,_map_calls(value,[t for t in plan['tasks'] if t['repository']==rid],states,catalog))
         position={u['id']:i for i,u in enumerate(catalog['units'])}
         links=[[position[a],position[b],n] for a,row in (catalog.get('links') or {}).items() if a in position for b,n in row if b in position]
-        repositories.append({'repository':rid,'commit':catalog['commit'],'coverage':catalog['coverage'],'map_coverage':catalog['map'].get('coverage'),'overview':overview,'units':rows+extra,'map_calls_by':by,'map_tasks':by_task,'retired':retired,
+        repositories.append({'repository':rid,'commit':catalog['commit'],'coverage':catalog['coverage'],'map_coverage':catalog['map'].get('coverage'),'overview':overview,'units':rows+extra,'map_calls_by':by,'map_tasks':by_task,'map_floor_by':floor,'retired':retired,
                              'links':links})
     pending=any(c.get('pending_signals') for c in catalogs.values())
-    family=_open_family(history,scope,plan['pins'])
     return {'repositories':repositories,'totals':_board_totals(repositories),'calls':_board_calls(repositories),'coverage':'signal','signals':'pending' if pending else 'ready',
-            'budget':_family_budget(history,family) if family else None,
+            'budget':None,
             'calls_parts':_board_parts(repositories),'map_by':_board_map_by(repositories),'map_calls':sum(repo['map_calls_by']['signal'] for repo in repositories),'modes':_board_modes(repositories),
             'time_limit_seconds':max(MAX_SECONDS,(2*_board_calls(repositories)+1)*TASK_SECONDS)}
 
@@ -353,6 +362,9 @@ def unit_signals(project,repository='',branch='dev',lang='ko'):
     for rid,pin in plan['pins'].items():
         conf,_,_,head=ai_extract.context(project,rid,branch)
         _signals(conf['path'],head)  # also for a map that only needs a patch: the unit catalog uses the scan to tell text from binary
+        for task in plan['tasks']:
+            if task['repository']==rid and task['task'] in MAP_TASKS:
+                for mode in COVERAGE:_planned({'project':project,'branch':branch,'lang':lang,'intent':{'task':'full','coverage':mode}},task)
         repositories.append({'repository':rid,'commit':head})
     return {'ready':True,'repositories':repositories}
 
@@ -442,15 +454,17 @@ def write(value):
     return value
 
 def _seal(value):
-    """A full run that ended keeps the board exactly as the board opened afterwards shows it, so its counts equal what is saved."""
-    if (value.get('intent') or {}).get('task')!='full':return value
-    try:value['final_board']=unit_board(value['project'],value['repository'],value['branch'],value['lang'])
-    except Exception:return value  # the live board still describes the run
+    """Write an ended run. A full run is shown by the live board; check that it opens first and record why when it does not."""
+    if (value.get('intent') or {}).get('task')=='full' and not (value.get('intent') or {}).get('only'):
+        try:unit_board(value['project'],value['repository'],value['branch'],value['lang'])
+        except Exception as error:
+            # The ended run is kept; the board that cannot open is named, not hidden.
+            value['seal_error']={'type':type(error).__name__,'message':str(error)[:300]}
     return write(value)
 
 def failure(value, code, message):
     value.update(state='failed', error={'code':code, 'message':message[:1000]}, finished_at=store.now())
-    return _seal(write(value))
+    return _seal(value)
 
 def _recover(value):
     """A released worker lock proves interruption; PIDs are never used to kill processes."""
@@ -504,7 +518,6 @@ def _intent(intent,repository):
         if type(limit)!=int or limit<0:raise ValueError('Confirm the maximum call count of the full analysis')
         coverage=intent.get('coverage','signal')
         if coverage not in COVERAGE:raise ValueError('Choose signal windows or every text file')
-        # renew: the user confirmed a new call limit instead of continuing under the one an unfinished analysis started with.
         only=intent.get('only')
         if only is not None:
             # Explain exactly these units (the user opened their cards); the units are checked against the catalog in prepare().
@@ -513,7 +526,7 @@ def _intent(intent,repository):
                     or not isinstance(u['target'],str) or not u['target'] for u in only)
                     or len({(u['repository'],u['target']) for u in only})!=len(only)):raise ValueError('Choose 1 to 24 units to explain')
             return {'task':task,'targets':[],'max_calls':limit,'coverage':coverage,'only':[dict(u) for u in only]}
-        return {'task':task,'targets':[],'max_calls':limit,'coverage':coverage,**({'renew':True} if intent.get('renew') is True else {})}
+        return {'task':task,'targets':[],'max_calls':limit,'coverage':coverage}
     if task=='resources':
         limit=intent.get('max_calls')
         if type(limit)!=int or limit<0:raise ValueError('Confirm the maximum number of resource analysis calls')
@@ -612,8 +625,6 @@ def _unit_catalogs(value,plan,defer=False):
     return catalogs
 
 SOURCE_ROW_OVERHEAD = 11  # bytes the compact [line,"text"] form adds to each source line
-MAP_USABLE = MAX_PROMPT_BYTES-2*UNIT_BYTES-4096-UNIT_BYTES  # source bytes one batch carries beside the shared protocol (16KB reserve; measured 7KB)
-MAP_FOLLOW_UP = 1.1  # read requests and one evidence retry per batch
 
 def _eligible(repo,commit,paths=None):
     """(file, blob id) of the regular, non-secret, non-binary-suffix files of a pinned commit."""
@@ -680,55 +691,28 @@ def _window_plan(rows,cited=()):
     return plan,report
 
 def _map_estimate(repo,head,selected,sizes,screens,lang,configuration,flag=None,defer=False):
-    """Upper bound of the model calls of the map, service structure and screen-group tasks.
-
-    A saved map that can be patched reads the changes since it plus every file it cites. Any other map reads the
-    signal windows of the commit (what the user sees as "signal-based") or, when the user asks for it, every text
-    file whole ("all"). Both numbers come from the real file contents at the pin."""
+    """What the map reads at this pin: patch (the changes since the saved map plus every file it cites) or the signal windows,
+    with the bytes of each coverage choice and the window report. The calls are counted from the real batches (_stage_plan)."""
     shown=sum(1 for screen in screens if not screen.get('redirect'))
-    page=MAP_USABLE
-    calls_of=lambda size:max(1,-(-int(size*MAP_FOLLOW_UP)//page))
-    rounds=lambda size:calls_of(size)*SYSTEM_READ_ROUNDS  # each structure batch may use every one of its read rounds (the signal run's limit)
-    names=sum(len(file)+4 for file in sizes)
-    result={'screens':shown,'mode':'whole','source_bytes':0,'calls':{'groups':1+shown//200}}
+    result={'screens':shown,'mode':'whole','source_bytes':0}
     try:
         prev=selected or {}
         mode=ai_extract.map_mode(repo,prev,lang,configuration,head,flag)
         if mode and mode[0]=='patch':
             base=prev['commit']
             changed,deleted,present=ai_extract.changes(repo,base,head)
-            cited=_cited_files(prev)
-            now=_source_profile(repo,head,set(present)|cited)
+            now=_source_profile(repo,head,set(present)|_cited_files(prev))
             before=_source_profile(repo,base,changed|set(deleted))
-            size=sum(now.values())+sum(before.values())
-            result.update(mode='patch',source_bytes=size)
-            result['calls']['analysis']=calls_of(size)
-            result['calls']['system']=rounds(sum(v for f,v in now.items() if f in changed)+sum(before.values())+len(json.dumps(prev.get('screens',[]))) // 8)
+            result.update(mode='patch',source_bytes=sum(now.values())+sum(before.values()))
         else:
             rows=_signals(repo,head,wait=not defer)
             plan,report=_window_plan(rows,_cited_files(prev))
-            all_size=report['text_bytes']
-            meta=names+20000+len(json.dumps({k:prev.get(k,[]) for k in ('screens','backend_routes','api_functions')},default=str))
-            # The signal run's structure input is the compact one its payload carries (code paths, per-folder counts, compact map), not every file name.
-            listed,other=_listing(rows,sorted(sizes))
-            compact={'files':listed,'other_files':other,'map':{'screens':[[x.get('path'),x.get('file'),x.get('heading')] for x in prev.get('screens',[])],
-                     'backend_routes':[[x.get('method'),x.get('path'),x.get('file'),x.get('function'),x.get('tables') or [],x.get('services') or []] for x in prev.get('backend_routes',[])]}}
-            system=rounds(len(json.dumps(compact,default=str))+20000)
-            system_all=rounds(meta)
-            modes={'signal':{'source_bytes':report['sent_bytes'],'calls':{'analysis':calls_of(report['sent_bytes']),'system':system,'groups':result['calls']['groups']}},
-                   'all':{'source_bytes':all_size,'calls':{'analysis':calls_of(all_size),'system':system_all,'groups':result['calls']['groups']}}}
-            result.update(source_bytes=modes['signal']['source_bytes'],modes=modes,coverage=report)
-            result['calls']=dict(modes['signal']['calls'])
+            modes={'signal':{'source_bytes':report['sent_bytes']},'all':{'source_bytes':report['text_bytes']}}
+            result.update(source_bytes=report['sent_bytes'],modes=modes,coverage=report)
     except (SignalsPending,RunError,*ai_extract.READ_ERRORS,KeyError,TypeError,ValueError) as error:
-        # Unreadable history, or a signal scan still running: assume the whole commit is read (an upper bound, flagged when pending).
-        readable=sum(int(min(size,MAX_FILE_BYTES)*1.4) for file,size in sizes.items() if not _exclusion(file,size))
-        result.update(source_bytes=readable);result['calls'].update(analysis=calls_of(readable),system=rounds(names+20000))
+        result.update(source_bytes=sum(int(min(size,MAX_FILE_BYTES)*1.4) for file,size in sizes.items() if not _exclusion(file,size)))
         if isinstance(error,SignalsPending):result['pending_signals']=True
     return result
-
-def _mode_calls(estimate,coverage):
-    """Calls per map task of one coverage choice; a patch run has a single plan."""
-    return ((estimate.get('modes') or {}).get(coverage) or estimate)['calls']
 
 def _unit(value,rid,target):
     for unit in (value.get('units',{}).get(rid) or {}).get('units',[]):
@@ -743,17 +727,13 @@ def _is_unit(value,rid,target):
     unit=_unit(value,rid,target)
     return bool(unit) and unit['kind']!='route'
 
-def _estimates(value):
-    return {rid:catalog['map'] for rid,catalog in (value.get('units') or {}).items() if 'map' in catalog}
 
-def _full_calls(tasks,estimates=None,coverage='signal',catalogs=None):
-    """Upper bound of model calls: one per base overview, estimated calls per map task, and for the units an `only` run
-    explains one per pack of them plus half again as many for the one retry of an answer that fails its evidence check."""
-    base=sum(1 for t in tasks if not t.get('target') and t['task'] not in MAP_TASKS)
-    maps=sum(_mode_calls((estimates or {}).get(t['repository']) or {'calls':{}},coverage).get(t['task'],1) for t in tasks if t['task'] in MAP_TASKS)
+def _full_calls(tasks,catalogs=None):
+    """Model calls of a run that explains chosen units: one per pack of them plus half again as many for the one retry
+    of an answer that fails its evidence check."""
     sample={(rid,u.get('resource') or u['id']):u.get('sample') for rid,c in (catalogs or {}).items() for u in c['units']}
     packs=len(_packs([(t['target'],t.get('unit_kind') or 'route',sample.get((t['repository'],t['target'])) or UNIT_UNKNOWN) for t in tasks if t.get('target')]))
-    return base+maps+(packs+-(-packs//2) if packs else _retry_allowance(base+maps))
+    return packs+-(-packs//2)
 
 def _failed_out(value):
     return {(f['repository'],f['target']) for f in value.get('unit_failures',[]) if f['attempts']>=UNIT_ATTEMPTS}
@@ -780,7 +760,9 @@ def _plan_full(value):
     tasks+=[{'repository':t['repository'],'task':'overview','target':t['target'],'unit_kind':t['kind'],**plan['pins'][t['repository']]}
             for t in targets if t['repository'] in plan['pins'] and (t['repository'],t['target']) not in done]
     # A full analysis explains no unit: the first overview, then the map, service structure and screen groups.
-    if not only:tasks+=[t for t in plan['tasks'] if t['task'] in MAP_TASKS]
+    # A stage that could not finish within its run is not asked again in that run; what it settled stays in its checkpoints.
+    closed={(t['repository'],t['task']) for t in value.get('stage_unavailable',[])}
+    if not only:tasks+=[t for t in plan['tasks'] if t['task'] in MAP_TASKS and (t['repository'],t['task']) not in closed]
     plan.update(tasks=tasks,unit_targets=targets,unit_catalog=value_units)
     return plan
 
@@ -926,19 +908,18 @@ def prepare(project, branch='dev', lang='ko', repository='', executor='claude', 
                             value['unavailable_resources'].append(entry)
                 skipped={(u['repository'],u['target']) for u in value.get('unavailable_resources',[])}
                 value['tasks']=remaining=[t for t in remaining if (t['repository'],t.get('target')) not in skipped or not t.get('target')]
-                calls=_full_calls(remaining,_estimates(value),scope['intent']['coverage'],value['units'])
                 only=scope['intent'].get('only')
                 if only and len(plan['unit_targets'])!=len(only):raise ValueError('Choose units of the current catalog')
-                family=None if only or scope['intent'].get('renew') else _open_family(history,scope,plan['pins'])
-                budget=_family_budget(history,family) if family else None
-                if budget and budget['coverage']==scope['intent']['coverage']:
-                    # Continuing: the limit confirmed when this analysis started still applies, with what earlier runs used.
-                    if budget['left']<=0:raise RunError('call_limit','The confirmed AI call limit ('+str(budget['limit'])+') is used up; saved results were retained. Confirm a new limit to continue')
-                    value['intent']={**scope['intent'],'max_calls':budget['limit']}
-                    value.update(family=family,budget={'limit':budget['limit'],'used_before':budget['used']})
+                if only:
+                    calls=_full_calls(remaining,catalogs=value['units'])
+                    budget={'limit':scope['intent']['max_calls'],'used_before':0}
                 else:
-                    if calls>scope['intent']['max_calls']:raise ValueError('The call count changed; confirm the new maximum call count')
-                    value.update(family=value['id'],budget={'limit':scope['intent']['max_calls'],'used_before':0})
+                    # The same count the board shows: first calls of every batch still to send, their extra calls and a retry allowance.
+                    started=time.monotonic()
+                    budget=_call_plan(value,remaining);calls=budget.pop('calls')
+                    budget.update(limit=scope['intent']['max_calls'],used_before=0,plan_seconds=round(time.monotonic()-started,2))
+                if calls>scope['intent']['max_calls']:raise ValueError('The call count changed; confirm the new maximum call count')
+                value.update(budget=budget)
                 if only:
                     # The board of this run is the opened board plus these units' own progress.
                     board=unit_board(project,scope['repository'],branch,lang)
@@ -1016,7 +997,7 @@ def cancel(run_id):
         # The worker checks this flag before saving under this same registry lock.
         if value['launch_epoch'] is None:
             value.update(state='cancelled',finished_at=store.now())
-            return _seal(write(value))
+            return _seal(value)
         return write(value)
 
 def retry(run_id, launch_intended=False):
@@ -1028,7 +1009,6 @@ def retry(run_id, launch_intended=False):
     if (previous.get('error') or {}).get('code') in ('invalid_result','analysis_failed'):
         resume=None  # A conflicting final merge may need new findings.
     intent=previous.get('intent')
-    if intent:intent={k:v for k,v in intent.items() if k!='renew'}
     return prepare(previous['project'],previous['branch'],previous['lang'],previous['repository'],previous['executor'],
                    launch_intended=launch_intended,intent=intent,resume_from=resume,expected_pins=expected_pins)
 
@@ -1130,6 +1110,25 @@ def _blob_lines(repo,oid,cancelled=None,deadline=None):
     if '\x00' in text:return 'binary'
     return [{'line':i,'text':line} for i,line in enumerate(text.splitlines(),1)]
 
+PREFETCH_MIN = 16  # files; fewer are read one by one
+
+def _prefetch(repo,entries,blobs,selected,excluded):
+    """Fill blobs with the numbered lines of many eligible files through one git cat-file stream (what _blob_lines gives one file at a time)."""
+    wanted={}
+    for entry in entries:
+        if not entry:continue
+        meta,raw_file=entry.split(b'\t',1);mode,kind,oid=meta.split()
+        try:file=raw_file.decode('utf-8')
+        except UnicodeError:continue
+        if oid in blobs or file in excluded or selected is not None and file not in selected:continue
+        if mode in (b'100644',b'100755') and kind==b'blob' and not _secret(file) and PurePosixPath(file).suffix.lower() not in BINARY_SUFFIXES:wanted[oid]=file
+    if len(wanted)<PREFETCH_MIN:return
+    rows=[(file,oid) for oid,file in wanted.items()]
+    by_file={file:oid for oid,file in wanted.items()}
+    for file,text,_ in source_signals.stream(repo,rows):
+        blobs[by_file[file]]=[{'line':i,'text':line} for i,line in enumerate(text.splitlines(),1)]
+    for oid in wanted:blobs.setdefault(oid,'binary')  # the stream skips blobs that are not UTF-8 text without NUL
+
 def export_source(repo, commit, commits=None, cancelled=None, deadline=None, selected=None, blobs=None, excluded=None, windows=None):
     """Export immutable regular text blobs only. Never inspect the checkout or follow symlinks.
     blobs keeps content by object ID for one run; each commit's tree and path rules still decide what is exported.
@@ -1139,6 +1138,7 @@ def export_source(repo, commit, commits=None, cancelled=None, deadline=None, sel
     for pinned in dict.fromkeys([commit,*(commits or [])]):
         _checkpoint(cancelled,deadline)
         entries=_git(repo,'ls-tree','-rz','--full-tree',pinned).split(b'\0')
+        _prefetch(repo,entries,blobs,selected.get(pinned,set()) if selected is not None else None,(excluded or {}).get(pinned,()))
         files=[];omitted=[]
         for entry in entries:
             _checkpoint(cancelled,deadline)
@@ -1835,7 +1835,36 @@ def _source_first(units):
             paired.add(page['id'])
     return ordered+[unit for unit in units if unit['kind']!='source' and unit['id'] not in paired]
 
-def _batch_payload(header,units,batch_id,prior=None):
+def _unit_bound(unit):
+    """Bytes adding this unit can add to an encoded batch packet at most: its value as JSON, its full ID in batch.units and the
+    file, snapshot and list wrappers it may open."""
+    return len(json.dumps(unit['value'],ensure_ascii=False,separators=(',',':')).encode())+len(unit['id'])+260
+
+def _next_batch(header,units,budget,start=0,batch_id='0'*64):
+    """How many units from units[start] the next batch takes: the most whose encoded packet stays within budget.
+    A packet is encoded only when the byte bound of the added units could cross the budget, so the result equals encoding after every unit."""
+    exact=len(_encoded(_batch_payload(header,[],batch_id)).encode());bound=exact;end=start
+    while end<len(units):
+        step=_unit_bound(units[end])
+        if bound+step>budget:
+            size=len(_encoded(_batch_payload(header,units[start:end+1],batch_id)).encode())
+            if size>budget:break
+            bound=size
+        else:bound+=step
+        end+=1
+    return end-start
+
+def plan_batches(header,units,budget,batch_id='0'*64):
+    """The batches of one map-family task, in order: ([[unit, ...], ...], [units that do not fit any packet alone]).
+    The run, the call limit shown before it and the board all count batches with this function."""
+    batches=[];unfit=[];start=0
+    while start<len(units):
+        n=_next_batch(header,units,budget,start,batch_id)
+        if not n:unfit.append(units[start]);start+=1;continue
+        batches.append(units[start:start+n]);start+=n
+    return batches,unfit
+
+def _batch_payload(header,units,batch_id):
     payload=copy.deepcopy(header);snapshots={};pages=[]
     compact='source_line_format' in header
     for unit in units:
@@ -1865,9 +1894,6 @@ def _batch_payload(header,units,batch_id,prior=None):
         'or [{metadata: [key, nestedKey], start, limit}] to retrieve original metadata pages (especially known/recheck IDs) from this pinned request. '
         'Need ranges use original one-based lines, limit <= 200; search pagination starts at 1. Never guess a path, mount or relation. '
         'Use unknown for genuinely unestablished facts. No response can change the supplied pins, unit IDs or task targets.'}
-    if prior:
-        if len(json.dumps(prior,ensure_ascii=False).encode())<=UNIT_BYTES:payload['batch']['prior']=prior
-        else:payload['batch']['prior_note']='Earlier validated fragments are retained by the server. Return additions from the original units and this requested context; never repeat unrelated earlier output.'
     return payload
 
 def _matching_files(repo, commit, query, paths, cancelled, deadline):
@@ -2532,12 +2558,204 @@ def _supersede(result,request,raw,repo,commit,layout):
         found=[r for r in result.get('backend_routes',[]) if old and isinstance(r,dict) and identity(r)==identity(old) and 'replaces' not in r]
         if len(found)==1:found[0]['replaces']=target
 
+CHECKPOINT_VERSION = 2  # settled batches are kept under the content they answer (pins, packet header, batch units), not under the run that asked
+PLAN_VERSION = 1
+# Extra calls (read rounds, a corrective re-ask, a lost reply) reserved per batch of a full analysis. Map: 75 calls for 54 batches in a real run
+# (0.39 per batch). Structure: a batch used its eight read rounds (one first call and seven reads) in every real run.
+EXTRA_PER_BATCH = {'analysis':0.4,'system':7,'groups':0.4}
+BATCH_EXTRA_MIN = 4  # one batch may take at least this many extra calls, and at most twice its stage's share per batch
+SETTLED_INDEX_BYTES = 4096
+EXECUTOR_STREAK = 3  # consecutive calls without a usable reply: the executor cannot answer, so the run stops
+# The run as a whole cannot go on: the account, the subscription, a cancel, changed code, the time limit or an unreadable repository.
+FATAL_CODES = {'cancelled','CANCELLED','pins_changed','timeout','source_unavailable','CLI_AUTH','CLI_ACCOUNT_CHANGED','CLI_USAGE_LIMIT',
+               'CLI_UNAVAILABLE','executor_failed','task_limit','already_running','preparation_failed'}
+
+class CallDenied(RunError):
+    def __init__(self,kind):super().__init__('call_limit',f'No {kind} call is left within the confirmed AI call limit; what was read is kept')
+
+class CallFailed(RunError):
+    """One model call gave no usable reply: no JSON, a timeout, or an executor failure that is not about the account."""
+    def __init__(self,code):super().__init__('call_failed','A model call returned no usable reply ('+str(code)[:60]+')')
+
+def _full(value):return (value.get('intent') or {}).get('task')=='full'
+
+def _stage_key(rid,task):return task+'@'+rid
+
+def _batch_extra_cap(task):return max(BATCH_EXTRA_MIN,2*-int(-EXTRA_PER_BATCH.get(task,0)//1))
+
+def _admit(value,key,kind,left_after=0):
+    """Whether one more call fits the confirmed limit. Every batch not yet started keeps its first call (the floor); an extra call
+    is allowed only while one call more than that floor is left and its stage has not used its share of extra calls."""
+    budget=value.get('budget')
+    if not budget or not _full(value):return True
+    stats=value.get('input_stats') or {};by=stats.get('by_stage') or {}
+    left=budget['limit']-budget.get('used_before',0)-stats.get('calls',0)
+    if 'floor' not in budget:return left>=1  # a run that explains chosen units: one call per pack
+    done={_stage_key(t['repository'],t['task']) for t in value.get('completed_tasks',[]) if not t.get('target')}
+    done|={_stage_key(t['repository'],t['task']) for t in value.get('stage_unavailable',[])}
+    others=sum(n for k,n in budget['floor'].items() if k!=key and k not in done and not (by.get(k) or {}).get('first'))
+    if kind=='first':return left-others>=1
+    if left-others-left_after<1:return False
+    used=(by.get(key) or {}).get('extra',0)
+    return used<budget['extra'].get(key,0)+budget.get('retry',0)
+
+def _requestable(payload):
+    """[[metadata path, items]] a read can name in this request: lists by entry count, text by characters, objects by keys."""
+    out=[]
+    def walk(path,value,depth):
+        if len(out)>=40 or value in (None,'',[],{}):return
+        if isinstance(value,dict):
+            if depth<3:
+                for k,v in value.items():walk(path+[k],v,depth+1)
+            else:out.append([path,len(value)])
+        elif isinstance(value,(list,str)):out.append([path,len(value)])
+    for key in ('known','recheck','inspect','deleted','input','sources'):
+        if isinstance(payload,dict) and key in payload:walk([key],payload[key],1)
+    return out
+
+def _settled_index(task,result):
+    """A short index of what earlier rounds of a batch returned, so a round can add to it without writing it again."""
+    if task=='analysis':
+        index={'screens':[x.get('path') for x in result.get('screens',[]) if isinstance(x,dict)],
+               'backend_routes':[[x.get('method'),x.get('path'),x.get('function')] for x in result.get('backend_routes',[]) if isinstance(x,dict)],
+               'inspected':len(result.get('inspected') or []),'unknown':len(result.get('unknown') or [])}
+    elif task=='system':
+        index={'nodes':[[x.get('id'),x.get('name')] for x in result.get('nodes',[]) if isinstance(x,dict)],
+               'externals':[[x.get('id'),x.get('name')] for x in result.get('externals',[]) if isinstance(x,dict)],
+               'links':[[x.get('from'),x.get('to'),x.get('label')] for x in result.get('links',[]) if isinstance(x,dict)],
+               'others':[x.get('name') for x in result.get('others',[]) if isinstance(x,dict)],'unknown':len(result.get('unknown') or [])}
+    elif task=='groups':index={'groups':[x.get('name') for x in result.get('groups',[]) if isinstance(x,dict)]}
+    else:index={k:(len(v) if isinstance(v,(list,dict)) else v) for k,v in result.items()}
+    size=lambda:len(json.dumps(index,ensure_ascii=False,separators=(',',':')).encode())
+    while size()>SETTLED_INDEX_BYTES:
+        key=max((k for k,v in index.items() if isinstance(v,list) and v),key=lambda k:len(json.dumps(index[k],ensure_ascii=False)),default=None)
+        if key is None:break
+        cut=max(1,len(index[key])//4);index[key]=index[key][:-cut];index['more_'+key]=index.get('more_'+key,0)+cut
+    return index
+
+SETTLED_RULE=(' batch.settled indexes what earlier rounds of this batch returned; the server keeps all of it. Do not return those entries again. '
+              'Return only new entries, or an entry under the same identity (screen path; method, path and function; node or external id) when you add to it.')
+
+def _split_unknown(fragment,files):
+    """Keep the map's unknown entries that name what they are about (a tracked file, a screen path or a route); count the rest,
+    remarks about the batch as a whole, apart. Returns the number set aside."""
+    entries=fragment.get('unknown')
+    if not isinstance(entries,list):return 0
+    kept=[];notes=0
+    for entry in entries:
+        if isinstance(entry,dict):
+            about,text=entry.get('about'),entry.get('text')
+            if isinstance(about,str) and isinstance(text,str) and text.strip() and (about in files or re.fullmatch(r'(?:[A-Z]+ )?/\S*',about.strip())):
+                kept.append(about.strip()+': '+text.strip());continue
+        elif isinstance(entry,str) and entry.strip() and any(f in entry for f in files):kept.append(entry);continue
+        notes+=1
+    fragment['unknown']=kept
+    return notes
+
+UNKNOWN_RULE=(' Each unknown entry is {about, text}: about is the tracked file path, screen path or "METHOD /path" route it concerns. '
+              'A remark about this batch as a whole (for example that it holds no screens) is not an unknown entry; leave it out.')
+
+def _gap_note(task,lang,scope):
+    """One line on what a stage could not read, for the stage's own unknown list."""
+    unread=scope['unread'];total=scope['batches']
+    if not unread and not scope.get('isolated'):return None
+    ko=lang!='en'
+    text=(f'입력 묶음 {total}개 중 {unread}개({scope["unread_units"]}조각)는 끝까지 읽지 못해 확인하지 못했다' if ko else
+          f'{unread} of {total} input batches ({scope["unread_units"]} pieces) could not be read to the end and are unconfirmed')
+    if scope.get('isolated'):text+=(f'; 합치면 결과가 깨지는 묶음 {scope["isolated"]}개는 뺐다' if ko else f'; {scope["isolated"]} batches that broke the merged result were left out')
+    return {'text':text,'needs':'read'} if task=='system' else text
+
+def _batch_units(value,task,request,payload,layout,extra=()):
+    """(header, units) of the batch protocol of a map-family task; the same for the run and its call plan."""
+    if task['task']=='analysis':
+        payload['schema']=copy.deepcopy(payload['schema'])
+        for example in ai_extract.cited(payload['schema']):example.pop('quote')
+        payload['prompt']=ai_extract.analysis_prompt(request['commit'],value['lang'],layout,request,overview=True,partial=True)
+    header,units=_units(payload)
+    return header,list({u['id']:u for u in [*extra,*units]}.values())
+
+def _full_shape(task,header,units,payload):
+    """(batch header, packet budget) of every batch of a full analysis task."""
+    batch_header={**header,'requestable_metadata':_requestable(payload)}
+    wide=task['task']=='analysis'
+    if wide and len(units)>=128:batch_header['source_line_format']='numbered_lines entries are [original one-based line, literal text, optional original character offset].'
+    return batch_header,(MAX_PROMPT_BYTES-2*UNIT_BYTES-4096 if wide else MAX_PROMPT_BYTES//2)
+
+def _stage_prompt(task,payload):
+    if task['task']=='analysis':
+        payload['prompt']+=' You may add preview_programs: [{name,file,line,quote}] for directly evidenced programs, CLI commands or workers. If there are no screens or routes, still provide inspected evidence and unknown as the map schema requires.'
+
+def _checkpoints():return root()/'checkpoints'/f'v{CHECKPOINT_VERSION}'
+
+def _scope_key(request,header,provisional):return ai_extract.digest([CHECKPOINT_VERSION,request['record_arguments'],header,provisional])
+
+def _batch_file(scope,index,ids):return _checkpoints()/scope/(ai_extract.digest([index,ids])+'.json')
+
+def _plan_key(value,task):
+    """What a stage's batches depend on, read without building them: the pinned commit and saved bundle, coverage, language and this code."""
+    conf,raw,_,head=ai_extract.context(value['project'],task['repository'],value['branch'])
+    return mapcore.cache_key(PLAN_VERSION,CHECKPOINT_VERSION,mapcore.code_digest(),(value.get('intent') or {}).get('coverage','signal'),value['lang'],
+                             conf['path'],head,task['task'],ai_extract.digest(json.loads(json.dumps(raw.get(value['branch']),default=str))),'plan')
+
+def _stage_plan(value,task,build=True):
+    """The batches one map-family task of a full analysis sends: {'direct': one plain call} or {'scope', 'keys'} of its batches,
+    with 'left' the batches no settled checkpoint answers yet. Cached; build=False returns None instead of building it
+    (the board opens without reading every file). ValueError: the stage cannot be planned yet (it needs the map saved first)."""
+    key=_plan_key(value,task)
+    plan=mapcore.cache_read('plans',key)
+    if not isinstance(plan,dict) or plan.get('version')!=PLAN_VERSION:
+        if not build:return None
+        request=_request(value,task)
+        conf,_,_,_=ai_extract.context(value['project'],task['repository'],value['branch'])
+        payload=_payload(value,task,request,blobs={})
+        _stage_prompt(task,payload)
+        if len(_encoded(payload).encode())<=MAX_PROMPT_BYTES:plan={'version':PLAN_VERSION,'direct':True}
+        else:
+            header,units=_batch_units(value,task,request,payload,conf['layout'])
+            batch_header,budget=_full_shape(task,header,units,payload)
+            batches,unfit=plan_batches(batch_header,units,budget)
+            plan={'version':PLAN_VERSION,'scope':_scope_key(request,header,{}),'keys':[ai_extract.digest([i,[u['id'] for u in b]]) for i,b in enumerate(batches,1)],'unfit':len(unfit)}
+        mapcore.cache_write('plans',key,plan)
+    if plan.get('direct'):return {**plan,'batches':1,'left':1}
+    return {**plan,'batches':len(plan['keys']),'left':sum(1 for k in plan['keys'] if not (_checkpoints()/plan['scope']/(k+'.json')).exists())}
+
+def _rough_batches(catalog,task,mode):
+    """Batches of a stage that cannot be planned yet (its input is not built, or it needs the map saved first): an upper bound
+    from the bytes the map reads, the tracked file list for the structure and the screen count for the groups."""
+    estimate=catalog.get('map') or {}
+    if task=='analysis':size=((estimate.get('modes') or {}).get(mode) or estimate).get('source_bytes',0)*1.2
+    elif task=='system':size=catalog['coverage'].get('tracked',0)*120+40000
+    else:size=estimate.get('screens',0)*400
+    return max(1,math.ceil(size/(MAX_PROMPT_BYTES//2)))
+
+def _call_plan(value,tasks):
+    """What the call limit of a full analysis is made of: one first call per batch of every stage still to run (the floor), extra calls
+    per batch, and a retry allowance for a call lost to a cancel or an interruption. The board and prepare() both count with this."""
+    floor={};extra={}
+    for t in tasks:
+        key=_stage_key(t['repository'],t['task'])
+        if t['task'] in MAP_TASKS:
+            plan=_planned(value,t)
+            left=plan['left'] if plan else _rough_batches(value['units'][t['repository']],t['task'],(value.get('intent') or {}).get('coverage','signal'))
+            floor[key]=left;extra[key]=_extra_of(t['task'],left)
+        elif t['task']=='overview' and not t.get('target'):floor[key]=1;extra[key]=0
+    total=sum(floor.values());retry=1+total//8 if total else 0
+    return {'floor':floor,'extra':extra,'retry':retry,'calls':total+sum(extra.values())+retry}
+
+def _record_scope(run_id,task,scope):
+    with locked():
+        current=read(run_id)
+        current.setdefault('map_scope',{}).setdefault(task['repository'],{})[task['task']]=scope
+        write(current)
+
 def generate(value,task,request,executor,cancelled,deadline,check,blobs=None):
-    deferred=[]
+    full=_full(value)
+    deferred=None if full else []
     repo=None;raw=None
     if task['task']!='briefing':
         conf,bundle,_,_=ai_extract.context(value['project'],task['repository'],value['branch'])
         repo=conf['path'];raw=bundle[value['branch']]
+    stage=_stage_key(task['repository'],'overview' if task['task']=='overview' and not task.get('target') and not task.get('pack_targets') else 'units' if task['task']=='overview' else task['task'])
     def validate(result,final=True,context=()):
         pins=request['record_arguments']
         for key in ('commit','configuration','base','snapshot','branch','lang'):
@@ -2545,23 +2763,39 @@ def generate(value,task,request,executor,cancelled,deadline,check,blobs=None):
         if 'language' in result and result['language']!=pins.get('lang'):raise RunError('pins_changed','Analysis response named a different language')
         if task['task']=='analysis':
             for key,area in (('screens','frontend'),('backend_routes','backend')):
-                if any(not ai_extract.within(item.get('file'),area,conf['layout']) for item in result.get(key,[]) if isinstance(item,dict)):raise RunError('invalid_result','Analysis claimed an item outside the configured area')
+                if any(not ai_extract.within(item.get('file'),area,conf['layout']) for item in result.get(key,[]) if isinstance(item,dict)):raise InvalidClaim('Analysis claimed an item outside the configured area')
         if repo:
             try:_strict_result(task['task'],result,repo,request['commit'],request,raw,final,context)
             except RunError:raise
             except (KeyError,TypeError,ValueError):raise InvalidClaim('An analysis claim did not match the task schema') from None
-    def invoke(payload):
+    streak=[0]
+    def invoke(payload,kind='first',left_after=0):
         check();prompt=_encoded(payload)
         if len(prompt.encode())>MAX_PROMPT_BYTES:raise RunError('source_too_large','An analysis context could not fit a bounded input')
         with locked():
             current=read(value['id']);stats=current.setdefault('input_stats',{'calls':0,'bytes':0,'max_prompt_bytes':0})
-            limit=(current.get('intent') or {}).get('max_calls') if (current.get('intent') or {}).get('task')=='full' else None
-            if limit is not None and stats['calls']+(current.get('budget') or {}).get('used_before',0)>=limit:
-                raise RunError('call_limit','The confirmed AI call limit ('+str(limit)+') was reached; saved results were retained. Continue to ask for the rest')
-            stats['calls']+=1;stats['bytes']+=len(prompt.encode());stats['max_prompt_bytes']=max(stats['max_prompt_bytes'],len(prompt.encode()));write(current)
-        result=_result(executor(prompt,cancelled=cancelled,timeout=min(TASK_SECONDS,max(1,int(deadline-time.monotonic())))))
-        check()
-        return result
+            if not _admit(current,stage,kind,left_after):raise CallDenied(kind)
+            stats['calls']+=1;stats['bytes']+=len(prompt.encode());stats['max_prompt_bytes']=max(stats['max_prompt_bytes'],len(prompt.encode()))
+            if full:
+                row=stats.setdefault('by_stage',{}).setdefault(stage,{'first':0,'extra':0});row[kind]=row.get(kind,0)+1
+            write(current)
+        try:
+            reply=executor(prompt,cancelled=cancelled,timeout=min(TASK_SECONDS,max(1,int(deadline-time.monotonic()))))
+            check()
+            result=_result(reply)
+        except RunError as error:
+            if not full or error.code!='invalid_result':raise
+            failed=error.code
+        except Exception as error:
+            code=getattr(error,'code',None)
+            if not full or code in FATAL_CODES or isinstance(error,Cancelled):raise
+            failed=code or type(error).__name__
+        else:
+            streak[0]=0
+            return result
+        streak[0]+=1
+        if streak[0]>=EXECUTOR_STREAK:raise RunError('executor_failed',f'{streak[0]} model calls in a row returned no usable reply; saved results were retained')
+        raise CallFailed(failed)
     if task.get('pack_targets'):
         prepared=[]
         for i,target in enumerate(task['pack_targets']):
@@ -2585,18 +2819,18 @@ def generate(value,task,request,executor,cancelled,deadline,check,blobs=None):
             if len(_encoded(envelope).encode())>MAX_PROMPT_BYTES and prepared:break
             prepared.append((target,packet,finalize))
             payload=envelope
-        isolate=(value.get('intent') or {}).get('task')=='full'
+        isolate=full
         if len(prepared)==1:
             target,packet,finalize=prepared[0]
             try:return {'packed_overviews':{target:finalize(invoke(packet))}}
-            except InvalidClaim:
+            except (InvalidClaim,CallFailed):
                 if not isolate:raise
                 return {'packed_overviews':{},'invalid_scopes':[target]}
         try:
             answer=invoke(payload)
             rows=answer.get('results')
             if not isinstance(rows,list):raise InvalidClaim('Missing independent resource results')
-        except InvalidClaim:
+        except (InvalidClaim,CallFailed):
             if not isolate:raise
             return {'packed_overviews':{},'invalid_scopes':[t for t,_,_ in prepared]}
         verified={};invalid=[]
@@ -2610,36 +2844,41 @@ def generate(value,task,request,executor,cancelled,deadline,check,blobs=None):
         return {'packed_overviews':verified,'invalid_scopes':invalid}
     if task['task']=='overview':
         target=task.get('target');plain=_plain_unit(value,task['repository'],target) if target else None
-        return _quick_overview(repo,request,value['lang'],invoke,cancelled,deadline,raw,None if plain else target,unit=plain)
+        def asked(packet):
+            try:return invoke(packet)
+            except CallFailed:return invoke(packet,'extra')  # one more try for a lost reply, within the limit
+        return _quick_overview(repo,request,value['lang'],asked if full else invoke,cancelled,deadline,raw,None if plain else target,unit=plain)
     payload=_payload(value,task,request,cancelled,deadline,blobs,deferred)
-    if task['task']=='analysis':
-        payload['prompt']+=' You may add preview_programs: [{name,file,line,quote}] for directly evidenced programs, CLI commands or workers. If there are no screens or routes, still provide inspected evidence and unknown as the map schema requires.'
+    _stage_prompt(task,payload)
     extra=[];provisional={}
     if not deferred and len(_encoded(payload).encode())<=MAX_PROMPT_BYTES:
-        result=invoke(payload);needs=result.pop('needs',[])
-        needs=needs if isinstance(needs,list) else []
-        programs=result.pop('preview_programs',None)
-        validate(result,final=not bool(needs))
+        kind='first'
+        while True:
+            try:
+                result=invoke(payload,kind)
+                needs=result.pop('needs',[])
+                needs=needs if isinstance(needs,list) else []
+                programs=result.pop('preview_programs',None)
+                validate(result,final=not bool(needs))
+                break
+            except (CallFailed,InvalidClaim):
+                if not full or kind=='extra':raise
+                kind='extra'  # one corrective or lost-reply retry, within the limit
         if not needs:
             if task['task']=='analysis':
                 _,context=_units({'snapshots':payload.get('snapshots',[])})
                 _preview(value,task,request['commit'],result,programs,context)
             return result
-        if not repo and any('metadata' not in need for need in needs):raise RunError('invalid_result','This task cannot request source reads')
+        if not repo and any('metadata' not in need for need in needs):needs=[n for n in needs if isinstance(n,dict) and 'metadata' in n]
         extra=_needed(repo,request['commit'],needs,cancelled,deadline,payload,blobs)
         # A direct reply asking for context is provisional. Promote it to the
         # same bounded protocol rather than publishing or ignoring its needs.
         payload['provisional_result']=result
         provisional=result
-    if task['task']=='analysis':
-        payload['schema']=copy.deepcopy(payload['schema'])
-        for example in ai_extract.cited(payload['schema']):
-            example.pop('quote')
-        payload['prompt']=ai_extract.analysis_prompt(request['commit'],value['lang'],conf['layout'],
-                                                    request,overview=True,partial=True)
-    header,units=_units(payload)
-    units=list({u['id']:u for u in extra+units}.values())
+    header,units=_batch_units(value,task,request,payload,conf['layout'] if repo else None,extra)
     result=copy.deepcopy(provisional);covered=set();pending=list(units);index=0
+    scope={'batches':0,'settled':0,'unread':0,'unread_units':0,'notes':0,'isolated':0,'reasons':{}}
+    fragments=[]
     def progress():
         with locked():
             current=read(value['id'])
@@ -2652,16 +2891,190 @@ def generate(value,task,request,executor,cancelled,deadline,check,blobs=None):
         # Metadata pages may be numerous. Start with source evidence; all pages
         # remain available to needs and are delivered before final validation.
         pending.sort(key=lambda unit:unit['kind']!='source')
-    # Isolate unpublished, settled batches from the published map and the UI status.
-    # A retry can reuse a packet only within its own worker family and exact task pins.
-    checkpoint_dir=None
-    if task['task'] in MAP_TASKS:
-        family=path(value.get('family') or value.get('resume_from',value['id'])).stem
-        scope_key=ai_extract.digest([1,request['record_arguments'],header,provisional])
-        checkpoint_dir=root()/'checkpoints'/family/scope_key
+    # Settled batches are kept under the content they answer, so another run on the same input (a retry, a continued analysis) reuses them.
+    scope_key=_scope_key(request,header,provisional)
+    # Outside a full analysis, settled batches serve only a retry of the same run, as before.
+    if not full:scope_key=ai_extract.digest([scope_key,value.get('resume_from',value['id'])])
+    checkpoint_dir=_checkpoints()/scope_key if task['task'] in MAP_TASKS else None
     windowed=_windowed(value,task,request)
     wide_batches=bool(deferred) or windowed
-    windowed_system=task['task']=='system' and (value.get('intent') or {}).get('task')=='full' and (value.get('intent') or {}).get('coverage','signal')=='signal'
+    requestable=_requestable(payload)
+    if full:full_header,full_budget=_full_shape(task,header,units,payload)
+    def shape(index,seed_only):
+        """(batch header, packet budget) of the index-th batch."""
+        if full:return full_header,full_budget
+        batch_header={**header,'requestable_metadata':requestable}
+        if wide_batches and (index>1 or windowed) and len(units)>=128:
+            batch_header['source_line_format']='numbered_lines entries are [original one-based line, literal text, optional original character offset].'
+        if seed_only:
+            # Keep the opening review bounded by its few source files. Historical catalog pages have their own pending units.
+            batch_header={k:v for k,v in batch_header.items() if k not in ('known','inspect','deleted','recheck')}
+            batch_header['prompt']=(batch_header.get('prompt','')+' This is an opening source sample. Report directly supported findings. '
+                                    'Catalog review and remaining files follow in later batches.')
+        # Leave room for at least one additional source unit and prior claims.
+        return batch_header,(MAX_PROMPT_BYTES-2*UNIT_BYTES-4096 if wide_batches and (index>1 or windowed) else MAX_PROMPT_BYTES//2)
+    extra_cap=_batch_extra_cap(task['task']) if full else MAX_READ_ROUNDS-1
+    def run_batch(index,batch,batch_header,first_kind,left_after):
+        """Ask one batch until it settles. Returns (fragment, how it ended, pieces requested but never read). Nothing in one batch ends the run:
+        a refused call, a lost reply or an answer that fails its checks closes the batch with what it established."""
+        ids=[u['id'] for u in batch];batch_id=ai_extract.digest([request['record_arguments'],index])
+        checkpoint=checkpoint_dir/(ai_extract.digest([index,ids])+'.json') if checkpoint_dir else None
+        if checkpoint:
+            try:cached=store.read(checkpoint)
+            except (ValueError,OSError):cached=None
+            if isinstance(cached,dict) and 'data' in cached and ai_extract.digest(cached['data'])==cached.get('digest'):
+                data=cached['data']
+                try:
+                    fragment=_unkeep(task['task'],_combine({'backend_routes':[]} if task['task']=='analysis' else {},data['fragment']))
+                    validate(fragment,False)
+                except InvalidClaim:pass  # an unusable saved batch is asked again
+                else:
+                    with locked():
+                        current=read(value['id'])
+                        if current['cancel_requested']:raise Cancelled()
+                        if data['preview']:current['preview']=data['preview']
+                        if data['overview']:current.setdefault('overviews',{})[task['repository']]=data['overview']
+                        write(current)
+                    return fragment,data.get('ended','settled'),0,data.get('notes',0)
+        context=list(batch);accumulated={};reads=[];refused={};served=set(ids);again=set()
+        files={u['value']['file'] for u in batch if u['kind']=='source'}
+        last_error=None;transitions=set();claim_retry=False;call_retry=False;feedback=None;satisfied=None;explained=False
+        kind=first_kind;extras=0;programs=None;ended='settled';notes=0
+        def packet_of(context,shed=True):
+            packet=_batch_payload(batch_header,context,batch_id);rules=packet['batch']
+            rules['rules']=feedback or rules['rules']
+            if task['task']=='analysis':rules['rules']+=' Optionally return top-level preview_programs: [{name,file,line}] for entry points directly evidenced in this context, including CLI commands and workers.'+(UNKNOWN_RULE if full else '')
+            optional=[]
+            if refused:
+                optional.append(('unavailable_requests',[{k:(str(v)[:300] if k=='error' else v) for k,v in row.items()} for row in list(refused.values())[-12:]],
+                                 ' Reads listed in unavailable_requests cannot be served and are never answered; do not request them again, and record what they would have settled in unknown.'))
+            if accumulated:optional.append(('settled',_settled_index(task['task'],accumulated),SETTLED_RULE))
+            if satisfied is not None:
+                optional.append(('satisfied_needs',satisfied,' The exact reads in satisfied_needs are already in snapshots or context_pages, including zero-hit pages. '
+                                 'Use those results and return {batch,covered,result,needs:[]}, with covered equal to units. Record uncertainty in unknown if the supplied material cannot establish a finding.'))
+            base=rules['rules']
+            while True:
+                rules['rules']=base+''.join(rule for _,_,rule in optional)
+                for key,content,_ in optional:rules[key]=content
+                size=len(_encoded(packet).encode())
+                if size<=MAX_PROMPT_BYTES:return packet if shed else size
+                if not shed or not optional:return None if shed else size
+                key,_,_=optional.pop()
+                rules.pop(key,None)  # least needed first: what was satisfied, then the settled index, then the refused reads
+        while True:
+            if kind=='extra' and extras>=extra_cap:ended='rounds';break
+            packet=packet_of(context)
+            if packet is None:ended='unfit';break
+            try:answer=invoke(packet,kind,left_after)
+            except CallDenied:ended='limit';break
+            except CallFailed:
+                extras+=kind=='extra'
+                if call_retry:ended='executor';break
+                call_retry=True;kind='extra';continue
+            extras+=kind=='extra';kind='extra'
+            feedback_now=feedback;feedback=None;satisfied=None
+            try:
+                if answer.get('batch')!=batch_id or answer.get('covered')!=packet['batch']['units']:
+                    if not full:raise RunError('invalid_result','Analysis batch coverage did not match')  # outside a full analysis this ends the run
+                    raise InvalidClaim('The reply did not name this batch and exactly its units in covered')
+                fragment=_result(answer.get('result'))
+                programs=answer.get('preview_programs',fragment.pop('preview_programs',None))
+                if task['task']=='analysis':
+                    if full:notes+=_split_unknown(fragment,files)
+                    _materialize_citations(fragment,programs,context,request['commit'])
+                validate(fragment,False,context if task['task'] in ('analysis','system') else ())
+                merged=_combine(accumulated,fragment)
+            except RunError as error:
+                if error.code in FATAL_CODES or not full and not isinstance(error,InvalidClaim):raise
+                last_error=error
+                if claim_retry or task['task'] not in ('analysis','system'):ended='invalid';break
+                claim_retry=True
+                feedback=(f'Your previous fragment failed validation: {error}. '
+                          'Resubmit this batch with covered equal to units and only supported schema entries. '
+                          +('Select its supplied file and one-based line; include offset when shown. The app supplies the quote. '
+                            if task['task']=='analysis' else
+                            'Cite only tracked source files supplied in this packet, each with its exact one-based line and a literal quote copied from that line. ')
+                          +'Use unknown for unsupported facts. Return {batch,covered,result,needs}.')
+                continue
+            accumulated=merged
+            needs=answer.get('needs',[])
+            needs=needs if isinstance(needs,list) else []
+            if not repo:needs=[n for n in needs if isinstance(n,dict) and 'metadata' in n]
+            if not needs:break
+            # Each model invocation sees only this packet. A piece pushed out of the packet can be asked for and is given once more;
+            # asked again after that, it is answered as unavailable, never as an error.
+            present={u['id'] for u in context};queued={u['id'] for u in reads};requested_here=[];new=False
+            for unit in _needed(repo,request['commit'],needs,cancelled,deadline,payload,blobs):
+                why=_refusal(unit)
+                if why is not None:refused[unit['id']]=why;continue
+                if unit['id'] in present:
+                    if unit['id'] not in ids:requested_here.append(unit)
+                    continue
+                if unit['id'] in queued:continue
+                if unit['id'] in served:
+                    if unit['id'] in again:
+                        refused[unit['id']]={'request':unit['value'].get('path') or unit['value'].get('file'),'error':'Already supplied twice in this batch; use what you recorded from it'}
+                        continue
+                    again.add(unit['id'])
+                reads.append(unit);queued.add(unit['id']);new=True
+            if not reads:
+                if explained:ended='repeated';break
+                explained=True;satisfied=needs;continue
+            transition=(frozenset(present),tuple(u['id'] for u in reads),ai_extract.digest(accumulated))
+            if transition in transitions:ended='cycle';break
+            transitions.add(transition)
+            sticky=[u for u in context if u['kind']=='source' and u['id'] not in ids]
+            context=list(batch)
+            for unit in {u['id']:u for u in requested_here+sticky}.values():
+                if packet_of(context+[unit],False)<=MAX_PROMPT_BYTES*3//4:context.append(unit)
+            before=len(context)
+            while reads and packet_of(context+[reads[0]],False)<=MAX_PROMPT_BYTES:
+                unit=reads.pop(0);context.append(unit);served.add(unit['id'])
+                if unit['kind']=='source':files.add(unit['value']['file'])
+            if len(context)==before:ended='unfit';break
+        unread=len(reads)
+        if not full and ended!='settled':
+            # A run that is not a full analysis keeps its earlier contract: it ends on a batch that cannot settle.
+            if ended=='invalid':raise last_error
+            if ended=='cycle':raise RunError('invalid_result','Analysis repeated a continuation cycle without new findings')
+            if ended=='unfit':raise RunError('source_too_large','Analysis continuation metadata could not fit a bounded input')
+            if ended=='repeated' and not refused:raise RunError('invalid_result','Requested material was already supplied and identified in this batch')
+            note=(f'One batch kept requesting more source than its {MAX_READ_ROUNDS} read rounds allowed; {unread} requested pieces were not read, so findings that depend on them are unconfirmed'
+                  if ended=='rounds' else f'The model kept requesting {len(refused)} pieces that cannot be read from this request, so findings that depend on them are unconfirmed')
+            accumulated=_combine(accumulated,{'unknown':[{'text':note,'needs':'read'} if task['task']=='system' else note]});unread=0
+        if ended in ('settled','rounds','repeated','cycle'):
+            _preview(value,task,request['commit'],accumulated,programs,context)
+            if checkpoint:
+                current=read(value['id'])
+                data={'fragment':accumulated,'preview':current.get('preview'),'overview':current.get('overviews',{}).get(task['repository']),'ended':ended,'notes':notes}
+                store.atomic(checkpoint,{'data':data,'digest':ai_extract.digest(data)})
+        return accumulated,ended,unread,notes
+    def close(index,batch,fragment,ended,unread,notes):
+        nonlocal result
+        ids=[u['id'] for u in batch]
+        if covered.intersection(ids):raise RunError('invalid_result','Duplicate analysis coverage')
+        covered.update(ids);scope['batches']+=1;scope['notes']+=notes
+        if ended not in ('settled','cached'):scope['reasons'][ended]=scope['reasons'].get(ended,0)+1
+        if ended in ('limit','executor','invalid','unfit') or unread:
+            scope['unread']+=1;scope['unread_units']+=len(batch) if ended in ('limit','executor','invalid','unfit') and not fragment else unread
+        else:scope['settled']+=1
+        if fragment:
+            try:result=_combine(result,fragment);fragments.append((index,ids,fragment))
+            except RunError as error:
+                if error.code in FATAL_CODES:raise
+                scope['isolated']+=1  # it contradicts what earlier batches settled; the first values stay
+        progress()
+    progress()
+    if full:
+        batch_header,budget=full_header,full_budget
+        planned,unfit=plan_batches(batch_header,pending,budget)
+        files=[checkpoint_dir/(ai_extract.digest([i,[u['id'] for u in b]])+'.json') for i,b in enumerate(planned,1)]
+        open_after=[sum(1 for f in files[i+1:] if not f.exists()) for i in range(len(planned))]
+        for i,batch in enumerate(planned,1):
+            close(i,batch,*run_batch(i,batch,batch_header,'extra' if provisional else 'first',open_after[i-1]))
+        for unit in unfit:
+            covered.add(unit['id']);scope['batches']+=1;scope['unread']+=1;scope['unread_units']+=1;scope['reasons']['unfit']=scope['reasons'].get('unfit',0)+1
+        index=len(planned);pending=[]
     settled=[False]
     def settle():
         """Once, after every batch: read the saved evidence of recheck targets that no batch could judge."""
@@ -2673,7 +3086,6 @@ def generate(value,task,request,executor,cancelled,deadline,check,blobs=None):
         fresh=[u for u in _recheck_windows(repo,request['commit'],raw,conf['layout'],missing,cancelled,deadline,blobs) if u['id'] not in known]
         units.extend(fresh);pending.extend(fresh)
         return bool(fresh)
-    progress()
     while pending or deferred or settle():
         if deferred and index:
             repo_path,head,previous,first=deferred.pop()
@@ -2686,175 +3098,58 @@ def generate(value,task,request,executor,cancelled,deadline,check,blobs=None):
             pending=_source_first(pending+later)
             progress()
             if not pending:break
-        check();batch=[];index+=1;batch_id=ai_extract.digest([request['record_arguments'],index])
-        # Keep the opening review bounded by its few source files. Historical
-        # catalog pages have their own pending units, and explicit needs can
-        # still retrieve them in this round from the original payload.
-        seed_only = bool(deferred) and index == 1 and pending[0]['kind'] == 'source'
-        batch_header = header
-        if wide_batches and (index>1 or windowed) and len(units)>=128:
-            batch_header={**header,'source_line_format':'numbered_lines entries are [original one-based line, literal text, optional original character offset].'}
-        if seed_only:
-            batch_header = {k: v for k, v in header.items()
-                            if k not in ('known', 'inspect', 'deleted', 'recheck')}
-            batch_header['prompt'] = (batch_header.get('prompt', '') +
-                                      ' This is an opening source sample. Report directly supported findings. '
-                                      'Catalog review and remaining files follow in later batches.')
-        # Leave room for at least one additional source unit and prior claims.
-        budget=MAX_PROMPT_BYTES-2*UNIT_BYTES-4096 if wide_batches and (index>1 or windowed) else MAX_PROMPT_BYTES//2
-        while pending and (not seed_only or pending[0]['kind'] == 'source'):
-            candidate=batch+[pending[0]]
-            if len(_encoded(_batch_payload(batch_header,candidate,batch_id)).encode())>budget:
-                if not batch:raise RunError('source_too_large','Analysis metadata could not fit a bounded input')
-                break
-            batch.append(pending.pop(0))
-        ids=[u['id'] for u in batch];context=list(batch);prior={};reads=[];accumulated=prior;programs=None
-        refused={}  # reads that cannot be served, told to the model in every later round
-        checkpoint=None
-        if checkpoint_dir:
-            checkpoint=checkpoint_dir/(ai_extract.digest([batch_id,ids])+'.json')
-            if value.get('resume_from') or value.get('family'):
-                try:cached=store.read(checkpoint)
-                except (ValueError,OSError):cached=None
-                if isinstance(cached,dict) and 'data' in cached and ai_extract.digest(cached['data'])==cached.get('digest'):
-                    data=cached['data']
-                    # A settled packet saved by an older merge can hold one registration twice (with and without its mount).
-                    fragment=_unkeep(task['task'],_combine({'backend_routes':[]} if task['task']=='analysis' else {},data['fragment']))
-                    validate(fragment,False)
-                    result=_combine(result,fragment)
-                    covered.update(ids)
-                    with locked():
-                        current=read(value['id'])
-                        if current['cancel_requested']:raise Cancelled()
-                        if data['preview']:current['preview']=data['preview']
-                        if data['overview']:current.setdefault('overviews',{})[task['repository']]=data['overview']
-                        write(current)
-                    progress()
-                    continue
-        read_transitions=set()
-        claim_retry_used=False
-        claim_feedback=None
-        explained_read=False
-        satisfied_needs=None
-        read_rounds=SYSTEM_READ_ROUNDS if windowed_system else MAX_READ_ROUNDS
-        for round in range(read_rounds):
-            packet=_batch_payload(batch_header,context,batch_id,prior)
-            if task['task']=='analysis':
-                packet['batch']['rules']+=' Optionally return top-level preview_programs: [{name,file,line}] for entry points directly evidenced in this context, including CLI commands and workers.'
-                if len(_encoded(packet).encode())>MAX_PROMPT_BYTES:
-                    packet=_batch_payload(batch_header,context,batch_id,prior)
-            if satisfied_needs is not None:
-                packet['batch']['rules']=(
-                    'The exact reads in satisfied_needs are already in snapshots or context_pages, including zero-hit pages. '
-                    'Use those results and return {batch,covered,result,needs:[]}, with covered equal to units. '
-                    'Record uncertainty in unknown if the supplied material cannot establish a finding.')
-                packet['batch']['satisfied_needs']=satisfied_needs
-                if len(_encoded(packet).encode())>MAX_PROMPT_BYTES:
-                    packet['batch'].pop('prior',None)
-                satisfied_needs=None
-            if refused:
-                packet['batch']['unavailable_requests']=[{k:(str(v)[:300] if k=='error' else v) for k,v in row.items()} for row in list(refused.values())[-12:]]
-                packet['batch']['rules']+=' Reads listed in unavailable_requests cannot be served and are never answered; do not request them again, and record what they would have settled in unknown.'
-            if claim_feedback is not None:
-                packet['batch']['rules']=claim_feedback
-                claim_feedback=None
-            answer=invoke(packet)
-            if answer.get('batch')!=batch_id or answer.get('covered')!=packet['batch']['units']:raise RunError('invalid_result','Analysis batch coverage did not match')
-            fragment=_result(answer.get('result'))
-            programs=answer.get('preview_programs',fragment.pop('preview_programs',None))
-            try:
-                if task['task']=='analysis':
-                    _materialize_citations(fragment,programs,context,request['commit'])
-                validate(fragment,False,context if task['task'] in ('analysis','system') else ())
-            except InvalidClaim as error:
-                if claim_retry_used or task['task'] not in ('analysis','system'):raise
-                claim_retry_used=True
-                claim_feedback=(f'Your previous fragment failed validation: {error}. '
-                                'Resubmit this batch with covered equal to units and only supported schema entries. '
-                                +('Select its supplied file and one-based line; include offset when shown. The app supplies the quote. '
-                                  if task['task']=='analysis' else
-                                  'Cite only tracked source files supplied in this packet, each with its exact one-based line and a literal quote copied from that line. ')
-                                +'Use unknown for unsupported facts. Return {batch,covered,result,needs}.')
-                continue
-            accumulated=_combine(prior,fragment)
-            needs=answer.get('needs',[])
-            needs=needs if isinstance(needs,list) else []
-            requested_here=[]
-            if needs:
-                if not repo and any('metadata' not in need for need in needs):raise RunError('invalid_result','This task cannot request source reads')
-                # Each model invocation sees only this packet. Earlier pages can
-                # be requested again after they fall outside the context budget.
-                present = {u['id'] for u in context}
-                queued = {u['id'] for u in reads}
-                refused_now=False
-                for unit in _needed(repo,request['commit'],needs,cancelled,deadline,payload,blobs):
-                    why=_refusal(unit)
-                    if why is not None:
-                        refused[unit['id']]=why;refused_now=True
-                    elif unit['id'] in present and unit['id'] not in ids:
-                        requested_here.append(unit)
-                    elif unit['id'] not in present and unit['id'] not in queued:
-                        reads.append(unit)
-                        queued.add(unit['id'])
-                if not reads and refused_now and explained_read:
-                    # Nothing new can be given and the model was told so once: keep what this batch established and say what stayed unread.
-                    note=f'The model kept requesting {len(refused)} pieces that cannot be read from this request, so findings that depend on them are unconfirmed'
-                    accumulated=_combine(accumulated,{'unknown':[{'text':note,'needs':'read'} if task['task']=='system' else note]})
-                elif not reads:
-                    if explained_read:
-                        raise RunError('invalid_result','Requested material was already supplied and identified in this batch')
-                    explained_read=True
-                    satisfied_needs=needs
-                    prior=accumulated
-                    continue
-                if reads:
-                    transition = (frozenset(present), tuple(u['id'] for u in reads),
-                                  ai_extract.digest(accumulated))
-                    if transition in read_transitions:
-                        raise RunError('invalid_result','Analysis repeated a continuation cycle without new findings')
-                    read_transitions.add(transition)
-            if not reads:
-                result=_combine(result,accumulated)
-                _preview(value,task,request['commit'],accumulated,programs,context)
-                if checkpoint:
-                    current=read(value['id'])
-                    data={'fragment':accumulated,'preview':current.get('preview'),
-                          'overview':current.get('overviews',{}).get(task['repository'])}
-                    store.atomic(checkpoint,{'data':data,'digest':ai_extract.digest(data)})
-                break
-            prior=accumulated
-            sticky=[u for u in context if u['kind']=='source' and u['id'] not in ids]
-            context=list(batch)
-            retained={u['id']:u for u in requested_here+sticky}
-            for unit in retained.values():
-                if len(_encoded(_batch_payload(batch_header,context+[unit],batch_id,prior)).encode())<=MAX_PROMPT_BYTES*3//4:context.append(unit)
-            before_reads=len(context)
-            while reads and len(_encoded(_batch_payload(batch_header,context+[reads[0]],batch_id,prior)).encode())<=MAX_PROMPT_BYTES:
-                context.append(reads.pop(0))
-            if len(context)==before_reads:raise RunError('source_too_large','Analysis continuation metadata could not fit a bounded input')
-        else:
-            # The model kept asking for more material. Keep what this batch established and say what was not read.
-            note=f'One batch kept requesting more source than its {read_rounds} read rounds allowed; {len(reads)} requested pieces were not read, so findings that depend on them are unconfirmed'
-            accumulated=_combine(accumulated,{'unknown':[{'text':note,'needs':'read'} if task['task']=='system' else note]})
-            result=_combine(result,accumulated)
-            if checkpoint:
-                current=read(value['id'])
-                data={'fragment':accumulated,'preview':current.get('preview'),'overview':current.get('overviews',{}).get(task['repository'])}
-                store.atomic(checkpoint,{'data':data,'digest':ai_extract.digest(data)})
-        if covered.intersection(ids):raise RunError('invalid_result','Duplicate analysis coverage')
-        covered.update(ids)
-        progress()
+        check();index+=1
+        seed_only=bool(deferred) and index==1 and pending[0]['kind']=='source'
+        batch_header,budget=shape(index,seed_only)
+        n=_next_batch(batch_header,[u for u in pending if u['kind']=='source'] if seed_only else pending,budget)
+        if not n:
+            # One piece too large for any packet: it is not read, and the rest goes on.
+            unit=pending.pop(0);covered.add(unit['id']);scope['batches']+=1;scope['unread']+=1;scope['unread_units']+=1
+            scope['reasons']['unfit']=scope['reasons'].get('unfit',0)+1;continue
+        batch=pending[:n];del pending[:n]
+        # After the planned batches of a full analysis, recheck windows are follow-up reads of the stage.
+        close(index,batch,*run_batch(index,batch,batch_header,'extra' if full else 'first',0))
     if covered!={u['id'] for u in units}:raise RunError('invalid_result','Analysis source coverage was incomplete')
-    try:
-        validate(_prune_dangling(task['task'],_unkeep(task['task'],result)))
-        if windowed and request.get('mode') in ('review','patch'):_supersede(result,request,raw,repo,request['commit'],conf['layout'])
+    if full and task['task'] in MAP_TASKS:
+        _record_scope(value['id'],task,scope)
+        note=_gap_note(task['task'],value['lang'],scope)
+        if note and task['task'] in ('analysis','system'):result['unknown']=[*(result.get('unknown') or []),note]
+        if task['task']=='analysis' and not result.get('screens') and not result.get('backend_routes') and not result.get('unknown'):
+            # The saved map needs a reason when it holds no screen and no route; the batch-wide remarks were counted, not kept.
+            result['unknown']=[f'{scope["batches"]}개 입력 묶음에서 화면이나 HTTP 경로를 확인하지 못했다' if value['lang']!='en' else f'No screen or HTTP route was established from {scope["batches"]} input batches']
+    def final(merged):
+        merged=_prune_dangling(task['task'],_unkeep(task['task'],copy.deepcopy(merged)))
+        validate(merged)
+        if windowed and request.get('mode') in ('review','patch'):_supersede(merged,request,raw,repo,request['commit'],conf['layout'])
         if task['task']=='system':
-            ids={n['id'] for n in result.get('nodes',[])};ext={x['id'] for x in result.get('externals',[])}
-            if any(l.get('from') not in ids or l.get('to') not in ids for l in result.get('links',[])) or any(set(n.get('uses',[]))-ext for n in result.get('nodes',[])):raise RunError('invalid_result','Analysis links named unknown targets')
+            ids={n['id'] for n in merged.get('nodes',[])};ext={x['id'] for x in merged.get('externals',[])}
+            if any(l.get('from') not in ids or l.get('to') not in ids for l in merged.get('links',[])) or any(set(n.get('uses',[]))-ext for n in merged.get('nodes',[])):raise RunError('invalid_result','Analysis links named unknown targets')
+        return merged
+    try:out=final(result)
     except RunError as error:
-        if error.code!='pins_changed':error.final_merge=True  # every batch settled, yet the merged whole is unusable: the same batches would fail again
-        raise
-    return result
+        if error.code=='pins_changed':raise
+        if not full:
+            error.final_merge=True  # every batch settled, yet the merged whole is unusable: the same batches would fail again
+            raise
+        # Keep the batches that merge into a usable whole, in order; a batch that breaks it is left out and asked again next time.
+        kept=copy.deepcopy(provisional)
+        for index,ids,fragment in fragments:
+            try:trial=_combine(kept,fragment);final(trial)
+            except RunError as later:
+                if later.code=='pins_changed':raise
+                scope['isolated']+=1
+                (checkpoint_dir/(ai_extract.digest([index,ids])+'.json')).unlink(missing_ok=True)
+                continue
+            kept=trial
+        for key in ('unknown',):
+            if key in result:kept[key]=list(dict.fromkeys(json.dumps(x,sort_keys=True,ensure_ascii=False) for x in [*(kept.get(key) or []),*result[key]]))
+            if key in kept:kept[key]=[json.loads(x) for x in kept[key]]
+        note=_gap_note(task['task'],value['lang'],scope)
+        if note and task['task'] in ('analysis','system') and note not in (kept.get('unknown') or []):kept['unknown']=[*(kept.get('unknown') or []),note]
+        _record_scope(value['id'],task,scope)
+        out=final(kept)
+    if checkpoint_dir:out['@checkpoint']=scope_key
+    return out
 
 def _partial_rows(kind,result):
     def cite(item):return {k:item[k] for k in ('file','line','quote') if k in item}
@@ -2900,6 +3195,14 @@ def _save(task,request,result):
     if task['task']=='analysis': return ai_extract.record(**args)
     if task['task']=='briefing': return briefing.record(**args)
     return ai_extract.task_record(**args)
+
+def _close_stage(run_id,task,error,cancelled):
+    """A map, structure or groups stage that cannot finish closes alone: the run goes on with the next stage and ends as completed with gaps."""
+    with locked():
+        value=read(run_id)
+        if value['cancel_requested']:raise Cancelled()
+        value.setdefault('stage_unavailable',[]).append({'repository':task['repository'],'task':task['task'],'code':getattr(error,'code',None) or 'invalid_result','reason':str(error)[:300]})
+        value.update(state='running',current_task=None,batch_progress=None);write(value)
 
 def run(run_id, executor=None):
     """Synchronous worker entry; executor(prompt, cancelled=callable, timeout=seconds) is injectable."""
@@ -2950,9 +3253,10 @@ def run(run_id, executor=None):
                         value=read(run_id)
                         if value['cancel_requested']: raise Cancelled()
                         value.update(state='completed',current_task=None,finished_at=store.now())
-                        value=_seal(write(value))
-                        family=path(value.get('family') or value.get('resume_from',value['id'])).stem
-                        shutil.rmtree(root()/'checkpoints'/family,ignore_errors=True)
+                        value=_seal(value)
+                        # Checkpoints of the earlier format were kept per run family; nothing reads them any more.
+                        for old in (root()/'checkpoints').glob('*'):
+                            if re.fullmatch(r'[0-9a-f]{32}',old.name):shutil.rmtree(old,ignore_errors=True)
                         return value
                 task=plan['tasks'][0]
                 if resource_run and len(value['resource_targets'])>=RESOURCE_PACK_SIZE:
@@ -2984,6 +3288,8 @@ def run(run_id, executor=None):
                 try:
                     result=generate(value,task,request,executor,cancelled,deadline,check,blobs)
                 except RunError as error:
+                    if full_run and task['task'] in MAP_TASKS and error.code not in FATAL_CODES:
+                        _close_stage(run_id,task,error,cancelled);continue
                     if full_run and task.get('target') and error.code=='invalid_result':
                         _record_unit_failures(run_id,task['repository'],task.get('pack_targets') or [task['target']],str(error),cancelled)
                         continue
@@ -2996,6 +3302,7 @@ def run(run_id, executor=None):
                         value.update(current_task=None);write(value)
                     continue
                 if time.monotonic()>deadline: raise RunError('timeout','Analysis reached its time limit; late output was not saved')
+                scope_key=result.pop('@checkpoint',None) if isinstance(result,dict) else None
                 if isinstance(result,dict): result=json.dumps(result,ensure_ascii=False)
                 if not isinstance(result,str) or len(result)>8_000_000: raise RunError('invalid_result','The analysis executor returned invalid output; saved results were retained')
                 with locked():
@@ -3023,7 +3330,10 @@ def run(run_id, executor=None):
                     else:
                         try:_save(task,request,result)
                         except ValueError as error:
-                            error.final_merge=True;raise
+                            if not full_run:raise
+                            value.setdefault('stage_unavailable',[]).append({'repository':task['repository'],'task':task['task'],'code':'invalid_result','reason':str(error)[:300]})
+                            value.update(state='running',current_task=None,batch_progress=None);write(value);continue
+                        if scope_key:shutil.rmtree(_checkpoints()/scope_key,ignore_errors=True)
                         done=(value.get('partial_results',{}).get(task['repository']) or {}).get(task['task'])
                         if done:done.update(state='published',items=[])
                     preview=value.get('preview',{})
@@ -3036,11 +3346,8 @@ def run(run_id, executor=None):
         except Exception as error:
             with locked():
                 value=read(run_id)
-                if getattr(error,'final_merge',False) and value.get('family'):
-                    # Settled batches that merge into an unusable whole are asked again next time, within the same call limit.
-                    shutil.rmtree(root()/'checkpoints'/path(value['family']).stem,ignore_errors=True)
                 if isinstance(error,Cancelled) or value['cancel_requested']:
-                    value.update(state='cancelled',finished_at=store.now(),error=None);return _seal(write(value))
+                    value.update(state='cancelled',finished_at=store.now(),error=None);return _seal(value)
                 # Never persist raw subprocess output (it may contain credentials/source).
                 code=getattr(error,'code',None) or 'analysis_failed'
                 message=str(error) if isinstance(error,(ValueError,RunError)) else 'Analysis could not finish. Retry to finish missing tasks; saved results were retained'
