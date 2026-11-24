@@ -582,7 +582,7 @@ def _full_scope(value,defer=False):
         whole=analysis_label.summary(catalog,index,index.get('project_description') or '',_known_routes(raw[value['branch']],index,head),spots)
         out[rid]={'pin':pin,'repo':conf['path'],'catalog':catalog,'sizes':sizes,'files':files,
                   'missing':sorted(n for n in lang_rules.needed(files) if not lang_rules.load(n)),
-                  'summary':whole,'spots':spots}
+                  'summary':whole,'spots':spots,'flows':analysis_label.edges(index)}
     return out
 
 def _known_routes(selected,index,head):
@@ -644,7 +644,7 @@ def _full_plan(value,history,defer=False):
     calls['total']=sum(calls[k] for k in CALL_KINDS)
     return scopes,plans,calls
 
-def _publish_shapes(value,rid,commit,labels,catalog,repo):
+def _publish_shapes(value,rid,commit,labels,catalog,repo,flows=()):
     """Write groups and system in the shapes the map screen reads, marked as an interpretation of the structure summary."""
     texts={}
     def line(file,number):
@@ -653,7 +653,7 @@ def _publish_shapes(value,rid,commit,labels,catalog,repo):
             try:texts[file]=_git(repo,'show',f'{commit}:{file}').decode('utf-8','ignore').splitlines()
             except Exception:texts[file]=[]
         return texts[file][number-1] if 0<number<=len(texts[file]) else None
-    groups,system=analysis_label.shapes(catalog,labels,line)
+    groups,system=analysis_label.shapes(catalog,labels,line,flows)
     meta={'source':'ai','basis':'structure_summary','provider':'claude-cli','commit':commit,'branch':value['branch'],'language':value['lang'],'generated_at':store.now()}
     with store.locked(value['project']):
         _,raw,stored_rid,head=ai_extract.context(value['project'],rid,value['branch'])
@@ -741,7 +741,7 @@ def _run_full(run_id,executor,cancelled):
             merged={'units':{k:v for p in labeled for k,v in p['units'].items()},'groups':[g for p in labeled for g in p['groups']],
                     'programs':(structure or {}).get('programs',[]),'links':(structure or {}).get('links',[]),
                     'requests':{k:v for p in labeled for k,v in (p.get('requests') or {}).items()}}
-            _publish_shapes(value,rid,scope['pin']['commit'],merged,scope['catalog'],scope['repo'])
+            _publish_shapes(value,rid,scope['pin']['commit'],merged,scope['catalog'],scope['repo'],scope['flows'])
 
 def _explain_unit(run_id,executor,cancelled):
     """The explanation of one unit the user opened: one call over its read source lines, saved as soon as it is checked."""

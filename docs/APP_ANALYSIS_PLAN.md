@@ -75,8 +75,12 @@ language) join the last labeling part.
 ## What the AI may claim
 
 - Labels may cite only the unit, evidence and request refs the summary listed. Anything else is dropped and counted
-  (`dropped`). For an evidence ref, local code fills the file, line and literal line text of the pinned commit, so
-  the evidence of a program or link is a declaration line the local map read.
+  (`dropped`). For an evidence ref, local code fills the file, line and literal line text of the pinned commit.
+- A link's evidence is found locally (`origin: local_link`): up to three lines where a code file of one program imports
+  a file of the other or sends a request the other serves, one per source file, most-connected files first. Only the
+  link's own direction counts; a link the local map shows the other way is kept as given. Without such a line, and for
+  every program, the declarations the model cited are kept (`origin: cited`) and the screen titles them 「관련 코드」,
+  because they only show code inside that area.
 - Screens and routes come only from local calculation. The AI names and groups them but never adds one.
 - No source line is sent for labels, so names and descriptions are an interpretation of the structure and are not
   checked against code. The board says this. Unit explanations are made from read source lines and are checked against them.

@@ -276,7 +276,7 @@ const UI_EN = {
   ' · 이 일을 시작하게 하는 서버 기능 ': ' · Triggering endpoints: ', '요청을 복사해 연결된 에이전트에 전달하세요': 'Copy the request to your connected agent',
   '이 프로그램의 코드를 건드린 PR ': 'PRs affecting this program: ', ' (열린 것과 최근 7일 병합)': ' (open or merged in 7 days)',
   '사본 ': 'Copies: ', '이 코드의 파일 ': 'This code’s files: ', '개가 들어 있고 ': '; different: ', '개가 ': ' versus ', '의 판과 다릅니다': '',
-  '코드에서 직접 닿는 데이터 ': 'Data accessed directly: ', '근거': 'Evidence',
+  '코드에서 직접 닿는 데이터 ': 'Data accessed directly: ', '근거': 'Evidence', '관련 코드': 'Related code',
   '의 파일 ': ' files: ', '개가 다른 버전으로 들어 있습니다. 같은 파일의 서로 다른 버전이 코드에 포함돼 있습니다': ' use a different version; different versions of the same file are included in the code',
   '자동 테스트': 'Linked tests',
   '기록 없음': 'No change history yet.', '↻ 새로고침을 누르면 설정에서 고른 기준 시각 뒤에 달라진 것이 여기에 쌓입니다.': 'Refresh to record structural changes since the previous refresh.',
@@ -1901,7 +1901,7 @@ function sysView(m) {
   y.externals.forEach((x, i) => { const users = y.nodes.filter(n => (n.uses || []).includes(x.id));
     h += ui`<div class="card node external ${S.node && !users.some(n => n.id === S.node) ? 'dim' : ''}"><div class="nm">${esc(x.name)}</div><div class="s">${esc(x.what)}</div><div class="s">쓰는 곳: ${users.map(n => esc(n.name)).join(', ') || tr('없음')}</div></div>`; });
   h += ui`</div></div><div class="sect"><h4>선 ${LINKS.length}개</h4><div class="group">` + LINKS.map((l, i) => { const a = y.nodes.find(n => n.id === l.from), b = y.nodes.find(n => n.id === l.to);
-    return `<div class="row ${S.node && l.from !== S.node && l.to !== S.node ? 'dim' : ''}"><span class="wn inline">${i + 1}</span><div class="grow"><div class="tw"><b class="strong">${esc(a.name)} → ${esc(b.name)}</b> ${esc(linkLabel(l))}</div></div>${l.sure === 'doc' ? tr('<span class="pill">문서로만 확인</span>') : l.sure === 'calc' ? tr('<span class="pill">사본 비교로 계산</span>') : ''}${evHtml(m, l.ev)}</div>`; }).join('') + ui`</div></div>
+    return `<div class="row ${S.node && l.from !== S.node && l.to !== S.node ? 'dim' : ''}"><span class="wn inline">${i + 1}</span><div class="grow"><div class="tw"><b class="strong">${esc(a.name)} → ${esc(b.name)}</b> ${esc(linkLabel(l))}</div></div>${l.sure === 'doc' ? tr('<span class="pill">문서로만 확인</span>') : l.sure === 'calc' ? tr('<span class="pill">사본 비교로 계산</span>') : ''}${l.ev?.[0]?.origin === 'cited' ? `<span class="pill">${tr('관련 코드')}</span>` : ''}${evHtml(m, l.ev)}</div>`; }).join('') + ui`</div></div>
     <div class="sect"><h4>지도 밖의 구성 요소</h4><div class="group">` + y.others.map(o => `<div class="row"><div class="grow"><div class="tw"><b class="strong">${esc(o.name)}</b> ${esc(o.what)}</div></div>${evHtml(m, o.ev)}</div>`).join('') + (y.others.length ? '' : tr('<div class="row"><div class="grow empty">없음</div></div>')) + `</div></div>`;
   return h;
 }
@@ -1925,7 +1925,7 @@ function sysInspector(m) {
   if ((n.copies || []).length) h += ui`<div class="sect"><h4>사본 ${n.copies.length}</h4><div class="group">${n.copies.map(c => { const d = c.files.filter(f => !f.same); return ui`<div class="row"><div class="grow"><div class="tw mono">${esc(c.branch)}</div><div class="s">이 코드의 파일 ${c.files.length}개가 들어 있고 ${d.length}개가 ${esc(c.against)}의 판과 다릅니다</div>${d.map(f => `<div class="s mono">${esc(f.path)}</div>`).join('')}</div></div>`; }).join('')}</div></div>`;
   if ((n.tables || []).length) h += ui`<div class="sect"><h4>코드에서 직접 닿는 데이터 ${n.tables.length}</h4><div class="flowline">${n.tables.map(t => `<span class="pill click" data-f="table|${esc(t)}">${esc(tableName(t))}</span>`).join('')}</div></div>`;
   if ((n.unknown || []).length) h += ui`<div class="sect"><h4>아직 모르는 것</h4><div class="group">${n.unknown.map(needHtml).join('')}</div></div>`;
-  return h + ui`<div class="sect"><h4>근거</h4>${evHtml(m, n.ev)}</div>`;
+  return h + `<div class="sect"><h4>${tr(n.ev?.[0]?.origin === 'cited' ? '관련 코드' : '근거')}</h4>${evHtml(m, n.ev)}</div>`;
 }
 // 상자 위치를 재서 선과 번호를 얹는다. 위치는 화면 크기에 따라 달라져 여기서만 계산한다.
 function drawWires() {

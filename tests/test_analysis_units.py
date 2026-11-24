@@ -142,7 +142,7 @@ class FullRun(unittest.TestCase):
         raw=self.raw();system=raw['system.ai'] if (raw.get('system.ai') or {}).get('basis') else raw['system']
         self.assertEqual([n['name'] for n in system['nodes']],['Service']);self.assertEqual(system['basis'],'structure_summary')
         # The model cited an evidence ref; local code filled the file, line and literal text of the pinned commit.
-        ev=system['nodes'][0]['ev'];self.assertEqual(len(ev),1)
+        ev=system['nodes'][0]['ev'];self.assertEqual((len(ev),ev[0]['origin']),(1,'cited'))
         self.assertEqual((self.repo/ev[0]['file']).read_text().splitlines()[ev[0]['line']-1].strip(),ev[0]['quote'])
         self.assertEqual(raw['groups']['request_names'],{f'api.py::{p[1:]}':f'Request {p}' for p in self.PATHS})
         # Pressing again with nothing changed sends nothing; the reopened board equals what the run saved.
@@ -226,6 +226,29 @@ class FullRun(unittest.TestCase):
         calls=[];done=analysis_run.run(job['id'],self.executor(calls))
         self.assertEqual((done['state'],len(calls)),('completed',1))
         self.assertEqual({r[0]:r[4] for r in self.board()['repositories'][0]['units']}[unit],'saved')
+
+
+class LinkEvidence(unittest.TestCase):
+    """A link's evidence is the local line that makes it; without one, the cited declarations are kept as related code."""
+    def test_import_lines_back_a_link_and_other_links_keep_cited_lines(self):
+        catalog={'units':[{'id':'folder:web','kind':'folder','files':['web/a.ts','web/b.ts']},{'id':'folder:api','kind':'folder','files':['api/s.py']},
+                          {'id':'folder:jobs','kind':'folder','files':['jobs/j.py']}]}
+        labels={'units':{},'groups':[],'programs':[{'name':n,'kind':'program','what':'','units':[u],'ev':[['api/s.py',2]]} for n,u in
+                                                   (('Web','folder:web'),('API','folder:api'),('Jobs','folder:jobs'))],
+                'links':[{'from':0,'to':1,'label':'calls','ev':[['web/b.ts',9]]},{'from':2,'to':1,'label':'uses','ev':[['jobs/j.py',1]]},
+                         {'from':1,'to':0,'label':'backwards','ev':[['api/s.py',2]]}]}
+        flows=[('web/b.ts',4,'api/s.py'),('web/a.ts',7,'api/s.py'),('web/a.ts',3,'api/s.py'),('web/a.ts',1,'web/b.ts')]  # the most-connected file first
+        line=lambda file,number:f'{file} line {number}'
+        _,system=analysis_label.shapes(catalog,labels,line,flows)
+        rows=lambda ev:[(e['file'],e['line'],e['quote'],e['origin']) for e in ev]
+        self.assertEqual(rows(system['links'][0]['ev']),[('web/a.ts',3,'web/a.ts line 3','local_link'),('web/b.ts',4,'web/b.ts line 4','local_link')])
+        self.assertEqual(rows(system['links'][1]['ev']),[('jobs/j.py',1,'jobs/j.py line 1','cited')])  # no local line: the cited one, shown as related code
+        # The local map shows web -> api only; the api -> web link is kept as given, with no local evidence.
+        self.assertEqual((system['links'][2]['from'],system['links'][2]['to'],rows(system['links'][2]['ev'])),('p2','p1',[('api/s.py',2,'api/s.py line 2','cited')]))
+        self.assertEqual({e['origin'] for n in system['nodes'] for e in n['ev']},{'cited'})
+        index={'imports':[{'file':'tests/test_web.py','line':1,'target':'api/s.py'},{'file':'web/a.ts','line':3,'target':'api/s.py'}],
+               'service_flow':{'connections':[{'client':{'file':'web/b.ts','line':4},'server':{'file':'api/s.py','line':2}}]}}
+        self.assertEqual(analysis_label.edges(index),[('web/a.ts',3,'api/s.py'),('web/b.ts',4,'api/s.py')])  # a test file shows no connection
 
 
 class StructureRepair(unittest.TestCase):

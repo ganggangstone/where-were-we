@@ -15,6 +15,8 @@ import hashlib
 import json
 import posixpath
 
+import source_signals
+
 BOUND = 64 * 1024  # bytes of summary JSON in one labeling call
 DECLARATIONS = 3
 FILES = 3
@@ -236,17 +238,40 @@ def structure_input(whole, labeled, ref_of):
     return {'description': whole['description'], 'links': whole['links'], 'groups': out}
 
 
-def shapes(catalog, labels, line=lambda file, number: None):
+def edges(index):
+    """[(file, line, target file)] the local map read: import lines and client requests matched to the server route,
+    from code files only (a test or support file importing both sides does not show how the programs connect)."""
+    service = index.get('service_flow') or {}
+    return [row for row in [(e['file'], e['line'], e['target']) for e in index.get('imports', []) if isinstance(e.get('target'), str)] + \
+           [(c['client']['file'], c['client']['line'], c['server']['file']) for c in service.get('connections', []) if c.get('client') and c.get('server')]
+            if source_signals.kind(row[0]) == 'code']
+
+
+def _local_link(flows, a, b):
+    """Up to 3 (file, line) where a file of `a` imports or requests a file of `b`, one per source file, most-connected files first.
+    Only this direction counts: a link the local map shows the other way gets none."""
+    hits = {}
+    for file, number, target in flows:
+        if file in a and file not in b and target in b and target not in a:
+            hits.setdefault(file, []).append(number)
+    ordered = sorted(hits.items(), key=lambda item: (-len(item[1]), item[0]))
+    return [(file, min(numbers)) for file, numbers in ordered[:3]]
+
+
+def shapes(catalog, labels, line=lambda file, number: None, flows=()):
     """The saved shapes the map screen reads: groups {groups, names, request_names} and system {nodes, links, externals, others}.
-    line(file, number) -> the literal text of that line of the pinned commit, or None; evidence without it is left out."""
-    def ev(rows):
+    line(file, number) -> the literal text of that line of the pinned commit, or None; evidence without it is left out.
+    flows: edges(index). A link's evidence is the local lines that make it (origin 'local_link'); without any, and for
+    programs, it is the declarations the model cited (origin 'cited'), which only show related code."""
+    def ev(rows, origin='cited'):
         out = []
         for file, number in rows or []:
             text = line(file, number)
             if text and text.strip():
-                out.append({'file': file, 'line': number, 'quote': text.strip()[:TEXT * 2], 'ok': True})
+                out.append({'file': file, 'line': number, 'quote': text.strip()[:TEXT * 2], 'ok': True, 'origin': origin})
         return out
     units = {u['id']: u for u in catalog['units']}
+    owned = [{f for r in p['units'] for f in units[r]['files']} for p in labels['programs']]
     screen_path = {u['id']: u['path'] for u in catalog['units'] if u['kind'] == 'screen' and u.get('path')}
     names = {screen_path[r]: v['name'] for r, v in labels['units'].items() if r in screen_path}
     groups = []
@@ -259,7 +284,8 @@ def shapes(catalog, labels, line=lambda file, number: None):
         code = sorted({_folder(units[r]) for r in p['units']} - {''})[:8]
         nodes.append({'id': f'p{i+1}', 'name': p['name'], 'kind': p['kind'], 'what': p['what'], 'origin': 'repo', 'origin_text': '',
                       'code': code, 'uses': [], 'unknown': [], 'col': 1 if p['kind'] == 'user' else 2, 'row': i + 1, 'ev': ev(p.get('ev'))})
-    links = [{'from': f"p{l['from']+1}", 'to': f"p{l['to']+1}", 'label': l['label'], 'style': 'solid', 'sure': False, 'ev': ev(l.get('ev'))}
+    links = [{'from': f"p{l['from']+1}", 'to': f"p{l['to']+1}", 'label': l['label'], 'style': 'solid', 'sure': False,
+              'ev': ev(_local_link(flows, owned[l['from']], owned[l['to']]), 'local_link') or ev(l.get('ev'))}
              for l in labels['links']]
     return ({'groups': groups, 'names': names, 'request_names': dict(labels.get('requests') or {})},
             {'nodes': nodes, 'links': links, 'externals': [], 'others': []})
