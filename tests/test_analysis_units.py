@@ -119,7 +119,8 @@ class FullRun(unittest.TestCase):
             return {'units':[{'ref':r,'name':f'Name {r}','what':'Does one thing'} for r in refs]+[{'ref':99999,'name':'Invented'}],
                     'groups':[{'name':'Everything','description':'All of it','units':refs}],
                     'requests':[{'ref':q[0],'name':f'Request {q[3]}'} for q in payload['requests']],
-                    'programs':[{'name':'Service','kind':'program','what':'Runs it','units':refs,'ev':[d[0] for u in payload['units'] for d in u[5]][:1]+[99999]}],'links':[]}
+                    'programs':[{'name':'Service','kind':'program','what':'Runs it','units':refs,'ev':[d[0] for u in payload['units'] for d in u[5]][:1]+[99999]}],'links':[],
+                    'externals':[{'name':'Mail service','what':'Sends mail','ev':[d[0] for u in payload['units'] for d in u[5]][:1],'users':[0]}]}
         return fake
 
     def analyse(self,calls,**kwargs):
@@ -144,6 +145,7 @@ class FullRun(unittest.TestCase):
         self.assertNotIn('Invented',[v['name'] for v in part['units'].values()]);self.assertEqual(part['dropped'],2)  # the invented unit and the unknown evidence ref
         raw=self.raw();system=raw['system.ai'] if (raw.get('system.ai') or {}).get('basis') else raw['system']
         self.assertEqual([n['name'] for n in system['nodes']],['Service']);self.assertEqual(system['basis'],'structure_summary')
+        self.assertEqual(([x['name'] for x in system['externals']],system['nodes'][0]['uses']),(['Mail service'],['x1']))  # an outside service the answer cited is kept
         # The model cited an evidence ref; local code filled the file, line and literal text of the pinned commit.
         ev=system['nodes'][0]['ev'];self.assertEqual((len(ev),ev[0]['origin']),(1,'cited'))
         self.assertEqual((self.repo/ev[0]['file']).read_text().splitlines()[ev[0]['line']-1].strip(),ev[0]['quote'])

@@ -751,7 +751,7 @@ def _run_full(run_id,executor,cancelled):
             part=saved[key]
             _update(run_id,lambda v,key=key,part=part:v.setdefault('labels',{}).setdefault(rid,{'commit':scope['pin']['commit'],'parts':{}})['parts'].__setitem__(key,part))
             labeled.append(part)
-            if last and i==0:structure={'key':key,'programs':part['programs'],'links':part['links'],'dropped':0}
+            if last and i==0:structure={'key':key,'programs':part['programs'],'links':part['links'],'externals':part.get('externals',[]),'dropped':0}
         if structure is None and labeled:
             payload=analysis_label.structure_input(scope['summary'],labeled,ref_of);key=analysis_label.key(payload)
             structure=structures.get(key)
@@ -760,11 +760,11 @@ def _run_full(run_id,executor,cancelled):
                 if answer is None:_update(run_id,_gap(rid,'structure','No usable answer after one retry'))
                 else:
                     labels,dropped=analysis_label.check(answer,{r:units[r]['id'] for g in payload['groups'] for r in g['units']},_spots_of(scope,payload))
-                    structure={'key':key,'programs':labels['programs'],'links':labels['links'],'dropped':dropped}
+                    structure={'key':key,'programs':labels['programs'],'links':labels['links'],'externals':labels['externals'],'dropped':dropped}
         if structure:_update(run_id,lambda v,s=structure:v['labels'][rid].__setitem__('structure',s))
         if labeled:
             merged={'units':{k:v for p in labeled for k,v in p['units'].items()},'groups':[g for p in labeled for g in p['groups']],
-                    'programs':(structure or {}).get('programs',[]),'links':(structure or {}).get('links',[]),
+                    'programs':(structure or {}).get('programs',[]),'links':(structure or {}).get('links',[]),'externals':(structure or {}).get('externals',[]),
                     'requests':{k:v for p in labeled for k,v in (p.get('requests') or {}).items()}}
             _publish_shapes(value,rid,scope['pin']['commit'],merged,scope['catalog'],scope['repo'],scope['flows'])
 
