@@ -360,6 +360,12 @@ class Analysis(unittest.TestCase):
         self.assertEqual(project.analysis_results(raw,'dev')['analysis']['version'],version)
         raw['dev']['analysis']['stale']=True
         self.assertTrue(project.analysis_results(raw,'dev')['analysis']['stale'])
+        # Steps and jobs written with an older wording instruction are asked again.
+        import mapcore
+        raw['dev']['analysis']['stale']=False;flow={'source':'ai','commit':raw['dev']['commit'],'language':'ko'}
+        raw['dev']['task_outputs']={'flows':{'routes':{'a::f':flow,'b::g':{**flow,'wording':mapcore.WORDING}}}}
+        steps=project.analysis_results(raw,'dev')['steps']
+        self.assertEqual((steps['a::f']['stale'],steps['b::g']['stale']),(True,False))
 
     def test_manual_architecture_proposal_is_reported_as_separately_saved(self):
         raw={'dev':{'commit':self.commit,'task_outputs':{'system':{'nodes':[]},'system.ai':{

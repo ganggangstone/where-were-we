@@ -51,7 +51,7 @@ class Briefing(unittest.TestCase):
             request=briefing.request('demo','','dev',lang)
             assert_reply_language(self,request['handoff'],lang,saved_results=True)
             assert_reply_language(self,request['prompt'],lang,'en',saved_results=True)
-            self.assertIn(f'Write explanations in {saved}; preserve identifiers.',request['prompt'])
+            self.assertIn(f'Write explanations in {saved}; keep identifiers only in evidence quotes.',request['prompt'])
             self.assertEqual(request['record_arguments']['lang'],lang)
         # The Korean handoff keeps the no-refresh contract in Korean, without an English sentence.
         self.assertIn('결과를 보여 주려고 refresh를 실행하지 마세요.',request_ko:=briefing.request('demo','','dev','ko')['handoff'])

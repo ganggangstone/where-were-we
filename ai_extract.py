@@ -241,7 +241,8 @@ Trace actual registration and imports; do not assume a convention or identify tw
 {citation_rule}
 Use repository-relative file paths. Normalize dynamic URL segments to {{}}. HTTP methods must be uppercase.
 Only include items and relations supported by code; list unresolved or omitted areas in unknown. An empty list is valid for an absent area.
-Labels, descriptions and unknown entries must be in {'English' if lang=='en' else 'Korean'}. Keep identifiers and paths unchanged.
+Labels, descriptions and unknown entries must be in {'English' if lang=='en' else 'Korean'}. Keep identifiers and paths unchanged in their own fields and quotes.
+{mapcore.PLAIN}
 {mapcore.reply_language(lang,'en',saved_results=True)}
 {'Omit request steps; those are analyzed only when explicitly requested.' if overview else 'Each step uses lane 서버, 저장소, 외부 or 화면.'} Tables, services and externals require their own evidence.
 For a route whose path or mount comes from other lines (router include, prefix, base path), cite those lines in dependencies.
@@ -276,7 +277,7 @@ def apply_result(raw,repo,refs,branch,lang,response,commit,layout,configuration=
     try:data=json.loads(text)
     except (ValueError,TypeError) as error:raise ValueError('AI output was not valid JSON; previous map was preserved') from error
     m,flows=normalize(layout_filter(data,layout),repo,commit,refs[branch]);m['analysis'].update(language=lang,configuration=configuration)
-    meta={'source':'ai','provider':provider,'commit':commit,'branch':branch,'language':lang,'configuration':configuration,'generated_at':m['analysis']['generated_at']}
+    meta={'source':'ai','provider':provider,'commit':commit,'branch':branch,'language':lang,'configuration':configuration,'wording':mapcore.WORDING,'generated_at':m['analysis']['generated_at']}
     for flow in flows['routes'].values():flow.update(meta)
     if flows['routes']:m['task_outputs']={'flows':flows}
     conf={**mapcore.TESTS_DEFAULT,'records':[],**(raw.get('tests') or {})}
@@ -581,7 +582,7 @@ def merge(raw,repo,branch,lang,data,head,configuration,sc,catalog,provider='mcp-
     models.update({t:t for r in all_routes if r.get('source')=='ai' for t in r.get('tables',[])})
     m=assemble(path,head,repo['refs'].get(branch) or prev.get('ref'),all_screens,kept_functions+got['api_functions']+basic_functions,all_routes,models,analysis)
     m['basic_drop']=sorted((set(prev.get('basic_drop') or []) if (prev.get('analysis') or {}).get('source')=='ai' else set())|(drop&{x['id'] for x in basic['backend_routes']+basic['screens']}))
-    meta={'source':'ai','provider':provider,'commit':head,'branch':branch,'language':lang,'configuration':configuration,'generated_at':analysis['generated_at']}
+    meta={'source':'ai','provider':provider,'commit':head,'branch':branch,'language':lang,'configuration':configuration,'wording':mapcore.WORDING,'generated_at':analysis['generated_at']}
     flows={key:{**flow,**meta,'hash':hashlib.sha1('\n'.join(cache[flow['file']]).encode()).hexdigest()[:12]} for key,flow in got['flows'].items()}
     outputs=carry(raw,branch,prev,m,flows,path,head)
     if outputs:m['task_outputs']=outputs
@@ -799,7 +800,7 @@ def task_request(name,task,branch='dev',lang='ko',repository='',target='',overvi
         prompt=(f'Produce {task} for commit {commit}. {rules}\nUse analysis_source with source_arguments for immutable source reads; never launch another AI CLI, execute application code or edit files. '
                 f'Use {"English" if lang=="en" else "Korean"} for names and explanations; keep identifiers unchanged. '
                 'Evidence must use tracked relative file paths, exact one-based lines and literal single-line quotes of at least 6 characters. Text matching does not establish semantic correctness. '
-                'Return a JSON object using schema. Preserve unknown facts explicitly. '+mapcore.reply_language(lang,'en',saved_results=True))
+                'Return a JSON object using schema. Preserve unknown facts explicitly. '+mapcore.PLAIN+mapcore.reply_language(lang,'en',saved_results=True))
         handoff=(f'where-were-we MCP의 request_ai_task를 {json.dumps(scope,ensure_ascii=False)} 인자로 호출하세요. '
                  '반환된 input·prompt·schema를 기준으로 현재 에이전트의 모델로 작업하세요. 필요한 코드는 source_arguments를 넣어 analysis_source로 읽으세요. '
                  '다른 AI CLI를 실행하지 마세요. 결과 JSON을 record_arguments와 함께 record_ai_task의 result_json으로 제출하세요. 저장 후 앱으로 돌아가라고 안내하세요. 앱이 저장된 결과를 읽습니다. 결과 확인을 위해 refresh 도구를 실행하지 마세요.') if lang=='ko' else (
@@ -834,7 +835,7 @@ def task_result(raw,task,branch,target,data,repo,commit,lang,configuration=None,
                 result.append({'text':item['text'],'needs':item.get('needs') if item.get('needs') in ('ops','read') else 'read'})
             else:raise ValueError('Use text and needs for unknown facts')
         return result
-    meta={'source':'ai','provider':provider,'commit':commit,'branch':branch,'language':lang,'configuration':configuration,'generated_at':project.now()}
+    meta={'source':'ai','provider':provider,'commit':commit,'branch':branch,'language':lang,'configuration':configuration,'wording':mapcore.WORDING,'generated_at':project.now()}
     updated=copy.deepcopy(raw)
     def program_jobs(node,payload):
         code=node['code'];jobs=[]
