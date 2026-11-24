@@ -17,6 +17,8 @@
         "title": "where were we",
         "width": 1480,
         "height": 940,
+        "minWidth": 960,
+        "minHeight": 600,
         "resizable": true,
         "fullscreen": false
       }
