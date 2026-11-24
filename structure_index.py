@@ -14,6 +14,7 @@ import lang_rules
 import next_routes
 import cobra_commands
 import service_flow
+import source_signals
 import default_flow
 import react_actions
 import sqlmodel_steps
@@ -809,7 +810,10 @@ def build(repo, commit, excluded=None, *, only_file=None, directory=None, page=1
                 text = raw.decode('utf-8')
             except UnicodeDecodeError:
                 continue
-            rows, edges, missing = lang_rules.apply(by_language[language], file, text, paths)
+            rows, edges, missing, found = lang_rules.apply(by_language[language], file, text, paths)
+            # Route hits in tests and support code are not the service's routes.
+            if source_signals.kind(file) == 'code':
+                routes.extend(found)
             limited_rows = rows[:MAX_DECLARATIONS - declarations]
             limited_edges = edges[:MAX_IMPORTS - len(imports)]
             truncated |= len(rows) != len(limited_rows) or len(edges) != len(limited_edges)

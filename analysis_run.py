@@ -593,8 +593,12 @@ def _saved_labels(history,rid):
     return parts,structures
 
 def _slices(scope,partition):
-    whole=scope['summary'];ref_of={u['id']:i for i,u in enumerate(scope['catalog']['units'])}
-    return [(analysis_label._slice(whole,[u for u in whole['units'] if scope['catalog']['units'][u[0]]['id'] in set(ids)]),last) for ids,last in partition]
+    """The labeling payloads of the announced partition. Units the reading rules added after it was fixed (routes of
+    another language) join the last part, so the number of calls stays the one announced."""
+    whole=scope['summary'];units=scope['catalog']['units'];placed={i for ids,_ in partition for i in ids}
+    late=[u for u in whole['units'] if units[u[0]]['id'] not in placed]
+    return [(analysis_label._slice(whole,[u for u in whole['units'] if units[u[0]]['id'] in set(ids)]+(late if n==len(partition)-1 else [])),last)
+            for n,(ids,last) in enumerate(partition)]
 
 def _full_plan(value,history,defer=False):
     """The calls of a full analysis, known before the start: one per language without reading rules, one per labeling

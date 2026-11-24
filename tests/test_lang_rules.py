@@ -112,7 +112,7 @@ class LangRules(unittest.TestCase):
         self.assertGreaterEqual(rule['dropped'], 7)
         # A resolved import is always a tracked path of the same commit.
         paths = lang_rules.Paths({'src/a/B.java'})
-        rows, edges, missing = lang_rules.apply(rule, 'src/a/A.java', 'import a.B;\nimport ..etc.passwd;\n' + 'x' * 100000, paths)
+        rows, edges, missing, _ = lang_rules.apply(rule, 'src/a/A.java', 'import a.B;\nimport ..etc.passwd;\n' + 'x' * 100000, paths)
         self.assertEqual(edges, [{'file': 'src/a/A.java', 'line': 1, 'target': 'src/a/B.java'}])
         self.assertIsNone(lang_rules.validate({'declarations': [{'regex': '(', 'name': 1}]}, 'java'))
 

@@ -13,8 +13,8 @@ while the run goes on.
    (`analysis_run.unit_board`) shows them as soon as they are calculated.
 2. **Reading rules (one call per language).** Python, JavaScript/TypeScript, Go and HTML are read by built-in
    readers. A language outside those five that has enough code files (`lang_rules.needed`) and no cached rules gets
-   one `lang_rules.obtain` call. The local map is then rebuilt with those rules, which adds declarations and
-   import links for that language. If the rules fail, the folder map stays and the board says that the
+   one `lang_rules.obtain` call. The local map is then rebuilt with those rules, which adds declarations,
+   import links and route units (route registrations outside test and support files) for that language. If the rules fail, the folder map stays and the board says that the
    language's connections were not read.
 3. **Labels and structure (from a summary, not from source).** `analysis_label.summary` builds a compact summary
    of the local map. It holds integer unit refs, kinds, local names, file counts, unit links, up to three
@@ -67,6 +67,7 @@ changed. When nothing changed, it makes no call.
 
 When reading rules are needed, every labeling part is counted, because the rules change the summary.
 The unit partition is fixed when the run is prepared, so the announced count still holds after the rules arrive.
+Units the rules add (route units of that language) join the last labeling part.
 
 ## What the AI may claim
 

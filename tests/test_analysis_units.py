@@ -177,6 +177,22 @@ class FullRun(unittest.TestCase):
         self.assertIn(('app/main.rb','app/models/user.rb'),{(e['file'],e['target']) for e in index['imports']})
         self.assertIn('"User"',calls[-1])  # the labeling summary carries the declarations the rules read
 
+    def test_route_rules_add_route_units_inside_the_announced_partition(self):
+        for name,text in {'web/app.rb':"require_relative 'store'\nget '/carts' do\nend\npost '/carts' do\nend\n",'web/store.rb':'class Store\nend\n',
+                          'web/item.rb':'class Item\nend\n','spec/app_spec.rb':"get '/from-a-test' do\nend\n"}.items():
+            (self.repo/name).parent.mkdir(parents=True,exist_ok=True);(self.repo/name).write_text(text)
+        self.save_code()
+        rules={**lang_rules_test.RUBY,'routes':[{'regex':r'''^\s*(get|post)\s+['"](/[^'"]*)['"]''','method':1,'path':2}]}
+        with patch.object(analysis_label,'BOUND',300):
+            calls=[];job,done=self.analyse(calls,rules=rules)
+        self.assertEqual(done['state'],'completed',done.get('error'))
+        self.assertEqual(len(calls),job['announced']['total'])  # the partition announced before the rules still holds
+        index=next(iter(analysis_run._INDEXES.values()))
+        self.assertEqual({(r['method'],r['path']) for r in index['service_flow']['registered_routes'] if r['server']['file'].endswith('.rb')},
+                         {('GET','/carts'),('POST','/carts')})  # the route in a test file is left out
+        rows={r[0]:r for r in self.board()['repositories'][0]['units']}
+        self.assertTrue(rows['route:/carts'][2].startswith('Name '))
+
     def test_failed_reading_rules_keep_the_folder_map_and_say_so(self):
         for i in range(4):(self.repo/f'app/m{i}.rb').parent.mkdir(exist_ok=True);(self.repo/f'app/m{i}.rb').write_text(f'class M{i}\nend\n')
         self.save_code()

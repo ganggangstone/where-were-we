@@ -14,8 +14,8 @@ from pathlib import Path, PurePosixPath
 import posixpath
 import re
 
-VERSION = 1
-MAX_PATTERNS = 12      # per list (declarations, imports)
+VERSION = 2
+MAX_PATTERNS = 12      # per list (declarations, imports, routes)
 MAX_PATTERN = 300      # characters
 MAX_LINE = 400         # a longer line is matched on its first characters only
 MAX_ROWS = 2000        # declarations or imports per file
@@ -35,6 +35,7 @@ LANGUAGE_OF = {
     '.lua': 'lua', '.pl': 'perl', '.pm': 'perl', '.jl': 'julia', '.hs': 'haskell', '.ml': 'ocaml',
     '.clj': 'clojure', '.zig': 'zig', '.nim': 'nim', '.cr': 'crystal', '.vue': 'vue', '.svelte': 'svelte'}
 _NAME = re.compile(r'[A-Za-z0-9_+-]{1,40}')
+_METHOD = re.compile(r'[A-Za-z]{2,10}')
 _PART = re.compile(r'[\w.+-]{0,40}/?|[\w.+/-]{1,80}')
 
 
@@ -168,15 +169,27 @@ def validate(data, name, lines=None):
             'from': 'dir' if spec.get('from') == 'dir' else 'root',
             'ext': _names(spec.get('ext')), 'index': _names(spec.get('index')), 'roots': _names(spec.get('roots')) or [''],
             'suffix': spec.get('suffix') is True, 'trim_tail': spec.get('trim_tail') is True}})
+    routes = []
+    for row in (data.get('routes') or [])[:MAX_PATTERNS] if isinstance(data.get('routes'), list) else []:
+        compiled = _pattern(row.get('regex')) if isinstance(row, dict) else None
+        method = row.get('method') if compiled else None
+        if not compiled or not _group(compiled, row.get('path')) or not (
+                _group(compiled, method) or isinstance(method, str) and _METHOD.fullmatch(method)):
+            dropped += 1
+            continue
+        routes.append({'regex': compiled.pattern, 'method': method, 'path': row['path']})
     if lines is not None:
-        slow = _probe([row['regex'] for row in declarations + imports], lines)
+        parts, at = [], 0
+        slow = _probe([row['regex'] for row in declarations + imports + routes], lines)
         dropped += len(slow)
-        imports = [row for i, row in enumerate(imports, len(declarations)) if i not in slow]
-        declarations = [row for i, row in enumerate(declarations) if i not in slow]
+        for part in (declarations, imports, routes):
+            parts.append([row for i, row in enumerate(part, at) if i not in slow])
+            at += len(part)
+        declarations, imports, routes = parts
     if not declarations and not imports:
         return None
     return {'version': VERSION, 'language': name, 'extensions': extensions, 'declarations': declarations,
-            'imports': imports, 'dropped': dropped}
+            'imports': imports, 'routes': routes, 'dropped': dropped}
 
 
 class Paths:
@@ -227,10 +240,12 @@ def _resolve(spec, value, file, paths):
 
 
 def apply(rule, file, text, paths):
-    """(declarations, imports, unresolved) of one file. paths: Paths of the same commit."""
+    """(declarations, imports, unresolved, routes) of one file. paths: Paths of the same commit.
+    routes have the shape of registered server routes (service_flow): method, path, server file and line."""
     declarations = [(row, re.compile(row['regex'])) for row in rule['declarations']]
     imports = [(row, re.compile(row['regex'])) for row in rule['imports']]
-    rows, edges, unresolved = [], [], 0
+    patterns = [(row, re.compile(row['regex'])) for row in rule.get('routes', [])]
+    rows, edges, unresolved, routes = [], [], 0, []
     for number, line in enumerate(text.splitlines(), 1):
         line = line[:MAX_LINE]
         for row, pattern in declarations:
@@ -249,7 +264,15 @@ def apply(rule, file, text, paths):
                 elif target != file and len(edges) < MAX_ROWS:
                     edges.append({'file': file, 'line': number, 'target': target})
                 break
-    return rows, edges, unresolved
+        for row, pattern in patterns:
+            match = pattern.search(line)
+            route = match and match.group(row['path'])
+            if route and route.startswith('/') and len(route) <= 200 and len(routes) < MAX_ROWS:
+                method = match.group(row['method']) if type(row['method']) is int else row['method']
+                if method and _METHOD.fullmatch(method):
+                    routes.append({'method': method.upper(), 'path': route, 'server': {'file': file, 'line': number, 'function': ''}, 'mounts': []})
+                break
+    return rows, edges, unresolved, routes
 
 
 def folder():
@@ -331,7 +354,8 @@ FORMAT = {'extensions': ['.ext'],
                            {'regex': r'^\s*def\s+(\w+)', 'kind': 'function', 'name': 1}],
           'imports': [{'regex': r'^import\s+([\w.]+);', 'group': 1,
                        'resolve': {'sep': '.', 'from': 'root', 'ext': ['.ext'], 'index': [], 'roots': ['src/'],
-                                   'suffix': True, 'trim_tail': True}}]}
+                                   'suffix': True, 'trim_tail': True}}],
+          'routes': [{'regex': r'''^\s*(get|post)\s+['"](/[^'"]*)['"]''', 'method': 1, 'path': 2}]}
 
 
 def prompt(name, chosen, all_files):
@@ -346,6 +370,8 @@ def prompt(name, chosen, all_files):
             'a repository path: sep replaces with "/", from is "root" (try each of roots) or "dir" (relative to the importing file), '
             'ext are suffixes to add, index are file names inside a folder, suffix:true matches a unique tracked path ending in the name, '
             'trim_tail:true also tries the name without its last one or two segments. Use paths to choose roots. '
+            'routes: a regex for a line that registers an HTTP route in server code; method is a group number or a fixed word '
+            '(GET, POST, ...), path is the group of the literal path starting with "/". Use [] when the samples register no routes. '
             'Keep each regex short, anchored and without nested repeats; at most 12 per list. '
             'List only declarations of types, modules and functions or methods, and only imports of code. '
             + json.dumps(payload, ensure_ascii=False, separators=(',', ':')))
