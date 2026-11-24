@@ -48,7 +48,7 @@ window.__TAURI__={core:{invoke:async(command,args)=>{
  if(command==='github_logins' && window.loginsFail)throw Error(window.loginsFail);
  if(command==='read_settings' && new URLSearchParams(location.search).get('settingsFail'))throw Error('fictional settings read failure');
  if(command==='save_project'){if(window.failSave)throw Error('fictional save failure');(window.savedProjects??=[]).push(args.project);return args.configuration;}
- if(command==='list_projects')return new URLSearchParams(location.search).get('empty')?(window.savedProjects||[]):['First','Second'];
+ if(command==='list_projects')return new URLSearchParams(location.search).get('empty')?(window.savedProjects||[]):['First','Second',...(window.extraProjects||[])];
  if(command==='read_project' && window.failRead)throw Error('fictional read failure');
  if(command==='read_project'){const b=window.configuredBundle?.project.name===args.project?structuredClone(window.configuredBundle):fakeBundle(args.project);if(window.noMap){b.dev=null;b.main=null;}if(window.mutateBundle)window.mutateBundle(b);return JSON.stringify(b);}
  if(command==='read_settings')return JSON.stringify({open_refresh:false,since:'last_refresh',since_time:''});
@@ -1249,7 +1249,7 @@ class Flows(unittest.TestCase):
  const index={repository:origin,commit,coverage:{candidate_files:3,indexed_files:2,skipped_files:1,unsupported_files:7,unresolved_imports:4,truncated:true},
   files:[{file:target,declarations:many},{file:entry,declarations:[]}],imports:[{file:entry,target,line:2}]};
  M().structure_indexes=[index,{...index,repository:'api',files:[],imports:[],coverage:{...index.coverage,indexed_files:0}}];
- S.view='sys';render();
+ S.view='sys';render();$('moduleDetails').open=true;await wait();
  const graph=()=>$('moduleGraph'),label=(s)=>graph().innerText.includes(tr(s));
  assert($('moduleFile').value===entry && label('모듈 연결 (베타)') && graph().innerText.includes(commit.slice(0,12)),'A connected source and its pinned commit appear first');
  assert(['확인한 파일','건너뛴 파일','미지원 파일','대상 미확인 import','분석 한도 도달'].every(label),'Partial coverage and unresolved relationships are explicit');
@@ -1267,7 +1267,7 @@ class Flows(unittest.TestCase):
   coverage:{...index.coverage,candidate_files:2,indexed_files:2,languages:{javascript:{candidate_files:1,indexed_files:1},typescript:{candidate_files:1,indexed_files:1},python:{candidate_files:0,indexed_files:0},html:{candidate_files:3,indexed_files:3},ruby:{candidate_files:2,indexed_files:2}}}};
  mixed.service_flow={connections:[{method:'GET',path:'/users',client:{file:'app.js',line:3},evidence:[{file:'app.js',line:1}],server:{file:'server.py',line:8,function:''},mounts:[{file:'server.py',line:2}]},
   {basis:'declared_defaults',evidence:[{file:'settings.py',line:18}],method:'POST',path:'/jobs',client:{file:'app.js',line:4},server:{file:'server.py',line:10,function:'jobs'},mounts:[]},{basis:'path_template',method:'PATCH',path:'/jobs/{id}',server_path:'/jobs/:id',data_steps:[{operation:'write',model:'Job',file:'server.js',line:14,evidence:[{file:'server.js',line:14},{file:'server.js',line:15}]}],actions:[{element:'input',event:'onChange',handler:'toggle',file:'App.jsx',line:17,handler_line:5,import_line:1,call_line:7,client_definition:{file:'app.js',line:3}},{element:'button',event:'onClick',handler:'save',label:'Save <entry>',label_source:{file:'App.jsx',line:25},file:'App.jsx',line:26,handler_line:20,call_line:21,import_line:1,client_definition:{file:'app.js',line:3}}],client:{file:'app.js',line:5},server:{file:'server.js',line:11,function:'update'},mounts:[]}],coverage:{requests:4,routes:2,unresolved_requests:1}};
- M().structure_indexes=[mixed];render();
+ M().structure_indexes=[mixed];render();$('moduleDetails').open=true;await wait();
  const http=()=>graph().querySelector('[data-http-flow]');
  assert($('flowFeature').options[0].textContent==='GET /users','Anonymous callbacks retain their verified HTTP identity');
  assert($('flowFeature').selectedOptions[0].textContent.includes('toggle') && $('httpConnection').value==='2','Proven UI actions come first');
@@ -1294,7 +1294,7 @@ class Flows(unittest.TestCase):
  assert(graph().innerText.includes('Ruby 2/2') && graph().innerText.includes('Ruby '+tr('읽기 규칙')),'A rule-read language is counted and named in the scope');
  assert(graph().querySelector('.module-neighbors').compareDocumentPosition(graph().querySelector('[data-module-coverage]')) & Node.DOCUMENT_POSITION_FOLLOWING,'Connections precede coverage detail');
  graph().querySelector('[data-module-neighbor]').click();assert(label('인터페이스') && $('moduleFile').value==='types.ts','Static JS to TS connection and TypeScript declaration');
- mixed.service_flow.feature_groups=[{resource:'/jobs',connection_indexes:[1,2]},{resource:'/users',connection_indexes:[0]}];render();
+ mixed.service_flow.feature_groups=[{resource:'/jobs',connection_indexes:[1,2]},{resource:'/users',connection_indexes:[0]}];render();$('moduleDetails').open=false;await wait();
  assert(!$('httpConnection') && !$('moduleDetails').open && graph().innerText.includes('/jobs'),'Refresh-only resource summaries precede collapsed details');
  graph().querySelector('[data-local-resource="/jobs"]').click();assert($('httpConnection').value==='2','Opening a resource selects its first evidenced UI action');
  $('httpConnection').value='0';$('httpConnection').dispatchEvent(new Event('change'));assert(graph().querySelector('[data-local-resource="/users"]').getAttribute('aria-expanded')==='true','Endpoint navigation switches resource and retains evidence');
@@ -1772,6 +1772,17 @@ class FeatureContext(unittest.TestCase):
         for lang in ('ko','en'):
             with self.subTest(lang=lang):
                 ok,error=page(FEATURE+checks,lang);self.assertTrue(ok,error)
+
+    def test_an_empty_default_groups_object_is_not_an_ai_result_and_an_outside_project_fills_the_selector(self):
+        ok,error=page(r'''
+ const items=['web::/items'];window.mutateBundle=b=>{b.groups={names:{},request_names:{},groups:[]};};
+ await loadProject('First');S.view='feat';render();
+ assert(!document.querySelector('.pill.ai') && !document.querySelector('.col h3 .ai'),'An empty groups default shows no AI pill or AI card');
+ assert(!document.body.innerText.includes(tr('미분류')),'No lone unclassified card without an AI result');
+ window.extraProjects=['Outside'];
+ await loadProject('Outside');
+ assert([...$('project').options].some(o=>o.value==='Outside') && $('project').value==='Outside','A project made outside the app is listed and selected');
+''','ko');self.assertTrue(ok,error)
 
     def test_full_map_stays_and_only_member_screens_are_highlighted_while_structure_is_unchanged(self):
         self.check(r'''

@@ -231,7 +231,7 @@ const fs=require('fs'),vm=require('vm'),assert=require('assert');
 const html=fs.readFileSync('ui/index.html','utf8');
 const js=html.slice(html.indexOf('<script>')+8,html.lastIndexOf('</script>'));
 const elements={}, calls=[];let chosen='last_refresh',rejectSave=false;
-const element=id=>elements[id] ||= {innerHTML:'',value:'',checked:false,disabled:false,
+const element=id=>elements[id] ||= {innerHTML:'',value:'',options:[{value:'demo'}],checked:false,disabled:false,
   querySelector:()=>({value:chosen}),querySelectorAll:()=>[],close(){this.open=false;}};
 global.document={getElementById:element,querySelectorAll:()=>[],addEventListener(type,fn){(this.listeners??={})[type]=fn;}};
 global.window={addEventListener(type,fn){(this.listeners??={})[type]=fn;},__TAURI__:{core:{invoke:async(name,args)=>{

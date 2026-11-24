@@ -182,9 +182,13 @@ class FullRun(unittest.TestCase):
         self.assertEqual(job['announced']['rules'],1);self.assertEqual(len(calls),job['announced']['total'])
         self.assertTrue(calls[0].startswith('You write line-based reading rules'))
         self.assertEqual(self.board()['repositories'][0]['missing_rules'],[])
-        index=next(iter(analysis_run._INDEXES.values()))
+        index=self.raw()['dev']['structure_index']  # the refreshed snapshot carries the rule-read links
         self.assertIn(('app/main.rb','app/models/user.rb'),{(e['file'],e['target']) for e in index['imports']})
         self.assertIn('"User"',calls[-1])  # the labeling summary carries the declarations the rules read
+        # The saved snapshot (확인 범위) names the language the new rules read, without pressing refresh.
+        self.assertIn('ruby',{k.lower() for k in self.raw()['dev']['structure_index']['coverage']['languages']})
+        again=[];job,done=self.analyse(again,fail=lambda prompt:True)
+        self.assertEqual((again,job['announced']['total']),([],0))
 
     def test_route_rules_add_route_units_inside_the_announced_partition(self):
         for name,text in {'web/app.rb':"require_relative 'store'\nget '/carts' do\nend\npost '/carts' do\nend\n",'web/store.rb':'class Store\nend\n',
@@ -196,7 +200,7 @@ class FullRun(unittest.TestCase):
             calls=[];job,done=self.analyse(calls,rules=rules)
         self.assertEqual(done['state'],'completed',done.get('error'))
         self.assertEqual(len(calls),job['announced']['total'])  # the partition announced before the rules still holds
-        index=next(iter(analysis_run._INDEXES.values()))
+        index=self.raw()['dev']['structure_index']  # the refreshed snapshot carries the rule-read links
         self.assertEqual({(r['method'],r['path']) for r in index['service_flow']['registered_routes'] if r['server']['file'].endswith('.rb')},
                          {('GET','/carts'),('POST','/carts')})  # the route in a test file is left out
         rows={r[0]:r for r in self.board()['repositories'][0]['units']}

@@ -26,11 +26,11 @@ class RefreshFirstWebKit(unittest.TestCase):
  const purpose=()=>$('map').querySelector('[data-project-purpose]');
  check(purpose().querySelector('summary').textContent==='Build <small> modules.' && !purpose().querySelector('small') && !purpose().open,'Document text is shown verbatim before source details');
  purpose().querySelector('summary').click();check(purpose().innerText.includes('README.md:3') && purpose().innerText.includes(pin),'The literal description retains its pinned citation');
- check(S.view==='sys' && $('map').innerText.includes('work'),'A CLI refresh must open local declarations');
+ check(S.view==='sys' && $('moduleDetails') && !$('moduleDetails').open,'Module connections stay collapsed without groups');$('moduleDetails').open=true;check($('map').innerText.includes('work'),'A CLI refresh must open local declarations');
  check(!$('map').querySelector('[data-http-flow]') && !$('automaticAnalysis'),'Empty HTTP graph and optional AI stay hidden');
  check(!calls.some(c=>['analysis_run_start','analysis_plan','analysis_providers'].includes(c.command)),'Refresh must not prepare AI');
  S.project=null;S.view='changes';await loadProject('First');
- check(S.view==='sys' && $('map').innerText.includes('worker.cjs'),'Opening a saved local map shows its structure');
+ check(S.view==='sys' && !$('moduleDetails').open,'Module connections are collapsed');$('moduleDetails').open=true;check($('map').innerText.includes('worker.cjs'),'Opening a saved local map shows its structure');
  const crossMap=M();const serverPin='bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',clientPin='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
  crossMap.repositories=[{id:'web',path:'/fictional/web'},{id:'api',path:'/fictional/service'}];
  crossMap.cross_repository_connections=[{method:'GET',path:'/cross',basis:'configured',client:{repository:'web',commit:clientPin,file:'src/shared file.js',line:4},server:{repository:'api',commit:serverPin,file:'src/shared file.js',line:8,function:'serve'}}];
@@ -81,7 +81,7 @@ class RefreshFirstWebKit(unittest.TestCase):
  index.cli_entries=[];
  index.cli_entries=[];index.files=[{file:'main.go',language:'go',declarations:[]},{file:'pkg/a.go',language:'go',declarations:[]}];index.imports=[];index.commit='go-edges';
  index.package_imports=[{file:'main.go',line:4,package:'example.org/pkg',directory:'pkg',members:['pkg/a.go','pkg/b.go'],member_count:3}];
- await doRefresh();const pkg=$('map').querySelector('[data-go-package]');pkg.querySelector('summary').click();
+ await doRefresh();$('moduleDetails').open=true;const pkg=$('map').querySelector('[data-go-package]');pkg.querySelector('summary').click();
  check(pkg.innerText.includes('2/3') && pkg.innerText.includes('main.go:4') && pkg.innerText.includes('pkg/b.go'),'Source import and bounded package membership are separate');
  check(pkg.querySelector('a[data-url$="/pkg/b.go"]'),'Unindexed package members point to their working files without fake line numbers');
  pkg.querySelector('[data-module-neighbor]').click();check($('moduleFile').value==='pkg/a.go','Indexed package member opens its module');

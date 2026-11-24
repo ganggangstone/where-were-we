@@ -845,6 +845,7 @@ function visibleScreens(m) {
 }
 const fold = (m, p) => { if (!p || !p.startsWith('/m/')) return p; const t = p.replace(/^\/m/, ''); return m.screens.some(x => x.path === t && !x.redirect) ? t : p; };
 // 화면 이름: 제목(코드 원문) → AI가 붙인 이름(점선) → 주소
+const hasAI = () => !!S.groups?.groups?.length; // 빈 기본값({groups:[]})은 AI 결과가 아니다
 const aiName = (p) => (S.groups && S.groups.names && S.groups.names[p]) || null;
 function label(m, p) { const t = m.screens.find(x => x.path === p); const h = t && t.heading; if (t?.repository) return (h || aiName(p) || t.source_path) + ' ['+connectionDisplayName(t.repository)+']'; if (!h) return aiName(p) || p;
   // 같은 제목을 쓰는 화면이 여럿이면 주소가 가장 짧은 것만 제목 그대로, 나머지는 주소를 붙인다.
@@ -877,7 +878,7 @@ const hasInbound = (m, p) => edges(m).some(e => e.to === p);
 // 왼쪽에서 오른쪽 묶음: groups.json(AI 제안)이 있으면 그것, 없으면 주소 첫 조각.
 function groupsOf(m) {
   const vis = visibleScreens(m); const out = [];
-  if (S.groups) {
+  if (hasAI()) {
     for (const g of S.groups.groups) { const list = g.screens.map(p => vis.find(s => s.path === p)).filter(Boolean); if (list.length) out.push({ name: displayIds(g.name), description: g.description, list, ai: true }); }
     const placed = new Set(S.groups.groups.flatMap(g => g.screens)); const rest = vis.filter(s => !placed.has(s.path)); if (rest.length) out.push({ name: tr('미분류'), description: tr('아직 묶이지 않은 화면'), list: rest });
   } else { const by = {}; for (const s of vis) (by['/' + (s.path.split('/')[1] || '')] ??= []).push(s); for (const [k, list] of Object.entries(by)) out.push({ name: k, description: '', list }); }
@@ -952,9 +953,15 @@ function vanished(m) { const p = S.prev && S.prev[S.branch]; if (!p || p.commit 
   return p._gone = { from: p.commit.slice(0, 8), to: m.commit.slice(0, 8), screens, reqs }; }
 
 // ---------- 불러오기 ----------
+async function fillProjects(selected) {
+  const ps = await invoke('list_projects');
+  $('project').innerHTML = ps.map(p => `<option ${p === selected ? 'selected' : ''}>${esc(p)}</option>`).join('') || tr('<option data-empty>(없음)</option>');
+  return ps;
+}
 async function loadProject(p, first = true, repository = S.project === p ? S.repository : '') {
   const token = ++S.loadToken; S.desiredProject=p; S.desiredRepository=repository;
   try {
+    if (![...$('project').options].some(o => o.value === p)) await fillProjects(p).catch(() => {}); // 앱 밖(MCP·CLI)에서 만든 프로젝트
     const bundle = JSON.parse(await invoke('read_project', {project:p, repository}));
     if (token !== S.loadToken) return;
     // 같은 서비스·코드를 다시 읽을 때만 고른 기능을 남긴다. 남긴 기능은 그리기 전에 화면 묶음으로 다시 확인한다.
@@ -1244,7 +1251,7 @@ function editProject(create, focus=null) {
     try {
       if (create && [...$('project').options].some(o=>!o.hasAttribute('data-empty') && o.value===name)) throw Error('A project with this name already exists');
       const saved=await saveConnections(name,{repositories:repos,shared_data:shared},known,repo=>{$('projectProgress').textContent=repo.name+' · '+tr('첫 지도 가져오는 중…');});
-      const ps=await invoke('list_projects');$('project').innerHTML=ps.map(p=>`<option ${p===name?'selected':''}>${esc(p)}</option>`).join('');
+      await fillProjects(name);
       dialog.close();await loadProject(name,false,'');
       if(!saved.collection.length && S.openRequestFor?.project===name && (S.projectInfo?.repositories || []).some(r=>!r.collected)) setStatus(tr('연결을 저장했습니다. 새로고침으로 첫 지도를 가져오면 AI에게 보낼 분석 요청이 준비됩니다.'));
       if(saved.collection.some(item=>!item.ok)) setStatus(tr('연결은 저장되었습니다. 가져오지 못한 코드는 새로고침으로 다시 시도하세요.'),true,saved.collection.filter(item=>!item.ok).map(item=>item.repository+': '+(item.log || item.error)).join('\n'));
@@ -1285,7 +1292,7 @@ function searchPanel(m) {
 function storyMap(m) {
   const gs = groupsOf(m); const es = edges(m); const q = S.q.trim().toLowerCase();
   const inSet = new Set(es.filter(e => e.to === S.sel && !e.common).map(e => e.from)), outSet = new Set(es.filter(e => e.from === S.sel && !e.common).map(e => e.to));
-  const aiCount = (S.groups ? S.groups.groups.length + Object.keys(S.groups.names || {}).length + Object.keys(S.groups.request_names || {}).length : 0) + Object.keys((S.flows && S.flows.routes) || {}).length;
+  const aiCount = (hasAI() ? S.groups.groups.length + Object.keys(S.groups.names || {}).length + Object.keys(S.groups.request_names || {}).length : 0) + Object.keys((S.flows && S.flows.routes) || {}).length;
   let h = ui`<div class="legend"><span><b class="strong">${visibleScreens(m).length}</b> 화면 · <b class="strong">${gs.length}</b> 묶음</span>
     <span title="테스트가 연결된 요청 비율 (통과 여부 아님)"><i class="dot ok"></i>테스트 연결</span>${aiCount?ui`<span><span class="ai">AI가 정리한 이름</span> ${aiCount}개</span>`:''}
     ${S.sel && !S.sel.startsWith('!') ? lineLegend([['selected','선택과 연결됨']]) : ''}
@@ -1777,13 +1784,12 @@ function structureIndexView(m,includePurpose=true,featuresOnly=false) {
   const resourceMap=!!(crossHtml || flow?.feature_groups?.length || flow?.registered_routes?.length);
   const inventory=(m.inventories || [m.inventory]).find(row=>row && (row.repository || '')===(index.repository || '') && row.commit===index.commit);
   const workspace=featuresOnly?'':workspaceView(index,state,evidence,dir=>inventory?.paths?.some(path=>path.startsWith(dir+'/')));
-  const hasGroups=!!cli || resourceMap || !!workspace;
   const metadata=`${includePurpose?purposeView(m,index):''}${status}`;
   const docs=readmeFeaturesView(index,evidence);
   if(featuresOnly)return `<section class="sect" id="moduleGraph" data-work-features>${indexes.length>1?repoControl:''}${http}${cli}${docs}</section>`;
-  const modules=hasGroups?`<details id="moduleDetails" ${state.moduleOpen?'open':''}><summary>${tr('모듈 연결 (베타)')}</summary>`:`<h2>${tr('모듈 연결 (베타)')}</h2>`;
+  const modules=`<details id="moduleDetails" ${state.moduleOpen?'open':''}><summary>${tr('모듈 연결 (베타)')}</summary>`;
   const heading=resourceMap?`${indexes.length>1?repoControl:''}${http}${cli}<details class="sect" id="flowSources" ${state.sourcesOpen?'open':''}><summary>${tr('문서·모듈')}</summary>${includePurpose?purposeView(m,index):''}${indexes.length>1?commit:status}${workspace}${docs}${modules}`:`${metadata}${workspace}${cli}${http}${docs}${modules}`;
-  const end=(hasGroups?'</details>':'')+(resourceMap?'</details>':'');
+  const end='</details>'+(resourceMap?'</details>':'');
   // 확인 범위는 이 코드에 실제로 있는 언어의 읽는 방식만 적는다. 읽기 규칙으로 읽은 언어도 이름을 적는다.
   const present=name=>counts[name]?.candidate_files>0;
   const boundaries=!coverage.languages?[tr('로컬 Python import')]:[
@@ -2139,7 +2145,7 @@ function featView(m) {
   const sel = selectedFeature(m)?.i ?? null; const near = (i) => sel == null || i === sel || f.links.some(l => (l.a === sel && l.b === i) || (l.b === sel && l.a === i)); const on = (l) => sel == null || l.a === sel || l.b === sel;
   // 비었으면 숫자 대신 이유를 한 줄로 쓴다. 화면이 있으면 「분석하기」가 묶음을 만든다.
   if (!f.gs.length) return `<p class="empty" data-empty-reason>${tr(visibleScreens(m).length ? '화면을 기능 묶음으로 나누지 않았다. 「분석하기」가 묶음을 만든다.' : '이 코드에서 화면을 찾지 못해 묶을 화면이 없다.')}</p>`;
-  let h = ui`<div class="legend"><span><b class="strong">${f.gs.length}</b> 기능 묶음 · 화면 <b class="strong">${visibleScreens(m).length}</b></span>${lineLegend([['calls','화면 이동'],['shared','데이터 전달']])}${S.groups ? `<span class="pill ai">${tr('AI가 정리한 이름')}</span>` : `<span class="pill">${tr('화면 주소')}</span>`}</div><div class="sys three" id="sys">${WIRES}`;
+  let h = ui`<div class="legend"><span><b class="strong">${f.gs.length}</b> 기능 묶음 · 화면 <b class="strong">${visibleScreens(m).length}</b></span>${lineLegend([['calls','화면 이동'],['shared','데이터 전달']])}${hasAI() ? `<span class="pill ai">${tr('AI가 정리한 이름')}</span>` : `<span class="pill">${tr('화면 주소')}</span>`}</div><div class="sys three" id="sys">${WIRES}`;
   f.gs.forEach((g, i) => { const st = f.stat[i];
     h += ui`<div class="card node gc${f.pos[i].col} gr${f.pos[i].row} ${i === sel ? 'sel' : ''} ${near(i) ? '' : 'dim'}" data-feat="${i}" data-w="G${i}"><div class="nm"><span class="${g.ai ? 'ai' : ''}">${esc(g.name)}</span></div><div class="s">${esc(g.description || '')}</div>
       <div class="meta"><span>화면 ${g.list.length} · 서버에 하는 일 ${st.reqs}</span>${st.reqs ? ui`<span class="bar" title="테스트 연결 ${st.tested}/${st.reqs}"><i style="width:${Math.round(st.tested / st.reqs * 100)}%"></i></span>` : ''}</div><div class="meta">${st.ext.map(x => `<span class="pill">${esc(x)}</span>`).join('')}</div></div>`; });
@@ -2471,8 +2477,7 @@ $('updates').onclick = () => { renderUpdates(); $('release-dialog').showModal();
 (async () => {
   try { S.settings=JSON.parse(await invoke('read_settings')); }
   catch(error) { S.settingsError=String(error); }
-  const ps = await invoke('list_projects');
-  $('project').innerHTML = ps.map(p => `<option>${esc(p)}</option>`).join('') || tr('<option data-empty>(없음)</option>');
+  const ps = await fillProjects();
   if (ps.length) await loadProject(ps[0]); else { S.firstRun = true; render(); if (typeof guideFirstRun === 'function') guideFirstRun(); }
   // Loading a project clears the status line, so a settings read failure is shown after it.
   if (S.settingsError) setStatus(tr('설정을 읽지 못했습니다. 오류 내용을 확인하세요.'),true,S.settingsError);

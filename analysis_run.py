@@ -707,9 +707,12 @@ def _run_full(run_id,executor,cancelled):
         if scope['missing']:
             show=lambda file,repo=scope['repo'],head=scope['pin']['commit']:_git(repo,'show',f'{head}:{file}').decode('utf-8','ignore')
             call=_counted(run_id,executor,cancelled,'rules')
+            saved_rule=False
             for name in scope['missing']:
                 rule,_,_=lang_rules.obtain(name,lang_rules.needed(scope['files'])[name],scope['sizes'],show,call)
                 if not rule:_update(run_id,_gap(rid,'rules:'+name,'No valid reading rules; the connections of these files were not read'))
+                else:saved_rule=True
+            if saved_rule:store.refresh_project(value['project'],rid)  # the snapshot (확인 범위) reads the rules too; local only, no AI
             _INDEXES.clear();scope.update(_full_scope({**value,'repository':rid})[rid])
         units=scope['catalog']['units'];ref_of={u['id']:i for i,u in enumerate(units)}
         saved,structures=_saved_labels(history,rid)
