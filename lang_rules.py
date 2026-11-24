@@ -173,11 +173,12 @@ def validate(data, name, lines=None):
     for row in (data.get('routes') or [])[:MAX_PATTERNS] if isinstance(data.get('routes'), list) else []:
         compiled = _pattern(row.get('regex')) if isinstance(row, dict) else None
         method = row.get('method') if compiled else None
+        prefix = isinstance(row, dict) and row.get('prefix') is True
         if not compiled or not _group(compiled, row.get('path')) or not (
-                _group(compiled, method) or isinstance(method, str) and _METHOD.fullmatch(method)):
+                prefix or _group(compiled, method) or isinstance(method, str) and _METHOD.fullmatch(method)):
             dropped += 1
             continue
-        routes.append({'regex': compiled.pattern, 'method': method, 'path': row['path']})
+        routes.append({'regex': compiled.pattern, 'method': None if prefix else method, 'path': row['path'], **({'prefix': True} if prefix else {})})
     if lines is not None:
         parts, at = [], 0
         slow = _probe([row['regex'] for row in declarations + imports + routes], lines)
@@ -245,7 +246,7 @@ def apply(rule, file, text, paths):
     declarations = [(row, re.compile(row['regex'])) for row in rule['declarations']]
     imports = [(row, re.compile(row['regex'])) for row in rule['imports']]
     patterns = [(row, re.compile(row['regex'])) for row in rule.get('routes', [])]
-    rows, edges, unresolved, routes = [], [], 0, []
+    rows, edges, unresolved, routes, prefix = [], [], 0, [], ''
     for number, line in enumerate(text.splitlines(), 1):
         line = line[:MAX_LINE]
         for row, pattern in declarations:
@@ -267,6 +268,11 @@ def apply(rule, file, text, paths):
         for row, pattern in patterns:
             match = pattern.search(line)
             route = match and match.group(row['path'])
+            if route and route.startswith('/') and row.get('prefix'):
+                prefix = route.rstrip('/')  # a class-level path: it heads the following routes of this file
+                break
+            if route and route.startswith('/') and prefix:
+                route = prefix + (route if route != '/' else '')
             if route and route.startswith('/') and len(route) <= 200 and len(routes) < MAX_ROWS:
                 method = match.group(row['method']) if type(row['method']) is int else row['method']
                 if method and _METHOD.fullmatch(method):
@@ -355,7 +361,8 @@ FORMAT = {'extensions': ['.ext'],
           'imports': [{'regex': r'^import\s+([\w.]+);', 'group': 1,
                        'resolve': {'sep': '.', 'from': 'root', 'ext': ['.ext'], 'index': [], 'roots': ['src/'],
                                    'suffix': True, 'trim_tail': True}}],
-          'routes': [{'regex': r'''^\s*(get|post)\s+['"](/[^'"]*)['"]''', 'method': 1, 'path': 2}]}
+          'routes': [{'regex': r'''^@Path\("(/[^"]*)"''', 'path': 1, 'prefix': True},
+                     {'regex': r'''^\s*(get|post)\s+['"](/[^'"]*)['"]''', 'method': 1, 'path': 2}]}
 
 
 def prompt(name, chosen, all_files):
@@ -371,7 +378,8 @@ def prompt(name, chosen, all_files):
             'ext are suffixes to add, index are file names inside a folder, suffix:true matches a unique tracked path ending in the name, '
             'trim_tail:true also tries the name without its last one or two segments. Use paths to choose roots. '
             'routes: a regex for a line that registers an HTTP route in server code; method is a group number or a fixed word '
-            '(GET, POST, ...), path is the group of the literal path starting with "/". Use [] when the samples register no routes. '
+            '(GET, POST, ...), path is the group of the literal path starting with "/". prefix:true marks a line that sets a path prefix '
+            '(a class-level mapping) for the following route lines of the same file until the next prefix line; it needs no method. Use [] when the samples register no routes. '
             'Keep each regex short, anchored and without nested repeats; at most 12 per list. '
             'List only declarations of types, modules and functions or methods, and only imports of code. '
             + json.dumps(payload, ensure_ascii=False, separators=(',', ':')))

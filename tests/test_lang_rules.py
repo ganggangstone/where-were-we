@@ -116,6 +116,19 @@ class LangRules(unittest.TestCase):
         self.assertEqual(edges, [{'file': 'src/a/A.java', 'line': 1, 'target': 'src/a/B.java'}])
         self.assertIsNone(lang_rules.validate({'declarations': [{'regex': '(', 'name': 1}]}, 'java'))
 
+    def test_a_prefix_route_pattern_heads_the_following_routes_of_its_file(self):
+        answer = {'declarations': [{'regex': r'^\s*class\s+(\w+)', 'kind': 'class', 'name': 1}],
+                  'routes': [{'regex': r'^@Base\("(/[^"]*)"', 'path': 1, 'prefix': True},
+                             {'regex': r'^\s*@(Get|Post)\("(/[^"]*)"', 'method': 1, 'path': 2},
+                             {'regex': r'^\s*@Any\("(/[^"]*)"', 'path': 1, 'prefix': 'yes'}]}  # not a prefix and no method: dropped
+        rule = lang_rules.validate(answer, 'java')
+        self.assertEqual(([r.get('prefix') for r in rule['routes']], rule['dropped']), ([True, None], 1))
+        text = '@Get("/health")\n@Base("/items/{id}/")\nclass A\n  @Get("/parts")\n  @Post("/")\n@Base("/other")\n  @Get("/x")\n'
+        routes = lang_rules.apply(rule, 'A.java', text, lang_rules.Paths({'A.java'}))[3]
+        self.assertEqual([(r['method'], r['path']) for r in routes],
+                         [('GET', '/health'), ('GET', '/items/{id}/parts'), ('POST', '/items/{id}'), ('GET', '/other/x')])
+        self.assertEqual(lang_rules.apply(rule, 'B.java', '  @Get("/y")\n', lang_rules.Paths({'B.java'}))[3][0]['path'], '/y')  # per file
+
     def test_rules_are_cached_and_reused_and_a_failure_keeps_the_folder_map(self):
         folder = str(Path(self.temp.name) / 'java')
         commit = repository(folder, JAVA_FILES)
