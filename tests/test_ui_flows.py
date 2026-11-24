@@ -840,7 +840,7 @@ class Flows(unittest.TestCase):
     def test_full_analysis_board_appears_in_the_panel_and_reads_without_asking_the_model(self):
         self.check(r"""
  window.appAnalysisFixture=true;
- window.unitBoard={repositories:[{repository:'',units:[['route:/items','route','/items',3,'saved','new'],['folder:lib','folder','lib',9,'pending','']],coverage:{tracked:12,in_units:9,indexed:9,excluded:{secret:1},truncated:false}}],totals:{units:2,saved:1,pending:1},calls:1,time_limit_seconds:3600};
+ window.unitBoard={repositories:[{repository:'',units:[['route:/items','route','/items',3,'saved','new'],['folder:lib','folder','lib',9,'pending','']],coverage:{tracked:12,in_units:9,indexed:9,excluded:{secret:1},truncated:false}}],totals:{units:2,saved:1,pending:1},calls:{rules:0,labeling:1,structure:0,unit:0,total:1}};
  S.view='sys';render();openAnalysisPanel();await AnalysisRun.check();await wait();
  const L=(en,ko)=>S.lang==='en'?en:ko,panel=$('insp').innerHTML;
  assert(panel.includes('unit-board') && panel.includes(L('Full code analysis','전체 코드 분석')) && panel.includes('class="beta"'),'The panel shows the beta board: '+panel.slice(0,200));
@@ -848,7 +848,7 @@ class Flows(unittest.TestCase):
  assert(!calls.some(c=>c.command==='analysis_run_start'),'Showing the board starts nothing');
  $('startFullAnalysis').click();await wait();
  const sent=calls.filter(c=>c.command==='analysis_run_start').at(-1).args.scope.intent;
- assert(sent.task==='full' && sent.max_calls===1,'The click sends the displayed call cap');
+ assert(sent.task==='full' && !('max_calls' in sent),'The click sends no call cap');
 """)
 
     def test_on_demand_app_controls_keep_real_targets_and_translations(self):
