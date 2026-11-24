@@ -73,6 +73,7 @@ const AnalysisRun = (() => {
   })[run?.state] || '';
   // 「분석하기」 버튼 뒤에 붙는 짧은 상태: 진행 중이면 저장한 작업 수/전체.
   const shortState = () => {
+    if (!active() && liveBoard()?.totals?.stale > 0) return text('다시 분석 필요','Reanalysis needed');
     if (!run) return '';
     if (active() && !run.cancel_requested) {
       const done = Array.isArray(run.completed_tasks) ? run.completed_tasks.length : Number(run.completed_tasks || 0);
@@ -479,11 +480,11 @@ const AnalysisRun = (() => {
       if(!boardError && loadingBoard){
         const quick=boardQuick?.repositories || [],files=quick.reduce((n,r)=>n+r.tracked,0),skipped=quick.reduce((n,r)=>n+Object.values(r.excluded || {}).reduce((a,c)=>a+c,0),0);
         const known=quick.length?` ${text('추적 파일 '+files+'개 · 제외 '+skipped+'개 · 코드 '+quick[0].commit.slice(0,8),'Tracked files '+files+' · excluded '+skipped+' · code '+quick[0].commit.slice(0,8))}`:'';
-        return `<section class="sect unit-board" data-unit-board="loading" aria-busy="true"><h3>${text('전체 코드 분석','Full code analysis')} ${beta()}</h3><p class="s" role="status">${text('단위를 계산하는 중입니다. AI는 부르지 않습니다.','Calculating units. No AI is called.')}${esc(known)}</p></section>`;
+        return `<section class="sect unit-board" data-unit-board="loading" aria-busy="true"><p class="s" role="status">${text('단위를 계산하는 중입니다. AI는 부르지 않습니다.','Calculating units. No AI is called.')}${esc(known)}</p></section>`;
       }
       if(!boardError)return '';
       const refresh=/\bRefresh\b/.test(String(boardError?.message || boardError));
-      return `<section class="sect unit-board" data-unit-board="error"><h3>${text('전체 코드 분석','Full code analysis')} ${beta()}</h3><p class="s">${refresh?text('이 코드를 한 번 새로고침하면 단위가 계산됩니다. 새로고침은 AI를 부르지 않습니다.','Units are calculated after one refresh of this code. Refreshing does not call AI.'):text('단위를 읽지 못했습니다.','Could not read the units.')}</p>${refresh?`<button class="btn primary" type="button" id="refreshForUnits">${text('새로고침하고 단위 계산','Refresh and calculate units')}</button>`:''}</section>`;
+      return `<section class="sect unit-board" data-unit-board="error"><p class="s">${refresh?text('이 코드를 한 번 새로고침하면 단위가 계산됩니다. 새로고침은 AI를 부르지 않습니다.','Units are calculated after one refresh of this code. Refreshing does not call AI.'):text('단위를 읽지 못했습니다.','Could not read the units.')}</p>${refresh?`<button class="btn primary" type="button" id="refreshForUnits">${text('새로고침하고 단위 계산','Refresh and calculate units')}</button>`:''}</section>`;
     }
     const t={...b.totals},total=t.units || 0;
     if(!total)return '';
@@ -506,7 +507,8 @@ const AnalysisRun = (() => {
     const filters=`<div class="unit-legend" role="group" aria-label="${text('상태 필터','State filter')}"><button type="button" data-unit-filter="all" aria-pressed="${unitFilter==='all'}">${text('전체','All')} ${total}</button>${present.map(k=>`<button type="button" data-unit-filter="${k}" data-state="${k==='explained'?'saved':k}" aria-pressed="${unitFilter===k}"><i aria-hidden="true"></i>${text(...UNIT_STATES[k])} ${n[k]}</button>`).join('')}</div>${t.retired?`<p class="s unit-retired">${text('현재 구조에 없는 이전 단위 '+t.retired+'개의 설명은 기록에만 남아 있고 위 개수에 넣지 않습니다.',t.retired+' explanations of earlier units that the current structure no longer has stay in history only and are not counted above.')}</p>`:''}`;
     const lanes=Object.keys(KINDS).filter(k=>unitRows.some(r=>r.kind===k)).map(kind=>{
       const set=unitRows.map((row,i)=>[row,i]).filter(([row])=>row.kind===kind);
-      return `<div class="unit-lane"><span class="unit-kind">${text(...KINDS[kind])}<b>${set.filter(([row])=>row.state==='saved').length}/${set.filter(([row])=>row.state!=='local').length}</b></span><span class="unit-cells">${set.map(([row,i])=>`<button class="unit-cell" type="button" data-unit-cell="${i}" data-state="${row.state}" ${linkedSet.has(i)?'data-linked="1"':''} title="${esc(row.name)} · ${stateText(row)}" aria-label="${esc(row.name)} · ${stateText(row)}"></button>`).join('')}</span></div>`;
+      const done=set.filter(([row])=>['saved','named'].includes(row.state)).length,detailed=MAP_KINDS.includes(kind)?0:set.filter(([row])=>row.state==='saved').length;
+      return `<div class="unit-lane"><span class="unit-kind">${text(...KINDS[kind])}<b>${done}/${set.filter(([row])=>row.state!=='local').length}</b>${detailed?`<small>${text('자세히 '+detailed,'Detailed '+detailed)}</small>`:''}</span><span class="unit-cells">${set.map(([row,i])=>`<button class="unit-cell" type="button" data-unit-cell="${i}" data-state="${row.state}" ${linkedSet.has(i)?'data-linked="1"':''} title="${esc(row.name)} · ${stateText(row)}" aria-label="${esc(row.name)} · ${stateText(row)}"></button>`).join('')}</span></div>`;
     }).join('');
     const rank=row=>STATE_ORDER.indexOf(legendKey(row));
     const listed=unitRows.map((row,i)=>[row,i]).filter(([row])=>unitFilter==='all' || legendKey(row)===unitFilter).sort((a,b)=>rank(a[0])-rank(b[0]) || a[1]-b[1]);
@@ -521,13 +523,15 @@ const AnalysisRun = (() => {
     const gaps=b.repositories.flatMap(r=>r.gaps || []);
     const gapNote=gaps.length?`<p class="s" role="status">${text('AI 해석이 없는 부분 '+gaps.length+'곳. 지도는 그대로 남는다.',gaps.length+' parts have no AI interpretation. The map stays.')}</p>`:'';
     const scopeHtml=`<details class="unit-calls" data-read-scope><summary>${text('읽기 범위','Reading range')}</summary><p class="s">${text('지도는 로컬에서 계산한다. 이름·묶음·서비스 구성은 AI가 지도 요약만 보고 해석한 것이다. 단위 설명은 그 단위의 코드 줄을 읽고 만든다.','The map is calculated locally. Names, groups and the service structure are AI interpretations of a map summary only. A unit explanation is made from that unit\'s code lines.')}</p>${rulesNote}${unitSummary(b)}</details>`;
-    const progress=`<span class="unit-count"><span class="chip">${text('이름·설명','Named')} ${t.named || 0}</span><span class="chip">${text('자세한 설명','Detailed')} ${explained}</span>${t.local?`<span class="chip" data-state="local">${text('로컬 확인','Checked locally')} ${t.local}</span>`:''}</span>`;
+    // 이름·설명 수는 자세한 설명이 있는 단위도 센다. 지도 줄(서비스 구성·화면 묶음)은 넣지 않는다.
+    const progress=`<span class="unit-count"><span class="chip">${text('이름·설명','Named')} ${(t.named || 0)+explained}</span>${explained?`<span class="chip">${text('자세한 설명','Detailed')} ${explained}</span>`:''}${t.local?`<span class="chip" data-state="local">${text('로컬 확인','Checked locally')} ${t.local}</span>`:''}</span>`;
     const start=live?`<div class="unit-run" role="status" aria-live="polite"><span class="chip">${text('AI 호출','AI calls')} ${used}/${b.announced?.total ?? calls}</span><button class="btn" id="cancelFullAnalysis" ${busy || run.cancel_requested?'disabled':''}>${text('취소','Cancel')}</button></div>`
       : scanning ? `<div class="unit-start"><span class="chips"><span class="chip" role="status">${text('파일 확인 중','Checking files')}</span></span><button class="btn primary" id="startFullAnalysis" disabled>${text('분석하기','Analyze')}</button></div>`
-      : calls>0 ? `<div class="unit-start"><span class="chips"><span class="chip">${text('지도 요약이 Claude로 전송','Map summary sent to Claude')}</span></span><button class="btn primary" id="startFullAnalysis" ${canStart?'':'disabled'}>${text('분석하기 · 호출 '+calls+'회','Analyze · '+calls+' calls')}</button>${usableNow?'':`<button class="btn quiet" id="checkFullAccount">${text('계정 확인','Check account')}</button>`}</div>`
+      : calls>0 && provider && !providerBusy && !usableNow ? `<div class="unit-start"><p role="alert">${esc(message(provider))}</p><button class="btn quiet" id="checkFullAccount">${text('계정 확인','Check account')}</button></div>`
+      : calls>0 ? `<div class="unit-start"><button class="btn primary" id="startFullAnalysis" ${canStart?'':'disabled'}>${text('분석하기 · 호출 '+calls+'회','Analyze · '+calls+' calls')}</button><span class="s">${text('지도 요약이 Claude로 전송','Map summary sent to Claude')}</span></div>`
       : `<p class="chips"><span class="chip ok">${text('분석할 것 없음','Nothing left to analyze')}</span></p>`;
     const alert=finished?`<p role="alert">${esc(message(run.error || {code:'CANCELLED'}))}</p>`:fullRun() && run.state==='completed' && run.map_gaps?`<p class="s" role="status">${esc(stateLabel())}</p>`:'';
-    return `<section class="sect unit-board" data-unit-board><h3>${text('전체 코드 분석','Full code analysis')} ${beta()}${progress}</h3>${start}${scopeHtml}${alert}${gapNote}${bar}${filters}<div class="unit-map" role="group" aria-label="${text('단위 구조도','Unit map')}">${lanes}</div><ul class="unit-cards">${shown.map(([row,i])=>unitCard(row,i,multi)).join('')}</ul>${hidden>0?`<button class="btn quiet" type="button" id="unitMore">${text('더 보기','Show more')} (${hidden})</button>`:''}</section>`;
+    return `<section class="sect unit-board" data-unit-board><div class="unit-head-line">${progress}</div>${start}${scopeHtml}${alert}${gapNote}${bar}${filters}<div class="unit-map" role="group" aria-label="${text('단위 구조도','Unit map')}">${lanes}</div><ul class="unit-cards">${shown.map(([row,i])=>unitCard(row,i,multi)).join('')}</ul>${hidden>0?`<button class="btn quiet" type="button" id="unitMore">${text('더 보기','Show more')} (${hidden})</button>`:''}</section>`;
   }
   async function readUnit(row) {
     const base={...scope(),repository:row.repo};
@@ -602,7 +606,9 @@ const AnalysisRun = (() => {
     const startLabel=batch?text('경로 묶음 설명 생성','Generate path group explanations'):scoped?text('이 경로 설명 생성','Generate path explanation'):choice.task==='overview' ? text('첫 개요 만들기','Create initial overview')
       : text(names[choice.task]+' 분석 시작','Analyze '+names[choice.task]);
     if(fullReady){
-      const parts=[providerBusy?`<p role="status">${text('계정 확인 중…','Checking the account…')}</p>`:provider && !usable()?`<p role="alert">${esc(message(provider))}</p><button class="btn quiet" id="checkAppAnalysis">${text('계정 확인','Check account')}</button>`:'',
+      // The board shows an account problem in place of its start; without a start it stays here.
+      const boardStart=(liveBoard()?.calls?.total ?? 0)>0 && (liveBoard()?.totals?.units ?? 0)>0;
+      const parts=[boardStart?'':providerBusy?`<p role="status">${text('계정 확인 중…','Checking the account…')}</p>`:provider && !usable()?`<p role="alert">${esc(message(provider))}</p><button class="btn quiet" id="checkAppAnalysis">${text('계정 확인','Check account')}</button>`:'',
         retryWarning?`<p role="alert" id="retryDeliveryWarning">${text('분석이 중단됐습니다. 마지막 요청이 Claude에 전달됐을 수 있어, 다시 시도하면 재전송될 수 있습니다.','Analysis was interrupted. Claude may already have received the last request; retrying may send it again.')}</p>`:'',
         issue?`<p role="alert">${esc(message(issue))}</p>`:'',
         retryWarning && sameScope() && ['failed','cancelled'].includes(run?.state)?`<button class="btn" id="retryAppAnalysis" aria-describedby="retryDeliveryWarning" ${canStart?'':'disabled'}>${text('현재 코드로 다시 시도','Retry with current code')}</button>`:''].join('');
@@ -672,7 +678,8 @@ const AnalysisRun = (() => {
       catch { if (current(token)) { error = {code:'result_read_failed'}; paint(); } }
     };
   }
-  function open() { syncScope(); if (!provider && !providerBusy) void providers(); else void check(); }
+  // The board loads on every open, also before the account check answers.
+  function open() { syncScope(); if (!provider && !providerBusy) void providers(); void check(); }
   window.addEventListener('focus', () => { syncScope(); void check(); });
   document.addEventListener('visibilitychange', () => { clearTimeout(timer); if (!document.hidden) { syncScope(); void check(); } });
   return {syncScope, open, html, overviewHtml, boardHtml, savedScopeHtml, bind, bindMapResults, stateLabel, shortState, check, checkAccount:()=>{void providers();void check();}};

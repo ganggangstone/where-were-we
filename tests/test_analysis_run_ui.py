@@ -101,7 +101,9 @@ const serve=(extra)=>{native=(command,args)=>command==='analysis_run_status'&&ar
         self.check_js(self.BOARD + r"""
 serve();status=null;await open();await AnalysisRun.check();await flush();
 const html=$('insp').innerHTML;
-assert(html.includes('Full code analysis') && html.includes('<span class="beta">Beta</span>') && html.includes('Detailed 1') && html.includes('Named 1'),'Beta board with named and detailed counts');
+assert(!html.includes('Full code analysis') && html.includes('Detailed 1') && html.includes('Named 2'),'No second heading; named counts include the detailed unit');
+assert(html.includes('Paths<b>1/2</b><small>Detailed 1</small>') && html.includes('Folders<b>1/3</b></span>'),'A lane counts named units out of units sent to AI and adds detailed ones apart');
+assert(!html.includes('checkFullAccount'),'No account button beside the start when the account works');
 assert(html.includes('Analyze · 3 calls') && html.includes('Map summary sent to Claude') && html.includes('AI interpretations of a map summary only'),'Call count, what is sent and what the AI reads before the click');
 assert(html.includes('Excluded 3') && html.includes('Index limit reached') && html.includes('Files 15/20') && html.includes('Credential files'),'Scope gaps, index limit and exclusion reasons');
 assert(html.includes('Analyzing') && html.includes('No explanation') && html.includes('Failed') && html.includes('Detailed explanation') && html.includes('Named and described'),'Named units are not shown as queued');
@@ -292,11 +294,45 @@ AnalysisRun.bind();$('refreshForUnits').onclick();assert(refreshed===1,'The acti
 assert(!calls.some(c=>['analysis_run_start','analysis_request'].includes(c.command)),'Refreshing never starts AI work');
 """)
 
+    def test_board_loads_on_first_open_before_the_account_answers_and_when_the_window_shows(self):
+        self.check_js(self.BOARD + r"""
+serve();status=null;let answer;native=(command,args)=>command==='analysis_providers'?new Promise(r=>answer=r):command==='analysis_run_status'&&args.view==='units'?unitBoard():undefined;
+await open();await flush();
+assert($('insp').innerHTML.includes('/orders'),'The first open shows the board while the account check is pending');
+answer(available);await flush();
+document.hidden=true;S.loadToken=2;render();await flush();
+const before=calls.filter(c=>c.args && c.args.view==='units').length;
+assert(!$('insp').innerHTML.includes('/orders'),'A hidden window reads nothing for the new scope');
+document.hidden=false;listeners.visibilitychange();await flush();await flush();
+assert(calls.filter(c=>c.args && c.args.view==='units').length===before+1 && $('insp').innerHTML.includes('/orders'),'Showing the window loads the board');
+""")
+
+    def test_account_problem_replaces_the_start_and_zero_detailed_is_not_shown(self):
+        self.check_js(self.BOARD + r"""
+const named=()=>({repositories:[{repository:'service',units:[['folder:a','folder','a',2,'named',''],['folder:b','folder','b',2,'local','']]}],totals:{units:2,named:1,local:1},calls:{rules:0,labeling:1,structure:0,unit:0,total:1}});
+native=(command,args)=>command==='analysis_run_status'&&args.view==='units'?named():undefined;
+provider={providers:[{provider:'claude',available:false,error_code:'CLI_NOT_INSTALLED'}]};status=null;await open();await flush();
+let html=$('insp').innerHTML;
+assert(!html.includes('startFullAnalysis') && html.includes('checkFullAccount') && html.includes('Install Claude Code'),'An account problem shows its message and the check in place of the start');
+assert(html.includes('Named 1') && !html.includes('Detailed') && html.includes('Folders<b>1/1</b></span>'),'Zero detailed explanations are not shown');
+provider=available;$('checkFullAccount').onclick();await flush();
+html=$('insp').innerHTML;
+assert(html.includes('id="startFullAnalysis"') && !html.includes('checkFullAccount'),'After the account works there is one button');
+""")
+
+    def test_short_state_says_reanalysis_when_units_are_outdated(self):
+        self.check_js(self.BOARD + r"""
+native=(command,args)=>command==='analysis_run_status'&&args.view==='units'?unitBoard({totals:{units:5,saved:1,named:1,working:1,pending:1,stale:1}}):undefined;
+status=null;assert(AnalysisRun.shortState()==='','No state before any run');
+await open();await flush();
+assert(AnalysisRun.shortState()==='Reanalysis needed','Outdated units ask for a new analysis');
+""")
+
     def test_korean_board_uses_plain_labels_without_banned_endings(self):
         self.check_js(self.BOARD + r"""
 S.lang='ko';serve();status=null;await open();await AnalysisRun.check();await flush();
 const html=$('insp').innerHTML;
-for(const word of ['전체 코드 분석','베타','분석 중','설명 없음','자세한 설명 있음','이름·설명 있음','분석하기 · 호출 3회','색인 한도 도달','제외 3'])assert(html.includes(word),'Korean label '+word);
+for(const word of ['분석 중','설명 없음','자세한 설명 있음','이름·설명 있음','분석하기 · 호출 3회','색인 한도 도달','제외 3'])assert(html.includes(word),'Korean label '+word);
 assert(!/해요|이에요|예요|할게요/.test(html),'No informal ending');
 """)
 
