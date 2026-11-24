@@ -14,7 +14,7 @@ const AnalysisRun = (() => {
     const args={...scope(),...(task==='steps'?{screen:choice.detailTarget}:task==='jobs'?{node:choice.detailTarget}:{})};
     const targets=['steps','jobs'].includes(task) ? (choice.targets || analysisCalls(command,args).map(a=>({repository:a.repository || '',target:a.screen || a.node}))) : [];
     if(task==='resources')return {task,targets:[],max_calls:choice.maxCalls,...(choice.area?{area:choice.area}:{})};
-    if(task==='full')return {task,targets:[],max_calls:choice.maxCalls ?? 0,coverage:choice.coverage || 'signal',...(Array.isArray(choice.only)?{only:choice.only}:{})};
+    if(task==='full')return {task,targets:[],...(Array.isArray(choice.only)?{only:choice.only}:{})};
     return {task,targets:command==='scope_overview'?[{repository:scope().repository,target:choice.detailTarget}]:targets};
   }
   const key = () => JSON.stringify([scope(), S.analysisChoice, S.loadToken]);
@@ -412,7 +412,7 @@ const AnalysisRun = (() => {
   let unitEdges=new Map(),linkStore={scope:'',repos:{}};
   const REASONS={secret:['비밀 파일','Credential files'],binary:['이미지·바이너리','Binary files'],large:['300KB 초과','Over 300KB'],generated:['생성·잠금 파일','Generated or lock files']};
   const SAMPLE_FILES=4;
-  let board=null,boardQuick=null,mapCoverage='signal',boardScope='',boardError=null,unitFilter='all',unitLimit=24,openedUnit=null,loadingBoard=false,unitRows=[];
+  let board=null,boardQuick=null,boardScope='',boardError=null,unitFilter='all',unitLimit=24,openedUnit=null,loadingBoard=false,unitRows=[];
   const unitDetails=new Map();
   const beta=()=>`<span class="beta">${text('베타','Beta')}</span>`;
   const boardScopeKey=()=>JSON.stringify([scope(),S.loadToken]);
@@ -505,7 +505,7 @@ const AnalysisRun = (() => {
     const state=text(...UNIT_STATES[row.state]);
     const title=mapRow?text(...KINDS[row.kind]):esc(row.name);
     const pieces=mapRow && /^\d+\/\d+$/.test(row.detail)?`<span class="chip">${text('입력 조각','Input pieces')} ${esc(row.detail)}</span>`:'';
-    const body=open && expandable?(mapRow?'':linkChips(index))+unitDetail(row)+explainButton(row,index):'';
+    const body=open && expandable?(mapRow?'':(row.what?`<p class="s">${esc(row.what)} <span class="chip">${text('AI 해석','AI interpretation')}</span></p>`:'')+linkChips(index))+unitDetail(row)+explainButton(row,index):'';
     return `<li class="unit-card" data-state="${row.state}" data-unit-card="${index}"><button class="unit-head" type="button" data-unit-open="${index}" aria-expanded="${expandable?open:false}" ${expandable||navigates?'':'aria-disabled="true"'}><i class="unit-dot" aria-hidden="true"></i><strong>${title}</strong><span class="chips">${mapRow?'':`<span class="chip">${text(...(KINDS[row.kind] || [row.kind,row.kind]))}</span>`}${pieces}${multi?`<span class="chip">${esc(connectionDisplayName(row.repo))}</span>`:''}${row.detail==='reused'?`<span class="chip">${text('코드 변경 없음','Code unchanged')}</span>`:''}</span><span class="unit-state">${state}</span></button>${body}</li>`;
   }
   function boardHtml() {
@@ -520,16 +520,13 @@ const AnalysisRun = (() => {
       const refresh=/\bRefresh\b/.test(String(boardError?.message || boardError));
       return `<section class="sect unit-board" data-unit-board="error"><h3>${text('전체 코드 분석','Full code analysis')} ${beta()}</h3><p class="s">${refresh?text('이 코드를 한 번 새로고침하면 단위가 계산됩니다. 새로고침은 AI를 부르지 않습니다.','Units are calculated after one refresh of this code. Refreshing does not call AI.'):text('단위를 읽지 못했습니다.','Could not read the units.')}</p>${refresh?`<button class="btn primary" type="button" id="refreshForUnits">${text('새로고침하고 단위 계산','Refresh and calculate units')}</button>`:''}</section>`;
     }
-    const mode=live?(run.intent?.coverage || b.coverage || 'signal'):(b.modes?.[mapCoverage]?mapCoverage:'signal'),picked=b.modes?.[mode];
-    const toAI=!live && mode==='all';  // "send every text file" makes the local folders part of the run
     const t={...b.totals},total=t.units || 0;
     if(!total)return '';
-    if(toAI && t.local){t.pending=(t.pending || 0)+t.local;t.local=0;}
     const multi=b.repositories.length>1,starts={};
     if(!live){linkStore={scope:boardScopeKey(),repos:{}};for(const repo of b.repositories)if(repo.links)linkStore.repos[repo.repository]=repo.links;}
     else if(linkStore.scope!==boardScopeKey())linkStore={scope:'',repos:{}};
     let at=0;
-    unitRows=b.repositories.flatMap(repo=>{starts[repo.repository]=at;at+=repo.units.length;return repo.units.map((row,ri)=>({repo:repo.repository,ri,id:row[0],kind:row[1],name:row[2],count:row[3],state:toAI && row[4]==='local'?'pending':row[4],detail:row[5]}));});
+    unitRows=b.repositories.flatMap(repo=>{starts[repo.repository]=at;at+=repo.units.length;return repo.units.map((row,ri)=>({repo:repo.repository,ri,id:row[0],kind:row[1],name:row[2],count:row[3],state:row[4],detail:row[5],what:row[6] || ''}));});
     unitEdges=new Map();
     for(const [repo,links] of Object.entries(linkStore.repos))for(const [from,to] of links){
       const a=starts[repo]+from,c=starts[repo]+to;if(!unitRows[a] || !unitRows[c])continue;
@@ -537,7 +534,7 @@ const AnalysisRun = (() => {
     }
     const openIndex=unitRows.findIndex(row=>unitKey(row)===openedUnit),linkedSet=new Set(openIndex>=0?[...(unitEdges.get(openIndex)?.out || []),...(unitEdges.get(openIndex)?.in || [])]:[]);
     const aiTotal=total-(t.local || 0);
-    const mapRows=unitRows.filter(r=>MAP_KINDS.includes(r.kind)),mapDone=mapRows.filter(r=>['saved','unavailable'].includes(r.state)).length+(savedOverviews().length?1:0),explained=unitRows.filter(r=>!MAP_KINDS.includes(r.kind) && r.state==='saved').length;
+    const explained=unitRows.filter(r=>!MAP_KINDS.includes(r.kind) && r.state==='saved').length;
     const present=STATE_ORDER.filter(k=>t[k]);
     const bar=`<div class="unit-bar" role="img" aria-label="${t.saved || 0}/${aiTotal}">${present.map(k=>`<i data-state="${k}" style="width:${(t[k]*100/total).toFixed(2)}%"></i>`).join('')}</div>`;
     const filters=`<div class="unit-legend" role="group" aria-label="${text('상태 필터','State filter')}"><button type="button" data-unit-filter="all" aria-pressed="${unitFilter==='all'}">${text('전체','All')} ${total}</button>${present.map(k=>`<button type="button" data-unit-filter="${k}" data-state="${k}" aria-pressed="${unitFilter===k}"><i aria-hidden="true"></i>${text(...UNIT_STATES[k])} ${t[k]}</button>`).join('')}</div>${t.retired?`<p class="s unit-retired">${text('현재 구조에 없는 이전 단위 '+t.retired+'개의 설명은 기록에만 남아 있고 위 개수에 넣지 않습니다.',t.retired+' explanations of earlier units that the current structure no longer has stay in history only and are not counted above.')}</p>`:''}`;
@@ -553,29 +550,18 @@ const AnalysisRun = (() => {
     const scanning=!live && b.signals==='pending';
     const usableNow=usable(),canStart=usableNow && !providerBusy && !busy && !active() && !scanning;
     const finished=fullRun() && ['failed','cancelled'].includes(run.state);
-    const calls=picked?.calls ?? b.calls,minutes=Math.max(1,Math.round((picked?.time_limit_seconds ?? b.time_limit_seconds ?? 3600)/60));
-    const span=m=>m<180?m+text('분',' min'):m<2880?Math.round(m/60)+text('시간',' h'):Math.round(m/1440)+text('일',' days');
-    const parts=picked?.calls_parts ?? b.calls_parts;
-    const mainButton=`<button class="btn primary" id="startFullAnalysis" ${canStart?'':'disabled'}>${text('분석하기 · 호출 최대 '+calls+'회','Analyze · up to '+calls+' calls')}</button>`;
-    const mapBy=picked?.map_by ?? b.map_by,mapStages=mapBy?[['analysis','지도','Map'],['system','서비스 구성','Service structure'],['groups','화면 묶음','Screen groups']].map(([k,ko,en])=>[k,ko,en,mapBy[k]]):[['map','지도·구성','Map and structure',parts?.map]];
-    const partList=parts?[['overview','첫 개요','First overview'],...mapStages.map(([,ko,en,n],i)=>['map'+i,ko,en,n]),['units','단위 묶음','Unit packs'],['retry','재시도 여유','Retry allowance'],['later','나중에 생길 단위 여유','Units added later']].map(([k,ko,en,n])=>[ko,en,n ?? parts[k]]).filter(([,,n])=>n>0).map(([ko,en,n])=>text(ko,en)+' '+n).join(' · '):'';
-    const partsHtml=partList?`<p class="s">${text('호출 상한 계산','How the limit is counted')}: ${partList} = ${calls}</p>`:'';
-    const mb=n=>n<1048576?Math.max(1,Math.round(n/1024))+' KB':(n/1048576).toFixed(n<10485760?1:0)+' MB';
-    const reports=b.repositories.map(r=>r.map_coverage).filter(Boolean),sum=k=>reports.reduce((n,r)=>n+(r[k] || 0),0);
-    const modeLabel=(key,ko,en)=>{const m=b.modes?.[key];return `<label class="unit-mode"><input type="radio" name="mapCoverage" value="${key}" ${mode===key?'checked':''} ${live||!canStart?'disabled':''}> <span><b>${text(ko,en)}</b>${m?` · ${text('호출 최대 '+m.calls+'회','up to '+m.calls+' calls')}`:''}</span></label>`;};
-    const coverageHtml=reports.length&&b.modes?`<div class="unit-coverage" data-map-coverage="${mode}"><div role="radiogroup" aria-label="${text('지도·구성 읽기 범위','What the map and structure read')}">${modeLabel('signal','신호 기반 읽기 (기본)','Signal-based reading (default)')}${modeLabel('all','모든 텍스트 파일 원문을 AI가 읽기','Send every text file to the AI')}</div>
-      <p class="s">${mode==='signal'
-        ?text('모든 텍스트 파일을 로컬에서 읽고 색인했습니다. AI는 신호(라우트·요청·저장소·외부 서비스·진입점)가 있는 줄 주변만 읽고, 더 필요하면 파일 범위나 검색을 요청합니다.','Every text file is read and indexed locally. The AI reads only lines around signals (routes, requests, storage, external services, entry points) and asks for a file range or search when it needs more.')
-        :text('신호와 관계없이 모든 텍스트 파일 원문을 조각으로 보냅니다. 호출과 전송량이 가장 큽니다.','Every text file is sent as pieces whatever its signals. This costs the most calls and data.')}</p>
-      <p class="s">${text('로컬 색인 '+sum('files')+' · 신호 줄 주변 '+sum('windows')+' · 지도가 인용해 전체 전송 '+sum('whole')+' · 신호 없음 '+sum('local')+' · 문서·데이터 '+sum('docs')+' · 테스트·외부 코드 '+sum('support')+' · 전송 약 '+mb(b.modes[mode]?.source_bytes ?? sum('sent_bytes'))+' / 원문 '+mb(sum('text_bytes')),'Indexed locally '+sum('files')+' · around signals '+sum('windows')+' · sent whole (cited by the map) '+sum('whole')+' · no signal '+sum('local')+' · documents and data '+sum('docs')+' · tests and vendored code '+sum('support')+' · sends about '+mb(b.modes[mode]?.source_bytes ?? sum('sent_bytes'))+' of '+mb(sum('text_bytes')))}</p></div>`:'';
-    const scopeHtml=`<details class="unit-calls" data-read-scope><summary>${text('읽기 범위','Reading range')}</summary>${coverageHtml}<p class="chips"><span class="chip">${text('시간 상한','Time cap')} ${span(minutes)}</span></p>${partsHtml}${unitSummary(b)}</details>`;
-    const progress=`<span class="unit-count"><span class="chip">${text('개요·지도·구성·묶음','Overview, map, structure, groups')} ${mapDone}/${mapRows.length+1}</span><span class="chip">${text('설명 저장','Explained')} ${explained}</span>${t.local?`<span class="chip" data-state="local">${text('로컬 확인','Checked locally')} ${t.local}</span>`:''}</span>`;
-    const start=live?`<div class="unit-run" role="status" aria-live="polite"><span class="chip">${text('AI 호출','AI calls')} ${run.unit_board?.budget?run.unit_board.budget.used+'/'+run.unit_board.budget.limit:(run.input_stats?.calls || 0)+((run.unit_estimate?.calls ?? calls)?' · '+text('최대','max')+' '+(run.unit_estimate?.calls ?? calls):'')}</span><span class="chip">${text('경과','Elapsed')} ${Math.max(0,Math.round((Date.now()-Date.parse(run.started_at || run.created_at))/60000)) || 0}${text('분',' min')}</span><button class="btn" id="cancelFullAnalysis" ${busy || run.cancel_requested?'disabled':''}>${text('취소','Cancel')}</button></div>`
-      : scanning ? `<div class="unit-start"><span class="chips"><span class="chip" role="status">${text('신호 수집 중','Scanning signals')}</span></span><button class="btn primary" id="startFullAnalysis" disabled>${text('분석하기','Analyze')}</button></div>`
-      : calls>0 ? `<div class="unit-start"><span class="chips"><span class="chip">${text('AI 호출 최대','AI calls up to')} ${calls}</span><span class="chip">${text('코드가 Claude로 전송','Code sent to Claude')}</span><span class="chip">${text('구독 한도 적용','Subscription limit')}</span></span>${mainButton}${usableNow?'':`<button class="btn quiet" id="checkFullAccount">${text('계정 확인','Check account')}</button>`}</div>`
-      : `<p class="chips"><span class="chip ok">${text('분석할 단계 없음','Nothing left to analyze')}</span></p>`;
+    const calls=b.calls?.total ?? 0,used=Object.values(b.used || {}).reduce((n,c)=>n+c,0);
+    const rulesNote=b.repositories.some(r=>r.missing_rules?.length)?`<p class="s">${text('내장 읽기 규칙이 없는 언어는 먼저 읽기 규칙을 받아 연결을 읽는다.','Languages without built-in readers first get reading rules, then their connections are read.')}</p>`:'';
+    const gaps=b.repositories.flatMap(r=>r.gaps || []);
+    const gapNote=gaps.length?`<p class="s" role="status">${text('AI 해석이 없는 부분 '+gaps.length+'곳. 지도는 그대로 남는다.',gaps.length+' parts have no AI interpretation. The map stays.')}</p>`:'';
+    const scopeHtml=`<details class="unit-calls" data-read-scope><summary>${text('읽기 범위','Reading range')}</summary><p class="s">${text('지도는 로컬에서 계산한다. 이름·묶음·서비스 구성은 AI가 지도 요약만 보고 해석한 것이다. 단위 설명은 그 단위의 코드 줄을 읽고 만든다.','The map is calculated locally. Names, groups and the service structure are AI interpretations of a map summary only. A unit explanation is made from that unit\'s code lines.')}</p>${rulesNote}${unitSummary(b)}</details>`;
+    const progress=`<span class="unit-count"><span class="chip">${text('설명 저장','Explained')} ${explained}</span>${t.local?`<span class="chip" data-state="local">${text('로컬 확인','Checked locally')} ${t.local}</span>`:''}</span>`;
+    const start=live?`<div class="unit-run" role="status" aria-live="polite"><span class="chip">${text('AI 호출','AI calls')} ${used}/${b.announced?.total ?? calls}</span><button class="btn" id="cancelFullAnalysis" ${busy || run.cancel_requested?'disabled':''}>${text('취소','Cancel')}</button></div>`
+      : scanning ? `<div class="unit-start"><span class="chips"><span class="chip" role="status">${text('파일 확인 중','Checking files')}</span></span><button class="btn primary" id="startFullAnalysis" disabled>${text('분석하기','Analyze')}</button></div>`
+      : calls>0 ? `<div class="unit-start"><span class="chips"><span class="chip">${text('지도 요약이 Claude로 전송','Map summary sent to Claude')}</span></span><button class="btn primary" id="startFullAnalysis" ${canStart?'':'disabled'}>${text('분석하기 · 호출 '+calls+'회','Analyze · '+calls+' calls')}</button>${usableNow?'':`<button class="btn quiet" id="checkFullAccount">${text('계정 확인','Check account')}</button>`}</div>`
+      : `<p class="chips"><span class="chip ok">${text('분석할 것 없음','Nothing left to analyze')}</span></p>`;
     const alert=finished?`<p role="alert">${esc(message(run.error || {code:'CANCELLED'}))}</p>`:fullRun() && run.state==='completed' && run.map_gaps?`<p class="s" role="status">${esc(stateLabel())}</p>`:'';
-    return `<section class="sect unit-board" data-unit-board><h3>${text('전체 코드 분석','Full code analysis')} ${beta()}${progress}</h3>${start}${scopeHtml}${alert}${bar}${filters}<div class="unit-map" role="group" aria-label="${text('단위 구조도','Unit map')}">${lanes}</div><ul class="unit-cards">${shown.map(([row,i])=>unitCard(row,i,multi)).join('')}</ul>${hidden>0?`<button class="btn quiet" type="button" id="unitMore">${text('더 보기','Show more')} (${hidden})</button>`:''}</section>`;
+    return `<section class="sect unit-board" data-unit-board><h3>${text('전체 코드 분석','Full code analysis')} ${beta()}${progress}</h3>${start}${scopeHtml}${alert}${gapNote}${bar}${filters}<div class="unit-map" role="group" aria-label="${text('단위 구조도','Unit map')}">${lanes}</div><ul class="unit-cards">${shown.map(([row,i])=>unitCard(row,i,multi)).join('')}</ul>${hidden>0?`<button class="btn quiet" type="button" id="unitMore">${text('더 보기','Show more')} (${hidden})</button>`:''}</section>`;
   }
   async function readUnit(row) {
     const base={...scope(),repository:row.repo};
@@ -604,17 +590,16 @@ const AnalysisRun = (() => {
     if($('unitMore'))$('unitMore').onclick=()=>{unitLimit+=48;paint();};
     if($('startFullAnalysis'))$('startFullAnalysis').onclick=()=>{
       const b=liveBoard();if(!b || active())return;
-      S.analysisChoice={...S.analysisChoice,task:'full_analysis',maxCalls:(b.modes?.[mapCoverage] || b).calls,coverage:b.modes?.[mapCoverage]?mapCoverage:'signal',only:undefined};
+      S.analysisChoice={...S.analysisChoice,task:'full_analysis',only:undefined};
       return execute('analysis_run_start');
     };
     root?.querySelectorAll?.('[data-unit-explain]').forEach(button=>button.onclick=()=>{
       const b=liveBoard(),row=unitRows[Number(button.dataset.unitExplain)];if(!b || !row || !canExplain())return;
-      S.analysisChoice={...S.analysisChoice,task:'full_analysis',maxCalls:2,coverage:b.modes?.[mapCoverage]?mapCoverage:'signal',only:[{repository:row.repo,target:row.id}]};
+      S.analysisChoice={...S.analysisChoice,task:'full_analysis',only:[{repository:row.repo,target:row.id}]};
       unitDetails.delete(unitKey(row));
       return execute('analysis_run_start');
     });
     root?.querySelectorAll?.('[data-unit-link]').forEach(button=>button.onclick=()=>{const row=unitRows[Number(button.dataset.unitLink)];if(row){unitFilter='all';void openUnit(row);}});
-    root?.querySelectorAll?.('input[name="mapCoverage"]').forEach(input=>input.onchange=()=>{mapCoverage=input.value;paint();});
     if($('refreshForUnits'))$('refreshForUnits').onclick=()=>$('refresh')?.click();
     if($('cancelFullAnalysis'))$('cancelFullAnalysis').onclick=()=>execute('analysis_run_cancel');
     if($('checkFullAccount'))$('checkFullAccount').onclick=()=>{void providers();};
