@@ -584,11 +584,7 @@ const AnalysisRun = (() => {
     const total=done+left;
     const progress=batchRun?text('경로 묶음 '+done+'개 저장 · '+left+'개 남음','Path groups saved: '+done+' · Remaining: '+left):done+'/'+total+' '+text('작업 저장됨','tasks saved');
     const task = run?.current_task;
-    const batches=run?.batch_progress,stats=run?.input_stats;
-    let inputProgress='';
-    if (batches && active()) {
-      inputProgress=text('현재 작업 입력 조각','Current task input units')+': '+batches.completed+'/'+batches.total;
-    }
+    const stats=run?.input_stats;
     const names={resources:text('경로 묶음 설명','Path group explanations'),overview:text('첫 개요','Initial overview'),full:text('분석하기','Analyze'),steps:text('동작 과정','Action steps'),jobs:text('프로그램이 하는 일','Program jobs'),briefing:text('변경 설명','Change explanation')};
     const taskName = typeof task === 'string' ? task : batchRun && task?.target ? [task.repository,task.target].filter(Boolean).join(' · ') : task ? [task.repository, text(task.task==='overview'?'첫 개요':PLAN_NAMES[task.task] || task.task, ({overview:'Initial overview',analysis:'Detailed map',system:'Architecture',groups:'Screen groups',jobs:'Program jobs',steps:'Action steps',briefing:'Change explanation'})[task.task] || task.task)].filter(Boolean).join(' · ') : '';
     const retryWarning=sameScope() && run.state==='failed' && errorCode(run.error)==='interrupted' && run.input_stats?.calls>0;
@@ -620,7 +616,7 @@ const AnalysisRun = (() => {
       <p class="chips"><span class="chip">${esc(scope().repository ? connectionDisplayName(scope().repository) : text('연결한 코드 전체','All connected repositories'))}</span><span class="chip">${esc(S.branch)}</span>${targets.map(target=>`<span class="chip">${target}</span>`).join('')}<span class="chip">${text('코드가 Claude로 전송 · 구독 한도 적용','Code sent to Claude · subscription limit')}</span></p>
       ${providerBusy ? `<p role="status">${text('Claude Code 계정 확인 중…','Checking the Claude Code account…')}</p>` : provider && !usable() ? `<p role="alert">${esc(message(provider))}</p>` : ''}
       ${run ? `${!sameScope() || (runAccount && runAccount!==identity) ? `<p class="chips"><span class="chip">${text('마지막 실행','Last run')}: ${esc(names[run.intent?.task || 'all'])}</span><span class="chip">${esc(runScope)}</span>${(run.intent?.targets || []).map(t=>`<span class="chip">${esc(t.repository)} · ${esc(t.target)}</span>`).join('')}${runAccount && runAccount!==identity ? `<span class="chip warn">${esc(runAccount)}</span>` : ''}${!sameScope() ? `<span class="chip warn">${text('현재 선택과 다름','Differs from selection')}</span>` : ''}</p>` : ''}<div role="status" aria-live="polite"><strong>${esc(stateLabel())}</strong> · ${esc(progress)}${batchRun && cached?' · '+text('재사용 '+cached+'개',cached+' reused'):''}${taskName ? '<div>'+esc(taskName)+'</div>' : ''}</div><progress max="${Math.max(total, 1)}" value="${done}" aria-label="${text('분석 진행률','Analysis progress')}"></progress>${run.blocked?.length ? `<p class="s">${text('먼저 확인할 분석','Analysis requiring attention')}: ${run.blocked.length}</p>` : ''}` : ''}
-      ${stats ? `<details><summary>${text('AI 사용량','AI usage')}</summary><p class="s">${text('입력 호출','Input calls')}: ${stats.calls} · ${text('전송한 입력 바이트','Encoded input bytes')}: ${stats.bytes}${inputProgress ? ' · '+esc(inputProgress) : ''}</p></details>` : ''}
+      ${stats ? `<details><summary>${text('AI 사용량','AI usage')}</summary><p class="s">${text('입력 호출','Input calls')}: ${stats.calls} · ${text('전송한 입력 바이트','Encoded input bytes')}: ${stats.bytes}</p></details>` : ''}
       ${retryWarning?`<p role="alert" id="retryDeliveryWarning">${text('분석이 중단됐습니다. 마지막 요청이 Claude에 전달됐을 수 있습니다. 다시 시도하면 같은 요청이 재전송될 수 있습니다.','Analysis was interrupted. Claude may already have received the last request. Retrying may send it again.')}</p>`:''}
       ${issue ? `<p role="alert">${esc(message(issue))}</p>` : ''}
       ${!active() && !fullReady && choice.task==='overview' ? `<p class="s" id="overviewLimits">${scoped?text('선택한 경로 · 최대 4파일 · AI 1회','Selected path: up to 4 files · 1 AI call'):text('연결한 코드마다 최대 4파일 · AI 1회','Per repository: up to 4 files · 1 AI call')}</p>` : ''}

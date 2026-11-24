@@ -336,13 +336,13 @@ for(const word of ['분석 중','설명 없음','자세한 설명 있음','이�
 assert(!/해요|이에요|예요|할게요/.test(html),'No informal ending');
 """)
 
-    def test_saved_task_and_input_progress_are_distinct_and_intent_is_not_reused(self):
+    def test_saved_task_and_input_calls_are_distinct_and_intent_is_not_reused(self):
         self.check_js(r'''
 const briefing={task:'briefing',targets:[]};S.analysisChoice={task:'briefing_request'};
-await flush();status=runRecord('running',{intent:briefing,completed_tasks:[{task:'briefing'}],input_stats:{calls:4,bytes:12000},batch_progress:{task:'briefing',completed:2,total:7}});
+await flush();status=runRecord('running',{intent:briefing,completed_tasks:[{task:'briefing'}],input_stats:{calls:4,bytes:12000}});
 await open();await AnalysisRun.check();await flush();
 assert($('insp').innerHTML.includes('1/2 tasks saved'),'Saved task count');
-assert($('insp').innerHTML.includes('Input calls: 4') && $('insp').innerHTML.includes('Current task input units: 2/7'),'Input units are not saved tasks');
+assert($('insp').innerHTML.includes('Input calls: 4'),'Input calls are not saved tasks');
 status=runRecord('failed',{intent:briefing});
 S.analysisChoice={task:'resource_batch',maxCalls:1};AnalysisRun.open();await flush();
 assert($('startAppAnalysis') && !$('retryAppAnalysis'),'Another intent is not offered as this request’s retry');
