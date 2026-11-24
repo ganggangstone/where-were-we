@@ -517,6 +517,8 @@ def _compose(name, conf, state, raws, repository='', branch='dev'):
         result['ref']=role;bundle[role]=result
     for repo in conf['repositories']:
         rid=repo['id'];raw=raws[rid];file=lambda x:qfile(rid,x);screen=lambda x:qscreen(rid,x)
+        # The repository prefix only tells repositories apart, so a one-repository project shows plain names.
+        tag=(lambda text,name=repo['name']:'['+name+'] '+text) if len(conf['repositories'])>1 else (lambda text:text)
         related_issues={}
         active_map=bundle['dev'] if bundle['dev']['available'] else bundle['main']
         for pr in [*(raw.get('status') or {}).get('open_prs',[]),*(raw.get('status') or {}).get('merged_prs',[])]:
@@ -526,7 +528,7 @@ def _compose(name, conf, state, raws, repository='', branch='dev'):
         for k in STATUS_LISTS:
             for item in (raw.get('status') or {}).get(k,[]):
                 x=copy.deepcopy(item);x['repository']=rid
-                if 'title' in x:x['title']='['+repo['name']+'] '+x['title']
+                if 'title' in x:x['title']=tag(x['title'])
                 if 'files' in x:x['files']=[file(f) for f in x['files']]
                 # Recompute cross-repository file impact from the composed map.
                 x['screens']=sorted(set([screen(p) for p in x.get('screens',[])]+[p for f in [*x.get('files',[]),*[file(f) for f in x.get('uncommitted',[])]] for p in (bundle['dev'] if bundle['dev']['available'] else bundle['main'])['file_screens'].get(f,[])]))
@@ -536,7 +538,7 @@ def _compose(name, conf, state, raws, repository='', branch='dev'):
         g=raw.get('groups') or {}
         bundle['groups']['names'].update({screen(k):v for k,v in g.get('names',{}).items()})
         bundle['groups']['request_names'].update({file(k):v for k,v in g.get('request_names',{}).items()})
-        if rid in ids:bundle['groups']['groups'] += [{**g,'name':'['+repo['name']+'] '+g['name'],'screens':[screen(p) for p in g['screens']]} for g in (raw.get('groups') or {}).get('groups',[])]
+        if rid in ids:bundle['groups']['groups'] += [{**g,'name':tag(g['name']),'screens':[screen(p) for p in g['screens']]} for g in (raw.get('groups') or {}).get('groups',[])]
         for key,value in (raw.get('flows') or {}).get('routes',{}).items():
             flow=copy.deepcopy(value)
             if flow.get('file'):flow['file']=file(flow['file'])
@@ -557,7 +559,7 @@ def _compose(name, conf, state, raws, repository='', branch='dev'):
                 'what':'Repository · '+str(len((raw.get('dev') or {}).get('screens',[])))+' screens',
                 'code':[],'uses':[],'ev':[],'unknown':[]}]
         for n in nodes:
-            x=copy.deepcopy(n);x.update(id=prefix+n['id'],repository=rid,name='['+repo['name']+'] '+n['name'])
+            x=copy.deepcopy(n);x.update(id=prefix+n['id'],repository=rid,name=tag(n['name']))
             x['code']=[file(v) for v in n.get('code',[])];x['uses']=[prefix+v for v in n.get('uses',[])]
             x['tables']=[tables.get((rid,t),rid+'::'+t) for t in n.get('tables',[])]
             for c in x.get('copies',[]):
@@ -582,12 +584,12 @@ def _compose(name, conf, state, raws, repository='', branch='dev'):
                 e=copy.deepcopy(entry);e['repository']=rid
                 for delta in e.get('branches',{}).values():
                     for key in ('screens_added','screens_removed'):
-                        for v in delta.get(key,[]):v['path']=screen(v['path']);v['name']='['+repo['name']+'] '+v['name']
+                        for v in delta.get(key,[]):v['path']=screen(v['path']);v['name']=tag(v['name'])
                     for key in ('requests_added','requests_removed'):
                         for v in delta.get(key,[]):v['screen']=screen(v['screen'])
                     for key in ('flows_added','flows_removed'):
                         for v in delta.get(key,[]):v['from']=screen(v['from']);v['to']=screen(v['to'])
-                for pr in e.get('prs',[]):pr['repository']=rid;pr['title']='['+repo['name']+'] '+pr['title'];pr['screens']=[screen(p) for p in pr.get('screens',[])]
+                for pr in e.get('prs',[]):pr['repository']=rid;pr['title']=tag(pr['title']);pr['screens']=[screen(p) for p in pr.get('screens',[])]
                 bundle['changes']['entries'].append(e)
     # Explicit repository-level API destinations are not claimed as code-proven.
     for repo in conf['repositories']:
@@ -643,7 +645,7 @@ def read_bundle(name, repository='', branch='dev'):
 
 def child_environment(root,repo,refresh=False):
     import mapcore
-    env=dict(refresh_environment(repo) if refresh else github_environment(repo),WHERE_WERE_WE_MANAGED_CODE='1' if repo.get('managed') else '',WHERE_WERE_WE_ROOT=str(root),WHERE_WERE_WE_REFS=json.dumps(repo['refs']),WHERE_WERE_WE_LAYOUT=json.dumps(repo['layout']),WHERE_WERE_WE_SETTINGS=mapcore.settings_path(),WHERE_WERE_WE_COLLECTION_STAGE='1')
+    env=dict(refresh_environment(repo) if refresh else github_environment(repo),WHERE_WERE_WE_MANAGED_CODE='1' if repo.get('managed') else '',WHERE_WERE_WE_ROOT=str(root),WHERE_WERE_WE_REFS=json.dumps(repo['refs']),WHERE_WERE_WE_LAYOUT=json.dumps(repo['layout']),WHERE_WERE_WE_SETTINGS=mapcore.settings_path(),WHERE_WERE_WE_COLLECTION_STAGE='1',WHERE_WERE_WE_LANG_RULES=str(__import__('lang_rules').folder()))
     return env
 
 def _transaction(name,repo,command, reset=False):
