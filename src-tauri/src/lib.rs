@@ -273,7 +273,7 @@ async fn analysis_run_start(app: tauri::AppHandle, scope: AnalysisScope, expecte
     analysis_command(app, vec!["start".into(), scope.project, "--repository".into(), scope.repository,
         "--branch".into(), scope.branch, "--lang".into(), scope.lang, "--executor".into(), "claude".into(),
         "--expected-account".into(), expected_account.to_string(), "--intent".into(),
-        scope.intent.unwrap_or_else(|| serde_json::json!({"task":"all","targets":[]})).to_string()]).await
+        scope.intent.unwrap_or_else(|| serde_json::json!({"task":"full","targets":[]})).to_string()]).await
 }
 
 #[tauri::command]

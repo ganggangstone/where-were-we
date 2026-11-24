@@ -23,7 +23,34 @@ class AnalysisRun(unittest.TestCase):
             'links':[],'externals':[],'others':[],'unknown':[]}
     GROUPS={'groups':[{'name':'Items','screens':['/items']}],'names':{},'request_names':{}}
 
+    ROUTE='server/items.go::SaveItem'
+    STEPS={'task':'steps','targets':[{'repository':'service','target':'@routes:["server/items.go::SaveItem"]'}]}
+
     def prepare(self,**kwargs):return analysis_run.prepare('demo',lang='en',**kwargs)
+    def steps(self):return self.prepare(intent=self.STEPS)
+    def seed_map(self):
+        """Save the map, structure and groups directly; 분석하기 (full) owns how they are made."""
+        data=copy.deepcopy(self.data)
+        for route in data['backend_routes']:route.pop('steps',None)  # the steps are the detail these tests ask for
+        req=ai_extract.request('demo','dev','en','service')
+        ai_extract.record(**req['record_arguments'],result_json=json.dumps(test_ai_extract.agent_answer(req,data)))
+        system={**self.SYSTEM,'nodes':[{k:v for k,v in n.items() if k!='jobs'} for n in self.SYSTEM['nodes']]}  # and so are the jobs
+        for task,result in (('system',system),('groups',self.GROUPS)):
+            req=ai_extract.task_request('demo',task,'dev','en','service');ai_extract.task_record(**req['record_arguments'],result_json=json.dumps(result))
+    def pad(self,lines=13000):
+        """Grow the route's own file past one input so its steps are sent in batches, then save the map of that commit."""
+        f=self.repo/'server/items.go';f.write_text(f.read_text()+'// padding line\n'*lines)
+        self.git('add','.');self.git('commit','-qm','Route file larger than one input')
+        self.seed_map()
+    def two_routes(self):
+        """A second endpoint, so one steps intent with two targets makes two tasks."""
+        (self.repo/'server/other.go').write_text('func Other() {}\nrouter.GET("/other", Other)\n')
+        self.git('add','.');self.git('commit','-qm','Independent second endpoint')
+        self.data['backend_routes'].append({'file':'server/other.go','line':2,'quote':'router.GET("/other", Other)',
+            'method':'GET','path':'/other','function':'Other'})
+        self.seed_map()
+        return {'task':'steps','targets':[self.STEPS['targets'][0],{'repository':'service','target':'@routes:["server/other.go::Other"]'}]}
+    def routes(self):return {'routes':{self.ROUTE:{'steps':[],'unknown':'No further steps established'}}}
     def raw(self):return project.raw_bundle(project.repository_folder('demo',project.config('demo')['repositories'][0],project.states('demo')))
     def fake(self,prompt,*,cancelled,timeout):
         self.assertFalse(cancelled());self.assertLessEqual(timeout,analysis_run.TASK_SECONDS)
@@ -37,39 +64,12 @@ class AnalysisRun(unittest.TestCase):
         if 'routes' in schema:return json.dumps({'routes':{k:{'steps':[],'unknown':'No further steps established'} for k in payload['input']['routes']}})
         self.fail('Unexpected task schema')
 
-    def test_app_overview_excludes_embedded_details_and_reuses_map(self):
-        calls=[]
-        def fake(prompt,**kwargs):
-            p=json.loads(prompt.split('\n',1)[1]);calls.append(p)
-            if 'screens' in p['schema']:
-                self.assertNotIn('steps',p['schema']['backend_routes'][0])
-                self.assertNotIn('and request steps',p['prompt'])
-                result=copy.deepcopy(self.data)
-                for route in result['backend_routes']:route.pop('steps',None)
-                return result
-            if 'nodes' in p['schema']:
-                self.assertNotIn('jobs',p['schema']['nodes'][0])
-                self.assertFalse([f for snapshot in p.get('snapshots',[]) for f in snapshot['files']])
-                self.assertTrue(p['input']['map']['backend_routes'])
-                result=copy.deepcopy(self.SYSTEM)
-                for node in result['nodes']:node.pop('jobs',None)
-                return result
-            return self.fake(prompt,**kwargs)
-        done=analysis_run.run(self.prepare()['id'],fake)
-        self.assertEqual(done['state'],'completed',done.get('error'))
-        self.assertEqual([t['task'] for t in done['completed_tasks']],['analysis','system','groups'])
-        self.assertFalse((self.raw()['dev'].get('task_outputs',{}).get('flows') or {}).get('routes'))
-        self.assertFalse((self.raw()['dev'].get('task_outputs',{}).get('jobs') or {}).get('nodes'))
-        again=analysis_run.run(self.prepare()['id'],lambda *a,**k:self.fail('unchanged overview'))
-        self.assertEqual(again['state'],'completed')
-
     def test_explicit_steps_target_only_and_retry_keeps_intent(self):
         (self.repo/'server/other.go').write_text('func Other() {}\nrouter.GET("/other", Other)\n')
         self.git('add','.');self.git('commit','-qm','Independent second endpoint')
         self.data['backend_routes'].append({'file':'server/other.go','line':2,'quote':'router.GET("/other", Other)',
             'method':'GET','path':'/other','function':'Other'})
-        done=analysis_run.run(self.prepare()['id'],self.fake)
-        self.assertEqual(done['state'],'completed',done.get('error'))
+        self.seed_map()
         intent={'task':'steps','targets':[{'repository':'service','target':'@routes:["server/items.go::SaveItem"]'}]}
         value=self.prepare(intent=intent)
         self.assertEqual([t['task'] for t in value['tasks']],['steps'])
@@ -86,19 +86,9 @@ class AnalysisRun(unittest.TestCase):
         done=analysis_run.run(again['id'],fake)
         self.assertEqual(done['state'],'completed',done.get('error'));self.assertEqual(len(calls),1)
 
-    def test_cold_detail_runs_only_map_prerequisite_and_chosen_routes(self):
-        intent={'task':'steps','targets':[{'repository':'service','target':'@routes:["server/items.go::SaveItem"]'}]}
-        value=self.prepare(intent=intent)
-        self.assertEqual([t['task'] for t in value['tasks']],['analysis'])
-        done=analysis_run.run(value['id'],self.fake)
-        self.assertEqual(done['state'],'completed',done.get('error'))
-        self.assertEqual([t['task'] for t in done['completed_tasks']],['analysis','steps'])
-        self.assertFalse(self.raw()['dev']['task_outputs'].get('system'))
-
     def test_cli_prepare_preserves_selected_intent_and_overview_keeps_proven_details(self):
         import subprocess
-        done=analysis_run.run(self.prepare()['id'],self.fake)
-        self.assertEqual(done['state'],'completed',done.get('error'))
+        self.seed_map()
         intent={'task':'steps','targets':[{'repository':'service','target':'/items'}]}
         argv=[sys.executable,'-B',str(Path(analysis_run.__file__)),'prepare','demo','--lang','en','--intent',json.dumps(intent)]
         result=subprocess.run(argv,env={**os.environ,'WHERE_WERE_WE_ROOT':str(self.home)},text=True,capture_output=True,check=True)
@@ -107,148 +97,16 @@ class AnalysisRun(unittest.TestCase):
         flow=copy.deepcopy(self.raw()['dev']['task_outputs']['flows']['routes']['server/items.go::SaveItem'])
         (self.repo/'independent.txt').write_text('An independent file without route dependencies.\n')
         self.git('add','.');self.git('commit','-qm','Independent text change')
-        done=analysis_run.run(self.prepare()['id'],self.fake)
-        self.assertEqual(done['state'],'completed',done.get('error'))
+        self.seed_map()
         carried=self.raw()['dev']['task_outputs']['flows']['routes']['server/items.go::SaveItem']
         self.assertEqual(carried['steps'],flow['steps'])
         self.assertEqual(carried['verified_commit'],flow['commit'])
         self.assertEqual(carried['carried_from'],flow['commit'])
-        self.assertFalse((self.raw()['dev'].get('task_outputs',{}).get('jobs') or {}).get('nodes'))
-
-    def test_sequential_worker_finishes_map_system_and_groups_without_collecting(self):
-        raw=self.raw();raw['changes']={'last_refresh':'fixed','last_result':{'since':'fixed'}}
-        project._publish('demo','service',raw,{},collection=False)
-        baseline=self.raw()['changes'];before_state=project.states('demo')['service'].get('last_success')
-        value=self.prepare();self.assertEqual(value['state'],'preparing')
-        done=analysis_run.run(value['id'],self.fake)
-        self.assertEqual(done['state'],'completed',done.get('error'))
-        self.assertEqual([t['task'] for t in done['completed_tasks']],['analysis','system','groups'])
-        self.assertEqual(done['pins'],value['pins'])
-        self.assertEqual(self.raw()['changes'],baseline)
-        self.assertEqual(project.states('demo')['service'].get('last_success'),before_state)
-        self.assertEqual(ai_extract.plan('demo',lang='en',overview=True)['tasks'],[])
-        self.assertFalse((self.raw()['dev'].get('task_outputs',{}).get('flows') or {}).get('routes'))
-        self.assertFalse((self.raw()['dev'].get('task_outputs',{}).get('jobs') or {}).get('nodes'))
-        again=self.prepare()
-        done=analysis_run.run(again['id'],lambda *a,**k:self.fail('Current analysis must not call a model'))
-        self.assertEqual(done['state'],'completed')
-
-    def test_large_first_unknown_stack_is_split_and_saved_as_one_map(self):
-        # The deterministic collector does not understand this syntax. Registration,
-        # handler and service are deliberately in different files and source units.
-        for file in ('pages/items.vue','server/items.go'):
-            self.git('rm','-q',file)
-        sources={
-            'web.screen':'screen /items calls POST /v1/items\n',
-            'api.mount':'mount POST /v1/items => SaveItem\n',
-            'handler.source':'function SaveItem uses StoreItems\n',
-            'store.source':'function StoreItems persists items\n',
-        }
-        for file,text in sources.items():(self.repo/file).write_text(text)
-        for i in range(6):(self.repo/f'padding{i}.source').write_text('ordinary unrelated source line\n'*9000)
-        self.git('add','.');self.git('commit','-qm','Unknown stack larger than one input')
-        value=self.prepare();self.assertEqual(value['tasks'][0]['mode'],'full')
-        calls=[];coverage=set();map_saves=[]
-        real_record=ai_extract.record
-        def save(**kwargs):
-            map_saves.append(kwargs);return real_record(**kwargs)
-        def executor(prompt,**kwargs):
-            calls.append(len(prompt.encode()));self.assertLessEqual(calls[-1],128*1024)
-            p=json.loads(prompt.split('\n',1)[1]);schema=p['schema']
-            if 'screens' not in schema:
-                result=({'nodes':[{'id':'api','name':'API','kind':'program','code':['.'],
-                    'ev':[{'file':'api.mount','line':1,'quote':'mount POST /v1/items'}],'jobs':[]}],
-                    'links':[],'externals':[],'others':[],'unknown':[]} if 'nodes' in schema else self.GROUPS)
-            else:
-                files={f['file']:f for s in p.get('snapshots',[]) for f in s['files']}
-                result={'screens':[],'backend_routes':[],'inspected':[],'unknown':[]}
-                if 'web.screen' in files:
-                    result['screens']=[{'path':'/items','file':'web.screen','line':1,'quote':'screen /items',
-                        'calls':[{'file':'web.screen','line':1,'quote':'calls POST /v1/items','method':'POST','path':'/v1/items'}]}]
-                if 'api.mount' in files:
-                    missing=[f for f in ('handler.source','store.source') if f not in files]
-                    if missing:
-                        return {'batch':p['batch']['id'],'covered':p['batch']['units'],'result':result,
-                                'needs':[{'file':f,'start':1,'limit':10} for f in missing]}
-                    result['backend_routes']=[{'file':'api.mount','line':1,'quote':'mount POST /v1/items',
-                        'method':'POST','path':'/v1/items','function':'SaveItem',
-                        'dependencies':[{'file':'handler.source','line':1,'quote':'function SaveItem uses StoreItems'}],
-                        'services':[{'file':'store.source','line':1,'quote':'function StoreItems persists items'}],
-                        'steps':[{'file':'store.source','line':1,'quote':'function StoreItems persists items','text':'Store items','lane':'저장소'}]}]
-            if 'batch' in p:
-                coverage.update(p['batch']['units'])
-                return {'batch':p['batch']['id'],'covered':p['batch']['units'],'result':result}
-            return result
-        with patch.object(ai_extract,'record',side_effect=save):done=analysis_run.run(value['id'],executor)
-        self.assertEqual(done['state'],'completed',done.get('error'))
-        m=self.raw()['dev'];self.assertEqual([s['path'] for s in m['screens']],['/items'])
-        self.assertEqual([(r['method'],r['path'],r['function']) for r in m['backend_routes']],[('POST','/v1/items','SaveItem')])
-        self.assertEqual(m['api_functions'][0]['calls'][0]['backend'][0]['function'],'SaveItem')
-        self.assertEqual(m['backend_routes'][0]['services'],['store.source'])
-        self.assertGreater(len(coverage),6);self.assertEqual(len(map_saves),1)
-        self.assertGreater(len(calls),3)
-        self.input_metrics={'calls':len(calls),'bytes':sum(calls),'maximum':max(calls)}
-
-    def test_small_patch_excludes_unrelated_source_and_unchanged_run_calls_nothing(self):
-        (self.repo/'unrelated.source').write_text('UNRELATED_CONTENT_MUST_NOT_BE_RESENT\n')
-        self.git('add','.');self.git('commit','-qm','Independent source')
-        done=analysis_run.run(self.prepare()['id'],self.fake)
-        self.assertEqual(done['state'],'completed',done.get('error'))
-        done=analysis_run.run(self.prepare()['id'],lambda *a,**k:self.fail('Unchanged source must make zero calls'))
-        self.assertEqual(done['state'],'completed')
-        before=copy.deepcopy(self.raw()['dev'])
-        f=self.repo/'server/items.go';f.write_text(f.read_text()+'// changed independently\n')
-        self.git('add','.');self.git('commit','-qm','Independent handler change')
-        prompts=[]
-        def executor(prompt,**kwargs):
-            self.assertNotIn('UNRELATED_CONTENT_MUST_NOT_BE_RESENT',prompt)
-            p=json.loads(prompt.split('\n',1)[1]);prompts.append(p)
-            if p.get('mode')=='patch':
-                self.assertEqual({f['file'] for s in p['snapshots'] for f in s['files']},{'server/items.go'})
-            return self.fake(prompt,**kwargs)
-        done=analysis_run.run(self.prepare()['id'],executor)
-        self.assertEqual(done['state'],'completed',done.get('error'))
-        self.assertEqual(self.raw()['dev']['screens'][0]['verified_commit'],before['screens'][0]['verified_commit'])
-        self.assertTrue(prompts)
 
     def source_fake(self,prompt,**kwargs):
-        """Respond only to evidence actually delivered, never the whole hidden fixture."""
-        p=json.loads(prompt.split('\n',1)[1]);schema=p['schema']
-        files={f['file'] for s in p.get('snapshots',[]) for f in s['files']}
-        supplied='\n'.join(line['text'] if isinstance(line,dict) else line[1] for s in p.get('snapshots',[]) for f in s['files'] for line in (f.get('lines') or f.get('numbered_lines') or []))  # the compact form carries [line, text]
-        if 'screens' in schema:
-            data={**self.data,'screens':self.data['screens'] if '<button @click="saveItem">' in supplied else [],
-                  'backend_routes':self.data['backend_routes'] if 'router.POST("/items", SaveItem)' in supplied else []}
-            result=test_ai_extract.agent_answer({'mode':p['mode'],'inspect':p.get('inspect',[]),'recheck':p.get('recheck',[])},data)
-            # Absence in a partial source unit does not establish a deletion.
-            if 'batch' in p:result.pop('removed',None)
-        # A full analysis sends a compact map that names the file but carries no quote.
-        elif 'nodes' in schema:result=self.SYSTEM if 'server/items.go' in files or any(ev.get('quote')==self.EV['quote'] for ev in ai_extract.cited(p.get('input',{}))) or 'server/items.go' in json.dumps(p.get('input',{}).get('map',{})) else {'nodes':[],'links':[],'externals':[],'others':[],'unknown':[]}
-        else:return self.fake(prompt,**kwargs)
-        return {'batch':p['batch']['id'],'covered':p['batch']['units'],'result':result} if 'batch' in p else result
-
-    def test_huge_utf8_line_and_file_are_read_completely_with_original_offsets(self):
-        text='가나다012345'*50000+'TAIL_MUST_BE_READ'
-        (self.repo/'huge.source').write_text(text)
-        self.git('add','.');self.git('commit','-qm','Large UTF-8 source line')
-        pieces={};calls=[]
-        def executor(prompt,**kwargs):
-            self.assertLessEqual(len(prompt.encode()),128*1024);calls.append(len(prompt.encode()))
-            p=json.loads(prompt.split('\n',1)[1])
-            for snapshot in p.get('snapshots',[]):
-                for file in snapshot['files']:
-                    if file['file']=='huge.source' and 'screens' in p['schema']:
-                        for line in file['lines']:
-                            self.assertEqual(line['line'],1)
-                            pieces[line.get('offset',0)]=line['text']
-            return self.source_fake(prompt,**kwargs)
-        done=analysis_run.run(self.prepare()['id'],executor)
-        self.assertEqual(done['state'],'completed',done.get('error'))
-        reconstructed=''
-        for offset,part in sorted(pieces.items()):
-            self.assertLessEqual(offset,len(reconstructed));self.assertEqual(reconstructed[offset:],part[:len(reconstructed)-offset])
-            reconstructed+=part[len(reconstructed)-offset:]
-        self.assertEqual(reconstructed,text);self.assertGreater(len(calls),3)
+        """A steps reply for one packet, wrapped in the batch envelope when the input was split."""
+        p=json.loads(prompt.split('\n',1)[1])
+        return {'batch':p['batch']['id'],'covered':p['batch']['units'],'result':self.routes()} if 'batch' in p else self.routes()
 
     def test_large_batch_encoding_preserves_every_source_coordinate_and_omission(self):
         lines=[{'line':1,'text':'original "\t" line'},{'line':3,'text':'긴 줄의 일부','offset':2176}]
@@ -263,207 +121,49 @@ class AnalysisRun(unittest.TestCase):
         units[0]['id']=units[1]['id'][:16]+'x'*48
         self.assertEqual(analysis_run._batch_payload(header,units,'batch')['batch']['units'],[u['id'] for u in units])
 
-    def test_retry_reuses_only_settled_batches_and_completes_full_coverage(self):
-        (self.repo/'padding.txt').write_text('unique row for analysis\n'*6500)
-        self.git('add','.');self.git('commit','-qm','Large full map')
-        baseline=self.raw()
-        run=self.prepare(intent={'task':'analysis','targets':[]})
-        initial=[];remaining=[]
-        def batch_id(prompt):return json.loads(prompt.split('\n',1)[1])['batch']['id']
-        def interrupted(prompt,**kwargs):
-            initial.append(batch_id(prompt))
-            if len(initial)==5:analysis_run.cancel(run['id'])
-            return self.source_fake(prompt,**kwargs)
-        stopped=analysis_run.run(run['id'],interrupted)
-        self.assertEqual(stopped['state'],'cancelled',stopped.get('error'))
-        self.assertEqual(self.raw(),baseline)
-        self.assertEqual(len(initial),5)
-        def resumed(prompt,**kwargs):
-            remaining.append(batch_id(prompt))
-            return self.source_fake(prompt,**kwargs)
-        again=analysis_run.retry(run['id'])
-        done=analysis_run.run(again['id'],resumed)
-        self.assertEqual(done['state'],'completed',done.get('error'))
-        self.assertEqual(remaining[0],initial[-1])
-        self.assertFalse(set(initial[:-1]) & set(remaining))
-        self.assertEqual(done['batch_progress']['completed'],done['batch_progress']['total'])
-        self.assertEqual([r['path'] for r in self.raw()['dev']['backend_routes']],['/items'])
-
-    def test_retry_ignores_settled_batch_from_another_commit(self):
-        source=self.repo/'padding.txt'
-        source.write_text('source row\n'*6500)
-        self.git('add','.');self.git('commit','-qm','Original source')
-        run=self.prepare(intent={'task':'analysis','targets':[]})
-        first=[]
-        def interrupted(prompt,**kwargs):
-            batch=json.loads(prompt.split('\n',1)[1])['batch']
-            first.append(batch['units'])
-            if len(first)==2:analysis_run.cancel(run['id'])
-            return self.source_fake(prompt,**kwargs)
-        self.assertEqual(analysis_run.run(run['id'],interrupted)['state'],'cancelled')
-        source.write_text('changed row\n'+source.read_text())
-        self.git('add','.');self.git('commit','-qm','Change source before retry')
-        again=analysis_run.retry(run['id'])
-        args=analysis_run._request(again,again['tasks'][0])['record_arguments']
-        indices=[]
-        def fresh(prompt,**kwargs):
-            batch=json.loads(prompt.split('\n',1)[1])['batch']
-            indices.append(batch['id'])
-            return self.source_fake(prompt,**kwargs)
-        done=analysis_run.run(again['id'],fresh)
-        self.assertEqual(done['state'],'completed',done.get('error'))
-        self.assertNotEqual(args['commit'],run['pins']['service']['commit'])
-        # The new request starts at its first batch. The old prefix is never eligible.
-        self.assertEqual(indices[0],ai_extract.digest([args,1]))
-        self.assertFalse((analysis_run.root()/'checkpoints'/run['id']).exists())
-
     def test_bad_batch_coverage_claim_cancel_and_changed_pin_preserve_last_good_map(self):
-        done=analysis_run.run(self.prepare()['id'],self.fake);self.assertEqual(done['state'],'completed')
-        (self.repo/'changed.source').write_text('independent source line\n'*13000)
-        self.git('add','.');self.git('commit','-qm','Large independent changed source')
-        for fault in ('missing','duplicate','quote','method','cancel','commit'):
+        self.pad()
+        for fault in ('missing','duplicate','quote','route','cancel','commit'):
             with self.subTest(fault=fault):
-                before=self.raw();value=self.prepare();calls=[]
+                before=self.raw();value=self.steps();calls=[]
                 def executor(prompt,**kwargs):
                     answer=self.source_fake(prompt,**kwargs);calls.append(prompt)
-                    if len(calls)==2 or (len(calls)==3 and fault in ('quote','method')):
+                    if len(calls)==2 or (len(calls)==3 and fault in ('quote','route')):
                         if fault=='missing':answer['covered']=[]
                         if fault=='duplicate':answer['covered']*=2
-                        if fault=='quote':answer['result']['inspected']=[{'file':'changed.source','line':1,'quote':'invented content'}]
-                        if fault=='method':answer['result']['backend_routes']=[{'file':'server/items.go','line':4,'quote':'router.POST("/items", SaveItem)','method':'BAD','path':'/items','function':'SaveItem'}]
+                        if fault=='quote':answer['result']['routes'][self.ROUTE]['steps']=[{'file':'server/items.go','line':1,'quote':'invented content','text':'Save','lane':'서버'}]
+                        if fault=='route':answer['result']['routes']={'not/requested':{'steps':[],'unknown':'unknown'}}
                         if fault=='cancel':analysis_run.cancel(value['id'])
                         if fault=='commit':
-                            f=self.repo/'changed.source';f.write_text(f.read_text()+'more\n');self.git('add','.');self.git('commit','-qm','Change during batch')
+                            f=self.repo/'server/items.go';f.write_text(f.read_text()+'more\n');self.git('add','.');self.git('commit','-qm','Change during batch')
                     return answer
                 done=analysis_run.run(value['id'],executor)
                 self.assertEqual(done['state'],'cancelled' if fault=='cancel' else 'failed',done.get('error'))
                 self.assertEqual(self.raw(),before);self.assertGreaterEqual(len(calls),2)
 
-    def test_oversized_group_metadata_is_paged_without_source_or_final_fusion_call(self):
-        done=analysis_run.run(self.prepare()['id'],self.fake);self.assertEqual(done['state'],'completed')
-        raw=self.raw();screen=raw['dev']['screens'][0]
-        raw['dev']['screens']=[{**screen,'path':f'/screen/{i}','heading':'Long screen title '*80} for i in range(200)]
-        raw['dev']['task_outputs'].pop('groups')
-        project._publish('demo','service',raw,{},collection=False)
-        value=self.prepare();self.assertEqual([t['task'] for t in value['tasks']],['groups'])
-        calls=[]
-        def executor(prompt,**kwargs):
-            calls.append(len(prompt.encode()));self.assertLessEqual(calls[-1],128*1024)
-            p=json.loads(prompt.split('\n',1)[1]);self.assertNotIn('snapshots',p)
-            screens=[page['value']['path'] for page in p.get('context_pages',[]) if page['path'][:2]==['input','screens']]
-            result={'groups':[{'name':'Items','screens':screens}]} if screens else {'groups':[]}
-            return {'batch':p['batch']['id'],'covered':p['batch']['units'],'result':result}
-        done=analysis_run.run(value['id'],executor)
-        self.assertEqual(done['state'],'completed',done.get('error'))
-        groups=self.raw()['dev']['task_outputs']['groups']['groups']
-        self.assertEqual(set(groups[0]['screens']),{f'/screen/{i}' for i in range(200)})
-        self.assertGreater(len(calls),1);self.assertEqual(done['input_stats']['calls'],len(calls))
-
     def test_small_invalid_nested_claims_are_not_silently_filtered(self):
-        for fault in ('action','nav_target','link','job_step','language'):
+        self.seed_map()
+        jobs={'task':'jobs','targets':[{'repository':'service','target':'api'}]}
+        for fault,intent in (('language',self.STEPS),('step_target',self.STEPS),('jobs_language',jobs)):
             with self.subTest(fault=fault):
-                before=self.raw();value=self.prepare()
+                before=self.raw();value=self.prepare(intent=intent)
                 def executor(prompt,**kwargs):
-                    p=json.loads(prompt.split('\n',1)[1]);result=json.loads(self.fake(prompt,**kwargs))
-                    if fault=='action' and 'screens' in p['schema']:
-                        result['screens'][0]['actions']=[{'file':'pages/items.vue','line':1,'quote':'<button @click="saveItem">','kind':'invented'}]
-                    if fault=='nav_target' and 'screens' in p['schema']:
-                        result['screens'][0]['actions']=[{'file':'pages/items.vue','line':1,'quote':'<button @click="saveItem">','kind':'nav','to':{'path':'/items'}}]
-                    if fault=='language' and 'screens' in p['schema']:result['lang']='ko'
-                    if fault=='link' and 'nodes' in p['schema']:result['links']=[{'from':'api','to':'missing','ev':[self.EV]}]
-                    if fault=='job_step' and 'nodes' in p['schema']:
-                        result['nodes'][0]['jobs']=[{'name':'Job','trigger':self.EV,'steps':[{'file':'pages/items.vue','line':1,'quote':'<button @click="saveItem">','text':'Wrong program'}]}]
-                    if fault=='step_target' and 'screens' in p['schema']:
-                        result['backend_routes'][0].pop('steps',None)
-                    if fault=='step_target' and 'routes' in p['schema']:
-                        result={'routes':{'unknown::handler':{'steps':[],'unknown':'Not established'}}}
-                    return result
+                    if fault=='language':return {**self.routes(),'lang':'ko'}
+                    if fault=='step_target':return {'routes':{'unknown::handler':{'steps':[],'unknown':'Not established'}}}
+                    return {'jobs':[],'unknown':[{'text':'No jobs established','needs':'read'}],'language':'ko'}
                 done=analysis_run.run(value['id'],executor)
                 self.assertEqual(done['state'],'failed',done.get('error'))
-                if fault in ('action','nav_target','language'):self.assertEqual(self.raw(),before)
-                elif fault!='step_target':self.assertNotIn('system',self.raw()['dev'].get('task_outputs',{}))
-                else:self.assertNotIn('unknown::handler',self.raw()['dev']['task_outputs'].get('flows',{}).get('routes',{}))
-                # Reset this synthetic bundle only; each subtest starts from the same last-good map.
-                project._publish('demo','service',before,{},collection=False)
-
-    def test_two_mounts_keep_identity_when_fragments_reverse_and_prefix_changes(self):
-        for name,prefix in (('mount-a.source','one'),('mount-b.source','two')):
-            (self.repo/name).write_text(f'prefix("/{prefix}", SaveItem)\n')
-        (self.repo/'filler.source').write_text('p'*150000)
-        routes=[]
-        for file,prefix in (('mount-a.source','one'),('mount-b.source','two')):
-            route=copy.deepcopy(self.data['backend_routes'][0]);route['path']=f'/{prefix}/items'
-            route['dependencies']=[{'file':file,'line':1,'quote':f'prefix("/{prefix}", SaveItem)'}];routes.append(route)
-        self.data['backend_routes']=routes
-        self.git('add','.');self.git('commit','-qm','Two independent mounts')
-        reverse=False
-        def executor(prompt,**kwargs):
-            p=json.loads(prompt.split('\n',1)[1]);files={f['file'] for s in p.get('snapshots',[]) for f in s['files']}
-            if 'screens' not in p['schema']:return self.source_fake(prompt,**kwargs)
-            if p.get('mode')=='patch':
-                self.assertNotIn('mount-b.source',files)
-                changed=copy.deepcopy(routes[0]);changed['path']='/uno/items'
-                changed['dependencies'][0]['quote']='prefix("/uno", SaveItem)'
-                changed['replaces']=next(r['id'] for r in p['recheck'] if r['path']=='/one/items')
-                return {'backend_routes':[changed],'accounted':[{'file':'mount-a.source','kind':'items'}]}
-            result={'screens':self.data['screens'] if 'pages/items.vue' in files else [],'backend_routes':[]}
-            needs=[]
-            if 'server/items.go' in files:
-                needs=[{'file':f,'limit':10} for f in ('mount-a.source','mount-b.source') if f not in files]
-                if not needs:result['backend_routes']=list(reversed(routes)) if reverse else routes
-            return {'batch':p['batch']['id'],'covered':p['batch']['units'],'result':result,'needs':needs}
-        done=analysis_run.run(self.prepare()['id'],executor);self.assertEqual(done['state'],'completed',done.get('error'))
-        saved={r['path']:r['id'] for r in self.raw()['dev']['backend_routes']};self.assertEqual(len(saved),2)
-        reverse=True
-        done=analysis_run.run(analysis_run.prepare('demo',lang='ko')['id'],executor)
-        self.assertEqual(done['state'],'completed',done.get('error'))
-        self.assertEqual({r['path']:r['id'] for r in self.raw()['dev']['backend_routes']},saved)
-        (self.repo/'mount-a.source').write_text('prefix("/uno", SaveItem)\n')
-        self.git('add','.');self.git('commit','-qm','Change one mount prefix')
-        done=analysis_run.run(analysis_run.prepare('demo',lang='ko')['id'],executor)
-        self.assertEqual(done['state'],'completed',done.get('error'))
-        after={r['path']:r['id'] for r in self.raw()['dev']['backend_routes']}
-        self.assertEqual(set(after),{'/uno/items','/two/items'});self.assertEqual(after['/two/items'],saved['/two/items'])
-
-    def test_rename_and_delete_use_required_old_blobs_without_unrelated_source(self):
-        done=analysis_run.run(self.prepare()['id'],self.fake);self.assertEqual(done['state'],'completed')
-        self.git('mv','server/items.go','server/renamed.go');self.git('add','.');self.git('commit','-qm','Rename handler')
-        old=self.raw()['dev']['backend_routes'][0]['id'];data=copy.deepcopy(self.data)
-        route=data['backend_routes'][0]
-        for ev in [route,*route['tables'],*route['steps']]:ev['file']='server/renamed.go'
-        route['replaces']=old
-        calls=[]
-        def executor(prompt,**kwargs):
-            p=json.loads(prompt.split('\n',1)[1]);calls.append(p)
-            if 'screens' in p['schema']:
-                self.assertEqual({f['file'] for s in p['snapshots'] for f in s['files']},{'server/items.go','server/renamed.go'})
-                return {'backend_routes':[route],'accounted':[{'file':'server/renamed.go','kind':'items'}]}
-            if 'nodes' in p['schema']:
-                system=copy.deepcopy(self.SYSTEM);system['nodes'][0]['ev'][0]['file']='server/renamed.go';return system
-            return self.fake(prompt,**kwargs)
-        done=analysis_run.run(self.prepare()['id'],executor)
-        self.assertEqual(done['state'],'completed',done.get('error'))
-        self.assertEqual(self.raw()['dev']['backend_routes'][0]['file'],'server/renamed.go')
-        renamed=self.raw()['dev']['backend_routes'][0]['id']
-        self.git('rm','-q','server/renamed.go');self.git('commit','-qm','Delete handler')
-        def deleted(prompt,**kwargs):
-            p=json.loads(prompt.split('\n',1)[1])
-            if 'screens' in p['schema']:return {'removed':[renamed],'accounted':[]}
-            if 'nodes' in p['schema']:
-                return {'nodes':[{'id':'web','name':'Web','kind':'program','code':['pages'],'ev':[{'file':'pages/items.vue','line':1,'quote':'<button @click="saveItem">'}],'jobs':[]}],'links':[],'externals':[],'others':[]}
-            return self.fake(prompt,**kwargs)
-        done=analysis_run.run(self.prepare()['id'],deleted)
-        self.assertEqual(done['state'],'completed',done.get('error'));self.assertEqual(self.raw()['dev']['backend_routes'],[])
+                self.assertEqual(self.raw(),before)
 
     def test_source_reads_and_literal_search_stay_inside_eligible_pinned_files(self):
         (self.repo/'big.source').write_text('p'*150000)
         (self.repo/'.env').write_text('PRIVATE_DO_NOT_SEND=credential\n')
         (self.repo/'link.source').symlink_to('/etc/passwd')
-        self.git('add','.');self.git('commit','-qm','Pinned read eligibility fixture')
+        self.git('add','.');self.git('commit','-qm','Pinned read eligibility fixture');self.pad()
         (self.repo/'untracked.source').write_text('UNTRACKED_DO_NOT_SEND\n')
         for file in ('../outside','.env','link.source','untracked.source'):
             with self.subTest(file=file):
-                before=self.raw();value=self.prepare()
+                before=self.raw();value=self.steps()
                 def denied(prompt,**kwargs):
                     p=json.loads(prompt.split('\n',1)[1]);self.assertNotIn('PRIVATE_DO_NOT_SEND',prompt);self.assertNotIn('UNTRACKED_DO_NOT_SEND',prompt)
                     return {'batch':p['batch']['id'],'covered':p['batch']['units'],'result':{},'needs':[{'file':file}]}
@@ -478,29 +178,27 @@ class AnalysisRun(unittest.TestCase):
                 searched=True
                 return {'batch':p['batch']['id'],'covered':p['batch']['units'],'result':{},'needs':[{'query':'db.Table','start':1,'limit':1}]}
             return self.source_fake(prompt,**kwargs)
-        done=analysis_run.run(self.prepare()['id'],searching)
+        done=analysis_run.run(self.steps()['id'],searching)
         self.assertEqual(done['state'],'completed',done.get('error'))
         self.assertTrue(any(page['value'].get('query')=='db.Table' and page['value']['total']==1 for p in calls for page in p.get('context_pages',[]) if isinstance(page['value'],dict)))
 
     def test_a_batch_that_keeps_requesting_reads_ends_with_what_it_found_and_says_so(self):
-        (self.repo/'big.source').write_text('p'*150000)
-        self.git('add','.');self.git('commit','-qm','Input large enough to be sent in batches')
-        rounds=[]
+        self.pad();rounds=[]
         def endless(prompt,**kwargs):
-            p=json.loads(prompt.split('\n',1)[1])
-            if 'screens' not in p['schema'] or 'batch' not in p:return self.fake(prompt,**kwargs)
-            answer=self.source_fake(prompt,**kwargs);rounds.append(1)
-            answer['needs']=[{'query':'zz'+str(len(rounds)),'start':1,'limit':1}]
-            return answer
-        with patch.object(analysis_run,'MAX_READ_ROUNDS',2):done=analysis_run.run(self.prepare()['id'],endless)
+            p=json.loads(prompt.split('\n',1)[1]);self.assertIn('batch',p);rounds.append(1)
+            return {'batch':p['batch']['id'],'covered':p['batch']['units'],'needs':[{'query':'zz'+str(len(rounds)),'start':1,'limit':1}],
+                    'result':{'jobs':[],'unknown':[{'text':'No jobs established by supplied source','needs':'read'}]}}
+        value=self.prepare(intent={'task':'jobs','targets':[{'repository':'service','target':'api'}]})
+        with patch.object(analysis_run,'MAX_READ_ROUNDS',2):done=analysis_run.run(value['id'],endless)
         self.assertEqual(done['state'],'completed',done.get('error'))
-        self.assertTrue(any('read rounds allowed' in str(u) for u in self.raw()['dev']['analysis']['unknown']))
+        self.assertIn('read rounds allowed',json.dumps(self.raw()['dev']['task_outputs']['jobs']['nodes']['api']['unknown']))
 
     def test_literal_searches_in_one_analysis_do_not_reread_pinned_blobs(self):
         import subprocess
-        # The padding fills the first batch, so its rounds carry only search hits from the other files.
+        # The padding, a cited dependency of the route, fills the first batch, so its rounds carry only search hits from the other files.
         padding='a-padding.source';(self.repo/padding).write_text('ordinary unrelated source line\n'*9000)
         self.git('add','.');self.git('commit','-qm','Padding that splits the input')
+        self.data['backend_routes'][0]['dependencies']=[{'file':padding,'line':1,'quote':'ordinary unrelated source line'}];self.seed_map()
         files=[padding,'pages/items.vue','server/items.go']
         names={self.git('rev-parse','HEAD:'+f).strip():f for f in files}
         needs=[{'query':'"/items"','start':1,'limit':1},{'query':'"/items"','start':2,'limit':1},{'query':'db.Table','start':1,'limit':1}]
@@ -511,7 +209,6 @@ class AnalysisRun(unittest.TestCase):
         def executor(prompt,**kwargs):
             nonlocal first
             p=json.loads(prompt.split('\n',1)[1])
-            if 'screens' not in p['schema']:return self.fake(prompt,**kwargs)
             first=first or p['batch']['id']
             pages=[page for page in p.get('context_pages',[]) if page.get('path')==['read_page']]
             if p['batch']['id']==first and len(pages)==1:
@@ -520,9 +217,9 @@ class AnalysisRun(unittest.TestCase):
             answer={'batch':p['batch']['id'],'covered':p['batch']['units'],'result':{}}
             if p['batch']['id']==first:
                 if needs:answer['needs']=[needs.pop(0)]
-                else:answer['result']=self.data
+                else:answer['result']=self.routes()
             return answer
-        value=self.prepare();blob_reads=[];real_popen=subprocess.Popen
+        value=self.steps();blob_reads=[];real_popen=subprocess.Popen
         def observed(command,*args,**kwargs):
             # cat-file -s reads only the size; a future reader that hides object IDs from argv fails the exact count.
             if '-s' not in command:blob_reads.extend(names[arg] for arg in command if arg in names)
@@ -533,15 +230,14 @@ class AnalysisRun(unittest.TestCase):
         self.assertEqual({f:blob_reads.count(f) for f in files},{f:1 for f in files})
 
     def test_stateless_continuation_can_revisit_an_evicted_page_but_stops_cycles(self):
-        (self.repo/'a-padding.source').write_text('ordinary line\n'*6000)
-        self.git('add','.');self.git('commit','-qm','Force multiple source batches')
+        self.pad()
         for sequence,should_finish,call_limit in (
                 (['absent-A']*10, False, 3),
                 (['absent-A', 'absent-B']*20, False, 5),
                 (['absent-A', 'absent-B', 'absent-A'], True, 4)):
             with self.subTest(sequence=sequence[:4]):
                 baseline=self.raw()
-                run=self.prepare(intent={'task':'analysis','targets':[]})
+                run=self.steps()
                 first_batch=None
                 queried=[]
                 def executor(prompt,**kwargs):
@@ -562,7 +258,7 @@ class AnalysisRun(unittest.TestCase):
                         queried.append(query)
                         answer['needs']=[{'query':query}]
                     else:
-                        answer['result']=self.data
+                        answer['result']=self.routes()
                     return answer
                 done=analysis_run.run(run['id'],executor)
                 self.assertLessEqual(len(queried),call_limit)
@@ -574,82 +270,6 @@ class AnalysisRun(unittest.TestCase):
                     self.assertEqual(done['error']['code'],'invalid_result')
                     self.assertEqual(self.raw(),baseline)
 
-    def test_batched_citations_select_numbered_lines_without_transcribing_source(self):
-        (self.repo/'z-padding.txt').write_text('ordinary line\n'*6000)
-        self.git('add','.');self.git('commit','-qm','Force source batches')
-        replies=[]
-        def executor(prompt,**kwargs):
-            packet=json.loads(prompt.split('\n',1)[1])
-            batch=packet['batch']
-            self.assertNotIn('quote',packet['schema']['backend_routes'][0])
-            self.assertIn('Return file and line only',packet['prompt'])
-            files=[f['file'] for snap in packet.get('snapshots',[]) for f in snap['files']]
-            result={}
-            if 'server/items.go' in files:
-                route=copy.deepcopy(self.data['backend_routes'][0])
-                for citation in ai_extract.cited(route):citation.pop('quote')
-                result['backend_routes']=[route]
-                replies.append(batch['id'])
-            return {'batch':batch['id'],'covered':batch['units'],'result':result}
-        done=analysis_run.run(self.prepare(intent={'task':'analysis','targets':[]})['id'],executor)
-        self.assertEqual(done['state'],'completed',done.get('error'))
-        self.assertEqual(len(replies),len(set(replies)))
-        route=self.raw()['dev']['backend_routes'][0]
-        self.assertEqual(route['quote'],'router.POST("/items", SaveItem)')
-        self.assertEqual(route['table_evidence'][0]['quote'],'db.Table("items").Create(item)')
-
-    def test_coordinate_selection_is_bound_to_visible_commit_and_exact_segment(self):
-        commit=self.commit
-        units=[{'kind':'source','value':{'commit':pin,'file':'file','lines':lines}} for pin,lines in [
-            ('old',[{'line':1,'text':'old only'}]),
-            (commit,[{'line':2,'text':'actual source','offset':30}])]]
-        for fields in [{'line':1},{'line':2},{'line':2,'offset':31},{'line':2,'offset':30,'commit':'old'}]:
-            with self.subTest(fields=fields),self.assertRaises(analysis_run.InvalidClaim):
-                analysis_run._materialize_citations({'inspected':[dict(file='file',**fields)]},None,units,commit)
-        point={'file':'file','line':2,'offset':30}
-        analysis_run._materialize_citations({'inspected':[point]},None,units,commit)
-        self.assertEqual(point,{'file':'file','line':2,'quote':'actual source'})
-
-    def test_batched_citation_uses_unique_visible_literal_when_number_is_wrong(self):
-        (self.repo/'z-padding.txt').write_text('ordinary line\n'*6000)
-        self.git('add','.');self.git('commit','-qm','Force source batches')
-        batches=[]
-        def executor(prompt,**kwargs):
-            packet=json.loads(prompt.split('\n',1)[1])
-            batch=packet['batch']
-            files=[f['file'] for snap in packet.get('snapshots',[]) for f in snap['files']]
-            fragment={}
-            if 'server/items.go' in files:
-                route=copy.deepcopy(self.data['backend_routes'][0])
-                route['line']=2
-                fragment={'backend_routes':[route]}
-                batches.append(batch['id'])
-            return {'batch':batch['id'],'covered':batch['units'],'result':fragment}
-        done=analysis_run.run(self.prepare(intent={'task':'analysis','targets':[]})['id'],executor)
-        self.assertEqual(done['state'],'completed',done.get('error'))
-        self.assertEqual(len(batches),len(set(batches)))
-        route=self.raw()['dev']['backend_routes'][0]
-        self.assertEqual((route['line'],route['quote']),(4,self.data['backend_routes'][0]['quote']))
-
-    def test_batched_citation_relocation_requires_unique_same_file_and_visible_current_line(self):
-        path='notes.txt'
-        (self.repo/path).write_bytes('same text\rsame text\r\n한글 reference\u2028other content'.encode())
-        self.git('add','.');self.git('commit','-qm','Pin duplicate and Unicode source lines')
-        commit=self.git('rev-parse','HEAD').strip()
-        repo=str(self.repo)
-        oid=self.git('rev-parse',f'HEAD:{path}').strip()
-        lines=analysis_run._blob_lines(repo,oid)
-        self.assertEqual(lines[2],{'line':3,'text':'한글 reference'})
-        def check(quote,visible,source_commit=commit,line=4):
-            data={'inspected':[{'file':path,'line':line,'quote':quote}]}
-            unit={'kind':'source','value':{'commit':source_commit,'file':path,'lines':visible}}
-            analysis_run._strict_result('analysis',data,repo,commit,context=[unit])
-            return data['inspected'][0]['line']
-        self.assertEqual(check('한글 reference',lines),3)
-        for args in [('same text',lines[:1]),('invented content',lines),('한글 reference',lines[:2]),
-                     ('한글 reference',lines,self.commit),('한글 reference',lines,0)]:
-            with self.subTest(args=args),self.assertRaises(analysis_run.InvalidClaim):check(*args)
-
     def test_evidence_accepts_literal_unicode_and_tab_in_tracked_path(self):
         path='작업\t명령.py'
         (self.repo/path).write_text('run_command()\n')
@@ -658,41 +278,8 @@ class AnalysisRun(unittest.TestCase):
         evidence={'file':path,'line':1,'quote':'run_command()'}
         analysis_run._strict_result('analysis',{'inspected':[evidence]},str(self.repo),commit)
 
-    def test_batched_invalid_citation_can_be_corrected_once(self):
-        (self.repo/'noise.source').write_text('ordinary line\n'*6000)
-        self.git('add','.');self.git('commit','-qm','Require batched analysis')
-        for correct in (False,True):
-            with self.subTest(correct=correct):
-                before=self.raw()
-                first=None
-                attempts=[]
-                def executor(prompt,**kwargs):
-                    nonlocal first
-                    packet=json.loads(prompt.split('\n',1)[1])
-                    batch=packet['batch']
-                    first=first or batch['id']
-                    fragment={}
-                    if batch['id']==first:
-                        attempts.append(batch['rules'])
-                        if correct and len(attempts)==2:
-                            fragment=self.data
-                        else:
-                            fragment={'inspected':[dict(self.EV,quote='unsupported citation')]}
-                    return {'batch':batch['id'],'covered':batch['units'],'result':fragment}
-                run=self.prepare(intent={'task':'analysis','targets':[]})
-                done=analysis_run.run(run['id'],executor)
-                self.assertEqual(len(attempts),2)
-                self.assertIn('exact source line',attempts[1])
-                self.assertNotIn('unsupported citation',attempts[1])
-                if correct:
-                    self.assertEqual(done['state'],'completed',done.get('error'))
-                else:
-                    self.assertEqual(done['error']['code'],'invalid_result')
-                    self.assertEqual(self.raw(),before)
-
     def test_same_read_notice_allows_current_packet_to_settle(self):
-        (self.repo/'noise.source').write_text('unrelated line\n'*6000)
-        self.git('add','.');self.git('commit','-qm','Use bounded read protocol')
+        self.pad()
         need={'query':'not-found','start':1,'limit':2}
         other={'query':'another-absent-term','start':1,'limit':1}
         notices=[]
@@ -707,7 +294,7 @@ class AnalysisRun(unittest.TestCase):
                     notices.append(batch['satisfied_needs'])
                     self.assertTrue(any(page['value'].get('total')==0 for page in p.get('context_pages',[])
                                         if page['path']==['read_page']))
-                    reply['result']=self.data
+                    reply['result']=self.routes()
                 else:
                     pages=[page['value']['query'] for page in p.get('context_pages',[])
                            if page['path']==['read_page']]
@@ -717,7 +304,7 @@ class AnalysisRun(unittest.TestCase):
                         self.assertCountEqual(pages,[need['query'],other['query']])
                         reply['needs']=[need]
             return reply
-        done=analysis_run.run(self.prepare(intent={'task':'analysis','targets':[]})['id'],executor)
+        done=analysis_run.run(self.steps()['id'],executor)
         self.assertEqual(done['state'],'completed',done.get('error'))
         self.assertEqual(notices,[[need]])
 
@@ -799,70 +386,19 @@ class AnalysisRun(unittest.TestCase):
         self.assertEqual(caught.exception.code,'timeout')
 
     def test_source_reuse_spans_tasks_in_a_run_but_not_separate_runs(self):
-        seen=[];real=analysis_run.generate
+        seen=[];real=analysis_run.generate;intent=self.two_routes()
         def observed(*args,**kwargs):
             seen.append(args[7]);return real(*args,**kwargs)
         with patch.object(analysis_run,'generate',observed):
-            done=analysis_run.run(self.prepare()['id'],self.fake);self.assertEqual(done['state'],'completed',done.get('error'))
+            done=analysis_run.run(self.prepare(intent=intent)['id'],self.fake);self.assertEqual(done['state'],'completed',done.get('error'))
             first=list(seen);seen.clear()
             self.assertGreater(len(first),1)
             self.assertTrue(all(x is first[0] for x in first))
             (self.repo/'server/items.go').write_text((self.repo/'server/items.go').read_text()+'// Second run source.\n')
-            self.git('add','.');self.git('commit','-qm','Change for a second run')
-            done=analysis_run.run(self.prepare()['id'],self.fake);self.assertEqual(done['state'],'completed',done.get('error'))
+            self.git('add','.');self.git('commit','-qm','Change for a second run');self.seed_map()
+            done=analysis_run.run(self.prepare(intent=intent)['id'],self.fake);self.assertEqual(done['state'],'completed',done.get('error'))
         self.assertTrue(seen)
         self.assertFalse([x for x in seen if x is first[0]])
-
-    def test_split_patch_retrieves_old_ids_only_from_actual_metadata_context(self):
-        mount='server/mount.source';file='server/routes.source';new=[];text=[]
-        for i in range(600):
-            fn=f'handler_{i:04}_'+('x'*48);quote=f'route POST /r{i} {fn}'
-            text.append(quote)
-            new.append({'file':file,'line':i+1,'quote':quote,'method':'POST','path':f'/v0/r{i}','function':fn,
-                'dependencies':[{'file':mount,'line':1,'quote':'prefix /v0'}],
-                'steps':[{'file':file,'line':i+1,'quote':quote,'text':'Handle request','lane':'서버'}]})
-        (self.repo/file).write_text('\n'.join(text)+'\n');(self.repo/mount).write_text('prefix /v0\n')
-        self.git('add','.');self.git('commit','-qm','Many pinned route identities')
-        self.data['backend_routes']+=new
-        req=ai_extract.request('demo','dev','en','service')
-        ai_extract.record(**req['record_arguments'],result_json=json.dumps(test_ai_extract.agent_answer(req,self.data)))
-        for task,result in (('system',self.SYSTEM),('groups',self.GROUPS)):
-            req=ai_extract.task_request('demo',task,'dev','en','service');ai_extract.task_record(**req['record_arguments'],result_json=json.dumps(result))
-        (self.repo/mount).write_text('prefix /v1\n');self.git('add','.');self.git('commit','-qm','Change the shared prefix')
-        calls=[];metadata_reads=[]
-        def executor(prompt,**kwargs):
-            p=json.loads(prompt.split('\n',1)[1]);calls.append(len(prompt.encode()));self.assertLessEqual(calls[-1],128*1024)
-            if 'screens' not in p['schema']:return self.fake(prompt,**kwargs)
-            self.assertIn('batch',p)
-            lines={line['text']:(f['file'],line['line']) for s in p.get('snapshots',[]) for f in s['files'] for line in f['lines']}
-            functions={line.split()[-1] for line in lines if line.startswith('route POST')}
-            items=list(p.get('recheck',[]));page=None
-            for entry in p.get('context_pages',[]):
-                if entry['path']==['recheck']:items+=entry['value']
-                elif entry['path'][:1]==['recheck'] and isinstance(entry['value'],dict):items.append(entry['value'])
-                if entry['path']==['read_page'] and entry['value'].get('metadata')==['recheck']:page=entry['value']
-            routes=[]
-            if functions and 'prefix /v1' in lines:
-                for item in items:
-                    if item['function'] not in functions:continue
-                    quote=next(line for line in lines if line.startswith('route POST') and line.split()[-1]==item['function'])
-                    routes.append({'file':file,'line':lines[quote][1],'quote':quote,'method':item['method'],
-                        'path':item['path'].replace('/v0/','/v1/'),'function':item['function'],'replaces':item['id'],
-                        'dependencies':[{'file':mount,'line':1,'quote':'prefix /v1'}],
-                        'steps':[{'file':file,'line':lines[quote][1],'quote':quote,'text':'Handle request','lane':'서버'}]})
-            needs=[]
-            if functions:
-                start=page['next'] if page else 1
-                if start:
-                    metadata_reads.append(start);needs.append({'metadata':['recheck'],'start':start,'limit':100})
-                if 'prefix /v1' not in lines:needs.append({'file':mount,'limit':1})
-            result={'backend_routes':routes}
-            if routes:result['accounted']=[{'file':mount,'kind':'items'}]
-            return {'batch':p['batch']['id'],'covered':p['batch']['units'],'result':result,'needs':needs}
-        done=analysis_run.run(self.prepare()['id'],executor)
-        self.assertEqual(done['state'],'completed',done.get('error'))
-        self.assertTrue(metadata_reads)
-        self.assertEqual({r['path'] for r in self.raw()['dev']['backend_routes']},{'/items',*[f'/v1/r{i}' for i in range(600)]})
 
     def test_same_url_in_unrelated_handlers_does_not_widen_changed_input(self):
         files={'backend/app/main.py':'from fastapi import FastAPI\nfrom app.routers import a, b\napp = FastAPI()\napp.include_router(a.router)\napp.include_router(b.router)\n'}
@@ -894,76 +430,47 @@ class AnalysisRun(unittest.TestCase):
 
     def test_direct_reply_needs_are_fulfilled_before_any_result_is_saved(self):
         helper='server/helper.go';(self.repo/helper).write_text('func HiddenHelper() { return }\n')
-        self.git('add','.');self.git('commit','-qm','Initially uncited helper')
-        done=analysis_run.run(self.prepare()['id'],self.fake);self.assertEqual(done['state'],'completed')
         path=self.repo/'server/items.go'
         path.write_text(path.read_text()+'HiddenHelper()\n//'+('x'*120000)+'\n')
-        self.git('add','.');self.git('commit','-qm','Reference the previously uncited helper')
+        self.git('add','.');self.git('commit','-qm','Reference an uncited helper');self.seed_map()
         before=self.raw();calls=[];saw_helper=False
         def executor(prompt,**kwargs):
             nonlocal saw_helper
             p=json.loads(prompt.split('\n',1)[1]);calls.append(len(prompt.encode()))
-            if 'screens' not in p['schema']:return self.fake(prompt,**kwargs)
             files={f['file'] for s in p.get('snapshots',[]) for f in s['files']}
             if len(calls)==1:
                 self.assertNotIn('batch',p);self.assertNotIn(helper,files)
-                result=json.loads(self.fake(prompt,**kwargs));result['needs']=[{'file':helper,'limit':10}];return result
+                return {**self.routes(),'needs':[{'file':helper,'limit':10}]}
             self.assertEqual(self.raw(),before,'The provisional direct reply must not be saved')
             answer=self.source_fake(prompt,**kwargs)
             if helper in files:
                 saw_helper=True
-                for route in answer['result'].get('backend_routes',[]):route['services']=[{'file':helper,'line':1,'quote':'func HiddenHelper()'}]
+                answer['result']['routes'][self.ROUTE]['steps']=[{'file':helper,'line':1,'quote':'func HiddenHelper() { return }','text':'Call the helper','lane':'서버'}]
             return answer
-        done=analysis_run.run(self.prepare()['id'],executor)
+        done=analysis_run.run(self.steps()['id'],executor)
         self.assertEqual(done['state'],'completed',done.get('error'));self.assertTrue(saw_helper)
-        self.assertEqual(self.raw()['dev']['backend_routes'][0]['services'],[helper]);self.assertGreater(len(calls),1)
+        flow=self.raw()['dev']['task_outputs']['flows']['routes'][self.ROUTE]
+        self.assertEqual([s['file'] for s in flow['steps']],[helper]);self.assertGreater(len(calls),1)
         self.assertLessEqual(max(calls),128*1024)
 
-    def test_provisional_system_link_can_resolve_after_needed_node_is_read(self):
-        helper='outside/store.source';(self.repo/'outside').mkdir();(self.repo/helper).write_text('store StoreRuntime\n')
-        self.git('add','.');self.git('commit','-qm','Initially uncited store')
-        done=analysis_run.run(self.prepare()['id'],self.fake);self.assertEqual(done['state'],'completed')
-        path=self.repo/'server/items.go';path.write_text(path.read_text()+'connect StoreRuntime()\n')
-        self.git('add','.');self.git('commit','-qm','Reference an outside store')
-        system_before=None;system_calls=[]
-        def executor(prompt,**kwargs):
-            nonlocal system_before
-            p=json.loads(prompt.split('\n',1)[1])
-            if 'nodes' not in p['schema']:return self.fake(prompt,**kwargs)
-            files={f['file'] for s in p.get('snapshots',[]) for f in s['files']};system_calls.append(files)
-            api=copy.deepcopy(self.SYSTEM['nodes'][0])
-            link={'from':'api','to':'store','label':'Uses store','ev':[{'file':'server/items.go','line':5,'quote':'connect StoreRuntime()'}]}
-            if len(system_calls)==1:
-                system_before=self.raw();self.assertNotIn(helper,files);self.assertNotIn('batch',p)
-                return {'nodes':[api],'links':[link],'externals':[],'others':[],'needs':[{'file':helper,'limit':10}]}
-            self.assertEqual(self.raw(),system_before)
-            self.assertIn(helper,files)
-            store={'id':'store','name':'Store','kind':'store','code':[],'ev':[{'file':helper,'line':1,'quote':'store StoreRuntime'}]}
-            return {'batch':p['batch']['id'],'covered':p['batch']['units'],
-                    'result':{'nodes':[store],'links':[],'externals':[],'others':[]}}
-        done=analysis_run.run(self.prepare()['id'],executor)
-        self.assertEqual(done['state'],'completed',done.get('error'));self.assertEqual(len(system_calls),2)
-        system=self.raw()['dev']['task_outputs']['system']
-        self.assertEqual({n['id'] for n in system['nodes']},{'api','store'});self.assertEqual(system['links'][0]['to'],'store')
-
-    def test_provider_failure_keeps_saved_map_and_retry_only_finishes_missing_tasks(self):
-        calls=[]
+    def test_provider_failure_keeps_saved_results_and_retry_only_finishes_missing_tasks(self):
+        intent=self.two_routes();calls=[]
         def executor(prompt,**kwargs):
             calls.append(prompt)
             if len(calls)==2:raise ValueError('Synthetic provider unavailable')
             return self.fake(prompt,**kwargs)
-        value=self.prepare();failed=analysis_run.run(value['id'],executor)
+        value=self.prepare(intent=intent);failed=analysis_run.run(value['id'],executor)
         self.assertEqual(failed['state'],'failed')
-        self.assertEqual([t['task'] for t in failed['completed_tasks']],['analysis'])
-        saved=copy.deepcopy(self.raw()['dev'])
+        self.assertEqual([t['task'] for t in failed['completed_tasks']],['steps'])
+        saved=copy.deepcopy(self.raw()['dev']['task_outputs']['flows']['routes'][self.ROUTE])
         retried=analysis_run.retry(value['id']);self.assertNotEqual(retried['id'],value['id'])
-        self.assertNotIn('analysis',[t['task'] for t in retried['tasks']])
+        self.assertEqual([t['target'] for t in retried['tasks']],['@routes:["server/other.go::Other"]'])
         done=analysis_run.run(retried['id'],self.fake)
         self.assertEqual(done['state'],'completed',done.get('error'))
-        self.assertEqual(self.raw()['dev']['analysis'],saved['analysis'])
+        self.assertEqual(self.raw()['dev']['task_outputs']['flows']['routes'][self.ROUTE],saved)
 
     def test_invalid_output_is_failed_without_publishing(self):
-        before=self.raw();value=self.prepare()
+        self.seed_map();before=self.raw();value=self.steps()
         done=analysis_run.run(value['id'],lambda *a,**k:'not JSON')
         self.assertEqual(done['state'],'failed');self.assertEqual(self.raw(),before)
 
@@ -977,8 +484,8 @@ class AnalysisRun(unittest.TestCase):
         done=analysis_run.run(value['id'],executor)
         self.assertEqual(done['state'],'cancelled');self.assertEqual(self.raw(),before)
 
-    def test_full_pin_change_during_execution_rejects_save(self):
-        before=self.raw();value=self.prepare()
+    def test_pin_change_during_execution_rejects_save(self):
+        self.seed_map();before=self.raw();value=self.steps()
         def executor(prompt,**kwargs):
             result=self.fake(prompt,**kwargs)
             (self.repo/'server/items.go').write_text((self.repo/'server/items.go').read_text()+'// changed\n')
@@ -1005,7 +512,7 @@ class AnalysisRun(unittest.TestCase):
         self.assertIsNone(analysis_run.status(project='demo',lang='ko'))
 
     def test_recovery_distinguishes_prepared_live_and_interrupted_workers(self):
-        value=self.prepare()
+        self.seed_map();value=self.steps()
         self.assertEqual(analysis_run.status(value['id'])['state'],'preparing')
         self.assertFalse(analysis_run.active()['active'])
         value.update(state='running',launch_epoch=time.time()-60);analysis_run.write(value)
@@ -1037,7 +544,7 @@ class AnalysisRun(unittest.TestCase):
         self.assertIn('credential_file',text)
 
     def test_input_that_cannot_fit_one_encoded_unit_fails_without_executor(self):
-        value=self.prepare();before=self.raw()
+        self.seed_map();value=self.steps();before=self.raw()
         with patch.object(analysis_run,'MAX_PROMPT_BYTES',32):
             done=analysis_run.run(value['id'],lambda *a,**k:self.fail('Input exceeds limit'))
         self.assertEqual(done['error']['code'],'source_too_large');self.assertEqual(self.raw(),before)
@@ -1061,7 +568,7 @@ class AnalysisRun(unittest.TestCase):
         import cli_executor
         shown={'email':'shown@example.invalid','auth_method':'claude.ai'}
         current={'email':'other@example.invalid','auth_method':'claude.ai'}
-        value=self.prepare()
+        self.seed_map();value=self.steps()
         with patch.object(cli_executor,'availability',return_value={'available':True,'authenticated':True,'account':current}),patch.object(analysis_run.subprocess,'Popen') as spawn:
             with self.assertRaisesRegex(ValueError,'account changed'):analysis_run.start(value['id'],shown)
             spawn.assert_not_called()
@@ -1071,7 +578,7 @@ class AnalysisRun(unittest.TestCase):
         import cli_executor
         folder=Path(self.temp.name)/'bin';folder.mkdir()
         fixtures=Path(self.temp.name)/'fixtures.json'
-        fixtures.write_text(json.dumps({'analysis':self.data,'system':self.SYSTEM,'groups':self.GROUPS,'flags':' '.join(cli_executor.REQUIRED_FLAGS)}))
+        fixtures.write_text(json.dumps({'flags':' '.join(cli_executor.REQUIRED_FLAGS)}))
         script=folder/'claude'
         script.write_text('#!'+sys.executable+'\n'+"""
 import json, os, sys, time
@@ -1084,8 +591,7 @@ else:
     if os.environ.get('TEST_ANALYSIS_PAUSE'):
         open(os.environ['TEST_ANALYSIS_PAUSE'],'w').write('started')
         time.sleep(30)
-    result=fixtures['analysis'] if 'screens' in schema else fixtures['system'] if 'nodes' in schema else fixtures['groups']
-    if payload.get('mode')=='review':result={'keep':'all',**result}
+    result={'routes':{k:{'steps':[],'unknown':'No further steps established'} for k in payload['input']['routes']}}
     print(json.dumps({'result':json.dumps(result)}))
 """)
         script.chmod(0o700)
@@ -1101,20 +607,21 @@ else:
 
     def test_real_detached_worker_uses_fake_cli_and_pinned_account(self):
         import cli_executor
+        self.seed_map()
         with patch.dict(os.environ,self.fake_cli()):
-            account=cli_executor.availability()['account'];value=self.prepare()
+            account=cli_executor.availability()['account'];value=self.steps()
             started=analysis_run.start(value['id'],account)
             self.assertEqual(started['account'],account)
             done=self.wait_terminal(value['id'])
         self.assertEqual(done['state'],'completed',done.get('error'))
-        self.assertEqual([t['task'] for t in done['completed_tasks']],['analysis','system','groups'])
+        self.assertEqual([t['task'] for t in done['completed_tasks']],['steps'])
 
     def test_detached_cancellation_stops_only_its_owned_fake_cli_without_saving(self):
         import cli_executor
         env=self.fake_cli();marker=Path(self.temp.name)/'model-started';env['TEST_ANALYSIS_PAUSE']=str(marker)
-        before=self.raw()
+        self.seed_map();before=self.raw()
         with patch.dict(os.environ,env):
-            account=cli_executor.availability()['account'];value=self.prepare()
+            account=cli_executor.availability()['account'];value=self.steps()
             analysis_run.start(value['id'],account)
             until=time.monotonic()+10
             while not marker.exists() and time.monotonic()<until:time.sleep(.05)
@@ -1125,9 +632,8 @@ else:
     def test_program_jobs_and_briefing_require_explicit_intent(self):
         self.SYSTEM={**self.SYSTEM,'nodes':self.SYSTEM['nodes']+[{'id':'web','name':'Web','kind':'program','code':['pages'],
             'ev':[{'file':'pages/items.vue','line':1,'quote':'<button @click="saveItem">'}]}]}
-        self.data={**self.data,'screens':[]}
-        value=self.prepare();done=analysis_run.run(value['id'],self.fake)
-        self.assertEqual(done['state'],'completed',done.get('error'))
+        self.data={**self.data,'screens':[]};self.GROUPS={'groups':[],'names':{},'request_names':{}}
+        self.seed_map()
         raw=self.raw();self.assertFalse(raw['dev']['task_outputs'].get('jobs',{}).get('nodes'))
         value=self.prepare(intent={'task':'jobs','targets':[{'repository':'service','target':'api'}]})
         calls=[]
@@ -1145,8 +651,8 @@ else:
             'commits':{'dev':{'from':self.commit,'to':self.commit}},'comparison':{'since':'last_refresh','since_time':''},
             'structure':{},'prs':[],'issues':[],'collection':{}}}}
         project._publish('demo','service',raw,{},collection=False)
-        value=self.prepare();self.assertEqual(value['tasks'],[])
-        analysis_run.run(value['id'],lambda *a,**k:self.fail('Overview must not explain changes'))
+        # Changed briefing evidence never adds a briefing task to another intent.
+        value=self.steps();self.assertEqual([t['task'] for t in value['tasks']],['steps']);analysis_run.cancel(value['id'])
         value=self.prepare(intent={'task':'briefing'});self.assertEqual([t['task'] for t in value['tasks']],['briefing'])
         def executor(prompt,**kwargs):
             payload=json.loads(prompt.split('\n',1)[1]);self.assertIn('sources',payload)
