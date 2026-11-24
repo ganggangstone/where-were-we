@@ -18,7 +18,8 @@ while the run goes on.
    language's connections were not read.
 3. **Labels and structure (from a summary, not from source).** `analysis_label.summary` builds a compact summary
    of the local map. It holds integer unit refs, kinds, local names, file counts, unit links, up to three
-   declaration names and file names per unit, and the project description. Folders are sent once as a
+   declaration names (each with an integer evidence ref) and file names per unit, the requests the local map knows
+   (each with a request ref), and the project description. Folders are sent once as a
    `[parent, name]` tree. When the summary is at most `analysis_label.BOUND` (64 KB), one call names every unit,
    groups the units and lists programs and their connections. A larger summary is split by top-level folder
    into labeling calls of at most 64 KB each, followed by one structure call over the labeled groups.
@@ -71,17 +72,20 @@ Units the rules add (route units of that language) join the last labeling part.
 
 ## What the AI may claim
 
-- Labels may cite only the unit refs the summary listed. Anything else is dropped and counted (`dropped`).
+- Labels may cite only the unit, evidence and request refs the summary listed. Anything else is dropped and counted
+  (`dropped`). For an evidence ref, local code fills the file, line and literal line text of the pinned commit, so
+  the evidence of a program or link is a declaration line the local map read.
 - Screens and routes come only from local calculation. The AI names and groups them but never adds one.
-- No source line is sent for labels, so they are an interpretation of the structure and are not checked against
-  code. The board says this. Unit explanations are made from read source lines and are checked against them.
+- No source line is sent for labels, so names and descriptions are an interpretation of the structure and are not
+  checked against code. The board says this. Unit explanations are made from read source lines and are checked against them.
 
 ## Saved shapes
 
 - Run record (`.analysis-runs/<id>.json`): `announced`, `input_stats.by_kind`, `labels[repository]` =
-  `{commit, parts: {input hash: {units: {unit id: {name, what}}, groups, programs, links, dropped}},
+  `{commit, parts: {input hash: {units: {unit id: {name, what}}, groups, programs, links, requests, dropped}},
   structure: {key, programs, links, dropped}}`, `gaps`.
 - Map screen (project bundle): `groups` `{groups: [{name, description, screens: [path]}], names, request_names}`
+  (`request_names` keyed `file::function`)
   and `system` (or `system.ai` beside a locally built one) `{nodes, links, externals, others}`. Both are marked
   `basis: structure_summary`. Programs saved this way never become units of the catalog that produced them.
 

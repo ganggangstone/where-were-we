@@ -578,10 +578,28 @@ def _full_scope(value,defer=False):
         catalog=_unit_catalogs(value,{'pins':{rid:pin}},defer)[rid]
         index=_pinned_index(conf['path'],raw[value['branch']],head)
         sizes=_tracked(conf['path'],head);files=[f for f,z in sizes.items() if not _exclusion(f,z)]
+        spots={}
+        whole=analysis_label.summary(catalog,index,index.get('project_description') or '',_known_routes(raw[value['branch']],index,head),spots)
         out[rid]={'pin':pin,'repo':conf['path'],'catalog':catalog,'sizes':sizes,'files':files,
                   'missing':sorted(n for n in lang_rules.needed(files) if not lang_rules.load(n)),
-                  'summary':analysis_label.summary(catalog,index,index.get('project_description') or '')}
+                  'summary':whole,'spots':spots}
     return out
+
+def _known_routes(selected,index,head):
+    """The requests the local map knows, keyed "file::function" as the map screen names them: the saved map's mounted
+    routes of this commit, then the server routes of the structure index."""
+    saved=selected.get('backend_routes',[]) if ai_extract.same(selected.get('commit'),head) else []
+    service=index.get('service_flow') or {}
+    servers=[{**r['server'],'method':r['method'],'path':r.get('server_path',r['path'])} for r in [*service.get('connections',[]),*service.get('registered_routes',[])] if r.get('server')]
+    rows=[{'key':r['file']+'::'+r['function'],'method':r.get('method',''),'path':r.get('path',''),'file':r['file']} for r in saved if r.get('mounted') and r.get('function')]
+    rows+=[{'key':r['file']+'::'+r['function'],'method':r['method'],'path':r['path'],'file':r['file']} for r in servers if r.get('function')]
+    return list({r['key']:r for r in reversed(rows)}.values())[::-1]
+
+def _spots_of(scope,payload):
+    """The evidence and request refs one call's input listed; any other ref in its answer is dropped."""
+    listed={d[0] for u in payload.get('units',[]) for d in u[5]}|{d[0] for g in payload.get('groups',[]) for d in g.get('declarations',[])}
+    asked={r[0] for r in payload.get('requests',[])}
+    return {'evidence':{k:v for k,v in scope['spots']['evidence'].items() if k in listed},'requests':{k:v for k,v in scope['spots']['requests'].items() if k in asked}}
 
 def _saved_labels(history,rid):
     """Every labeling part and structure saved for this repository, by the hash of its input (latest wins)."""
@@ -622,9 +640,16 @@ def _full_plan(value,history,defer=False):
     calls['total']=sum(calls[k] for k in CALL_KINDS)
     return scopes,plans,calls
 
-def _publish_shapes(value,rid,commit,labels,catalog):
+def _publish_shapes(value,rid,commit,labels,catalog,repo):
     """Write groups and system in the shapes the map screen reads, marked as an interpretation of the structure summary."""
-    groups,system=analysis_label.shapes(catalog,labels)
+    texts={}
+    def line(file,number):
+        # Local code quotes the cited line of the pinned commit; the model only chose the ref.
+        if file not in texts:
+            try:texts[file]=_git(repo,'show',f'{commit}:{file}').decode('utf-8','ignore').splitlines()
+            except Exception:texts[file]=[]
+        return texts[file][number-1] if 0<number<=len(texts[file]) else None
+    groups,system=analysis_label.shapes(catalog,labels,line)
     meta={'source':'ai','basis':'structure_summary','provider':'claude-cli','commit':commit,'branch':value['branch'],'language':value['lang'],'generated_at':store.now()}
     with store.locked(value['project']):
         _,raw,stored_rid,head=ai_extract.context(value['project'],rid,value['branch'])
@@ -633,7 +658,7 @@ def _publish_shapes(value,rid,commit,labels,catalog):
         updated=copy.deepcopy(bundle)
         dest='system.ai' if bundle.get('system') and bundle['system'].get('source')!='ai' else 'system'
         updated[dest]={**meta,**system}
-        if groups['groups']:updated['groups']={**meta,**groups}
+        if groups['groups'] or groups['request_names']:updated['groups']={**meta,**groups}
         if stored_rid:store._publish(value['project'],stored_rid,updated,{},collection=False)
         else:
             for name,item in updated.items():
@@ -692,7 +717,7 @@ def _run_full(run_id,executor,cancelled):
             if key not in saved:
                 answer=_ask(_counted(run_id,executor,cancelled,'labeling'),analysis_label.prompt('labeling',payload,value['lang'],last and i==0))
                 if answer is None:_update(run_id,_gap(rid,f'labeling:{i}','No usable answer after one retry'));continue
-                labels,dropped=analysis_label.check(answer,{u[0]:units[u[0]]['id'] for u in payload['units']})
+                labels,dropped=analysis_label.check(answer,{u[0]:units[u[0]]['id'] for u in payload['units']},_spots_of(scope,payload))
                 saved[key]={**labels,'dropped':dropped}
             part=saved[key]
             _update(run_id,lambda v,key=key,part=part:v.setdefault('labels',{}).setdefault(rid,{'commit':scope['pin']['commit'],'parts':{}})['parts'].__setitem__(key,part))
@@ -705,13 +730,14 @@ def _run_full(run_id,executor,cancelled):
                 answer=_ask(_counted(run_id,executor,cancelled,'structure'),analysis_label.prompt('structure',payload,value['lang'],True))
                 if answer is None:_update(run_id,_gap(rid,'structure','No usable answer after one retry'))
                 else:
-                    labels,dropped=analysis_label.check(answer,{r:units[r]['id'] for g in payload['groups'] for r in g['units']})
+                    labels,dropped=analysis_label.check(answer,{r:units[r]['id'] for g in payload['groups'] for r in g['units']},_spots_of(scope,payload))
                     structure={'key':key,'programs':labels['programs'],'links':labels['links'],'dropped':dropped}
         if structure:_update(run_id,lambda v,s=structure:v['labels'][rid].__setitem__('structure',s))
         if labeled:
             merged={'units':{k:v for p in labeled for k,v in p['units'].items()},'groups':[g for p in labeled for g in p['groups']],
-                    'programs':(structure or {}).get('programs',[]),'links':(structure or {}).get('links',[])}
-            _publish_shapes(value,rid,scope['pin']['commit'],merged,scope['catalog'])
+                    'programs':(structure or {}).get('programs',[]),'links':(structure or {}).get('links',[]),
+                    'requests':{k:v for p in labeled for k,v in (p.get('requests') or {}).items()}}
+            _publish_shapes(value,rid,scope['pin']['commit'],merged,scope['catalog'],scope['repo'])
 
 def _explain_unit(run_id,executor,cancelled):
     """The explanation of one unit the user opened: one call over its read source lines, saved as soon as it is checked."""

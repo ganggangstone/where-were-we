@@ -113,11 +113,13 @@ class FullRun(unittest.TestCase):
             payload=json.loads(prompt[prompt.index('{"description"'):])
             if prompt.startswith('You build the service structure'):
                 refs=[r for g in payload['groups'] for r in g['units']]
-                return {'programs':[{'name':'Service','kind':'program','what':'Runs it','units':refs},{'name':'Ghost','units':[99999]}],'links':[]}
+                ev=[d[0] for g in payload['groups'] for d in g['declarations']][:1]
+                return {'programs':[{'name':'Service','kind':'program','what':'Runs it','units':refs,'ev':ev},{'name':'Ghost','units':[99999]}],'links':[]}
             refs=[u[0] for u in payload['units']]
             return {'units':[{'ref':r,'name':f'Name {r}','what':'Does one thing'} for r in refs]+[{'ref':99999,'name':'Invented'}],
                     'groups':[{'name':'Everything','description':'All of it','units':refs}],
-                    'programs':[{'name':'Service','kind':'program','what':'Runs it','units':refs}],'links':[]}
+                    'requests':[{'ref':q[0],'name':f'Request {q[3]}'} for q in payload['requests']],
+                    'programs':[{'name':'Service','kind':'program','what':'Runs it','units':refs,'ev':[d[0] for u in payload['units'] for d in u[5]][:1]+[99999]}],'links':[]}
         return fake
 
     def analyse(self,calls,**kwargs):
@@ -136,9 +138,13 @@ class FullRun(unittest.TestCase):
         self.assertTrue(named and all(r[2].startswith('Name ') and r[6]=='Does one thing' for r in named))
         self.assertEqual({r[0]:r[4] for r in rows if r[0].startswith('task:')},{'task:groups':'saved','task:system':'saved'})
         part=next(iter(analysis_run.read(job['id'])['labels']['service']['parts'].values()))
-        self.assertNotIn('Invented',[v['name'] for v in part['units'].values()]);self.assertEqual(part['dropped'],1)
+        self.assertNotIn('Invented',[v['name'] for v in part['units'].values()]);self.assertEqual(part['dropped'],2)  # the invented unit and the unknown evidence ref
         raw=self.raw();system=raw['system.ai'] if (raw.get('system.ai') or {}).get('basis') else raw['system']
         self.assertEqual([n['name'] for n in system['nodes']],['Service']);self.assertEqual(system['basis'],'structure_summary')
+        # The model cited an evidence ref; local code filled the file, line and literal text of the pinned commit.
+        ev=system['nodes'][0]['ev'];self.assertEqual(len(ev),1)
+        self.assertEqual((self.repo/ev[0]['file']).read_text().splitlines()[ev[0]['line']-1].strip(),ev[0]['quote'])
+        self.assertEqual(raw['groups']['request_names'],{f'api.py::{p[1:]}':f'Request {p}' for p in self.PATHS})
         # Pressing again with nothing changed sends nothing; the reopened board equals what the run saved.
         again=[];job,done=self.analyse(again)
         self.assertEqual((again,job['announced']['total'],done['state']),([],0,'completed'))
