@@ -145,6 +145,19 @@ class LangRules(unittest.TestCase):
         self.assertEqual((again, calls, len(asked)), (rule, 0, 1))
         self.assertEqual(set(lang_rules.loaded(['java'])), {'.java'})
 
+    def test_an_answer_wrapped_in_one_key_is_accepted_and_cached(self):
+        files = sorted(RUBY_FILES)
+        sizes = {f: len(t) for f, t in RUBY_FILES.items()}
+        asked = []
+
+        def wrapped(prompt, **kwargs):
+            asked.append(prompt)
+            self.assertNotIn('"format"', prompt)
+            return json.dumps({'language': 'ruby', 'format': RUBY})
+        rule, calls, _ = lang_rules.obtain('ruby', files, sizes, RUBY_FILES.get, wrapped)
+        self.assertEqual((calls, len(rule['imports'])), (1, 2))
+        self.assertEqual(lang_rules.obtain('ruby', files, sizes, RUBY_FILES.get, wrapped)[1], 0)
+
 
 if __name__ == '__main__':
     unittest.main()
