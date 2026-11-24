@@ -1249,7 +1249,7 @@ class Flows(unittest.TestCase):
  const index={repository:origin,commit,coverage:{candidate_files:3,indexed_files:2,skipped_files:1,unsupported_files:7,unresolved_imports:4,truncated:true},
   files:[{file:target,declarations:many},{file:entry,declarations:[]}],imports:[{file:entry,target,line:2}]};
  M().structure_indexes=[index,{...index,repository:'api',files:[],imports:[],coverage:{...index.coverage,indexed_files:0}}];
- S.view='sys';render();$('moduleDetails').open=true;await wait();
+ S.view='sys';render();$('detailLists').open=true;$('moduleDetails').open=true;await wait();
  const graph=()=>$('moduleGraph'),label=(s)=>graph().innerText.includes(tr(s));
  assert($('moduleFile').value===entry && label('모듈 연결 (베타)') && graph().innerText.includes(commit.slice(0,12)),'A connected source and its pinned commit appear first');
  assert(['확인한 파일','건너뛴 파일','미지원 파일','대상 미확인 import','분석 한도 도달'].every(label),'Partial coverage and unresolved relationships are explicit');

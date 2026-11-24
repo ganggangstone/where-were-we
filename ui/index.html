@@ -1592,7 +1592,7 @@ function savedScopeButton(resource) {
 }
 function standaloneRoutes(flow) {
   const identity=(r,path)=>JSON.stringify([r.method,path,r.server.file,r.server.line]);
-  const linked=new Set((bareGroups(flow)?[]:flow.connections).map(row=>identity(row,row.server_path || row.path)));
+  const linked=new Set(flow.connections.map(row=>identity(row,row.server_path || row.path)));
   return flow.registered_routes.filter(row=>!linked.has(identity(row,row.path)));
 }
 const ROUTES_PER_PAGE=8;
@@ -1647,10 +1647,8 @@ function registeredRoutesView(flow,state,evidence) {
   const controls=pages>1?`<div class="ctl"><button class="btn quiet" data-route-page="${page-1}" ${page===0?'disabled':''}>${tr('이전')}</button><span>${page+1} / ${pages}</span><button class="btn quiet" data-route-page="${page+1}" ${page+1===pages?'disabled':''}>${tr('다음')}</button></div>`:'';
   return `<details class="sect" id="registeredRoutes" ${state.routesOpen?'open':''}><summary>${tr('서버 경로 (베타)')} · ${routes.length}</summary>${picker}${explainArea}${list}${controls}${capped?`<div class="s">${tr('저장된 경로')} ${flow.registered_routes.length}/${flow.coverage.routes}</div>`:''}</details>`;
 }
-// 화면 동작이 하나도 없는 기능 묶음은 서버 경로 이름만 되풀이한다. 그 경로는 서버 경로 목록에 둔다.
-const bareGroups=flow=>!!flow?.feature_groups?.length && !flow.feature_groups.some(group=>group.connection_indexes.some(i=>flow.connections[i]?.actions?.length));
 function serviceFlowView(flow,state,evidence) {
-  if(!flow || bareGroups(flow))return '';
+  if(!flow)return '';
   const {connections,coverage:counts}=flow;
   if(!connections.length && !counts.requests && !counts.routes)return '';
   const features=[];
@@ -2315,7 +2313,7 @@ function render() {
   let components=sys?sysView(m):'';
   // 결과가 먼저다: 서비스 구성 그림과 선 목록, 그다음 모듈 연결, 맨 아래에 접힌 파일 목록.
   // 기능 흐름이 있는 코드는 그 흐름이 결과라서 앞에 두고 구성 요소를 접는다.
-  const featureFlow=sys && shownSystem(m)===S.system && (m.structure_indexes || [m.structure_index]).some(index=>index?.service_flow?.feature_groups?.length && !bareGroups(index.service_flow));
+  const featureFlow=sys && shownSystem(m)===S.system && (m.structure_indexes || [m.structure_index]).some(index=>index?.service_flow?.feature_groups?.length);
   if(featureFlow){
     components=`<details class="sect" id="serviceComponents" ${S.componentsScope===S.moduleGraph?.scope || S.node?'open':''}><summary>${tr('구성 요소')}</summary>${components}</details>`;
   }

@@ -21,6 +21,8 @@ class RefreshFirstWebKit(unittest.TestCase):
  const index={repository:'web',commit:pin,version:11,project_description:{text:'Build <small> modules.',file:'README.md',line:3},coverage:{indexed_files:1,candidate_files:1,languages:{javascript:{indexed_files:1,candidate_files:1}}},
    files:[{file,language:'javascript',declarations:[{kind:'function',name:'work',line:1}]}],imports:[],
    service_flow:{connections:[],coverage:{requests:0,routes:0},feature_groups:[]}};
+ // These checks read the structure lists, which the screen folds under 「자세한 목록」.
+ S.listsOpen=true;
  window.mutateBundle=b=>{b.dev.structure_indexes=[index];b.project.repositories[0].fingerprint='pin'};
  await doRefresh();
  const purpose=()=>$('map').querySelector('[data-project-purpose]');
