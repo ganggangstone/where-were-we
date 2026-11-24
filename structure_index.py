@@ -10,6 +10,7 @@ import re
 import subprocess
 import warnings
 
+import lang_rules
 import next_routes
 import cobra_commands
 import service_flow
@@ -627,7 +628,9 @@ def _directory_page(ordered, page, file_limit, byte_limit):
                       'selected_bytes':sum(entry[1] for _,entry in selected)}
 
 
-def build(repo, commit, excluded=None, *, only_file=None, directory=None, page=1):
+def build(repo, commit, excluded=None, *, only_file=None, directory=None, page=1, rules=None):
+    """rules: {extension: reading rule} from lang_rules for languages outside LANGUAGES (none by default)."""
+    rules = rules or {}
     if not re.fullmatch(r'(?:[a-f0-9]{40}|[a-f0-9]{64})', commit):
         raise ValueError('Structure indexing requires a full commit ID')
     if only_file is not None and directory is not None:
@@ -715,6 +718,8 @@ def build(repo, commit, excluded=None, *, only_file=None, directory=None, page=1
             go_config = (oid, int(size))
         suffix = PurePosixPath(file).suffix
         lang = 'go' if suffix == '.go' else 'python' if suffix == '.py' else 'javascript' if suffix in JS_EXTENSIONS else 'typescript' if suffix in TS_EXTENSIONS else 'html' if suffix in ('.html','.htm') else None
+        if lang is None and suffix.lower() in rules:
+            lang = rules[suffix.lower()]['language']
         if lang:
             languages[file] = lang
             candidates[file] = (oid, int(size))
@@ -748,8 +753,9 @@ def build(repo, commit, excluded=None, *, only_file=None, directory=None, page=1
     scoped = candidates if directory is None else {f:e for f,e in candidates.items() if f.startswith(directory + '/')}
     file_limit = MAX_FILES if directory is None else min(MAX_DIRECTORY_FILES, MAX_FILES)
     byte_limit = MAX_BYTES if directory is None else min(MAX_DIRECTORY_BYTES, MAX_BYTES)
+    ruled = sorted({rule['language'] for rule in rules.values()} - set(LANGUAGES))
     groups = [[(f, e) for f, e in scoped.items() if languages[f] == lang]
-              for lang in LANGUAGES]
+              for lang in (*LANGUAGES, *ruled)]
     bounded = len(scoped)>file_limit or sum(size for _,size in scoped.values())>byte_limit
     if only_file is not None:
         if only_file not in candidates:
@@ -794,8 +800,25 @@ def build(repo, commit, excluded=None, *, only_file=None, directory=None, page=1
     except ImportError:
         next_contexts = {}
     unavailable = set()
+    by_language = {rule['language']: rule for rule in rules.values()}
+    paths = lang_rules.Paths(candidates) if by_language else None
     for file, raw in _blobs(git, env, selected):
         language = languages[file]
+        if language in by_language:
+            try:
+                text = raw.decode('utf-8')
+            except UnicodeDecodeError:
+                continue
+            rows, edges, missing = lang_rules.apply(by_language[language], file, text, paths)
+            limited_rows = rows[:MAX_DECLARATIONS - declarations]
+            limited_edges = edges[:MAX_IMPORTS - len(imports)]
+            truncated |= len(rows) != len(limited_rows) or len(edges) != len(limited_edges)
+            files.append({'file':file,'language':language,'declarations':limited_rows})
+            parsed.add(file)
+            imports.extend(limited_edges)
+            unresolved += missing
+            declarations += len(limited_rows)
+            continue
         if language == 'go':
             inside_module = not any(file.startswith(base + '/') for base in go_modules) and 'vendor' not in file.split('/')
             try:
@@ -938,7 +961,7 @@ def build(repo, commit, excluded=None, *, only_file=None, directory=None, page=1
                 'unresolved_imports': unresolved, 'truncated': truncated}
     coverage['languages'] = {lang:{'candidate_files':sum(languages[f]==lang for f in candidates),
                                    'indexed_files':sum(languages[f]==lang for f in parsed)}
-                             for lang in LANGUAGES}
+                             for lang in (*LANGUAGES, *ruled)}
     coverage['unavailable_languages'] = sorted(unavailable)
     if bounded:
         coverage['selection']='bounded_directory_sample'
@@ -961,5 +984,5 @@ def build(repo, commit, excluded=None, *, only_file=None, directory=None, page=1
                      key=lambda item:(preferred.index(item[0].lower()),item[0]))
     description = _project_description(git, env, sources)
     features = _documented_features(git, env, [item for item in sources if item[0].lower() == 'readme.md'])
-    return {'version':VERSION,'commit': commit,'project_description':description,'workspace_packages':workspace_packages,'workspace_dependencies':workspace_dependencies,'documented_features':features,'cli_entries':cli_entries, 'files': files, 'imports': resolved, 'package_imports':package_imports, 'coverage': coverage,
+    return {'version':VERSION,'commit': commit,'rules':lang_rules.digest(rules),'project_description':description,'workspace_packages':workspace_packages,'workspace_dependencies':workspace_dependencies,'documented_features':features,'cli_entries':cli_entries, 'files': files, 'imports': resolved, 'package_imports':package_imports, 'coverage': coverage,
             'service_flow':service_flow.connect(routes, requests)}

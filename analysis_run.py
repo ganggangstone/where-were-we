@@ -23,6 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import ai_extract
 import analysis_units
 import briefing
+import lang_rules
 import mapcore
 import project as store
 import source_signals
@@ -579,13 +580,16 @@ def _pinned_index(repo,selected,head):
     A saved index is used when it matches. A legacy project (no saved index) or an older collection
     is rebuilt from git and cached under .analysis-cache, so the next read in another process is free."""
     import structure_index
+    # Languages outside the built-in readers are read with their cached rules (lang_rules); new rules make a new index.
+    rules=lang_rules.loaded(lang_rules.needed([f for f,z in _tracked(repo,head).items() if not _exclusion(f,z)]))
+    digest=lang_rules.digest(rules)
     saved=(selected or {}).get('structure_index') or {}
-    if saved.get('commit')==head and saved.get('version')==structure_index.VERSION:return saved
-    key=mapcore.cache_key(repo,head,structure_index.VERSION,mapcore.code_digest())
+    if saved.get('commit')==head and saved.get('version')==structure_index.VERSION and (saved.get('rules') or '')==digest:return saved
+    key=mapcore.cache_key(repo,head,structure_index.VERSION,mapcore.code_digest(),digest)
     if key in _INDEXES:return _INDEXES[key]
     built=mapcore.cache_read('index',key)
     if not built or built.get('commit')!=head or built.get('version')!=structure_index.VERSION:
-        built=structure_index.build(repo,head,excluded=_secret)
+        built=structure_index.build(repo,head,excluded=_secret,rules=rules)
         mapcore.cache_write('index',key,built)
     _INDEXES.clear();_INDEXES[key]=built
     return built

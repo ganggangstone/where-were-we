@@ -422,7 +422,7 @@ def tree_inventory(entries, commit):
 
 CACHE_KEEP = 4
 _CODE_FILES = ('extract.py','structure_index.py','service_flow.py','default_flow.py','express_routes.py','react_actions.py',
-               'sqlmodel_steps.py','cobra_commands.py','next_routes.py','mapcore.py')
+               'sqlmodel_steps.py','cobra_commands.py','next_routes.py','lang_rules.py','mapcore.py')
 
 @functools.lru_cache(maxsize=1)
 def code_digest():
