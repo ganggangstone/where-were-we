@@ -854,7 +854,7 @@ class Flows(unittest.TestCase):
  window.unitBoard={repositories:[{repository:'',units:[['route:/items','route','/items',3,'saved','new'],['folder:lib','folder','lib',9,'pending','']],coverage:{tracked:12,in_units:9,indexed:9,excluded:{secret:1},truncated:false}}],totals:{units:2,saved:1,pending:1},calls:{rules:0,labeling:1,structure:0,unit:0,total:1}};
  S.view='sys';render();openAnalysisPanel();await AnalysisRun.check();await wait();
  const L=(en,ko)=>S.lang==='en'?en:ko,panel=$('insp').innerHTML;
- assert(panel.includes('unit-board') && panel.includes(L('Full code analysis','전체 코드 분석')) && panel.includes('class="beta"'),'The panel shows the beta board: '+panel.slice(0,200));
+ assert(panel.includes('unit-board') && !panel.includes(L('Full code analysis','전체 코드 분석')) && (panel.match(/<h[23]/g) || []).length===1,'The panel shows the board under one heading: '+panel.slice(0,200));
  assert($('startFullAnalysis') && panel.includes(L('No explanation','설명 없음')),'Queued units are labeled and the start needs a click');
  assert(!calls.some(c=>c.command==='analysis_run_start'),'Showing the board starts nothing');
  $('startFullAnalysis').click();await wait();
@@ -961,7 +961,7 @@ class Flows(unittest.TestCase):
  S.agentPrompt=null;render();await doRefresh();await wait();
  assert(calls.filter(c=>c.command==='analysis_plan').length===1 && S.analysisRequest?.handoff==='After refresh','Refresh prepares the same unified request once');
  assert(window.copied===undefined && S.agentPurpose!=='analysis','No clipboard write and no panel opened');
- assert($('analyzeMap').innerText.includes(tr('요청 준비됨')),'The prepared request is visible on the button');
+ assert($('analyzeMap').innerText===tr('분석하기'),'A chat request prepared by refresh does not change the Analyze button');
  S.analysisRequest={...S.analysisRequest,copied:true,scope:{...S.analysisRequest.scope,project:'Second'},handoff:'Other project'};
  let before=calls.filter(c=>c.command==='analysis_plan').length;
  await applyAppCommand({id:'app-refresh-1',action:'refresh',arguments:{}});await wait();
@@ -983,7 +983,7 @@ class Flows(unittest.TestCase):
  assert($('checkAnalysisResults'),'Result check is offered');
  document.querySelector('#view [data-v="sys"]').click();
  assert(!$('checkAnalysisResults'),'Browsing replaced the panel');
- assert($('analyzeMap').innerText.includes(tr('요청 준비됨')),'The prepared request stays visible');
+ assert(!$('analyzeMap').innerText.includes(tr('요청 준비됨')),'The chat request state stays off the Analyze button');
  $('analyzeMap').click();
  assert($('checkAnalysisResults') && pane().includes(tr('요청 복사')),'The same request reopens with the result check');
 ''')
@@ -1311,6 +1311,7 @@ class Flows(unittest.TestCase):
  await doRefresh();S.workView=null;document.querySelector('#view [data-v="work"]').click();
  const graph=()=>$('map').querySelector('[data-work-features]');
  assert(S.view==='feat' && graph() && !$('regroup'),'What it does starts from verified local features without empty screen grouping');
+ assert(!graph().querySelector('#registeredRoutes')?.open,'The route list starts closed');graph().querySelector('#registeredRoutes').open=true;
  assert(graph().innerText.includes('GET /items') && graph().innerText.includes('tool-0'),'Current map includes both locally registered API and command');
  graph().querySelector('[data-registered-route] summary').click();
  assert(graph().innerText.includes('list_items') && graph().innerHTML.includes('api.py:8'),'Handler and evidence can be inspected in place');
@@ -1490,7 +1491,7 @@ class AutoRead(unittest.TestCase):
  await back();
  assert(S.analysisRequest.state==='saved','The result was still read');
  assert(S.view==='sys' && !$('checkAnalysisResults') && !pane().includes(tr('요청 복사')),'The right panel was not taken over');
- assert($('analyzeMap').innerText.includes(tr('결과 저장됨')),'The header reports the saved result');
+ assert($('analyzeMap').innerText===tr('분석하기'),'The chat result stays in the panel, not on the Analyze button');
 """)
 
     def test_a_late_read_after_a_context_change_is_dropped_and_does_not_leave_the_request_checking(self):
@@ -1560,7 +1561,7 @@ class AutoRead(unittest.TestCase):
  document.querySelector('#view [data-v="sys"]').click();assert(S.view==='sys' && S.agentPrompt==null,'The user browsed elsewhere');
  window.failRead=true;await back();const n=reads();
  assert(S.analysisRequest.state==='error','The read failed');
- assert($('analyzeMap').innerText.includes(tr('결과 읽기 실패')),'The header reports the failed read: '+$('analyzeMap').innerText);
+ assert($('analyzeMap').innerText===tr('분석하기'),'The chat read failure stays off the Analyze button: '+$('analyzeMap').innerText);
  assert(S.view==='sys' && S.agentPrompt==null && !$('checkAnalysisResults'),'The view and the right panel are kept');
  await wait(200);assert(reads()===n,'No retry storm after the error');
 """)

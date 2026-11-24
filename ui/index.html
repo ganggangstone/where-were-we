@@ -709,11 +709,9 @@ function planSummary(request) {
 const ANALYSIS_TASKS = [['analysis_plan','필요한 분석 모두 요청'],['analysis_request','화면과 서버 코드 자세히 보기'],['make_system','서비스 구성 보기'],['suggest_groups','화면을 기능별로 정리하기'],['briefing_request','무엇이 바뀌었는지 알아보기']];
 const activeAnalysis = () => { const r=S.analysisRequest; return r && (!r.scope || ['project','repository','branch'].every(k=>r.scope[k]===S[k]) && (!r.scope.lang || r.scope.lang===S.lang)) ? r : null; };
 function analysisButtonText() {
-  const request=activeAnalysis(),state=request?.state,short={prepared:request?.copied?'결과 확인 대기':'요청 준비됨',up_to_date:'결과 저장됨',blocked:'요청하지 못한 분석',saved:'결과 저장됨',proposal:'결과 저장됨',previous:'이전에 저장된 결과',proposal_previous:'이전에 저장된 결과',partial:'일부 결과 저장됨',proposal_partial:'일부 결과 저장됨',stale:'다른 버전의 결과',checking:'확인 중…',error:'결과 읽기 실패'};
-  const appState=typeof AnalysisRun!=='undefined'?AnalysisRun.stateLabel():'';
-  // 하나뿐인 주 동작은 「분석하기」다. 뒤에는 짧은 상태만 붙인다.
-  const appShort=typeof AnalysisRun!=='undefined' && AnalysisRun.shortState?AnalysisRun.shortState():appState;
-  return tr('분석하기')+(appShort ? ' · '+appShort : state ? ' · '+tr(short[state] || '결과 확인 대기') : '');
+  // 「분석하기」 버튼에는 이 앱의 분석 실행 상태만 붙인다. AI 채팅 요청 상태는 패널 안에 있다.
+  const appShort=typeof AnalysisRun!=='undefined' && AnalysisRun.shortState?AnalysisRun.shortState():'';
+  return tr('분석하기')+(appShort ? ' · '+appShort : '');
 }
 // 고른 코드가 지금 연결된 코드가 아니면(연결을 바꿨을 때) 고르지 않은 것으로 본다.
 const analysisTarget = () => { const t=S.analysisChoice?.target || ''; return t==='*' || S.projectInfo?.repositories?.some(r=>r.id===t) ? t : ''; };
@@ -1640,7 +1638,7 @@ function registeredRoutesView(flow,state,evidence) {
     return `<details class="sect" data-registered-route="${esc(resource || '')}"><summary><strong class="mono">${esc(route.method+' '+route.path)}</strong> ${defaults}${savedScopeButton(resource)}</summary>${compactTrace(route)}<details><summary>${tr('근거')}</summary>${proof}${flowDataSteps(route.data_steps,evidence)}</details>${explain}</details>`;
   }).join('');
   const controls=pages>1?`<div class="ctl"><button class="btn quiet" data-route-page="${page-1}" ${page===0?'disabled':''}>${tr('이전')}</button><span>${page+1} / ${pages}</span><button class="btn quiet" data-route-page="${page+1}" ${page+1===pages?'disabled':''}>${tr('다음')}</button></div>`:'';
-  return `<details class="sect" id="registeredRoutes" ${(state.routesOpen ?? !flow.connections.length)?'open':''}><summary>${tr('서버 경로 (베타)')} · ${routes.length}</summary>${picker}${explainArea}${list}${controls}${capped?`<div class="s">${tr('저장된 경로')} ${flow.registered_routes.length}/${flow.coverage.routes}</div>`:''}</details>`;
+  return `<details class="sect" id="registeredRoutes" ${state.routesOpen?'open':''}><summary>${tr('서버 경로 (베타)')} · ${routes.length}</summary>${picker}${explainArea}${list}${controls}${capped?`<div class="s">${tr('저장된 경로')} ${flow.registered_routes.length}/${flow.coverage.routes}</div>`:''}</details>`;
 }
 function serviceFlowView(flow,state,evidence) {
   if(!flow)return '';
