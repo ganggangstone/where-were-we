@@ -8,6 +8,7 @@ import json, os, re, subprocess, sys
 from collections import defaultdict
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import mapcore
+import source_signals
 import structure_index
 
 REPO, REF = sys.argv[1], sys.argv[2]
@@ -19,12 +20,16 @@ def git(*args):
 
 
 PIN = git('rev-parse', '--verify', REF + '^{commit}').strip()
-_entries = list(mapcore.git_tree_entries(REPO, PIN))
-_files = set()
-for mode, path in _entries:
+_entries, _files, _oids = [], set(), {}
+for row in subprocess.check_output(['git', '-C', REPO, 'ls-tree', '-rz', '--full-tree', PIN]).split(b'\0'):
+    if not row:
+        continue
+    meta, path = row.split(b'\t', 1)
+    mode, _, oid = meta.split(b' ')
+    _entries.append((mode, path))
     if mode in (b'100644', b'100755'):
         try:
-            _files.add(path.decode('utf-8'))
+            _files.add(path.decode('utf-8')); _oids[path.decode('utf-8')] = oid
         except UnicodeDecodeError:
             # Count all tracked files; map evidence paths must round-trip through UTF-8 JSON.
             continue
@@ -41,26 +46,87 @@ def show(path):
     return _cache[path]
 
 
+def preload(paths):
+    """Read many tracked files through one git process into the show() cache."""
+    want = [(p, _oids[p]) for p in paths if p not in _cache and p in _oids]
+    if not want:
+        return
+    out = subprocess.run(["git", "-C", REPO, "cat-file", "--batch"], input=b"".join(o + b"\n" for _, o in want), capture_output=True, check=True).stdout
+    pos = 0
+    for p, _ in want:
+        nl = out.index(b"\n", pos); size = int(out[pos:nl].split()[2])
+        _cache[p] = out[nl + 1:nl + 1 + size].decode("utf-8", "replace"); pos = nl + 2 + size
+
+
 def commit():
     return git("rev-parse", "--short", PIN).strip()
 
 
-# ---------- 1. 화면: App.tsx 의 <Route path=... element={<X ...> ----------
+# ---------- 1. 화면: 라우트를 정의한 파일(어디에 있든)의 <Route path=... element={<X ...>, 라우트 객체 배열, 파일 기반 라우트 ----------
 LAYOUT = json.loads(os.environ.get("WHERE_WERE_WE_LAYOUT", "{}"))
-SRC = LAYOUT.get("frontend") or ("src" if "src/App.tsx" in ls() else "frontend/src")
-BACKEND = LAYOUT.get("backend") or ("app" if "app/main.py" in ls() else "backend/app")
-APP = SRC + "/App.tsx"
-for area, root, required in (("frontend", SRC, APP), ("backend", BACKEND, BACKEND + "/main.py")):
+JS = (".tsx", ".jsx", ".ts", ".js", ".vue")
+ROUTE_MARK = re.compile(r"<Route\b[^>]*\bpath=|\b(?:createBrowserRouter|createHashRouter|createMemoryRouter|useRoutes|createRouter)\(|\bnew\s+VueRouter\b")
+MAX_FRONTEND_FILES = 4000  # files read to find route definitions; a larger frontend is read in path order up to this many
+
+def inside(f, root):
+    return not root or f.startswith(root.rstrip("/") + "/")
+
+def _code(f, root=None):
+    return f.endswith(JS) and source_signals.kind(f) == "code" and "/node_modules/" not in "/" + f and inside(f, root)
+
+def _src_root(f):
+    """The source root of a frontend file: up to its src folder, else its top folder."""
+    parts = f.split("/")
+    return "/".join(parts[:parts.index("src") + 1]) if "src" in parts[:-1] else (parts[0] if len(parts) > 1 else "")
+
+def _framework_pages():
+    """Next.js / Nuxt file routes: (route file, root) under app/ or pages/ next to a package.json that depends on next or nuxt."""
+    out = []
+    for f in sorted(ls()):
+        parts = f.split("/")
+        at = next((i for i, x in enumerate(parts[:-1]) if x in ("app", "pages")), None)
+        if at is None or not _code(f, LAYOUT.get("frontend")) or "api" in parts[at + 1:-1]:
+            continue
+        pkg = "/".join(parts[:at - 1] if at and parts[at - 1] == "src" else parts[:at])
+        if not re.search(r'"(next|nuxt)"\s*:', show((pkg + "/" if pkg else "") + "package.json") or ""):
+            continue
+        rest = "/".join(parts[at + 1:]).rsplit(".", 1)[0]
+        if parts[at] == "app":
+            if not re.search(r"(^|/)page$", rest):
+                continue
+            rest = rest[:-4]
+        elif re.search(r"(^|/)_(app|document|error)$", rest):
+            continue
+        segs = [x for x in rest.split("/") if x and x != "index" and not re.fullmatch(r"\(.*\)|@.*", x)]
+        segs = ["*" if x.startswith("[...") or x.startswith("[[...") else ":" + x.strip("[]") if x.startswith("[") else x for x in segs]
+        out.append((f, "/" + "/".join(segs)))
+    return out
+
+_FRONT = sorted((f for f in ls() if _code(f, LAYOUT.get("frontend"))), key=lambda f: (f.count("/"), f))[:MAX_FRONTEND_FILES]
+preload(_FRONT)
+ROUTE_FILES = sorted(f for f in _FRONT if ROUTE_MARK.search(show(f) or ""))
+PAGE_FILES = _framework_pages()
+_roots = [_src_root(f) for f in ROUTE_FILES + [f for f, _ in PAGE_FILES]]
+SRC = LAYOUT.get("frontend") or (max(sorted(set(_roots)), key=_roots.count) if _roots else ("src" if "src/App.tsx" in ls() else "frontend/src"))
+_PY = sorted((f for f in ls() if f.endswith(".py") and source_signals.kind(f) == "code" and inside(f, LAYOUT.get("backend"))), key=lambda f: (f.count("/"), f))[:MAX_FRONTEND_FILES]
+preload(_PY)
+# The FastAPI application file closest to the repository root, wherever it lives.
+BACKEND_MAIN = next((f for f in _PY if re.search(r"=\s*FastAPI\(", show(f) or "")), None) or ((LAYOUT.get("backend") or ("app" if "app/main.py" in ls() else "backend/app")) + "/main.py")
+BACKEND = LAYOUT.get("backend") or os.path.dirname(BACKEND_MAIN)
+BP = BACKEND.rstrip("/") + "/" if BACKEND else ""
+for area, root in (("frontend", SRC), ("backend", BACKEND)):
     if area in LAYOUT and LAYOUT[area] and not any(f.startswith(root.rstrip("/")+"/") for f in ls()):
         raise ValueError(f"Configured {area} source root has no tracked files: {root}")
 
 def resolve(frm, spec):
     """상대 import 를 저장소 경로로. 없으면 None."""
+    if spec.startswith(("@/", "~/")):
+        spec, frm = "./" + spec[2:], _src_root(frm) + "/x"  # the alias names the importing file's source root
     if not spec.startswith("."):
         return None
     base = os.path.normpath(os.path.join(os.path.dirname(frm), spec))
-    for cand in (base, base + ".ts", base + ".tsx", base + "/index.ts", base + "/index.tsx"):
-        if cand in ls() and cand.endswith((".ts", ".tsx")):
+    for cand in (base, *(base + e for e in JS), *(base + "/index" + e for e in JS)):
+        if cand in ls() and cand.endswith(JS):
             return cand
     return None
 
@@ -79,6 +145,21 @@ def imports(path):
     return out
 
 
+LAZY_RE = re.compile(r"\bconst\s+(\w+)\s*=[^;\n]*?\bimport\(\s*['\"]([^'\"]+)['\"]")
+
+def components(path):
+    """{local component name: file} from static imports and `const X = lazy(() => import('./X'))`."""
+    out = {}
+    for names, tgt in imports(path):
+        for n in re.findall(r"\w+(?:\s+as\s+\w+)?", names.strip("{} ")):
+            out[n.split()[-1]] = tgt
+    for m in LAZY_RE.finditer(show(path) or ""):
+        tgt = resolve(path, m.group(2))
+        if tgt:
+            out[m.group(1)] = tgt
+    return out
+
+
 def balanced(text, start, open_ch="{", close_ch="}"):
     """text[start] 가 open_ch 일 때 짝이 맞는 close_ch 까지의 안쪽 문자열."""
     depth, i = 0, start
@@ -92,36 +173,50 @@ def balanced(text, start, open_ch="{", close_ch="}"):
     return text[start + 1:]
 
 
+def _row(path, comps, comp_file, evidence, cond=None):
+    inner = [c for c in comps if c in comp_file]
+    page = inner[-1] if inner else None
+    # ponytail: a nested relative path is read from the root, joining parent paths needs a JSX tree walk
+    return {"path": path if path.startswith("/") or path == "*" else "/" + path, "component": page or (comps[0] if comps else None),
+            "file": comp_file.get(page) if page else None, "evidence": evidence, "condition": cond, "redirect": page is None}
+
+
 def screens():
-    src = show(APP) or ""
-    comp_file = {}
-    for names, tgt in imports(APP):
-        for n in re.findall(r"\w+(?:\s+as\s+\w+)?", names.strip("{} ")):
-            comp_file[n.split()[-1]] = tgt
     rows = []
-    starts = [m.start() for m in re.finditer(r"<Route\b", src)]
-    for i, st in enumerate(starts):
-        end = starts[i + 1] if i + 1 < len(starts) else len(src)
-        block = src[st:end]
-        pm = re.search(r"\bpath=\"([^\"]+)\"", block)
-        em = re.search(r"\belement=\{", block)
-        if not pm or not em:
+    for app in ROUTE_FILES:
+        src = show(app) or ""
+        comp_file = components(app)
+        starts = [m.start() for m in re.finditer(r"<Route\b", src)]
+        for i, st in enumerate(starts):
+            end = starts[i + 1] if i + 1 < len(starts) else len(src)
+            block = src[st:end]
+            pm = re.search(r"\bpath=(?:\"([^\"]+)\"|'([^']+)'|\{\s*['\"`]([^'\"`$]+)['\"`]\s*\})", block)
+            em = re.search(r"\b(?:element|component|Component)=\{", block)
+            if not pm or not em:
+                continue
+            element = balanced(block, em.end() - 1)
+            line_start = src.rfind("\n", 0, st) + 1
+            cond = re.search(r"import\.meta\.env\.(\w+)\s*===\s*'([^']*)'", src[line_start:st])
+            rows.append(_row(next(g for g in pm.groups() if g), re.findall(r"<([A-Za-z_]\w*)" if em.group(0) == "element={" else r"([A-Za-z_]\w*)", element),
+                             comp_file, f"{app}:{src[:st].count(chr(10)) + 1}", f"{cond.group(1)} === '{cond.group(2)}'" if cond else None))
+        if "<Route" in src:
             continue
-        element = balanced(block, em.end() - 1)
-        line_start = src.rfind("\n", 0, st) + 1
-        cond = re.search(r"import\.meta\.env\.(\w+)\s*===\s*'([^']*)'", src[line_start:st])
-        comps = re.findall(r"<([A-Za-z_]\w*)", element)
-        inner = [c for c in comps if c in comp_file]
-        page = inner[-1] if inner else None
-        rows.append({
-            "path": pm.group(1),
-            "component": page or (comps[0] if comps else None),
-            "file": comp_file.get(page) if page else None,
-            "evidence": f"{APP}:{src[:st].count(chr(10)) + 1}",
-            "condition": f"{cond.group(1)} === '{cond.group(2)}'" if cond else None,
-            "redirect": page is None,
-        })
-    return rows
+        # Route object arrays (createBrowserRouter, useRoutes, Vue Router): { path: '/x', element: <X/> | component: X | () => import('./X') }
+        marks = [m for m in re.finditer(r"\bpath\s*:\s*(['\"`])([^'\"`$]*)\1", src)]
+        for i, m in enumerate(marks):
+            seg = src[m.end():marks[i + 1].start() if i + 1 < len(marks) else len(src)]
+            cm = re.search(r"\b(?:element\s*:\s*<\s*(\w+)|[cC]omponent\s*:\s*(\w+)\s*[,}\n]|(?:[cC]omponent|lazy)\s*:\s*\(\)\s*=>\s*import\(\s*['\"]([^'\"]+)['\"])", seg)
+            if not cm:
+                continue
+            table = dict(comp_file)
+            if cm.group(3):
+                table["<lazy>"] = resolve(app, cm.group(3))
+            name = cm.group(1) or cm.group(2) or ("<lazy>" if table.get("<lazy>") else cm.group(3))
+            rows.append(_row(m.group(2), [name], {k: v for k, v in table.items() if v}, f"{app}:{src[:m.start()].count(chr(10)) + 1}"))
+    for f, path in PAGE_FILES:
+        rows.append({"path": path, "component": os.path.basename(f).rsplit(".", 1)[0], "file": f, "evidence": f"{f}:1", "condition": None, "redirect": False})
+    seen = set()
+    return [r for r in rows if not ((r["path"], r["file"]) in seen or seen.add((r["path"], r["file"])))]
 
 
 # ---------- 2. 화면 파일에서 상대 import 를 따라 닿는 파일 ----------
@@ -426,19 +521,16 @@ DECO_RE = re.compile(r"^@(\w+)\.(get|post|put|patch|delete)\(\s*(?:\n\s*)?([\"']
 ROUTER_RE = re.compile(r"^(\w+)\s*=\s*APIRouter\((.*?)\)", re.M | re.S)
 
 def backend_routes():
-    main = show(BACKEND + "/main.py") or ""
-    alias_mod = {}
-    for m in re.finditer(r"^from\s+[\w.]*routers\s+import\s+(.+)$", main, re.M):
-        for item in m.group(1).split(","):
-            parts = item.strip().split()
-            if parts:
-                alias_mod[parts[-1]] = parts[0]
+    main = show(BACKEND_MAIN) or ""
+    imps = py_imports(main)  # from .routers import users  /  from .routers.users import router as users_router
     mounted = {}  # (module, router var) -> include prefix
-    for m in re.finditer(r"include_router\(\s*(\w+)\.(\w+)(.*?)\)", main, re.S):
+    for m in re.finditer(r"include_router\(\s*(\w+)(?:\.(\w+))?(.*?)\)", main, re.S):
         pm = re.search(r"prefix\s*=\s*[\"']([^\"']*)[\"']", m.group(3))
-        mounted[(alias_mod.get(m.group(1), m.group(1)), m.group(2))] = pm.group(1) if pm else ""
+        mod, orig = imps.get(m.group(1), ("", m.group(1)))
+        key = (orig, m.group(2)) if m.group(2) else (mod.split(".")[-1], orig)
+        mounted[key] = pm.group(1) if pm else ""
     rows = []
-    files = [BACKEND + "/main.py"] + sorted(x for x in ls() if x.startswith(BACKEND + "/routers/") and x.endswith(".py"))
+    files = [BACKEND_MAIN] + [x for x in _PY if x.startswith(BP) and x != BACKEND_MAIN and "APIRouter(" in (show(x) or "")]
     for f in files:
         src = show(f) or ""
         mod = os.path.basename(f)[:-3]
@@ -463,8 +555,8 @@ EXTERNAL_DIRS = {"byteplus": "BytePlus", "elevenlabs": "ElevenLabs", "topaz": "T
 def models():
     """{클래스 이름: 테이블 이름}"""
     out = {}
-    for f in ls():
-        if not (f.startswith(BACKEND + "/models/") and f.endswith(".py")):
+    for f in sorted(ls()):
+        if not (f in _PY and f.startswith(BP)) or "__tablename__" not in (show(f) or ""):
             continue
         src = show(f)
         for m in re.finditer(r"^class\s+(\w+)\((?:Base|\w*Base)\):(.*?)(?=^class\s|\Z)", src, re.M | re.S):
@@ -503,7 +595,7 @@ def func_body(src, name):
 
 def service_file(mod):
     """'services.pipeline_launch' → backend/app/services/pipeline_launch.py"""
-    cand = BACKEND + "/" + mod.replace(".", "/") + ".py"
+    cand = BP + mod.replace(".", "/") + ".py"
     return cand if cand in ls() else None
 
 
@@ -659,7 +751,7 @@ def main():
         "ref": mapcore.configured_refs().get(os.path.basename(OUT or "")[:-5], REF), "commit": commit(), "repo": os.path.abspath(REPO), "models": model_table,
         "inventory": mapcore.tree_inventory(_entries, PIN),
         "structure_index": structure_index.build(REPO, PIN),
-        "coverage": {"frontend": APP in ls() and LAYOUT.get("frontend", True) is not None, "backend": BACKEND + "/main.py" in ls() and LAYOUT.get("backend", True) is not None},
+        "coverage": {"frontend": bool(ROUTE_FILES or PAGE_FILES) and LAYOUT.get("frontend", True) is not None, "backend": BACKEND_MAIN in ls() and LAYOUT.get("backend", True) is not None},
         "extractor": mapcore.extractor_id(HOME),  # 뽑는 방법(코드와 테스트 규칙)이 바뀌면 지도 두 장을 그대로 비교할 수 없다
         "screens": scr, "api_functions": fn_rows, "backend_routes": be,
         "unresolved_calls": unresolved, "backend_routes_without_screen": orphans,
