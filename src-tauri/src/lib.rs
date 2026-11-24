@@ -25,8 +25,14 @@ fn reserve_update_work() -> Result<(), String> {
     Ok(())
 }
 
-fn root() -> PathBuf {
-    PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".where-were-we")
+// WHERE_WERE_WE_ROOT moves the data folder (as in mapcore.py); the backend child inherits it.
+fn root() -> PathBuf { data_root(std::env::var_os("WHERE_WERE_WE_ROOT"), std::env::var_os("HOME")) }
+
+fn data_root(over: Option<std::ffi::OsString>, home: Option<std::ffi::OsString>) -> PathBuf {
+    match over.filter(|v| !v.is_empty()) {
+        Some(v) => PathBuf::from(v),
+        None => PathBuf::from(home.unwrap_or_default()).join(".where-were-we"),
+    }
 }
 
 /// ~/.where-were-we/<프로젝트>/ 폴더 이름 목록.
@@ -779,6 +785,13 @@ mod tests {
         assert_eq!(result["fresh_server"]["state"],"permission_denied");
         assert_eq!(result["connection"]["state"],"not_verified");
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn data_root_honours_the_override_and_falls_back_to_home() {
+        assert_eq!(data_root(Some("/tmp/data".into()), Some("/h".into())), PathBuf::from("/tmp/data"));
+        assert_eq!(data_root(Some("".into()), Some("/h".into())), PathBuf::from("/h/.where-were-we"));
+        assert_eq!(data_root(None, Some("/h".into())), PathBuf::from("/h/.where-were-we"));
     }
 
     #[test]
