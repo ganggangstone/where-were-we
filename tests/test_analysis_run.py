@@ -425,6 +425,17 @@ else:
         self.assertEqual(saved['jobs'][0]['steps'][0]['line'],2)
         self.assertEqual(saved['unknown'],[{'text':'8 of 21 files read.','needs':'read'}])
 
+    def test_jobs_small_program_files_go_whole_and_no_note_when_all_were_read(self):
+        (self.repo/'server/hooks.go').write_text('func Start() {}\n'+'// spacer comment line\n'*30+'func Stop() { close(db) }\n')
+        self.git('add','.');self.git('commit','-qm','Start and stop hooks');self.seed_map();sent=[]
+        def executor(prompt,**kwargs):
+            p=self.packet(prompt);sent.extend((s['file'],row[1]) for s in p['sources'] for row in s['lines'])
+            return {'jobs':[],'unknown':[{'text':'No jobs established','needs':'read'}]}
+        done=analysis_run.run(self.prepare(intent={'task':'jobs','targets':[{'repository':'service','target':'api'}]})['id'],executor)
+        self.assertEqual(done['state'],'completed',done.get('error'))
+        self.assertIn(('server/hooks.go',32),sent)  # the line after the signal window
+        self.assertEqual(self.raw()['dev']['task_outputs']['jobs']['nodes']['api']['unknown'],[{'text':'No jobs established','needs':'read'}])
+
     def test_jobs_ref_outside_the_supplied_program_lines_is_rejected(self):
         self.seed_map();before=self.raw();calls=[]
         def executor(prompt,**kwargs):

@@ -1865,6 +1865,11 @@ def _around(signals,file,limit):
         b=min(b,a+left-1);out.append((a,b));left-=b-a+1
     return out
 
+def _spans(lines,signals,file,limit,budget):
+    """The whole file when its rows fit budget, else its signal windows (_around)."""
+    if sum(_size([0,r['line'],r['text'].strip()[:200]])+8 for r in lines.get(file,[]))<=budget:return [(1,10**9)]
+    return _around(signals,file,limit)
+
 def _rows(lines,picks,budget,refs):
     """Numbered [ref, line, text] rows of the picked spans of exported files, at most budget bytes; refs gains {ref: pinned line}."""
     out=[];size=0
@@ -1955,8 +1960,10 @@ def _detail(value,task,request,call,validate):
             route={**request['input']['routes'][key],**by_key.get(key,{})}
             start=declared.get((route['file'],route['function']),route.get('line') or 1)
             spans=[(max(1,start-2),start+120),(max(1,(route.get('line') or 1)-5),(route.get('line') or 1)+5)]
-            picks[key]=[(route['file'],spans),*((f,_around(signals,f,60)) for f in dict.fromkeys([*(route.get('services') or []),*imports.get(route['file'],[])]) if f!=route['file'])]
+            picks[key]=[(route['file'],spans),*((f,60) for f in dict.fromkeys([*(route.get('services') or []),*imports.get(route['file'],[])]) if f!=route['file'])]
         lines={f['file']:f['lines'] for f in export_source(repo,commit,selected={commit:{f for p in picks.values() for f,_ in p}})[0]['files']}
+        # A small service or imported file goes whole; a large one only its signal windows.
+        picks={key:[p[0],*((f,_spans(lines,signals,f,n,ROUTE_BYTES//4)) for f,n in p[1:])] for key,p in picks.items()}
         sources={key:_rows(lines,picks[key],ROUTE_BYTES,refs) for key in keys}
         calls=[[]];size=0
         for key in keys:
@@ -1987,15 +1994,17 @@ def _detail(value,task,request,call,validate):
         return (-classes.get('program',0),-sum(classes.values()),source_signals.kind(f) in ('doc','support'),f)
     chosen=sorted(files,key=rank)[:MAX_JOB_FILES]
     lines={f['file']:f['lines'] for f in export_source(repo,commit,selected={commit:set(chosen)})[0]['files']}
-    sources=[s for f in chosen for s in _rows(lines,[(f,_around(signals,f,160))],DETAIL_BYTES//MAX_JOB_FILES,refs)]
+    sources=[s for f in chosen for s in _rows(lines,[(f,_spans(lines,signals,f,160,DETAIL_BYTES//MAX_JOB_FILES))],DETAIL_BYTES//MAX_JOB_FILES,refs)]
     routes=[{'key':ai_extract.handler(r),**{k:r.get(k) for k in ('method','path','file')}} for r in request['input']['routes']][:200]
     packet={'prompt':request['prompt']+REF_RULE,'schema':{**schema,'unknown':[ai_extract.UNKNOWN_SCHEMA]},
             'input':{'node':{k:request['input']['node'].get(k) for k in ('id','name','kind','what','code')},'routes':routes},'sources':sources}
     def check(got):
         got=_cited(got,refs);validate(got);return got
     result=answer(packet,check)
-    note={'ko':f'프로그램 파일 {len(files)}개 중 {len(sources)}개만 읽었다.','en':f'{len(sources)} of {len(files)} files read.'}[lang]
-    result['unknown']=[*(result.get('unknown') if isinstance(result.get('unknown'),list) else []),{'text':note,'needs':'read'}]
+    result['unknown']=result.get('unknown') if isinstance(result.get('unknown'),list) else []
+    if len(sources)<len(files):
+        note={'ko':f'프로그램 파일 {len(files)}개 중 {len(sources)}개만 읽었다.','en':f'{len(sources)} of {len(files)} files read.'}[lang]
+        result['unknown'].append({'text':note,'needs':'read'})
     return result
 
 def _save(task,request,result):
