@@ -272,7 +272,7 @@ class Guide(unittest.TestCase):
  assert(window.calls.filter(c=>c.command==='refresh').length===1 && !$('guideRefresh') && $('guideAnalysis') && !$('guideFinish'),'One explicit refresh makes the basic map ready, not the first analysis');
  $('guideAnalysis').click();await wait();
  assert(!$('guide').open && !window.calls.some(c=>c.command==='analysis_request'),'Analysis opens the request panel without running');
- assert($('insp').textContent.includes(tr('자세한 지도')),'The existing analysis panel is shown');
+ assert($('insp').textContent.includes(tr('분석하기')),'The existing analysis panel is shown');
 """)
 
     def test_copy_step_explains_one_request_and_ai_cost_before_copying(self):
@@ -723,8 +723,8 @@ class Flows(unittest.TestCase):
  assert(S.project==='lumen-web' && window.savedProjects.includes('lumen-web'),'An empty service name falls back to the first code name: '+S.project);
  assert($('manageRepositories').textContent===tr('코드 추가·수정'),'The code bar button says add or edit code');
  $('manageRepositories').click();assert(d.querySelector('h2').textContent===tr('살펴보는 코드') && !d.textContent.includes(tr('기본값: 첫 코드 이름')),'Editing names the explored code without the default hint');d.close();
- assert($('analyzeMap').textContent.startsWith(tr('AI 지도')),'The AI button says what the AI makes: '+$('analyzeMap').textContent);
- $('analyzeMap').click();assert(pane().includes(tr('자세한 지도')) && $('insp').querySelector('.request-flow')?.textContent.includes(tr('AI 채팅')),'The panel shows the copy-to-chat flow');
+ assert($('analyzeMap').textContent.startsWith(tr('분석하기')),'The AI button says what the AI makes: '+$('analyzeMap').textContent);
+ $('analyzeMap').click();assert(pane().includes(tr('분석하기')) && $('insp').querySelector('.request-flow')?.textContent.includes(tr('AI 채팅')),'The panel shows the copy-to-chat flow');
 ''',query='&empty=1')
 
     def test_dictionary_has_no_duplicate_interface_keys(self):
@@ -737,7 +737,7 @@ class Flows(unittest.TestCase):
         import shutil
         source=(ROOT/'ui/index.html').read_text();run=(ROOT/'ui/analysis-run.js').read_text()
         code=source[source.index('const UI_EN = {'):source.index('function ui(parts')]
-        strings=['관련 코드','근거','서비스 구성이 아직 없습니다.','「AI 지도」의 「분석하기」가 서비스 구성을 만든다.','일부 설명의 근거 코드가 바뀌었습니다. 「분석하기」로 다시 만든다.']
+        strings=['관련 코드','근거','서비스 구성이 아직 없습니다.','「분석하기」가 서비스 구성을 만든다.','분석하기','코드가 부름','같은 파일을 다른 버전으로 씀','읽기 규칙','읽은 언어 없음','JS/TS 상대 경로 import·재내보내기','이 코드에서 화면(페이지 주소)을 찾지 못했다.','이 코드에서 데이터 모델이나 테이블을 찾지 못했다.','이 코드에서 화면을 찾지 못해 묶을 화면이 없다.','일부 설명의 근거 코드가 바뀌었습니다. 「분석하기」로 다시 만든다.']
         script=code+f";const S={{lang:'en'}};console.log(JSON.stringify({json.dumps(strings,ensure_ascii=False)}.map(tr)))"
         result=subprocess.run([shutil.which('node'),'-e',script],capture_output=True,text=True,timeout=60)
         self.assertEqual(result.returncode,0,result.stderr)
@@ -899,7 +899,7 @@ class Flows(unittest.TestCase):
  document.querySelector('[data-analysis-task="analysis_request"]').click();await new Promise(r=>setTimeout(r,20));
  assert(calls.some(c=>c.command==='analysis_request' && c.args.repository==='web'),'Request goes to the chosen code');
  assert(pane().includes(tr('요청 복사')),'The prepared request is shown');
- S.view='sys';S.system=null;S.branchDetails=null;render();assert(!$('remakeSys') && document.body.textContent.includes(tr('「AI 지도」의 「분석하기」가 서비스 구성을 만든다.')),'The structure points to 분석하기 instead of its own button');$('analyzeMap').click();await new Promise(r=>setTimeout(r,20));
+ S.view='sys';S.system=null;S.branchDetails=null;render();assert(!$('remakeSys') && document.body.textContent.includes(tr('「분석하기」가 서비스 구성을 만든다.')),'The structure points to 분석하기 instead of its own button');$('analyzeMap').click();await new Promise(r=>setTimeout(r,20));
  assert(!$('status').textContent && !calls.some(c=>c.command==='analysis_plan'),'Contextual buttons open the panel without preparing a request');
  document.querySelector('[data-analysis-task="analysis_plan"]').click();await new Promise(r=>setTimeout(r,20));
  assert(!$('status').textContent && calls.some(c=>c.command==='analysis_plan' && c.args.repository===''),'Contextual buttons request all connected code without forcing a code choice');
@@ -1173,6 +1173,25 @@ class Flows(unittest.TestCase):
  assert($('registeredConnectionState').getAttribute('role')==='status' && !$('insp').querySelector('[role=alert]'),'Matching registration is a status, not a warning');
 ''')
 
+    def test_program_detail_titles_cited_code_and_lists_its_folders(self):
+        self.check(r'''
+ const pm=M();const pn={id:'api::p9',name:'Worker',kind:'program',origin:'repo',what:'Runs jobs',code:['api/jobs'],uses:[],unknown:[],ev:[{file:'api/jobs/run.py',line:3,quote:'def run():',ok:true}]};
+ S.system={...S.system,nodes:[...S.system.nodes,pn]};S.node='api::p9';
+ let ph=sysInspector(pm);
+ assert(ph.includes(tr('관련 코드')) && !ph.includes('<h4>'+tr('근거')+'</h4>') && ph.includes('def run():') && ph.includes('run.py:3'),'Cited program code is titled related code with its quoted line');
+ assert(ph.includes(tr('코드가 오는 곳')) && ph.includes('jobs/'),'The code folders of the program are listed');
+ pn.ev=[{file:'api/jobs/run.py',line:3,quote:'import x',ok:true,origin:'local_link'}];ph=sysInspector(pm);
+ assert(ph.includes('<h4>'+tr('근거')+'</h4>'),'A local import line is titled evidence');
+ const po={...pm,repositories:[pm.repositories?.[0] || {id:'api'}]};
+ assert(!/data-url[^>]*>[^<]*: run\.py/.test(zed(po,'api/jobs/run.py',3)),'One code shows no code-name prefix');
+ if(typeof AnalysisRun!=='undefined'){const ob=AnalysisRun.boardHtml;AnalysisRun.boardHtml=()=>'<div id="fakeBoard">board</div>';S.chatRequestOpen=undefined;S.agentPurpose='analysis';S.analysisRequest={state:'prepared'};S.agentPrompt='request';renderAgentPrompt();
+  assert($('fakeBoard') && $('fakeBoard').checkVisibility() && !$('chatRequest').open && ($('fakeBoard').compareDocumentPosition($('chatRequest')) & Node.DOCUMENT_POSITION_FOLLOWING),'The board shows first without expanding and the chat request stays collapsed below');
+  AnalysisRun.boardHtml=ob;S.agentPrompt=null;}
+ S.view='focus';render();
+ const pe=document.querySelector('[data-empty-reason]');
+ assert(!S.dataModels?.length || pe===null || !/해요/.test(pe.textContent),'Empty reasons are plain sentences');
+''')
+
     def test_app_generated_text_is_localized_but_user_data_is_not(self):
         self.check(r'''
  const links=[{from:'api::worker',to:'web::repository',label:'Configured API destination',sure:'doc',ev:[]},{from:'web::repository',to:'api::worker',label:'Configured API destination',sure:'code',ev:[{file:'x',line:1}]}];
@@ -1180,7 +1199,7 @@ class Flows(unittest.TestCase):
  S.view='sys';render();
  const text=main();
  if(S.lang==='ko'){assert(!text.includes('Repository · 3 screens') && text.includes('코드 · 화면 3개'),'The generated code box is described in Korean');
-  assert(text.split('Configured API destination').length===2 && text.includes('지정한 서버 연결'),'Only the generated connection label is translated');}
+  assert(text.includes('Configured API destination') && text.includes('지정한 서버 연결'),'Only the generated connection label is translated');}
  else assert(text.includes('Code · screens: 3'),'The generated code box is described in English');
  assert(text.includes('Repository · 9 screens'),'User or AI written text is not rewritten');
  $('q').value=tr('지정한 서버 연결');$('q').dispatchEvent(new Event('input'));
@@ -1245,7 +1264,7 @@ class Flows(unittest.TestCase):
  assert(!$('moduleFile') && label('확인한 파일'),'A repository without parsed files shows coverage only');
  assert(label('로컬 Python import'),'Old snapshots retain their original Python-only coverage');
  const mixed={...index,files:[{file:'app.js',language:'javascript',declarations:[]},{file:'types.ts',language:'typescript',declarations:[{name:'Task',kind:'interface',line:2}]}],imports:[{file:'app.js',line:1,target:'types.ts'}],
-  coverage:{...index.coverage,candidate_files:2,indexed_files:2,languages:{javascript:{candidate_files:1,indexed_files:1},typescript:{candidate_files:1,indexed_files:1},python:{candidate_files:0,indexed_files:0}}}};
+  coverage:{...index.coverage,candidate_files:2,indexed_files:2,languages:{javascript:{candidate_files:1,indexed_files:1},typescript:{candidate_files:1,indexed_files:1},python:{candidate_files:0,indexed_files:0},ruby:{candidate_files:2,indexed_files:2}}}};
  mixed.service_flow={connections:[{method:'GET',path:'/users',client:{file:'app.js',line:3},evidence:[{file:'app.js',line:1}],server:{file:'server.py',line:8,function:''},mounts:[{file:'server.py',line:2}]},
   {basis:'declared_defaults',evidence:[{file:'settings.py',line:18}],method:'POST',path:'/jobs',client:{file:'app.js',line:4},server:{file:'server.py',line:10,function:'jobs'},mounts:[]},{basis:'path_template',method:'PATCH',path:'/jobs/{id}',server_path:'/jobs/:id',data_steps:[{operation:'write',model:'Job',file:'server.js',line:14,evidence:[{file:'server.js',line:14},{file:'server.js',line:15}]}],actions:[{element:'input',event:'onChange',handler:'toggle',file:'App.jsx',line:17,handler_line:5,import_line:1,call_line:7,client_definition:{file:'app.js',line:3}},{element:'button',event:'onClick',handler:'save',label:'Save <entry>',label_source:{file:'App.jsx',line:25},file:'App.jsx',line:26,handler_line:20,call_line:21,import_line:1,client_definition:{file:'app.js',line:3}}],client:{file:'app.js',line:5},server:{file:'server.js',line:11,function:'update'},mounts:[]}],coverage:{requests:4,routes:2,unresolved_requests:1}};
  M().structure_indexes=[mixed];render();
@@ -1269,7 +1288,8 @@ class Flows(unittest.TestCase):
  const storage=http().querySelector('[data-flow-storage]');assert(storage.innerText.includes(tr('모델 쓰기')) && storage.innerText.includes('Job') && [...storage.querySelectorAll('a')].map(a=>a.textContent).join(',')==='server.js:14,server.js:15','Server data access follows the handler with distinct citations');
  const action=http().querySelector('[data-flow-actions] details');action.open=true;
  assert([tr('입력 변경'),'toggle','input.onChange','App.jsx:17','App.jsx:5','App.jsx:1','App.jsx:7','app.js:3'].every(value=>action.innerText.includes(value)),'Event and intermediate call references lead into the selected request');
- assert(graph().innerText.includes('JavaScript 1/1') && graph().innerText.includes('TypeScript 1/1') && label('Python import · JS/TS 상대 경로 import·재내보내기'),'Mixed-language coverage carries its actual support boundary');
+ assert(graph().innerText.includes('JavaScript 1/1') && graph().innerText.includes('TypeScript 1/1') && label('JS/TS 상대 경로 import·재내보내기') && !graph().innerText.includes('Python import'),'Mixed-language coverage names only languages present');
+ assert(graph().innerText.includes('Ruby 2/2') && graph().innerText.includes('Ruby '+tr('읽기 규칙')),'A rule-read language is counted and named in the scope');
  assert(graph().querySelector('.module-neighbors').compareDocumentPosition(graph().querySelector('[data-module-coverage]')) & Node.DOCUMENT_POSITION_FOLLOWING,'Connections precede coverage detail');
  graph().querySelector('[data-module-neighbor]').click();assert(label('인터페이스') && $('moduleFile').value==='types.ts','Static JS to TS connection and TypeScript declaration');
  mixed.service_flow.feature_groups=[{resource:'/jobs',connection_indexes:[1,2]},{resource:'/users',connection_indexes:[0]}];render();
@@ -1428,7 +1448,7 @@ class AutoRead(unittest.TestCase):
  $('toggleAutomaticAnalysis').click();
  const refresh=$('checkAnalysisResults');
  assert(refresh.getClientRects().length && refresh.classList.contains('primary') && refresh.textContent===tr('저장된 결과 새로고침'),'After copying the visible next action refreshes saved results');
- assert($('cpAgent').compareDocumentPosition($('automaticAnalysis')) & Node.DOCUMENT_POSITION_FOLLOWING,'Existing AI request comes before automatic execution');
+ assert($('automaticAnalysis').compareDocumentPosition($('cpAgent')) & Node.DOCUMENT_POSITION_FOLLOWING,'The copy-to-chat path sits below automatic analysis');
  await back();
  assert(S.analysisRequest.state==='saved' && reads()===n+1,'Focus read the saved result: '+S.analysisRequest.state);
  assert(pane().includes(tr('결과 저장됨')) && $('viewAnalysisResults'),'The panel shows the saved state and the result button');

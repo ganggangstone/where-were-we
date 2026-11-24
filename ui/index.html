@@ -429,6 +429,7 @@ Object.assign(UI_EN,{'워크스페이스 패키지':'Workspace packages','내부
 Object.assign(UI_EN,{'영역 AI 설명 (베타)':'Area AI explanations (beta)','저장된 설명':'Saved explanation','경로 영역':'Path area','모든 경로':'All paths'});
 Object.assign(UI_EN,{"표시 버전":"Map version","이 코드만 · 서버 연결 유지":"This code only · server links kept","코드 간 서버 연결 가능":"Code can link to servers","확인된 길 없음 · 직접 주소로 열리거나 미연결":"No links found · direct URL or unconnected","코드·지도 유지":"Code and map kept","Claude Code 분석 또는 AI 요청":"Claude Code analysis or AI request"});
 Object.assign(UI_EN,{'베타':'Beta','자동 분석':'Automatic analysis','AI 채팅에 요청':'Ask in your AI chat','요금·한도: 연결한 AI':'Rates and limits: your AI'});
+Object.assign(UI_EN,{'분석하기':'Analyze','「분석하기」가 서비스 구성을 만든다.':'「Analyze」 builds the architecture.','코드가 부름':'Code calls','같은 파일을 다른 버전으로 씀':'Uses another version of the same file','읽기 규칙':'reading rules','읽은 언어 없음':'No language read','JS/TS 상대 경로 import·재내보내기':'JS/TS relative imports and re-exports','이 코드에서 화면(페이지 주소)을 찾지 못했다.':'No screens (page addresses) were found in this code.','화면을 기능 묶음으로 나누지 않았다. 「분석하기」가 묶음을 만든다.':'Screens are not grouped into features yet. 「Analyze」 makes the groups.','이 코드에서 화면을 찾지 못해 묶을 화면이 없다.':'No screens were found in this code, so there is nothing to group.','이 코드에서 데이터 모델이나 테이블을 찾지 못했다.':'No data models or tables were found in this code.'});
 const UI_PATTERN = new RegExp(Object.keys(UI_EN).sort((a, b) => b.length - a.length).map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'g');
 function tr(text) { return S.lang === 'en' ? String(text).replace(UI_PATTERN, match => UI_EN[match]) : String(text); }
 function ui(parts, ...values) { return parts.reduce((out, part, i) => out + tr(part) + (i < values.length ? values[i] : ''), ''); }
@@ -710,7 +711,9 @@ const activeAnalysis = () => { const r=S.analysisRequest; return r && (!r.scope 
 function analysisButtonText() {
   const request=activeAnalysis(),state=request?.state,short={prepared:request?.copied?'결과 확인 대기':'요청 준비됨',up_to_date:'결과 저장됨',blocked:'요청하지 못한 분석',saved:'결과 저장됨',proposal:'결과 저장됨',previous:'이전에 저장된 결과',proposal_previous:'이전에 저장된 결과',partial:'일부 결과 저장됨',proposal_partial:'일부 결과 저장됨',stale:'다른 버전의 결과',checking:'확인 중…',error:'결과 읽기 실패'};
   const appState=typeof AnalysisRun!=='undefined'?AnalysisRun.stateLabel():'';
-  return tr('AI 지도')+(state ? ' · '+tr(short[state] || '결과 확인 대기') : appState ? ' · '+tr('자동 분석 (베타)')+' · '+appState : '');
+  // 하나뿐인 주 동작은 「분석하기」다. 뒤에는 짧은 상태만 붙인다.
+  const appShort=typeof AnalysisRun!=='undefined' && AnalysisRun.shortState?AnalysisRun.shortState():appState;
+  return tr('분석하기')+(appShort ? ' · '+appShort : state ? ' · '+tr(short[state] || '결과 확인 대기') : '');
 }
 // 고른 코드가 지금 연결된 코드가 아니면(연결을 바꿨을 때) 고르지 않은 것으로 본다.
 const analysisTarget = () => { const t=S.analysisChoice?.target || ''; return t==='*' || S.projectInfo?.repositories?.some(r=>r.id===t) ? t : ''; };
@@ -1288,7 +1291,7 @@ function storyMap(m) {
   let h = ui`<div class="legend"><span><b class="strong">${visibleScreens(m).length}</b> 화면 · <b class="strong">${gs.length}</b> 묶음</span>
     <span title="테스트가 연결된 요청 비율 (통과 여부 아님)"><i class="dot ok"></i>테스트 연결</span>${aiCount?ui`<span><span class="ai">AI가 정리한 이름</span> ${aiCount}개</span>`:''}
     ${S.sel && !S.sel.startsWith('!') ? lineLegend([['selected','선택과 연결됨']]) : ''}
-</div><div class="cols">`;
+</div>${visibleScreens(m).length ? '' : `<p class="empty" data-empty-reason>${tr('이 코드에서 화면(페이지 주소)을 찾지 못했다.')}</p>`}<div class="cols">`;
   // 고른 기능은 지도에서 빼거나 흐리지 않고 그 묶음 줄만 강조한다.
   const feat = selectedFeature(m);
   for (const g of gs) { const on = !!feat && featureId(g) === feat.id;
@@ -1319,7 +1322,9 @@ function codeLocation(m,file) {
   const r = m.repositories?.find(r=>file?.startsWith(r.id+'/'));
   return r ? r.path+'/'+file.slice(r.id.length+1) : m.repo+'/'+file;
 }
-const zed = (m, file, line) => ui`<a class="lnk mono" data-url="${esc('zed://file'+codeLocation(m,file)+':'+line)}" title="Zed로 열기">${m.multi_repo ? esc(connectionDisplayName(file.split('/')[0]))+': ' : ''}${esc(file.split('/').pop())}:${line}</a>`;
+// 코드 이름은 연결한 코드가 둘 이상일 때만 붙인다. 하나뿐이면 구분할 대상이 없다.
+const manyRepos = (m) => (m.repositories || []).length > 1;
+const zed = (m, file, line) => ui`<a class="lnk mono" data-url="${esc('zed://file'+codeLocation(m,file)+':'+line)}" title="Zed로 열기">${manyRepos(m) ? esc(connectionDisplayName(file.split('/')[0]))+': ' : ''}${esc(file.split('/').pop())}:${line}</a>`;
 const screenLine = (m, s) => ui`화면: ${label(m, s.path)} — ${s.path} (${s.file})`;
 const baseLine = (m) => ui`기준: ${m.ref} ${m.commit}`;
 function copyText(m, s, row) {
@@ -1394,14 +1399,17 @@ function detail(m, s, r) {
 const WIRES = `<svg id="wires"><defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z"/></marker></defs></svg>`;
 const NEED = { ops: '실행 환경에서 확인 필요', read: '아직 읽지 않음' };
 const ORIGIN = { repo: ['이 코드', ''], other: ['다른 코드', 'warn'], copy: ['사본을 끼워 씀', 'warn'], none: ['코드 없음', 'warn'] };
-const evHtml = (m, evs) => (evs || []).map(e => e.repo ? `<div class="kv">${esc(e.repo)} ${esc(e.file)}</div>` :
-  `<div class="kv">${zed(m, e.file, e.line)}${e.ok === false ? tr(' <span class="pill warn">근거 줄이 바뀜</span>') : ''}</div>`).join('');
+const evHtml = (m, evs, quote = false) => (evs || []).map(e => e.repo ? `<div class="kv">${esc(e.repo)} ${esc(e.file)}</div>` :
+  `<div class="kv">${zed(m, e.file, e.line)}${e.ok === false ? tr(' <span class="pill warn">근거 줄이 바뀜</span>') : ''}${quote && e.quote ? `<div class="s mono">${esc(e.quote)}</div>` : ''}</div>`).join('');
+// 모델이 고른 줄은 관련 코드다. 근거는 로컬에서 찾은 연결 줄뿐이다. origin 이 없던 때 저장한 프로그램 줄도 관련 코드로 읽는다.
+const evTitle = (n) => n.ev?.[0]?.origin === 'local_link' || (n.kind !== 'program' && n.ev?.length && !n.ev[0].origin) ? '근거' : '관련 코드';
 const needHtml = (u) => `<div class="row"><span class="arrow">${u.needs === 'ops' ? '🔒' : '?'}</span><div class="grow"><div class="tw">${esc(u.text)}</div><div class="s">${tr(NEED[u.needs])}</div></div></div>`;
 function proposalSwitch() {
   if (!S.proposal) return '';
   return `<span class="seg light" role="group" aria-label="${tr('보여 줄 구조')}"><button data-proposal="0" aria-pressed="${!S.showProposal}" class="${S.showProposal ? '' : 'on'}">${tr('기존 서비스 구성')}</button><button data-proposal="1" aria-pressed="${!!S.showProposal}" class="${S.showProposal ? 'on' : ''}">${tr('AI 제안')}</button></span>${S.showProposal ? `<span class="pill ai">${tr('AI 제안 · 기존 서비스 구성은 바뀌지 않았습니다')}</span>` : ''}`;
 }
 const STRUCTURE_LANGUAGES={python:'Python',javascript:'JavaScript',typescript:'TypeScript',html:'HTML',go:'Go'};
+const languageName=name=>STRUCTURE_LANGUAGES[name] || name.charAt(0).toUpperCase()+name.slice(1);
 function declarationKind(kind,language) {
   const names={class:'클래스',function:'함수',async_function:'비동기 함수',interface:'인터페이스',type:language==='go'?'타입 선언':'타입 별칭',enum:'열거형',method:'메서드'};
   return tr(names[kind] || kind);
@@ -1510,20 +1518,18 @@ function inventoryBrowser(m,row,key,coverage) {
   const controls=pages>1?`<div class="ctl"><button class="btn quiet" data-inventory-page="${page-1}" ${page===0?'disabled':''}>${tr('이전')}</button><span>${page+1} / ${pages}</span><button class="btn quiet" data-inventory-page="${page+1}" ${page+1===pages?'disabled':''}>${tr('다음')}</button></div>`:'';
   const directory=S.inventoryDirectory?.key===key && S.inventoryDirectory.directory===state.dir?S.inventoryDirectory:null;
   const inspect=state.dir?`<button class="btn quiet" data-inspect-directory="${esc(state.dir)}" aria-expanded="${!!directory}">${tr('폴더 구조 (베타)')}</button>`:'';
-  return `<div class="ctl">${state.dir?`<button class="btn quiet" data-inventory-dir="${esc(parent)}">${tr('상위 폴더')}</button>`:''}<code>${esc(state.dir || '/')}</code> ${badge(state.dir || '.')} ${inspect}</div>${directory?directoryDetail(directory,fileUrl):''}<ul>${rows.join('')}</ul>${controls}${row.paths_truncated?`<p class="s">${tr('파일 경로 표시 한도 도달')}</p>`:''}`;
+  return `<div class="ctl">${state.dir?`<button class="btn quiet" data-inventory-dir="${esc(parent)}">${tr('상위 폴더')}</button>`:''}<code>${esc(state.dir || '/')}</code> ${badge(state.dir || '.')} ${inspect}</div>${directory?directoryDetail(directory,fileUrl):''}<ul class="inventory-list">${rows.join('')}</ul>${controls}${row.paths_truncated?`<p class="s">${tr('파일 경로 표시 한도 도달')}</p>`:''}`;
 }
 function inventoryView(m) {
   const rows=m.inventories || (m.inventory ? [m.inventory] : []);
   const indexes=m.structure_indexes || (m.structure_index?[m.structure_index]:[]);
   const scope=JSON.stringify([S.project,S.branch,S.repository,rows.map(row=>[row.repository,row.commit])]);
   if(S.inventoryScope!==scope){
+    // 파일 목록은 결과 아래에 접어 둔다. 열면 그때 펼친다.
     S.inventoryScope=scope;S.inventoryDirectory=null;S.inventoryFile=null;S.inventoryBrowse=null;S.inventoryOpen=null;
-    if(rows.length===1 && rows[0].paths?.length && !indexes.some(index=>index.files?.length || index.cli_entries?.length || index.workspace_packages?.length)){
-      S.inventoryOpen=JSON.stringify([S.project,rows[0].repository || '',rows[0].commit]);
-    }
   }
   return rows.map(row=>{
-    const label=row.repository ? connectionDisplayName(row.repository) : '';
+    const label=row.repository && rows.length>1 ? connectionDisplayName(row.repository) : '';
     const key=JSON.stringify([S.project,row.repository || '',row.commit]),open=S.inventoryOpen===key;
     const legacyCounts=()=>`<table><thead><tr><th>${tr('최상위 폴더')}</th><th>${tr('파일 수')}</th></tr></thead><tbody>${row.directories.map(([dir,count])=>`<tr><td>${dir?esc(dir):tr('루트 디렉터리')}</td><td>${esc(count)}</td></tr>`).join('')}</tbody></table>`;
     return `<details class="sect" data-inventory="${esc(key)}" ${open?'open':''}><summary>${esc([label,tr(indexes.some(index=>index.service_flow?.feature_groups?.length)?'파일':'Git 추적 파일'),row.files].filter(x=>x!=='').join(' · '))}</summary>${open?`<p class="mono" title="${esc(row.commit)}">${esc(row.commit.slice(0,12))}</p>${Array.isArray(row.paths)?inventoryBrowser(m,row,key,indexes.find(index=>(index.repository || '')===(row.repository || '') && index.commit===row.commit)?.coverage):legacyCounts()}`:''}</details>`;
@@ -1747,12 +1753,12 @@ function structureIndexView(m,includePurpose=true,featuresOnly=false) {
   }
   selected=selected || files.find(f=>f.file===firstLink?.file) || files[0];
   state.file=selected?.file || '';
-  const repoControl=indexes.length>1?`<label>${tr('연결한 코드')} <select id="moduleRepository">${indexes.map(i=>`<option value="${esc(i.repository)}" ${i===index?'selected':''}>${esc(repoLabel(i.repository))}</option>`).join('')}</select></label>`:`<span>${esc(repoLabel(index.repository))}</span>`;
+  const repoControl=indexes.length>1?`<label>${tr('연결한 코드')} <select id="moduleRepository">${indexes.map(i=>`<option value="${esc(i.repository)}" ${i===index?'selected':''}>${esc(repoLabel(i.repository))}</option>`).join('')}</select></label>`:'';
   const commit=`<code class="mono" title="${esc(index.commit)}">${esc(index.commit.slice(0,12))}</code>`;
   const languages=STRUCTURE_LANGUAGES;
   const counts=coverage.languages || {python:coverage};
   const languageCounts=Object.entries(counts).filter(([,v])=>v.candidate_files>0)
-    .map(([name,v])=>`${esc(languages[name] || name)} ${esc(v.indexed_files)}/${esc(v.candidate_files)}`);
+    .map(([name,v])=>`${esc(languageName(name))} ${esc(v.indexed_files)}/${esc(v.candidate_files)}`);
   const status=`<div class="module-scope s">${repoControl} ${commit}<span>${tr('확인한 파일')} ${coverage.indexed_files}/${coverage.candidate_files}</span></div>`;
   const gaps=[
     ['건너뛴 파일',coverage.skipped_files],
@@ -1780,8 +1786,15 @@ function structureIndexView(m,includePurpose=true,featuresOnly=false) {
   const modules=hasGroups?`<details id="moduleDetails" ${state.moduleOpen?'open':''}><summary>${tr('모듈 연결 (베타)')}</summary>`:`<h2>${tr('모듈 연결 (베타)')}</h2>`;
   const heading=resourceMap?`${indexes.length>1?repoControl:''}${http}${cli}<details class="sect" id="flowSources" ${state.sourcesOpen?'open':''}><summary>${tr('문서·모듈')}</summary>${includePurpose?purposeView(m,index):''}${indexes.length>1?commit:status}${workspace}${docs}${modules}`:`${metadata}${workspace}${cli}${http}${docs}${modules}`;
   const end=(hasGroups?'</details>':'')+(resourceMap?'</details>':'');
-  const boundary=coverage.languages ? 'Python import · JS/TS 상대 경로 import·재내보내기' : '로컬 Python import';
-  const scopeNote=`<div class="sect s" data-module-coverage><strong>${tr('확인 범위')}</strong> · ${tr(boundary)}${index.version>=11?' · '+tr('로컬 .cjs require'):''}${coverage.languages?.go?' · '+tr('Go 모듈 내부 import'):''}${languageCounts.length?`<div>${languageCounts.join(' · ')}</div>`:''}${gaps.length?`<div role="status">${gaps.join(' · ')}</div>`:''}</div>`;
+  // 확인 범위는 이 코드에 실제로 있는 언어의 읽는 방식만 적는다. 읽기 규칙으로 읽은 언어도 이름을 적는다.
+  const present=name=>counts[name]?.candidate_files>0;
+  const boundaries=!coverage.languages?[tr('로컬 Python import')]:[
+    present('python')?'Python import':'',
+    present('javascript') || present('typescript')?tr('JS/TS 상대 경로 import·재내보내기')+(index.version>=11?' · '+tr('로컬 .cjs require'):''):'',
+    present('go')?tr('Go 모듈 내부 import'):'',
+    ...Object.keys(counts).filter(name=>!(name in STRUCTURE_LANGUAGES) && present(name)).map(name=>`${esc(languageName(name))} ${tr('읽기 규칙')}`)
+  ].filter(Boolean);
+  const scopeNote=`<div class="sect s" data-module-coverage><strong>${tr('확인 범위')}</strong> · ${boundaries.join(' · ') || tr('읽은 언어 없음')}${languageCounts.length?`<div>${languageCounts.join(' · ')}</div>`:''}${gaps.length?`<div role="status">${gaps.join(' · ')}</div>`:''}</div>`;
   if (!selected) return `<section class="sect" id="moduleGraph">${heading}${scopeNote}${end}</section>`;
   const filePage=large?Math.floor(files.indexOf(selected)/pageSize):0;
   const subset=large?files.slice(filePage*pageSize,(filePage+1)*pageSize):files;
@@ -1884,20 +1897,23 @@ function bindStructureIndex() {
 function sysView(m) {
   const y = S.system;
   if ((m.structure_index || m.structure_indexes?.length) && !y?.nodes?.length && !y?.externals?.length && !y?.unknown?.length && !y?.others?.length) {
-    return `<div class="ctl">${proposalSwitch()}<span class="s">${tr('「AI 지도」의 「분석하기」가 서비스 구성을 만든다.')}</span></div>`;
+    return `<div class="ctl">${proposalSwitch()}<span class="s">${tr('「분석하기」가 서비스 구성을 만든다.')}</span></div>`;
   }
-  if (!y) return ui`<div class="hint">서비스 구성이 아직 없습니다.<br><br>「AI 지도」의 「분석하기」가 서비스 구성을 만든다.</div>`; const stale = y.checked && m.commit && !m.commit.startsWith(y.checked);
+  if (!y) return ui`<div class="hint">서비스 구성이 아직 없습니다.<br><br>「분석하기」가 서비스 구성을 만든다.</div>`; const stale = y.checked && m.commit && !m.commit.startsWith(y.checked);
   const LINKS = sysLinks(y); const near = new Set(LINKS.filter(l => l.from === S.node || l.to === S.node).flatMap(l => [l.from, l.to]));
-  let h = ui`<div class="legend"><span><b class="strong">${y.nodes.filter(n => n.kind !== 'user').length}</b> 덩어리 · 바깥 서비스 <b class="strong">${y.externals.length}</b></span>
-    ${lineLegend([['calls','호출·읽기·쓰기'],['shared','공유']])}<span class="s" title="${esc(tr(NEED.ops))}" aria-label="${tr('운영 확인')}">🔒</span>${metaList([['작성',esc(y.written || '—')],['원문 대조',`<span class="mono">${esc(y.checked || tr('안 함'))}</span>`]])}
-    ${proposalSwitch()}<span class="spacer"></span>${stale ? tr('<span class="pill warn">지도와 기준 커밋이 다름</span>') : ''}</div>
-    <div class="sysrow"><div class="graph" id="sys">${WIRES}`;
+  // 범례에는 이 그림에 실제로 나온 표시만 둔다.
+  const locked = y.nodes.some(n => (n.unknown || []).some(u => u.needs === 'ops'));
+  const samples = [LINKS.some(l => l.style !== 'copy') ? ['calls', '코드가 부름'] : null, LINKS.some(l => l.style === 'copy') ? ['shared', '같은 파일을 다른 버전으로 씀'] : null].filter(Boolean);
+  let h = `<div class="legend"><span>${tr('구성 요소')} <b class="strong">${y.nodes.filter(n => n.kind !== 'user').length}</b>${y.externals.length ? ` · ${tr('바깥 서비스')} <b class="strong">${y.externals.length}</b>` : ''}</span>
+    ${samples.length ? lineLegend(samples) : ''}${locked ? `<span class="s">🔒 ${tr(NEED.ops)}</span>` : ''}
+    ${proposalSwitch()}<span class="spacer"></span>${stale ? tr('<span class="pill warn">지도와 기준 커밋이 다름</span>') : ''}</div>`;
+  h += `<div class="sysrow"><div class="graph" id="sys">${WIRES}`;
   for (const n of y.nodes) {
     const o = ORIGIN[n.origin]; const lock = (n.unknown || []).some(u => u.needs === 'ops');
     h += `<div class="card node ${n.kind} ${n.id === S.node ? 'sel' : ''} ${S.node && !near.has(n.id) && n.id !== S.node ? 'dim' : ''}" data-node="${esc(n.id)}" data-w="${esc(n.id)}"><div class="nm">${esc(n.name)}${lock ? ' 🔒' : ''}</div>
       <div class="s">${esc(n.what)}</div><div class="meta">${o && n.kind !== 'store' ? `<span class="pill ${o[1]}">${tr(o[0])}</span>` : ''}${(n.uses || []).map(u => `<span class="pill">${esc(y.externals.find(x => x.id === u).name)}</span>`).join('')}</div></div>`;
   }
-  h += ui`</div><div class="fcol extcol"><div class="zone">바깥 서비스 ${y.externals.length}</div>`;
+  h += '</div>' + (y.externals.length ? ui`<div class="fcol extcol"><div class="zone">바깥 서비스 ${y.externals.length}</div>` : '<div>');
   y.externals.forEach((x, i) => { const users = y.nodes.filter(n => (n.uses || []).includes(x.id));
     h += ui`<div class="card node external ${S.node && !users.some(n => n.id === S.node) ? 'dim' : ''}"><div class="nm">${esc(x.name)}</div><div class="s">${esc(x.what)}</div><div class="s">쓰는 곳: ${users.map(n => esc(n.name)).join(', ') || tr('없음')}</div></div>`; });
   h += ui`</div></div><div class="sect"><h4>선 ${LINKS.length}개</h4><div class="group">` + LINKS.map((l, i) => { const a = y.nodes.find(n => n.id === l.from), b = y.nodes.find(n => n.id === l.to);
@@ -1914,7 +1930,8 @@ function sysInspector(m) {
       <div class="sect"><h4>아직 모르는 것 ${all.length}</h4><div class="group">${all.map(needHtml).join('') || tr('<div class="row"><div class="grow empty">없음</div></div>')}</div></div>`; }
   const ls = sysLinks(y).map((l, i) => ({ ...l, i })).filter(l => l.from === n.id || l.to === n.id); const nm = (id) => y.nodes.find(x => x.id === id).name;
   let h = `<div class="head"><div class="grow"><h2>${esc(n.name)}</h2><p class="sub">${esc(n.what)}</p></div>${n.detail === 'map' ? tr('<button class="btn" id="toMap">화면 지도 보기</button>') : ''}</div>`;
-  if (n.origin) h += ui`<div class="sect"><h4>코드가 오는 곳</h4><div class="group"><div class="row"><div class="grow"><div class="tw">${esc(n.origin_text)}</div></div><span class="pill ${ORIGIN[n.origin][1]}">${tr(ORIGIN[n.origin][0])}</span></div></div></div>`;
+  // 저장한 코드 폴더(code)를 그대로 보여 준다. origin_text 가 비어도 칸이 비지 않는다.
+  if (n.origin || n.code?.length) h += `<div class="sect" data-node-code><h4>${tr('코드가 오는 곳')}</h4><div class="group">${n.origin_text ? `<div class="row"><div class="grow"><div class="tw">${esc(n.origin_text)}</div></div>${ORIGIN[n.origin] ? `<span class="pill ${ORIGIN[n.origin][1]}">${tr(ORIGIN[n.origin][0])}</span>` : ''}</div>` : ''}${(n.code || []).map(path => { const [repo, ...rest] = path.split('/'); return `<div class="row"><div class="grow"><a class="lnk mono" data-url="${esc('zed://file'+codeLocation(m,path))}" title="${esc(tr('작업 폴더에서 열기'))}">${manyRepos(m) ? esc(connectionDisplayName(repo))+': ' : ''}${esc(rest.join('/') || repo)}/</a></div></div>`; }).join('')}</div></div>`;
   h += ui`<div class="sect"><h4>이어진 선 ${ls.length}</h4><div class="group">${ls.map(l => `<div class="row click" data-node="${esc(l.from === n.id ? l.to : l.from)}"><span class="wn inline">${l.i + 1}</span><div class="grow"><div class="tw"><b class="strong">${l.from === n.id ? '→ ' + esc(nm(l.to)) : '← ' + esc(nm(l.from))}</b> ${esc(linkLabel(l))}</div></div></div>`).join('') || tr('<div class="row"><div class="grow empty">없음</div></div>')}</div></div>`;
   if ((n.uses || []).length) h += ui`<div class="sect"><h4>쓰는 바깥 서비스</h4><div class="flowline">${n.uses.map(u => `<span class="pill">${esc(y.externals.find(x => x.id === u).name)}</span>`).join('')}</div></div>`;
   const jn = S.jobs && S.jobs.nodes[n.id];
@@ -1925,14 +1942,14 @@ function sysInspector(m) {
   if ((n.copies || []).length) h += ui`<div class="sect"><h4>사본 ${n.copies.length}</h4><div class="group">${n.copies.map(c => { const d = c.files.filter(f => !f.same); return ui`<div class="row"><div class="grow"><div class="tw mono">${esc(c.branch)}</div><div class="s">이 코드의 파일 ${c.files.length}개가 들어 있고 ${d.length}개가 ${esc(c.against)}의 판과 다릅니다</div>${d.map(f => `<div class="s mono">${esc(f.path)}</div>`).join('')}</div></div>`; }).join('')}</div></div>`;
   if ((n.tables || []).length) h += ui`<div class="sect"><h4>코드에서 직접 닿는 데이터 ${n.tables.length}</h4><div class="flowline">${n.tables.map(t => `<span class="pill click" data-f="table|${esc(t)}">${esc(tableName(t))}</span>`).join('')}</div></div>`;
   if ((n.unknown || []).length) h += ui`<div class="sect"><h4>아직 모르는 것</h4><div class="group">${n.unknown.map(needHtml).join('')}</div></div>`;
-  return h + `<div class="sect"><h4>${tr(n.ev?.[0]?.origin === 'cited' ? '관련 코드' : '근거')}</h4>${evHtml(m, n.ev)}</div>`;
+  return h + (n.ev?.length ? `<div class="sect" data-node-evidence><h4>${tr(evTitle(n))}</h4>${evHtml(m, n.ev, true)}</div>` : '');
 }
 // 상자 위치를 재서 선과 번호를 얹는다. 위치는 화면 크기에 따라 달라져 여기서만 계산한다.
 function drawWires() {
   const box = $('sys'); const links = S._wires; if (!box || !links || !box.getBoundingClientRect) return; const o = box.getBoundingClientRect(); const svg = $('wires');
   const rect = (id) => { const r = box.querySelector(`[data-w="${id}"]`).getBoundingClientRect(); return { x: r.left - o.left, y: r.top - o.top, w: r.width, h: r.height }; };
   const edge = (r, tx, ty) => { const cx = r.x + r.w / 2, cy = r.y + r.h / 2, dx = tx - cx, dy = ty - cy; const k = Math.min(dx ? Math.abs(r.w / 2 / dx) : Infinity, dy ? Math.abs(r.h / 2 / dy) : Infinity); return [cx + dx * k, cy + dy * k]; };
-  box.querySelectorAll('.wn').forEach(e => e.remove()); svg.querySelectorAll('line, path.wire').forEach(e => e.remove());
+  box.querySelectorAll('.wn, .wn-label').forEach(e => e.remove()); svg.querySelectorAll('line, path.wire').forEach(e => e.remove());
   if (box.classList.contains('graph') && window.dagre) return drawGraph(box, svg, links);
   for (const l of links) { const a = rect(l.from), b = rect(l.to); const [x1, y1] = l.h ? [a.x + a.w, a.y + a.h / 2] : edge(a, b.x + b.w / 2, b.y + b.h / 2), [x2, y2] = l.h ? [b.x, b.y + b.h / 2] : edge(b, a.x + a.w / 2, a.y + a.h / 2); /* h: 옆줄끼리는 오른쪽 변에서 왼쪽 변으로 */
     const ln = document.createElementNS('http://www.w3.org/2000/svg', 'line'); for (const [k, v] of Object.entries({ x1, y1, x2, y2, ...(l.noend ? {} : { 'marker-end': 'url(#ah)' }), ...(l.start ? { 'marker-start': 'url(#ah)' } : {}), class: 'wire ' + (l.style || '') + (l.dim ? ' dim' : '') })) ln.setAttribute(k, v); svg.appendChild(ln);
@@ -1944,12 +1961,17 @@ function drawGraph(box, svg, links) {
   const gap = parseFloat(getComputedStyle(box).getPropertyValue('--space-8'));
   const g = new dagre.graphlib.Graph({ multigraph: true }); g.setGraph({ rankdir: 'LR', nodesep: gap / 2, ranksep: gap, edgesep: gap / 3, marginx: 0, marginy: 0 }); g.setDefaultEdgeLabel(() => ({}));
   const els = {}; box.querySelectorAll('[data-w]').forEach(el => { els[el.dataset.w] = el; g.setNode(el.dataset.w, { width: el.offsetWidth, height: el.offsetHeight }); });
-  links.forEach((l, i) => g.setEdge(l.from, l.to, {}, 'e' + i)); dagre.layout(g);
+  // 선 이름은 선 위에 둔다. 상자 폭(--size-node)에 한 줄로 들어가지 않으면 번호만 두고 뜻은 아래 선 목록에 맡긴다.
+  const max = box.querySelector('[data-w]')?.offsetWidth || 0;
+  const tags = links.map(l => { if (!l.n) return null; const t = document.createElement('span'); t.className = 'wn-label' + (l.dim ? ' dim' : '');
+    t.innerHTML = `<b class="wn inline">${l.n}</b>`; if (l.label) { const x = document.createElement('span'); x.textContent = linkLabel(l); t.appendChild(x); } box.appendChild(t);
+    if (l.label && t.offsetWidth > max) t.lastChild.remove(); return t; });
+  links.forEach((l, i) => g.setEdge(l.from, l.to, tags[i] ? { width: tags[i].offsetWidth, height: tags[i].offsetHeight, labelpos: 'c' } : {}, 'e' + i)); dagre.layout(g);
   for (const [id, el] of Object.entries(els)) { const n = g.node(id); el.style.left = n.x - n.width / 2 + 'px'; el.style.top = n.y - n.height / 2 + 'px'; }
   box.style.width = g.graph().width + 'px'; box.style.height = g.graph().height + 'px';
   links.forEach((l, i) => { const pts = g.edge(l.from, l.to, 'e' + i).points; const d = pts.map((p, k) => (k ? 'L' : 'M') + p.x + ' ' + p.y).join(' ');
     const path = document.createElementNS('http://www.w3.org/2000/svg', 'path'); for (const [k, v] of Object.entries({ d, fill: 'none', ...(l.noend ? {} : { 'marker-end': 'url(#ah)' }), ...(l.start ? { 'marker-start': 'url(#ah)' } : {}), class: 'wire ' + (l.style || '') + (l.dim ? ' dim' : '') })) path.setAttribute(k, v); svg.appendChild(path);
-    if (l.n) { const p = pts[Math.floor(pts.length / 2)]; const t = document.createElement('span'); t.className = 'wn' + (l.dim ? ' dim' : ''); t.textContent = l.n; t.style.left = p.x + 'px'; t.style.top = p.y + 'px'; box.appendChild(t); } });
+    const e = g.edge(l.from, l.to, 'e' + i); if (tags[i]) { tags[i].style.left = e.x + 'px'; tags[i].style.top = e.y + 'px'; } });
 }
 
 // ---------- 그리기: 바뀐 것 (새로고침할 때마다 refresh.py 가 changes.json 에 한 건씩 남긴다) ----------
@@ -2116,6 +2138,8 @@ function featView(m) {
   const f = featureGraph(m);
   if(local && !f.gs.length)return local;
   const sel = selectedFeature(m)?.i ?? null; const near = (i) => sel == null || i === sel || f.links.some(l => (l.a === sel && l.b === i) || (l.b === sel && l.a === i)); const on = (l) => sel == null || l.a === sel || l.b === sel;
+  // 비었으면 숫자 대신 이유를 한 줄로 쓴다. 화면이 있으면 「분석하기」가 묶음을 만든다.
+  if (!f.gs.length) return `<p class="empty" data-empty-reason>${tr(visibleScreens(m).length ? '화면을 기능 묶음으로 나누지 않았다. 「분석하기」가 묶음을 만든다.' : '이 코드에서 화면을 찾지 못해 묶을 화면이 없다.')}</p>`;
   let h = ui`<div class="legend"><span><b class="strong">${f.gs.length}</b> 기능 묶음 · 화면 <b class="strong">${visibleScreens(m).length}</b></span>${lineLegend([['calls','화면 이동'],['shared','데이터 전달']])}${S.groups ? `<span class="pill ai">${tr('AI가 정리한 이름')}</span>` : `<span class="pill">${tr('화면 주소')}</span>`}</div><div class="sys three" id="sys">${WIRES}`;
   f.gs.forEach((g, i) => { const st = f.stat[i];
     h += ui`<div class="card node gc${f.pos[i].col} gr${f.pos[i].row} ${i === sel ? 'sel' : ''} ${near(i) ? '' : 'dim'}" data-feat="${i}" data-w="G${i}"><div class="nm"><span class="${g.ai ? 'ai' : ''}">${esc(g.name)}</span></div><div class="s">${esc(g.description || '')}</div>
@@ -2182,6 +2206,7 @@ function focusView(m) {
   if (S.focus?.t === 'screen' && !m.screens.some(x => x.path === S.focus.id)) return ui`<div class="hint">이 버전에는 선택한 화면이 없습니다.<br><br><button class="btn plain" id="unfocus">‹ 데이터 목록</button></div>`;
   const d = S.focus && focusData(m);
   if (!d) { const tu = tableUse(m); const all = [...new Set([...Object.values(m.models || {}), ...Object.keys(tu)])].map(t => ({ t, w: tu[t] ? tu[t].w.size : 0, r: tu[t] ? tu[t].r.size : 0, p: progs(t) })).sort((a, b) => (b.w + b.r) - (a.w + a.r) || a.t.localeCompare(b.t));
+    if (!all.length) return `<div class="legend"><h2>${tr('데이터 목록')}</h2></div><p class="empty" data-empty-reason>${tr('이 코드에서 데이터 모델이나 테이블을 찾지 못했다.')}</p>`;
     return ui`<div class="legend"><h2>${tr('데이터 목록')}</h2>${lineLegend([['calls','호출·읽기·쓰기']])}</div>
       <div class="sect"><h4>데이터 ${all.length}</h4><div class="group">` + all.map(x => `<div class="row click" data-f="table|${esc(x.t)}"><div class="grow"><div class="t mono">${esc(tableName(x.t))}</div></div><span class="s">${x.w + x.r ? ui`바꾸는 화면 ${x.w} · 읽는 화면 ${x.r}` : tr('화면에서 닿지 않음')}</span>${x.p.map(n => ui`<span class="pill warn">${esc(n.name)}도 직접 씀</span>`).join('')}</div>`).join('') + `</div></div>`; }
   const card = (c, w) => `<div class="card node ${c.f ? '' : 'plain'}" data-w="${w}" ${c.f ? `data-f="${esc(c.f)}"` : ''}><div class="nm"><span class="${c.ai ? 'ai' : ''}">${esc(c.name)}</span></div><div class="s">${esc(c.sub || '')}</div></div>`;
@@ -2237,13 +2262,17 @@ function render() {
     const indexes=m.structure_indexes || (m.structure_index?[m.structure_index]:[]);
     const hasPaths=(m.inventories || [m.inventory]).some(row=>row?.paths?.length);
     structure=hasPaths && indexes.length<=1 && !indexes.some(index=>index.files?.length || index.cli_entries?.length || index.workspace_packages?.length)
-      ? purposeView(m,indexes[0])+inventoryView(m)+structureIndexView(m,false) : structureIndexView(m)+inventoryView(m);
+      ? purposeView(m,indexes[0])+structureIndexView(m,false) : structureIndexView(m);
   }
   let components=sys?sysView(m):'';
-  if(sys && (m.structure_indexes || [m.structure_index]).some(index=>index?.service_flow?.feature_groups?.length)){
+  // 결과가 먼저다: 서비스 구성 그림과 선 목록, 그다음 모듈 연결, 맨 아래에 접힌 파일 목록.
+  // 기능 흐름이 있는 코드는 그 흐름이 결과라서 앞에 두고 구성 요소를 접는다.
+  const featureFlow=sys && (m.structure_indexes || [m.structure_index]).some(index=>index?.service_flow?.feature_groups?.length);
+  if(featureFlow){
     components=`<details class="sect" id="serviceComponents" ${S.componentsScope===S.moduleGraph?.scope || S.node?'open':''}><summary>${tr('구성 요소')}</summary>${components}</details>`;
   }
-  $('map').innerHTML = searchPanel(m) + (view === 'changes' ? changesView(m) : sys ? structure+components : view === 'focus' ? focusView(m) : view === 'feat' ? featView(m) : storyMap(m)); $('insp').innerHTML = view === 'changes' ? changesInspector(m) : sys ? sysInspector(m) : view === 'focus' ? focusFeatureInspector(m) : view === 'feat' ? featInspector(m) : mapInspector(m);
+  const sysBody=sys?(featureFlow?structure+components:components+structure)+inventoryView(m):'';
+  $('map').innerHTML = searchPanel(m) + (view === 'changes' ? changesView(m) : sys ? sysBody : view === 'focus' ? focusView(m) : view === 'feat' ? featView(m) : storyMap(m)); $('insp').innerHTML = view === 'changes' ? changesInspector(m) : sys ? sysInspector(m) : view === 'focus' ? focusFeatureInspector(m) : view === 'feat' ? featInspector(m) : mapInspector(m);
   S._wires = null;
   if (view === 'focus' && S.focus) { const d = focusData(m); S._wires = d ? [...d.left.map((_, i) => ({ from: 'L' + i, to: 'C', h: true })), ...d.right.map((_, i) => ({ from: 'C', to: 'R' + i, h: true }))] : null; drawWires(); }
   if (view === 'feat') { const f = featureGraph(m); const fi = selectedFeature(m)?.i ?? null; S._wires = f.links.map((l, i) => ({ from: 'G' + (l.back && !l.fwd ? l.b : l.a), to: 'G' + (l.back && !l.fwd ? l.a : l.b), n: i + 1, style: l.ways.length ? '' : 'copy', noend: !l.ways.length, start: !!(l.fwd && l.back), dim: fi != null && l.a !== fi && l.b !== fi })); drawWires();
@@ -2399,7 +2428,11 @@ function renderAgentPrompt() {
   const steps=request && ['up_to_date','blocked'].includes(request.state)?`<p class="sub">${esc(tr(task || ''))}</p><div role="status">${tr(states[request.state] || '')}</div>${planSummary(request)}`:request?`<p class="sub">${esc([tr(task || ''),target].filter(Boolean).join(' · '))}</p><div id="analysisResultState" role="status">${status}</div>${['partial','proposal_partial'].includes(request.state) && request.codes ? `<div class="s" data-codes>${[['saved','결과가 저장된 코드: '],['partial','일부 결과만 저장된 코드: '],['waiting','결과를 기다리는 코드: ']].filter(([k])=>request.codes[k].length).map(([k,label])=>`<div>${tr(label)}${esc(request.codes[k].map(connectionDisplayName).join(', '))}</div>`).join('')}</div>` : ''}${request.command==='analysis_plan'?planSummary(request):''}<div class="ctl">${ready?`<button class="btn primary" id="viewAnalysisResults">${tr(request.state.startsWith('proposal')?'AI 제안 보기':'결과 보기')}</button>`:''}<button class="btn ${ready || request.copied || request.state==='error'?'quiet':'primary'}" id="cpAgent">${tr('요청 복사')}</button><button class="btn ${!ready && (request.copied || request.state==='error')?'primary':'quiet'}" id="checkAnalysisResults" ${request.state==='checking'?'disabled':''}>${tr('저장된 결과 새로고침')}</button><span id="cpDone">${request.copied && ready?tr('복사됨'):''}</span></div>`:'';
   const more=request && !['up_to_date','blocked'].includes(request.state)?`<details class="sect"><summary>${tr('요청 내용·다른 분석')}</summary><pre class="prompt mono">${esc(request.handoff ?? S.agentPrompt)}</pre>${analysisChooser(true)}</details>`:analysisChooser();
   // AI 사용량·요금 안내는 이 패널에 한 번만 보인다.
-  $('insp').innerHTML=analysis?`<h2>${tr('자세한 지도')} <span class="beta">${tr('베타')}</span></h2>`+(typeof AnalysisRun!=='undefined' && AnalysisRun.overviewHtml?AnalysisRun.overviewHtml()+AnalysisRun.boardHtml():'')+(request?`<h3>${tr('AI 채팅에 요청')} <span class="chip">${tr('요금·한도: 연결한 AI')}</span></h3>`+steps+more:`<details class="sect" id="chatRequest"><summary>${tr('AI 채팅에 요청')} <span class="chip">${tr('요금·한도: 연결한 AI')}</span></summary>${steps}${more}</details>`)+(typeof AnalysisRun!=='undefined'?(auto=>auto?`<details class="sect" id="automaticAnalysis" ${S.automaticPanelOpen?'open':''}><summary id="toggleAutomaticAnalysis">${tr('자동 분석')} <span class="beta">${tr('베타')}</span>${AnalysisRun.stateLabel()?' · '+esc(AnalysisRun.stateLabel()):''}</summary>${auto}</details>`:'')(AnalysisRun.html(false)):''):
+  // 분석 결과(단위 카드·연결 그림)가 먼저 펼쳐져 보인다. 내 AI 채팅에 요청을 복사하는 길은 아래에 접어 둔다.
+  const board=typeof AnalysisRun!=='undefined' && AnalysisRun.overviewHtml?AnalysisRun.overviewHtml()+AnalysisRun.boardHtml():'';
+  // 결과판이 없으면 복사하는 길이 유일한 길이라 펼쳐 둔다.
+  const chatOpen=S.chatRequestOpen ?? (!!request?.copied || !board);
+  $('insp').innerHTML=analysis?`<h2>${tr('분석하기')} <span class="beta">${tr('베타')}</span></h2>`+board+(typeof AnalysisRun!=='undefined'?(auto=>auto?`<details class="sect" id="automaticAnalysis" ${S.automaticPanelOpen?'open':''}><summary id="toggleAutomaticAnalysis">${tr('자동 분석')} <span class="beta">${tr('베타')}</span>${AnalysisRun.stateLabel()?' · '+esc(AnalysisRun.stateLabel()):''}</summary>${auto}</details>`:'')(AnalysisRun.html(false)):'')+`<details class="sect" id="chatRequest" ${chatOpen?'open':''}><summary>${tr('AI 채팅에 요청')} <span class="chip">${tr('요금·한도: 연결한 AI')}</span></summary>${steps}</details>${more}`:
     `<h2>${tr('AI 연결')}</h2><p>${tr('연결 설정과 공통 지시 파일 변경 전 확인을 요청합니다.')}</p>`+(S.agentPromptError?`<div role="alert">${errorHtml(tr('안내를 만들지 못했습니다. 다시 시도하세요.'),S.agentPromptError)}</div>`:helpDetails(`<pre class="prompt mono">${esc(S.agentPrompt)}</pre>`,'연결 안내 보기'))+`<div class="ctl">${S.agentPromptError?'':ui`<button class="btn primary" id="cpAgent">복사</button><span id="cpDone"></span>`}<button class="btn" id="openConnectionDiagnostic">${tr('연결 진단')}</button></div>`;
   if($('cpAgent'))$('cpAgent').onclick=async()=>{
     const prompt=analysis?request.handoff ?? S.agentPrompt:S.agentPrompt,copyRequest=S.analysisRequest;
@@ -2408,6 +2441,7 @@ function renderAgentPrompt() {
   };
   if($('openConnectionDiagnostic'))$('openConnectionDiagnostic').onclick=()=>startConnectionDiagnostic();
   if(!analysis)return;
+  if($('chatRequest'))$('chatRequest').querySelector('summary').onclick=()=>{S.chatRequestOpen=!$('chatRequest').open;};
   if($('toggleAutomaticAnalysis'))$('toggleAutomaticAnalysis').onclick=e=>{
     e.preventDefault();
     const details=$('automaticAnalysis');

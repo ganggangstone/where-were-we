@@ -71,6 +71,16 @@ const AnalysisRun = (() => {
     preparing:text('준비 중…','Preparing…'), running:text('분석 중…','Running…'), saving:text('저장 중…','Saving…'),
     completed:run?.map_gaps?text('완료 · 일부 확인 불가','Completed · some parts unconfirmed'):text('완료','Completed'), failed:text('실패','Failed'), cancelled:text('취소됨','Cancelled')
   })[run?.state] || '';
+  // 「분석하기」 버튼 뒤에 붙는 짧은 상태: 진행 중이면 저장한 작업 수/전체.
+  const shortState = () => {
+    if (!run) return '';
+    if (active() && !run.cancel_requested) {
+      const done = Array.isArray(run.completed_tasks) ? run.completed_tasks.length : Number(run.completed_tasks || 0);
+      const left = Number.isInteger(run.tasks) ? run.tasks : (run.tasks || []).length;
+      return text('진행 중','Running') + (done + left ? ' ' + done + '/' + (done + left) : '');
+    }
+    return stateLabel();
+  };
   function schedule(token) {
     clearTimeout(timer);
     if (current(token) && active() && !document.hidden) timer = setTimeout(() => check(), 1500);
@@ -665,6 +675,6 @@ const AnalysisRun = (() => {
   function open() { syncScope(); if (!provider && !providerBusy) void providers(); else void check(); }
   window.addEventListener('focus', () => { syncScope(); void check(); });
   document.addEventListener('visibilitychange', () => { clearTimeout(timer); if (!document.hidden) { syncScope(); void check(); } });
-  return {syncScope, open, html, overviewHtml, boardHtml, savedScopeHtml, bind, bindMapResults, stateLabel, check, checkAccount:()=>{void providers();void check();}};
+  return {syncScope, open, html, overviewHtml, boardHtml, savedScopeHtml, bind, bindMapResults, stateLabel, shortState, check, checkAccount:()=>{void providers();void check();}};
 })();
 AnalysisRun.syncScope();
