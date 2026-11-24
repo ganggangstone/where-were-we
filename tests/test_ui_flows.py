@@ -733,6 +733,20 @@ class Flows(unittest.TestCase):
         seen=[a or b for a,b in keys];duplicates=sorted({k for k in seen if seen.count(k)>1})
         self.assertGreater(len(seen),300);self.assertEqual(duplicates,[])
 
+    def test_new_analysis_texts_have_english_before_the_pattern_is_built(self):
+        import shutil
+        source=(ROOT/'ui/index.html').read_text();run=(ROOT/'ui/analysis-run.js').read_text()
+        code=source[source.index('const UI_EN = {'):source.index('function ui(parts')]
+        strings=['관련 코드','근거','서비스 구성이 아직 없습니다.','「AI 지도」의 「분석하기」가 서비스 구성을 만든다.','일부 설명의 근거 코드가 바뀌었습니다. 「분석하기」로 다시 만든다.']
+        script=code+f";const S={{lang:'en'}};console.log(JSON.stringify({json.dumps(strings,ensure_ascii=False)}.map(tr)))"
+        result=subprocess.run([shutil.which('node'),'-e',script],capture_output=True,text=True,timeout=60)
+        self.assertEqual(result.returncode,0,result.stderr)
+        for ko,en in zip(strings,json.loads(result.stdout)):
+            self.assertFalse(re.search('[가-힣]',en),(ko,en))
+            self.assertNotEqual(ko,en)
+        for ko,en in (('이름·설명 있음','Named and described'),('자세한 설명 있음','Detailed explanation'),('이름·설명','Named'),('자세한 설명','Detailed'),('내장 읽기 규칙이 없는 언어는 먼저 읽기 규칙을 받아 연결을 읽는다.','Languages without built-in readers first get reading rules, then their connections are read.')):
+            self.assertIn(f"'{ko}','{en}'",run)
+
     def test_halved_text_labels_are_translated_and_keep_the_plain_style(self):
         index=(ROOT/'ui/index.html').read_text();run=(ROOT/'ui/analysis-run.js').read_text()
         before=index[:index.index('const UI_PATTERN')]
