@@ -190,6 +190,24 @@ class FullRun(unittest.TestCase):
         again=[];job,done=self.analyse(again,fail=lambda prompt:True)
         self.assertEqual((again,job['announced']['total']),([],0))
 
+    def test_rules_saved_earlier_reach_the_snapshot_on_the_next_run(self):
+        for name,text in {'app/main.rb':"require_relative 'models/user'\nclass App\nend\n",'app/models/user.rb':'class User\nend\n',
+                          'app/models/order.rb':'class Order\nend\n','app/models/item.rb':'class Item\nend\n'}.items():
+            (self.repo/name).parent.mkdir(parents=True,exist_ok=True);(self.repo/name).write_text(text)
+        self.save_code();analysis_run.lang_rules.save('ruby',lang_rules_test.RUBY)  # e.g. by another project; this snapshot was read without them
+        self.assertNotIn('ruby',self.raw()['dev']['structure_index']['coverage']['languages'])
+        calls=[];job,done=self.analyse(calls)
+        self.assertEqual((job['announced']['rules'],done['state']),(0,'completed'))
+        self.assertIn('ruby',self.raw()['dev']['structure_index']['coverage']['languages'])
+
+    def test_a_finished_run_leaves_nothing_for_the_board_or_the_chat_request(self):
+        calls=[];job,done=self.analyse(calls);self.assertEqual(done['state'],'completed')
+        # The open panel reads the finished run's own board: its saved labels count, so nothing is left to call.
+        self.assertEqual(analysis_run.status(project='demo',repository='service',lang='en',view='catalog')['unit_board']['calls']['total'],0)
+        self.assertEqual(analysis_run.status(project='demo',repository='service',lang='en',view='latest'),{'id':job['id'],'state':'completed'})
+        plan=analysis_run.ai_extract.plan('demo','dev','en','service')
+        self.assertFalse({t['task'] for t in plan['tasks']}&{'analysis','system','groups'},plan['tasks'])
+
     def test_route_rules_add_route_units_inside_the_announced_partition(self):
         for name,text in {'web/app.rb':"require_relative 'store'\nget '/carts' do\nend\npost '/carts' do\nend\n",'web/store.rb':'class Store\nend\n',
                           'web/item.rb':'class Item\nend\n','spec/app_spec.rb':"get '/from-a-test' do\nend\n"}.items():

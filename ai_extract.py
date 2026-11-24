@@ -1068,7 +1068,9 @@ def plan(name,branch='dev',lang='ko',repository='',overview=False,light=False):
         res=project.analysis_results(raw,branch);sel=project.branch_bundle(raw,branch);m=raw[branch]
         fresh=lambda meta:bool(meta) and not meta['stale'] and meta.get('language')==lang and same(meta.get('commit'),head) and meta.get('configuration')==config
         add=lambda task,before,target='':tasks.append({'repository':rid,'task':task,'target':target,'before':before,**pin})
-        if not fresh(res['analysis']):
+        # The app's 분석하기 labels the locally computed map (basis structure_summary) instead of rewriting it.
+        labeled=((sel.get('system.ai') or {}).get('source')=='ai' and sel['system.ai'] or sel.get('system') or {}).get('basis')=='structure_summary' and fresh(res['system'])
+        if not fresh(res['analysis']) and not labeled:
             # Dependents are known only after the new map is saved; the agent re-plans then.
             add('analysis',res['analysis']);tasks[-1].update(mode=req['mode'],reason=req['reason'],recheck_count=len(req['recheck']),inspect_count=len(req['inspect']))
             add('system',res['system']);add('groups',res['groups']);continue
@@ -1087,7 +1089,8 @@ def plan(name,branch='dev',lang='ko',repository='',overview=False,light=False):
                                 'reason':'Review the saved AI structure proposal; its program identity differs from the written structure.'});continue
             if not fresh(res['jobs'].get(node['id'])):missing.append(node['id'])
         # A program whose code changed while the structure stayed current only needs its own jobs again.
-        rerun=[n for n in missing if n in (sel.get('jobs') or {}).get('nodes',{})]  # a saved record, even empty, is re-asked per program
+        # A saved record, even empty, is re-asked per program; so is every program of a labeled structure, which has no jobs of its own.
+        rerun=missing if labeled else [n for n in missing if n in (sel.get('jobs') or {}).get('nodes',{})]
         if not fresh(res['system']) or set(missing)-set(rerun):add('system',res['system'])
         else:
             for n in rerun:add('jobs',res['jobs'].get(n),n)

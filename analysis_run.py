@@ -653,7 +653,7 @@ def _publish_shapes(value,rid,commit,labels,catalog,repo,flows=()):
             except Exception:texts[file]=[]
         return texts[file][number-1] if 0<number<=len(texts[file]) else None
     groups,system=analysis_label.shapes(catalog,labels,line,flows)
-    meta={'source':'ai','basis':'structure_summary','provider':'claude-cli','commit':commit,'branch':value['branch'],'language':value['lang'],'generated_at':store.now()}
+    meta={'source':'ai','basis':'structure_summary','provider':'claude-cli','commit':commit,'configuration':value['pins'][rid]['configuration'],'branch':value['branch'],'language':value['lang'],'generated_at':store.now()}
     with store.locked(value['project']):
         _,raw,stored_rid,head=ai_extract.context(value['project'],rid,value['branch'])
         if head!=commit:return
@@ -715,6 +715,12 @@ def _run_full(run_id,executor,cancelled):
                 else:saved_rule=True
             if saved_rule:store.refresh_project(value['project'],rid)  # the snapshot (확인 범위) reads the rules too; local only, no AI
             _INDEXES.clear();scope.update(_full_scope({**value,'repository':rid})[rid])
+        else:
+            # Rules saved by an earlier run (or another project) leave this snapshot's index unread by them until a refresh; local only, no AI.
+            _,raw,_,_=ai_extract.context(value['project'],rid,value['branch'])
+            saved=(raw.get(value['branch']) or {}).get('structure_index') or {}
+            if saved.get('commit')==scope['pin']['commit'] and (saved.get('rules') or '')!=lang_rules.digest(lang_rules.loaded(lang_rules.needed(scope['files']))):
+                store.refresh_project(value['project'],rid)
         units=scope['catalog']['units'];ref_of={u['id']:i for i,u in enumerate(units)}
         saved,structures=_saved_labels(history,rid)
         labeled=[];structure=None
