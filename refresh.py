@@ -85,8 +85,7 @@ for b in ("dev", "main"):
         if (cur.get('inventory') or {}).get('commit') != ref or 'paths' not in cur['inventory']:
             cur['inventory'] = mapcore.tree_inventory(mapcore.git_tree_entries(REPO, ref), ref)
         import structure_index
-        if ((cur.get('structure_index') or {}).get('commit') != ref or
-                (cur.get('structure_index') or {}).get('version') != structure_index.VERSION):
+        if structure_index.outdated(cur.get('structure_index'), REPO, ref):
             cur['structure_index'] = structure_index.build(REPO, ref)
         cur['analysis']['observed_commit']=ref
         cur['analysis']['stale']=have not in (now,ref)
@@ -98,6 +97,8 @@ for b in ("dev", "main"):
     if have != now:
         log += extract_basic(ref,path); moved[b] = (have, now)
     elif cur.get("extractor") != mapcore.extractor_id(HOME):  # 테스트 규칙 등 뽑는 방법만 바뀌었으면 같은 커밋을 다시 뽑는다
+        log += extract_basic(ref,path)
+    elif cur.get('structure_index') and __import__('structure_index').outdated(cur['structure_index'], REPO, ref):  # 새로 저장한 읽기 규칙(lang_rules)도 같은 커밋을 다시 읽게 한다
         log += extract_basic(ref,path)
     else:
         log += f"origin/{b} ({now}) 그대로\n"

@@ -282,8 +282,9 @@ def apply(rule, file, text, paths):
 
 
 def folder():
+    # A collection stage runs with its own temporary root; it reads the saved rules of the real data root.
     import mapcore
-    return Path(mapcore.ROOT) / '.lang-rules'
+    return Path(os.environ.get('WHERE_WERE_WE_LANG_RULES') or Path(mapcore.ROOT) / '.lang-rules')
 
 
 def path(name):

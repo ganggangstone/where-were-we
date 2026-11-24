@@ -695,7 +695,7 @@ def record(project,repository,branch,lang,commit,configuration,result_json,base=
         updated[branch]['inventory'] = inventory
         index = (raw.get(branch) or {}).get('structure_index')
         import structure_index
-        if not index or index.get('commit') != head or index.get('version') != structure_index.VERSION:
+        if structure_index.outdated(index, repo['path'], head):
             index = structure_index.build(repo['path'], head)
         updated[branch]['structure_index'] = index
         updated[branch]['analysis']['provider']=provider

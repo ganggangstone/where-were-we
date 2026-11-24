@@ -629,9 +629,28 @@ def _directory_page(ordered, page, file_limit, byte_limit):
                       'selected_bytes':sum(entry[1] for _,entry in selected)}
 
 
+def cached_rules(repo, commit, excluded=None):
+    """{extension: rule} of the saved reading rules (lang_rules) this commit's languages need. Reads only saved rules, never asks AI."""
+    if excluded is None:
+        from analysis_run import _secret as excluded
+    tree = subprocess.check_output(['git', '-C', repo, 'ls-tree', '-rz', '--name-only', '--full-tree', commit],
+                                   env={**os.environ, 'GIT_NO_LAZY_FETCH': '1'})
+    files = [os.fsdecode(name) for name in tree.split(b'\0') if name]
+    return lang_rules.loaded(lang_rules.needed([f for f in files if not excluded(f)]))
+
+
+def outdated(index, repo, commit):
+    """True when a saved index is for another commit, another reader version or other saved reading rules."""
+    index = index or {}
+    return (index.get('commit') != commit or index.get('version') != VERSION
+            or (index.get('rules') or '') != lang_rules.digest(cached_rules(repo, commit)))
+
+
 def build(repo, commit, excluded=None, *, only_file=None, directory=None, page=1, rules=None):
-    """rules: {extension: reading rule} from lang_rules for languages outside LANGUAGES (none by default)."""
-    rules = rules or {}
+    """rules: {extension: reading rule} from lang_rules for languages outside LANGUAGES.
+    None reads the saved rules of the commit's languages, so every caller counts rule-read files as read."""
+    if rules is None:
+        rules = cached_rules(repo, commit, excluded)
     if not re.fullmatch(r'(?:[a-f0-9]{40}|[a-f0-9]{64})', commit):
         raise ValueError('Structure indexing requires a full commit ID')
     if only_file is not None and directory is not None:
