@@ -578,4 +578,6 @@ export const persist = async () => run();
             self.assertEqual(index['imports'],[{'file':'src/main.tsx','line':1,'target':'src/task.ts'},
                                                {'file':'src/main.tsx','line':2,'target':'src/shared.js'}])
             self.assertEqual(index['coverage']['unresolved_imports'],2)
-            self.assertEqual(index['coverage']['languages']['typescript'],{'candidate_files':4,'indexed_files':3})
+            # A file the grammar cannot fully read is kept from its recovered tree and named as partly read.
+            self.assertEqual(index['coverage']['languages']['typescript'],{'candidate_files':4,'indexed_files':4})
+            self.assertEqual(index['coverage']['partial_files'],['src/bad.ts'])

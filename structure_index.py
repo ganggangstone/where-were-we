@@ -29,7 +29,7 @@ MAX_DECLARATIONS = 20_000
 MAX_IMPORTS = 20_000
 
 
-VERSION = 31
+VERSION = 32
 JS_EXTENSIONS = {'.js', '.jsx', '.mjs', '.cjs'}
 LANGUAGES = ('python', 'javascript', 'typescript', 'html', 'go')
 TS_EXTENSIONS = {'.ts', '.tsx', '.mts', '.cts'}
@@ -58,8 +58,6 @@ def _script(file, raw, candidates, next_context=None):
     except UnicodeDecodeError:
         return None
     root = _parser(grammar).parse(raw).root_node
-    if root.has_error:
-        return None
     kinds = {'function_declaration':'function', 'generator_function_declaration':'function',
              'class_declaration':'class', 'abstract_class_declaration':'class', 'method_definition':'method',
              'interface_declaration':'interface', 'type_alias_declaration':'type', 'enum_declaration':'enum'}
@@ -124,7 +122,11 @@ def _script(file, raw, candidates, next_context=None):
     routes = express_routes(root,file)
     if next_context:
         routes.extend(next_routes.handlers(root, file, next_context))
-    return rows, edges, unresolved, requests, default_flow.sdk_facts(root,file), routes, app_factories(root,file), react_actions.facts(root,requests)
+    if root.has_error:
+        # A grammar gap (an entity-like '&' in JSX text, say): declarations and imports come from the recovered tree,
+        # requests and routes are not claimed from it.
+        return rows, edges, unresolved, [], None, [], [], [], True
+    return rows, edges, unresolved, requests, default_flow.sdk_facts(root,file), routes, app_factories(root,file), react_actions.facts(root,requests), False
 
 
 def _go_structure(file, raw, module, directories, blocked):
@@ -766,6 +768,7 @@ def build(repo, commit, excluded=None, *, only_file=None, directory=None, page=1
     factory_modules = {}
     imports = []
     parsed = set()
+    partial = []
     consumed = declarations = unresolved = 0
     selected = []
     truncated = False
@@ -883,7 +886,8 @@ def build(repo, commit, excluded=None, *, only_file=None, directory=None, page=1
                 continue
             if script is None:
                 continue
-            rows, edges, missing, file_requests, sdk, server_routes, factories, actions = script
+            rows, edges, missing, file_requests, sdk, server_routes, factories, actions, broken = script
+            if broken:partial.append(file)
             if any(actions):action_modules[file]=actions
             if any(factories):factory_modules[file]=factories
             routes.extend(server_routes)
@@ -981,7 +985,7 @@ def build(repo, commit, excluded=None, *, only_file=None, directory=None, page=1
     unresolved += len(imports) - len(resolved)
     coverage = {'candidate_files': len(candidates), 'indexed_files': len(files),
                 'skipped_files': len(candidates) - len(files), 'unsupported_files': unsupported,
-                'unresolved_imports': unresolved, 'truncated': truncated}
+                'unresolved_imports': unresolved, 'truncated': truncated, 'partial_files': sorted(partial)[:50]}
     coverage['languages'] = {lang:{'candidate_files':sum(languages[f]==lang for f in candidates),
                                    'indexed_files':sum(languages[f]==lang for f in parsed)}
                              for lang in (*LANGUAGES, *ruled)}
