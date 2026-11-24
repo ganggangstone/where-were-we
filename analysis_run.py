@@ -112,7 +112,7 @@ def _progress(value):
     result.update(completed_tasks=len(completed),tasks=len(tasks),map_gaps=bool(value.get('gaps')))
     return result
 
-UNIT_STATES=('saved','working','pending','failed','stale','local')
+UNIT_STATES=('saved','named','working','pending','failed','stale','local')  # named: 분석하기 gave a name and one line; saved: a detailed explanation too
 
 def _is_local(unit):
     """A documents, data or tests folder: read and counted locally, explained by the AI only when the user asks for that unit."""
@@ -168,7 +168,7 @@ def unit_board(project,repository='',branch='dev',lang='ko',run=None):
             elif live and run.get('intent',{}).get('only') and any(t['target']==target and t['repository']==rid for t in run.get('unit_targets',[])):state='working'
             elif _is_local(unit):state='local'
             elif target in gave_up:state,detail='failed',gave_up[target]['reason']
-            else:state='pending'
+            else:state='named' if names.get(unit['id']) else 'pending'
             label=names.get(unit['id']) or {}
             rows.append([unit['id'],unit['kind'],label.get('name') or unit['name'],unit['file_count'],state,detail[:200],label.get('what','')])
         # Explanations kept in history for units the current structure no longer has (a re-derived structure): listed apart, never counted as units.

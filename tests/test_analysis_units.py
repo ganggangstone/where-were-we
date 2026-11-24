@@ -136,6 +136,9 @@ class FullRun(unittest.TestCase):
         rows=self.board()['repositories'][0]['units']
         named=[r for r in rows if not r[0].startswith('task:') and r[4]!='local']
         self.assertTrue(named and all(r[2].startswith('Name ') and r[6]=='Does one thing' for r in named))
+        # A unit 분석하기 named is done for the run; only a detailed explanation, asked per unit, is still possible.
+        self.assertEqual({r[4] for r in named},{'named'})
+        totals=self.board()['totals'];self.assertEqual((totals['named'],totals['pending']),(len(named),0))
         self.assertEqual({r[0]:r[4] for r in rows if r[0].startswith('task:')},{'task:groups':'saved','task:system':'saved'})
         part=next(iter(analysis_run.read(job['id'])['labels']['service']['parts'].values()))
         self.assertNotIn('Invented',[v['name'] for v in part['units'].values()]);self.assertEqual(part['dropped'],2)  # the invented unit and the unknown evidence ref

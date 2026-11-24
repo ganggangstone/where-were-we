@@ -90,9 +90,10 @@ const unitBoard=(extra={})=>({repositories:[{repository:'service',units:[
  ['route:/orders','route','/orders',3,'saved','new'],
  ['route:/reports','route','/reports',6,'working',''],
  ['folder:lib','folder','lib',9,'pending',''],
- ['folder:tools','folder','tools',3,'failed','']],
+ ['folder:tools','folder','tools',3,'failed',''],
+ ['folder:jobs','folder','jobs',2,'named','','Runs the jobs']],
  coverage:{tracked:20,in_units:15,indexed:15,excluded:{secret:1,binary:2},truncated:true}}],
- totals:{units:4,saved:1,working:1,pending:1,failed:1},calls:{rules:0,labeling:2,structure:1,unit:0,total:3},...extra});
+ totals:{units:5,saved:1,named:1,working:1,pending:1,failed:1},calls:{rules:0,labeling:2,structure:1,unit:0,total:3},...extra});
 const serve=(extra)=>{native=(command,args)=>command==='analysis_run_status'&&args.view==='units'?unitBoard(extra):undefined;};
 """
 
@@ -100,10 +101,10 @@ const serve=(extra)=>{native=(command,args)=>command==='analysis_run_status'&&ar
         self.check_js(self.BOARD + r"""
 serve();status=null;await open();await AnalysisRun.check();await flush();
 const html=$('insp').innerHTML;
-assert(html.includes('Full code analysis') && html.includes('<span class="beta">Beta</span>') && html.includes('Explained 1'),'Beta board with saved count');
+assert(html.includes('Full code analysis') && html.includes('<span class="beta">Beta</span>') && html.includes('Detailed 1') && html.includes('Named 1'),'Beta board with named and detailed counts');
 assert(html.includes('Analyze · 3 calls') && html.includes('Map summary sent to Claude') && html.includes('AI interpretations of a map summary only'),'Call count, what is sent and what the AI reads before the click');
 assert(html.includes('Excluded 3') && html.includes('Index limit reached') && html.includes('Files 15/20') && html.includes('Credential files'),'Scope gaps, index limit and exclusion reasons');
-assert(html.includes('Analyzing') && html.includes('No explanation') && html.includes('Failed') && html.includes('Saved'),'Unfinished units show as preparing or queued');
+assert(html.includes('Analyzing') && html.includes('No explanation') && html.includes('Failed') && html.includes('Detailed explanation') && html.includes('Named and described'),'Named units are not shown as queued');
 assert(count('analysis_run_start')===0,'Showing the board costs no model call');
 await $('startFullAnalysis').onclick();await flush();
 const intent=calls.find(c=>c.command==='analysis_run_start').args.scope.intent;
@@ -133,7 +134,7 @@ native=async(command,args)=>{
 };
 status=null;await open();await AnalysisRun.check();await flush();
 let html=$('insp').innerHTML;
-assert(html.includes('/orders') && html.includes('Explained 1'),'The unit list shows before the scan ends');
+assert(html.includes('/orders') && html.includes('Detailed 1'),'The unit list shows before the scan ends');
 assert(html.includes('Checking files') && /id="startFullAnalysis" disabled/.test(html) && !html.includes('2 calls'),'No call count and no start until the file check ends');
 assert(count('analysis_run_start')===0,'Waiting costs no model call');
 release();await flush();await flush();await flush();
@@ -176,7 +177,7 @@ const serveLocal=(extra)=>{native=(command,args)=>command==='analysis_run_status
         self.check_js(self.LOCAL_BOARD + r"""
 serveLocal();status=null;await open();await AnalysisRun.check();await flush();
 let html=$('insp').innerHTML;
-assert(html.includes('Explained 2') && html.includes('Checked locally 1') && html.includes('data-state="local"'),'Saved AI units over AI units, local counted apart');
+assert(html.includes('Detailed 2') && html.includes('Checked locally 1') && html.includes('data-state="local"'),'Saved AI units over AI units, local counted apart');
 assert(html.includes('Read locally 18') && html.includes('AI range 7') && html.includes('Local only 5'),'Scope chips come from coverage');
 assert(!$('renewFullAnalysis') && html.includes('Analyze · 4 calls'),'One start button with the board count');
 await $('startFullAnalysis').onclick();await flush();
@@ -277,7 +278,7 @@ assert(!calls.some(c=>['analysis_run_start','analysis_request'].includes(c.comma
         self.check_js(self.BOARD + r"""
 S.lang='ko';serve();status=null;await open();await AnalysisRun.check();await flush();
 const html=$('insp').innerHTML;
-for(const word of ['전체 코드 분석','베타','분석 중','설명 없음','저장됨','분석하기 · 호출 3회','색인 한도 도달','제외 3'])assert(html.includes(word),'Korean label '+word);
+for(const word of ['전체 코드 분석','베타','분석 중','설명 없음','저장됨','자세한 설명 있음','이름·설명 있음','분석하기 · 호출 3회','색인 한도 도달','제외 3'])assert(html.includes(word),'Korean label '+word);
 assert(!/해요|이에요|예요|할게요/.test(html),'No informal ending');
 """)
 

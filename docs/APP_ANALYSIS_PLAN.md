@@ -25,6 +25,8 @@ while the run goes on.
    into labeling calls of at most 64 KB each, followed by one structure call over the labeled groups.
 4. **Unit explanation (on demand).** A card the user opens can ask for that unit's explanation. This is one call
    over source lines read from that unit (`_quick_overview`), saved in `unit_overviews` or `scope_overviews`.
+   On the board a unit 「분석하기」 named shows 「이름·설명 있음」 (state `named`) and counts as done for the run; one with
+   this explanation shows 「자세한 설명 있음」 (`saved`). Only units no labeling part covered stay `pending` (설명 없음).
 
 The project-overview call is not part of 「분석하기」. The summary already carries the project description that
 the structure index reads from the README.

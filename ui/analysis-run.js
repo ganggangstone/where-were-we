@@ -374,8 +374,10 @@ const AnalysisRun = (() => {
   // ---- Full code analysis: units are saved as they finish and read as a map and cards, not as a wall of text ----
   const KINDS={route:['경로','Paths'],screen:['화면','Screens'],program:['프로그램','Programs'],package:['패키지','Packages'],cli:['CLI','CLI'],folder:['폴더','Folders'],map:['지도','Map'],system:['서비스 구성','Service structure'],groups:['화면 묶음','Screen groups']};
   const MAP_KINDS=['map','system','groups'];
-  const UNIT_STATES={saved:['저장됨','Saved'],working:['분석 중','Analyzing'],local:['로컬 확인','Checked locally'],pending:['설명 없음','No explanation'],failed:['검증 실패','Failed'],stale:['오래됨','Outdated']};
-  const STATE_ORDER=['working','saved','local','failed','stale','pending'];
+  const UNIT_STATES={saved:['저장됨','Saved'],named:['이름·설명 있음','Named and described'],working:['분석 중','Analyzing'],local:['로컬 확인','Checked locally'],pending:['설명 없음','No explanation'],failed:['검증 실패','Failed'],stale:['오래됨','Outdated']};
+  // A unit's saved state is its detailed explanation; the map rows (groups, service structure) are simply saved.
+  const stateText=row=>row.state==='saved' && !MAP_KINDS.includes(row.kind)?text('자세한 설명 있음','Detailed explanation'):text(...UNIT_STATES[row.state]);
+  const STATE_ORDER=['working','saved','named','local','failed','stale','pending'];
   const LOCAL_KINDS={doc:['문서','Documents'],data:['데이터','Data'],support:['테스트·외부 코드','Tests and vendored code']};
   let unitEdges=new Map(),linkStore={scope:'',repos:{}};
   const REASONS={secret:['비밀 파일','Credential files'],binary:['이미지·바이너리','Binary files'],large:['300KB 초과','Over 300KB'],generated:['생성·잠금 파일','Generated or lock files']};
@@ -438,7 +440,7 @@ const AnalysisRun = (() => {
   }
   function unitDetail(row) {
     if(row.state==='working')return '';
-    if(row.state==='pending')return `<p class="chips"><span class="chip">${text('파일','Files')} ${row.count}</span></p>`;
+    if(['pending','named'].includes(row.state))return `<p class="chips"><span class="chip">${text('파일','Files')} ${row.count}</span></p>`;
     if(row.state==='failed')return `<p class="s">${text('AI 설명이 근거와 맞지 않아 저장하지 않았습니다.','The AI answer did not match its evidence and was not saved.')}</p>`;
     const group=unitDetails.get(unitKey(row));
     if(group===undefined)return `<p class="s">${text('불러오는 중…','Loading…')}</p>`;
@@ -448,14 +450,14 @@ const AnalysisRun = (() => {
   }
   const canExplain=()=>usable() && !providerBusy && !busy && !active();
   function explainButton(row,index) {
-    if(MAP_KINDS.includes(row.kind) || !['pending','failed','local','stale'].includes(row.state))return '';
+    if(MAP_KINDS.includes(row.kind) || !['pending','named','failed','local','stale'].includes(row.state))return '';
     const label=['stale','failed'].includes(row.state)?text('다시 설명 · 호출 1회','Explain again · 1 call'):text('AI 설명 · 호출 1회','AI explanation · 1 call');
     return `<p class="unit-ask"><button class="btn" type="button" data-unit-explain="${index}" ${canExplain()?'':'disabled'}>${label}</button><span class="chip">${text('코드가 Claude로 전송','Code sent to Claude')}</span>${beta()}</p>`;
   }
   function unitCard(row,index,multi) {
     const mapRow=MAP_KINDS.includes(row.kind),navigates=mapRow && row.state==='saved';
     const open=openedUnit===unitKey(row),expandable=row.state!=='working' && !mapRow;
-    const state=text(...UNIT_STATES[row.state]);
+    const state=stateText(row);
     const title=mapRow?text(...KINDS[row.kind]):esc(row.name);
     const body=open && expandable?(row.what?`<p class="s">${esc(row.what)} <span class="chip">${text('AI 해석','AI interpretation')}</span></p>`:'')+linkChips(index)+unitDetail(row)+explainButton(row,index):'';
     return `<li class="unit-card" data-state="${row.state}" data-unit-card="${index}"><button class="unit-head" type="button" data-unit-open="${index}" aria-expanded="${expandable?open:false}" ${expandable||navigates?'':'aria-disabled="true"'}><i class="unit-dot" aria-hidden="true"></i><strong>${title}</strong><span class="chips">${mapRow?'':`<span class="chip">${text(...(KINDS[row.kind] || [row.kind,row.kind]))}</span>`}${multi?`<span class="chip">${esc(connectionDisplayName(row.repo))}</span>`:''}${row.detail==='reused'?`<span class="chip">${text('코드 변경 없음','Code unchanged')}</span>`:''}</span><span class="unit-state">${state}</span></button>${body}</li>`;
@@ -492,7 +494,7 @@ const AnalysisRun = (() => {
     const filters=`<div class="unit-legend" role="group" aria-label="${text('상태 필터','State filter')}"><button type="button" data-unit-filter="all" aria-pressed="${unitFilter==='all'}">${text('전체','All')} ${total}</button>${present.map(k=>`<button type="button" data-unit-filter="${k}" data-state="${k}" aria-pressed="${unitFilter===k}"><i aria-hidden="true"></i>${text(...UNIT_STATES[k])} ${t[k]}</button>`).join('')}</div>${t.retired?`<p class="s unit-retired">${text('현재 구조에 없는 이전 단위 '+t.retired+'개의 설명은 기록에만 남아 있고 위 개수에 넣지 않습니다.',t.retired+' explanations of earlier units that the current structure no longer has stay in history only and are not counted above.')}</p>`:''}`;
     const lanes=Object.keys(KINDS).filter(k=>unitRows.some(r=>r.kind===k)).map(kind=>{
       const set=unitRows.map((row,i)=>[row,i]).filter(([row])=>row.kind===kind);
-      return `<div class="unit-lane"><span class="unit-kind">${text(...KINDS[kind])}<b>${set.filter(([row])=>row.state==='saved').length}/${set.filter(([row])=>row.state!=='local').length}</b></span><span class="unit-cells">${set.map(([row,i])=>`<button class="unit-cell" type="button" data-unit-cell="${i}" data-state="${row.state}" ${linkedSet.has(i)?'data-linked="1"':''} title="${esc(row.name)} · ${text(...UNIT_STATES[row.state])}" aria-label="${esc(row.name)} · ${text(...UNIT_STATES[row.state])}"></button>`).join('')}</span></div>`;
+      return `<div class="unit-lane"><span class="unit-kind">${text(...KINDS[kind])}<b>${set.filter(([row])=>row.state==='saved').length}/${set.filter(([row])=>row.state!=='local').length}</b></span><span class="unit-cells">${set.map(([row,i])=>`<button class="unit-cell" type="button" data-unit-cell="${i}" data-state="${row.state}" ${linkedSet.has(i)?'data-linked="1"':''} title="${esc(row.name)} · ${stateText(row)}" aria-label="${esc(row.name)} · ${stateText(row)}"></button>`).join('')}</span></div>`;
     }).join('');
     const rank=row=>STATE_ORDER.indexOf(row.state);
     const listed=unitRows.map((row,i)=>[row,i]).filter(([row])=>unitFilter==='all' || row.state===unitFilter).sort((a,b)=>rank(a[0])-rank(b[0]) || a[1]-b[1]);
@@ -507,7 +509,7 @@ const AnalysisRun = (() => {
     const gaps=b.repositories.flatMap(r=>r.gaps || []);
     const gapNote=gaps.length?`<p class="s" role="status">${text('AI 해석이 없는 부분 '+gaps.length+'곳. 지도는 그대로 남는다.',gaps.length+' parts have no AI interpretation. The map stays.')}</p>`:'';
     const scopeHtml=`<details class="unit-calls" data-read-scope><summary>${text('읽기 범위','Reading range')}</summary><p class="s">${text('지도는 로컬에서 계산한다. 이름·묶음·서비스 구성은 AI가 지도 요약만 보고 해석한 것이다. 단위 설명은 그 단위의 코드 줄을 읽고 만든다.','The map is calculated locally. Names, groups and the service structure are AI interpretations of a map summary only. A unit explanation is made from that unit\'s code lines.')}</p>${rulesNote}${unitSummary(b)}</details>`;
-    const progress=`<span class="unit-count"><span class="chip">${text('설명 저장','Explained')} ${explained}</span>${t.local?`<span class="chip" data-state="local">${text('로컬 확인','Checked locally')} ${t.local}</span>`:''}</span>`;
+    const progress=`<span class="unit-count"><span class="chip">${text('이름·설명','Named')} ${t.named || 0}</span><span class="chip">${text('자세한 설명','Detailed')} ${explained}</span>${t.local?`<span class="chip" data-state="local">${text('로컬 확인','Checked locally')} ${t.local}</span>`:''}</span>`;
     const start=live?`<div class="unit-run" role="status" aria-live="polite"><span class="chip">${text('AI 호출','AI calls')} ${used}/${b.announced?.total ?? calls}</span><button class="btn" id="cancelFullAnalysis" ${busy || run.cancel_requested?'disabled':''}>${text('취소','Cancel')}</button></div>`
       : scanning ? `<div class="unit-start"><span class="chips"><span class="chip" role="status">${text('파일 확인 중','Checking files')}</span></span><button class="btn primary" id="startFullAnalysis" disabled>${text('분석하기','Analyze')}</button></div>`
       : calls>0 ? `<div class="unit-start"><span class="chips"><span class="chip">${text('지도 요약이 Claude로 전송','Map summary sent to Claude')}</span></span><button class="btn primary" id="startFullAnalysis" ${canStart?'':'disabled'}>${text('분석하기 · 호출 '+calls+'회','Analyze · '+calls+' calls')}</button>${usableNow?'':`<button class="btn quiet" id="checkFullAccount">${text('계정 확인','Check account')}</button>`}</div>`
@@ -524,7 +526,7 @@ const AnalysisRun = (() => {
     if(MAP_KINDS.includes(row.kind) && row.state==='saved'){S.agentPrompt=null;S.view=row.kind==='groups'?'feat':'sys';render();return;}
     if(row.state==='working' || MAP_KINDS.includes(row.kind)){openedUnit=key;paint();return;}
     openedUnit=openedUnit===key?null:key;paint();
-    if(openedUnit!==key || unitDetails.has(key) || ['pending','failed'].includes(row.state))return;
+    if(openedUnit!==key || unitDetails.has(key) || ['pending','named','failed'].includes(row.state))return;
     const token=epoch;
     let group=null;try{group=await readUnit(row);}catch{}
     if(token!==epoch)return;

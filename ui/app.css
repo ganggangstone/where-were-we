@@ -311,6 +311,7 @@ h3 > .chip { margin-left:var(--space-2) }
 /* 전체 코드 분석: 단위 구조도와 카드. 저장된 단위는 바로 읽고, 나머지는 준비 중·대기로 보인다. */
 .unit-board [data-state] { color:var(--color-text-secondary) }
 .unit-board [data-state="saved"] { color:var(--color-ok) }
+.unit-board [data-state="named"] { color:var(--color-ok) }
 .unit-board [data-state="working"] { color:var(--color-accent) }
 .unit-board [data-state="failed"] { color:var(--color-warn) }
 .unit-board [data-state="stale"] { color:var(--color-ai) }
@@ -325,6 +326,7 @@ h3 > .chip { margin-left:var(--space-2) }
 .unit-bar { display:flex; height:var(--size-bar); overflow:hidden; border-radius:var(--radius-bar); background:var(--color-bg-control); margin:var(--space-3) var(--space-0) }
 .unit-bar > i { display:block; height:100%; background:currentColor }
 .unit-bar > i[data-state="pending"] { background:transparent }
+.unit-bar > i[data-state="named"], .unit-cell[data-state="named"] { opacity:var(--opacity-dim) }
 .unit-legend { display:flex; flex-wrap:wrap; gap:var(--space-2); margin:var(--space-3) var(--space-0) }
 .unit-legend button { display:inline-flex; align-items:center; gap:var(--space-2); padding:var(--space-1) var(--space-3); border:var(--border-hairline); border-radius:var(--radius-pill); font:var(--font-secondary); color:var(--color-text-secondary) }
 .unit-board .unit-legend button[aria-pressed="true"] { background:var(--color-bg-control); font-weight:var(--weight-strong) }
