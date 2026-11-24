@@ -21,6 +21,7 @@ import time
 import uuid
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import ai_extract
+import analysis_label
 import analysis_units
 import briefing
 import lang_rules
@@ -40,11 +41,6 @@ UNIT_BYTES = 16 * 1024
 MAX_READ_ROUNDS = 32
 SYSTEM_DELTA_FILES = 64  # a full analysis reads the structure from the compact listing when more files than this changed since the saved structure
 RESOURCE_PACK_SIZE = 4
-UNIT_PACK_BYTES = 108 * 1024  # sample bytes of the plain units one call explains, packet overhead included; the prompt cap stays the hard limit
-UNIT_PACK_MAX = 24
-UNIT_OVERHEAD = 300  # per-unit packet fields outside the source rows (the shared instructions are sent once per call)
-UNIT_UNKNOWN = 9000  # a unit saved by an older catalog has no measured sample
-UNIT_ATTEMPTS = 2
 MAP_TASKS = ('analysis','system','groups')
 PARTIAL_ITEMS = 60
 SIMPLE_RESOURCE_PACK_SIZE = 8
@@ -106,39 +102,21 @@ def _cancellation_probe(run_id):
 
 def _progress(value):
     excluded={'scope_overviews','overviews','program_observations','resource_targets','saved_overviews','saved_scope_overviews',
-              'unit_overviews','units','unit_targets','unit_failures','partial_results','board_base'}
+              'unit_overviews','units','unit_targets','unit_failures','partial_results','board_base','labels','plan'}
     result={k:v for k,v in value.items() if k not in excluded}
-    if (value.get('intent') or {}).get('task')=='full' and 'units' in value:result['unit_board']=_run_board(value)
+    if (value.get('intent') or {}).get('task')=='full' and 'pins' in value and value.get('state') in TERMINAL|ACTIVE:
+        try:result['unit_board']=unit_board(value['project'],value['repository'],value['branch'],value['lang'],run=value)
+        except (ValueError,RunError,*ai_extract.READ_ERRORS):pass
     completed=value.get('completed_tasks',[])
     tasks=value.get('tasks',[])
     if value.get('intent',{}).get('task')=='resources':
         done={(t['repository'],t.get('target')) for t in completed}
         tasks=[t for t in tasks if (t['repository'],t.get('target')) not in done]
-    result.update(completed_tasks=len(completed),tasks=len(tasks),map_gaps=_map_gaps(value))
+    result.update(completed_tasks=len(completed),tasks=len(tasks),map_gaps=bool(value.get('gaps')))
     return result
 
-def _map_gaps(value):
-    """Whether a stage of a full analysis closed without finishing, or a saved stage left input batches unread."""
-    return bool(value.get('stage_unavailable')) or any(scope.get('unread') or scope.get('isolated')
-                                                      for stages in (value.get('map_scope') or {}).values() for scope in stages.values())
-
-def _packs(rows):
-    """Group the pending unit targets, in order, into calls: path groups four at a time as before, every other unit by the
-    sample bytes they carry (at most UNIT_PACK_BYTES and UNIT_PACK_MAX units per call). rows: [(target, kind, sample bytes)]."""
-    packs=[];current=[];used=0;plain=None
-    for target,kind,n in rows:
-        now=kind!='route'
-        if current and (now!=plain or (not now and len(current)>=RESOURCE_PACK_SIZE) or (now and (len(current)>=UNIT_PACK_MAX or used+n>UNIT_PACK_BYTES))):
-            packs.append(current);current=[];used=0
-        current.append(target);used+=n;plain=now
-    if current:packs.append(current)
-    return packs
-
-def _pending_rows(units,states):
-    """[(target, kind, sample bytes)] of the units whose state still needs a call, in catalog order."""
-    return [(u.get('resource') or u['id'],u['kind'],u.get('sample',UNIT_UNKNOWN)) for u,state in zip(units,states) if state not in ('saved','unavailable')]
-
 UNIT_STATES=('saved','working','partial','pending','failed','unavailable','stale','local')
+MAP_KINDS=('system','groups')
 
 def _is_local(unit):
     """A documents, data or tests folder: read and counted locally, explained by the AI only when the user asks for that unit."""
@@ -152,175 +130,35 @@ def _board_totals(repositories):
     totals['retired']=sum(len(repo.get('retired',())) for repo in repositories)
     return totals
 
-def _retry_allowance(calls):
-    """Room for a call lost to a cancel or an interruption and for one corrective re-ask."""
-    return 1+calls//8 if calls else 0
+def _label_rows(saved,gaps,working):
+    """The groups and service-structure rows of one repository: saved, being made, failed (no AI interpretation) or pending."""
+    def state(kind,has,prefix):
+        failed=next((g['reason'] for g in gaps if g['part'].startswith(prefix)),None)
+        return ('working','') if working else ('saved','') if has else ('failed',failed) if failed else ('pending','')
+    return [['task:groups','groups','groups',0,*state('groups',bool(saved.get('parts')),'labeling')],
+            ['task:system','system','system',0,*state('system',bool(saved.get('structure')),'structure')]]
 
-def _board_parts(repositories,coverage='signal'):
-    """What the call limit of a full analysis is made of (the same sum as _call_plan): first overviews, the map-family batches
-    with their extra calls, and the retry allowance over the first calls. Unit explanations are asked one unit at a time (`only`)."""
-    overview=sum(1 for repo in repositories if repo['overview'] not in ('saved','working'));maps=sum(repo['map_calls_by'][coverage] for repo in repositories)
-    floor=overview+sum(repo['map_floor_by'][coverage] for repo in repositories)
-    return {'overview':overview,'map':maps,'units':0,'retry':_retry_allowance(floor),'later':0}
-
-def _board_map_by(repositories,coverage='signal'):
-    """The map calls still to make, by stage (map, service structure, screen groups)."""
-    return {task:sum(repo['map_tasks'][coverage][task] for repo in repositories) for task in MAP_TASKS}
-
-def _board_calls(repositories,coverage='signal'):
-    return sum(_board_parts(repositories,coverage).values())
-
-def _board_modes(repositories):
-    """The call limit of each coverage choice (signal windows or every text file), so the user can compare before starting."""
-    return {mode:{'calls':_board_calls(repositories,mode),'calls_parts':_board_parts(repositories,mode),'map_by':_board_map_by(repositories,mode),
-                  'time_limit_seconds':max(MAX_SECONDS,(2*_board_calls(repositories,mode)+1)*TASK_SECONDS)} for mode in COVERAGE}
-
-MAP_KINDS=('map','system','groups')
-COVERAGE=('signal','all')
-
-def _map_states(catalog,pending,partial,working=(),done=(),blocked=None):
-    """State of the map, service structure and screen-group tasks of one repository."""
-    out={}
-    for task in MAP_TASKS:
-        part=partial.get(task)
-        detail=f"{part['covered']}/{part['total']}" if part else ''
-        if blocked:out[task]=('unavailable',blocked[:200])
-        elif task in working:out[task]=('working',detail)
-        elif task in done:out[task]=('saved','')
-        elif task in pending:out[task]=('partial',detail) if part else ('stale' if pending[task] else 'pending','')
-        else:out[task]=('saved','')
-    if not blocked and 'analysis' not in pending and 'analysis' not in working and not catalog['map']['screens'] and out['groups'][0]=='saved':
-        out['groups']=('unavailable','no screens')
-    return out
-
-def _extra_of(task,batches):return math.ceil(EXTRA_PER_BATCH.get(task,0)*batches-1e-9) if batches else 0
-
-def _map_calls(value,tasks,states,catalog,build=False):
-    """{mode: {task: [first calls, extra calls]}} of the map stages still to run, counted from the batches they will send
-    (batches a settled checkpoint answers cost nothing)."""
-    out={}
-    for mode in COVERAGE:
-        scoped={**value,'intent':{**(value.get('intent') or {}),'task':'full','coverage':mode}};row={}
-        for task in MAP_TASKS:
-            t=next((t for t in tasks if t['task']==task),None)
-            if t is None or states[task][0] not in ('pending','stale','partial','working'):row[task]=[0,0];continue
-            plan=_planned(scoped,t,build)
-            left=plan['left'] if plan else _rough_batches(catalog,task,mode)
-            row[task]=[left,_extra_of(task,left)]
-        out[mode]=row
-    return out
-
-def _planned(value,task,build=True):
-    try:return _stage_plan(value,task,build)
-    except (ValueError,RunError,*ai_extract.READ_ERRORS):return None
-
-def _map_rows(states,calls):
-    rows=[[f'task:{task}','map' if task=='analysis' else task,task,0,*states[task]] for task in MAP_TASKS]
-    tasks={mode:{task:sum(calls[mode][task]) for task in MAP_TASKS} for mode in COVERAGE}
-    floor={mode:sum(calls[mode][task][0] for task in MAP_TASKS) for mode in COVERAGE}
-    return rows,{mode:sum(tasks[mode].values()) for mode in COVERAGE},tasks,floor
-
-def _only_board(value):
-    """The board of a run that explains chosen units: the board as it was opened, with those units' own progress."""
-    current=value.get('current_task') or {}
-    working={(current['repository'],t) for t in (current.get('pack_targets') or [current.get('target')]) if t} if value.get('state') in ACTIVE and current else set()
-    unavailable={(u['repository'],u['target']):u['reason'] for u in value.get('unavailable_resources',[])}
-    failures={(f['repository'],f['target']):f for f in value.get('unit_failures',[])}
-    wanted={(t['repository'],t['target']) for t in value.get('unit_targets',[])}
-    repositories=[]
-    for base in value['board_base']:
-        rid=base['repository'];target_of={u['id']:u.get('resource') or u['id'] for u in value['units'][rid]['units']};rows=[]
-        for row in base['units']:
-            key=(rid,target_of.get(row[0]));row=list(row)
-            if key in wanted:
-                saved=(value.get('scope_overviews' if row[1]=='route' else 'unit_overviews',{}).get(rid) or {}).get(key[1])
-                if saved:row[4:6]=['saved','reused' if saved.get('generated_commit') else '']
-                elif key in working:row[4:6]=['working','']
-                elif key in unavailable:row[4:6]=['unavailable',unavailable[key][:200]]
-                elif key in failures and failures[key]['attempts']>=UNIT_ATTEMPTS:row[4:6]=['failed',failures[key]['reason'][:200]]
-            rows.append(row)
-        repositories.append({**base,'units':rows})
-    return {'repositories':repositories,'totals':_board_totals(repositories),'calls':0,'coverage':value['intent'].get('coverage','signal'),'budget':_budget(value),
-            'calls_parts':{'overview':0,'map':0,'units':0,'retry':0,'later':0},'map_calls':0,'modes':{},'only':True}
-
-def _run_board(value):
-    """Compact per-unit states of one full run, cheap enough to ride along with every progress poll."""
-    if (value.get('intent') or {}).get('only') and value.get('board_base'):return _only_board(value)
-    if value.get('state') in TERMINAL and not value.get('seal_error'):
-        # One board: an ended run shows what the board opened now shows, so its counts equal what is saved.
-        # A board that could not open when the run ended (seal_error) is shown from the run's own record below.
-        return {**unit_board(value['project'],value['repository'],value['branch'],value['lang']),'budget':_budget(value)}
-    working=set()
-    current=value.get('current_task') or {}
-    if value.get('state') in ACTIVE and current:
-        working={(current['repository'],t) for t in (current.get('pack_targets') or [current.get('target')]) if t}
-    unavailable={(u['repository'],u['target']):u['reason'] for u in value.get('unavailable_resources',[])}
-    failures={(f['repository'],f['target']):f for f in value.get('unit_failures',[])}
-    coverage=(value.get('intent') or {}).get('coverage','signal')
-    repositories=[]
-    for rid,catalog in value['units'].items():
-        rows=[]
-        for unit in catalog['units']:
-            target=unit.get('resource') or unit['id']
-            store_name='scope_overviews' if unit['kind']=='route' else 'unit_overviews'
-            saved=(value.get(store_name,{}).get(rid) or {}).get(target)
-            key=(rid,target)
-            if saved:state,detail='saved','reused' if saved.get('generated_commit') else ''
-            elif key in working:state,detail='working',''
-            elif _is_local(unit):state,detail='local',''
-            elif key in unavailable:state,detail='unavailable',unavailable[key]
-            elif key in failures and failures[key]['attempts']>=UNIT_ATTEMPTS:state,detail='failed',failures[key]['reason']
-            else:state,detail='pending',''
-            rows.append([unit['id'],unit['kind'],unit['name'],unit['file_count'],state,detail[:200]])
-        base='saved' if rid in value.get('overviews',{}) else 'working' if value.get('state') in ACTIVE and current.get('repository')==rid and current.get('task')=='overview' and not current.get('target') else 'pending'
-        pending={t['task']:bool(t.get('before')) for t in value.get('tasks',[]) if t['repository']==rid and t['task'] in MAP_TASKS}
-        partial={k:v for k,v in (value.get('partial_results',{}).get(rid) or {}).items() if v['state']=='partial'}
-        working={current['task']} if value.get('state') in ACTIVE and current.get('repository')==rid and current.get('task') in MAP_TASKS else set()
-        done={t['task'] for t in value.get('completed_tasks',[]) if t['repository']==rid and t['task'] in MAP_TASKS}
-        blocked=next((t.get('reason') for t in value.get('blocked',[]) if t.get('repository')==rid and t.get('task')=='analysis'),None)
-        states=_map_states(catalog,pending,partial,working,done,blocked)
-        extra,by,by_task,floor=_map_rows(states,_map_calls(value,[t for t in value.get('tasks',[]) if t['repository']==rid],states,catalog))
-        repositories.append({'repository':rid,'commit':catalog['commit'],'coverage':catalog['coverage'],'map_coverage':catalog['map'].get('coverage'),'overview':base,'units':rows+extra,
-                             'map_calls_by':by,'map_tasks':by_task,'map_floor_by':floor})
-    return {'repositories':repositories,'totals':_board_totals(repositories),'calls':_board_calls(repositories,coverage),'coverage':coverage,'budget':_budget(value),
-            'calls_parts':_board_parts(repositories,coverage),'map_by':_board_map_by(repositories,coverage),'map_calls':sum(repo['map_calls_by'][coverage] for repo in repositories),'modes':_board_modes(repositories)}
-
-def _budget(value):
-    budget=value.get('budget')
-    if not budget:return None
-    used=budget['used_before']+(value.get('input_stats') or {}).get('calls',0)
-    return {'limit':budget['limit'],'used':used,'left':max(0,budget['limit']-used)}
-
-def _latest_partials(history,rid,pin):
-    """Unfinished map-family results of the latest runs on exactly this code and configuration."""
-    found={}
-    for record in sorted(history,key=lambda r:r['created_at']):
-        for task,entry in (record.get('partial_results',{}).get(rid) or {}).items():
-            if entry.get('commit')!=pin['commit'] or entry.get('configuration')!=pin['configuration']:continue
-            if entry['state']=='partial':found[task]=entry
-            else:found.pop(task,None)
-    return found
-
-def unit_board(project,repository='',branch='dev',lang='ko'):
-    """Per-unit states for the current code, read from the local index and every saved run. Never calls AI."""
+def unit_board(project,repository='',branch='dev',lang='ko',run=None):
+    """Per-unit states and labels for the current code, read from the local index and every saved run. Never calls AI.
+    calls: the calls 분석하기 would make now (rules, labeling, structure), counted as prepare() counts them."""
     scope=_scope(project,repository,branch,lang)
-    value={'project':project,'branch':branch,'lang':lang,'repository':scope['repository'],'intent':{'task':'full','targets':[],'max_calls':0}}
-    plan=ai_extract.plan(project,branch,lang,scope['repository'],overview=True,light=True)
-    catalogs=_unit_catalogs(value,plan,defer=True)
+    value={'project':project,'branch':branch,'lang':lang,'repository':scope['repository'],'intent':{'task':'full','targets':[]}}
     history=[r for r in _runs() if all(r[k]==scope[k] for k in ('project','lang','branch'))]
     history.sort(key=lambda r:r['created_at'])
+    scopes,_,calls=_full_plan(value,[r for r in history if not run or r['id']!=run['id']],defer=True)
+    live=run and run.get('state') in ACTIVE
     contexts={}
     repositories=[]
-    for rid,catalog in catalogs.items():
-        pin=plan['pins'][rid]
-        latest={};base=None;gave_up={};unavailable={}
+    for rid,full in scopes.items():
+        catalog=full['catalog'];pin=full['pin']
+        latest={};gave_up={};labels={};gaps=[]
         for record in history:
-            if (record.get('overviews') or {}).get(rid):base=record['overviews'][rid]
             for store_name in ('scope_overviews','unit_overviews'):
                 for target,overview in (record.get(store_name,{}).get(rid) or {}).items():latest[target]=overview
             if (record.get('intent') or {}).get('task')=='full' and record.get('pins',{}).get(rid)==pin:
-                gave_up.update({f['target']:f for f in record.get('unit_failures',[]) if f['attempts']>=UNIT_ATTEMPTS and f['repository']==rid})
-                unavailable.update({u['target']:u['reason'] for u in record.get('unavailable_resources',[]) if u['repository']==rid})
+                gave_up.update({f['target']:f for f in record.get('unit_failures',[]) if f['repository']==rid})
+            if (record.get('labels') or {}).get(rid):labels=record['labels'][rid];gaps=[g for g in record.get('gaps',[]) if g['repository']==rid]
+        names={k:v for part in (labels.get('parts') or {}).values() for k,v in part['units'].items()}
         rows=[]
         for unit in catalog['units']:
             target=unit.get('resource') or unit['id']
@@ -331,41 +169,33 @@ def unit_board(project,repository='',branch='dev',lang='ko'):
                 else:
                     kept=_reuse_unit(saved,pin,scope,rid,contexts,unit) if unit['kind']!='route' else _reuse_scope(saved,pin,scope,rid,contexts,False)
                     state,detail=('saved','reused') if kept else ('stale','')
+            elif live and run.get('intent',{}).get('only') and any(t['target']==target and t['repository']==rid for t in run.get('unit_targets',[])):state='working'
             elif _is_local(unit):state='local'
             elif target in gave_up:state,detail='failed',gave_up[target]['reason']
-            elif target in unavailable:state,detail='unavailable',unavailable[target]
             else:state='pending'
-            rows.append([unit['id'],unit['kind'],unit['name'],unit['file_count'],state,detail[:200]])
+            label=names.get(unit['id']) or {}
+            rows.append([unit['id'],unit['kind'],label.get('name') or unit['name'],unit['file_count'],state,detail[:200],label.get('what','')])
         # Explanations kept in history for units the current structure no longer has (a re-derived structure): listed apart, never counted as units.
         current={u.get('resource') or u['id'] for u in catalog['units']}
         retired=sorted(t for t,o in latest.items() if o.get('unit') and t not in current)
-        overview='saved' if base and base.get('version')==OVERVIEW_VERSION and all(base.get(k)==v for k,v in pin.items()) else 'pending'
-        pending={t['task']:bool(t.get('before')) for t in plan['tasks'] if t['repository']==rid and t['task'] in MAP_TASKS}
-        blocked=next((t.get('reason') for t in plan['blocked'] if t.get('repository')==rid and t.get('task')=='analysis'),None)
-        states=_map_states(catalog,pending,_latest_partials(history,rid,pin),blocked=blocked)
-        extra,by,by_task,floor=_map_rows(states,_map_calls(value,[t for t in plan['tasks'] if t['repository']==rid],states,catalog))
         position={u['id']:i for i,u in enumerate(catalog['units'])}
         links=[[position[a],position[b],n] for a,row in (catalog.get('links') or {}).items() if a in position for b,n in row if b in position]
-        repositories.append({'repository':rid,'commit':catalog['commit'],'coverage':catalog['coverage'],'map_coverage':catalog['map'].get('coverage'),'overview':overview,'units':rows+extra,'map_calls_by':by,'map_tasks':by_task,'map_floor_by':floor,'retired':retired,
-                             'links':links})
-    pending=any(c.get('pending_signals') for c in catalogs.values())
-    return {'repositories':repositories,'totals':_board_totals(repositories),'calls':_board_calls(repositories),'coverage':'signal','signals':'pending' if pending else 'ready',
-            'budget':None,
-            'calls_parts':_board_parts(repositories),'map_by':_board_map_by(repositories),'map_calls':sum(repo['map_calls_by']['signal'] for repo in repositories),'modes':_board_modes(repositories),
-            'time_limit_seconds':max(MAX_SECONDS,(2*_board_calls(repositories)+1)*TASK_SECONDS)}
+        repositories.append({'repository':rid,'commit':catalog['commit'],'coverage':catalog['coverage'],'units':rows+_label_rows(labels,gaps,live and not run['intent'].get('only')),
+                             'retired':retired,'links':links,'gaps':gaps,'missing_rules':full['missing']})
+    pending=any(s['catalog'].get('pending_signals') for s in scopes.values())
+    board={'repositories':repositories,'totals':_board_totals(repositories),'calls':calls,'signals':'pending' if pending else 'ready'}
+    if run:board.update(announced=run.get('announced'),used=(run.get('input_stats') or {}).get('by_kind',{}))
+    return board
 
 def unit_signals(project,repository='',branch='dev',lang='ko'):
-    """Run (or load) the local signal scan of each pinned commit so the board's map numbers can be exact. Never calls AI.
+    """Run (or load) the local signal scan of each pinned commit, which tells text from binary for the unit catalog. Never calls AI.
     It only fills .analysis-cache, so it runs beside the board without the run lock."""
     scope=_scope(project,repository,branch,lang)
     plan=ai_extract.plan(project,branch,lang,scope['repository'],overview=True,light=True)
     repositories=[]
-    for rid,pin in plan['pins'].items():
+    for rid in plan['pins']:
         conf,_,_,head=ai_extract.context(project,rid,branch)
-        _signals(conf['path'],head)  # also for a map that only needs a patch: the unit catalog uses the scan to tell text from binary
-        for task in plan['tasks']:
-            if task['repository']==rid and task['task'] in MAP_TASKS:
-                for mode in COVERAGE:_planned({'project':project,'branch':branch,'lang':lang,'intent':{'task':'full','coverage':mode}},task)
+        _signals(conf['path'],head)
         repositories.append({'repository':rid,'commit':head})
     return {'ready':True,'repositories':repositories}
 
@@ -384,13 +214,7 @@ def unit_result(project,repository,branch,lang,target):
     """One saved unit explanation, flagged when it was made from older code."""
     scope=_scope(project,repository,branch,lang)
     found=None
-    if isinstance(target,str) and target.startswith('task:'):
-        # An unfinished map, structure or screen-group result: shown with its evidence, never part of the saved map.
-        plan=ai_extract.plan(project,branch,lang,scope['repository'],overview=True,light=True)
-        rid=scope['repository'];pin=plan['pins'].get(rid)
-        history=[r for r in _runs() if all(r[k]==scope[k] for k in ('project','lang','branch'))]
-        entry=_latest_partials(history,rid,pin).get(target[5:]) if pin else None
-        return {'task':target[5:],**entry} if entry else None
+    if isinstance(target,str) and target.startswith('task:'):return None
     if isinstance(target,str) and target.startswith('route:'):target=target[6:]
     local=None
     if isinstance(target,str) and target.startswith('folder:local:'):
@@ -515,19 +339,15 @@ def _intent(intent,repository):
         if len(targets)>1 or targets and not targets[0]['target'].startswith('/'):raise ValueError('Choose one verified resource scope')
     elif bool(targets)!=(task in ('steps','jobs')):raise ValueError('Detail tasks require explicit targets')
     if task=='full':
-        limit=intent.get('max_calls')
-        if type(limit)!=int or limit<0:raise ValueError('Confirm the maximum call count of the full analysis')
-        coverage=intent.get('coverage','signal')
-        if coverage not in COVERAGE:raise ValueError('Choose signal windows or every text file')
         only=intent.get('only')
         if only is not None:
-            # Explain exactly these units (the user opened their cards); the units are checked against the catalog in prepare().
-            if (not isinstance(only,list) or not 1<=len(only)<=24 or any(not isinstance(u,dict) or set(u)!={'repository','target'}
+            # Explain the one unit whose card the user opened; it is checked against the catalog in prepare().
+            if (not isinstance(only,list) or len(only)!=1 or any(not isinstance(u,dict) or set(u)!={'repository','target'}
                     or not isinstance(u['repository'],str) or u['repository']=='*' or repository and u['repository']!=repository
                     or not isinstance(u['target'],str) or not u['target'] for u in only)
-                    or len({(u['repository'],u['target']) for u in only})!=len(only)):raise ValueError('Choose 1 to 24 units to explain')
-            return {'task':task,'targets':[],'max_calls':limit,'coverage':coverage,'only':[dict(u) for u in only]}
-        return {'task':task,'targets':[],'max_calls':limit,'coverage':coverage}
+                    ):raise ValueError('Choose one unit to explain')
+            return {'task':task,'targets':[],'only':[dict(u) for u in only]}
+        return {'task':task,'targets':[]}
     if task=='resources':
         limit=intent.get('max_calls')
         if type(limit)!=int or limit<0:raise ValueError('Confirm the maximum number of resource analysis calls')
@@ -594,13 +414,6 @@ def _pinned_index(repo,selected,head):
     _INDEXES.clear();_INDEXES[key]=built
     return built
 
-def _sample(repo,commit,units):
-    """Give every unit the bytes its explanation sample carries (its first four files, 24 usable lines each, plus the repeated
-    instructions), so calls can be packed by what they really carry. Reads only those files."""
-    files={f for u in units if u['kind']!='route' for f in u['files'][:4]}
-    cost=source_signals.sample_bytes(repo,_eligible(repo,commit,files)) if files else {}
-    for unit in units:
-        if unit['kind']!='route':unit['sample']=UNIT_OVERHEAD+sum(cost.get(f,0) for f in unit['files'][:4])
 
 def _unit_catalogs(value,plan,defer=False):
     """Freeze the AI-free unit catalog of every pinned repository for this run."""
@@ -611,7 +424,9 @@ def _unit_catalogs(value,plan,defer=False):
         if head!=pin['commit']:raise ValueError('Refresh the local structure before analyzing every unit')
         index=_pinned_index(conf['path'],selected,head)
         screens=selected.get('screens',[]) if ai_extract.same(selected.get('commit'),head) else []
-        nodes=((store.branch_bundle(raw,value['branch']).get('system') or {}).get('nodes',[]))
+        system=store.branch_bundle(raw,value['branch']).get('system') or {}
+        # Programs read from code become units; programs labeled from this very catalog (structure_summary) never feed back into it.
+        nodes=system.get('nodes',[]) if system.get('basis')!='structure_summary' else []
         programs=[{'id':n['id'],'name':n.get('name'),'code':n['code']} for n in nodes if n.get('kind','program')=='program' and n.get('code') and n.get('id')]
         sizes=_tracked(conf['path'],head)
         # The local scan read every blob, so it knows which files are text. A file it could not read as UTF-8 text
@@ -622,9 +437,7 @@ def _unit_catalogs(value,plan,defer=False):
             reason=_exclusion(file,size)
             return reason if reason or text is None or not size or file in text else 'binary'
         built=analysis_units.catalog(index,sizes,exclusion,screens,programs,local=lambda file:source_signals.kind(file) in ('doc','support'))
-        _sample(conf['path'],head,built['units'])
-        flag=ai_extract.review_flag(value['project'],rid,value['branch'],selected)
-        catalogs[rid]={'commit':head,**built,'map':_map_estimate(conf['path'],head,selected,sizes,screens,value.get('lang') or 'ko',pin['configuration'],flag,defer)}
+        catalogs[rid]={'commit':head,**built}
         if text is None:catalogs[rid]['pending_signals']=True
     return catalogs
 
@@ -645,10 +458,6 @@ def _eligible(repo,commit,paths=None):
 def _scan(repo,commit,paths=None,signals=True):
     return source_signals.scan_commit(repo,commit,_eligible(repo,commit,paths),SOURCE_ROW_OVERHEAD,signals)
 
-def _source_profile(repo,commit,paths=None):
-    """Bytes each exportable file adds to a map batch ({file: serialized bytes}); regular UTF-8 text blobs only.
-    One streamed git read of the pinned commit, so no file is checked out or parsed twice."""
-    return {file:row['size'] for file,row in _scan(repo,commit,paths,False).items()}
 
 _SIGNALS={}
 
@@ -694,29 +503,6 @@ def _window_plan(rows,cited=()):
         else:report['local']+=1
     return plan,report
 
-def _map_estimate(repo,head,selected,sizes,screens,lang,configuration,flag=None,defer=False):
-    """What the map reads at this pin: patch (the changes since the saved map plus every file it cites) or the signal windows,
-    with the bytes of each coverage choice and the window report. The calls are counted from the real batches (_stage_plan)."""
-    shown=sum(1 for screen in screens if not screen.get('redirect'))
-    result={'screens':shown,'mode':'whole','source_bytes':0}
-    try:
-        prev=selected or {}
-        mode=ai_extract.map_mode(repo,prev,lang,configuration,head,flag)
-        if mode and mode[0]=='patch':
-            base=prev['commit']
-            changed,deleted,present=ai_extract.changes(repo,base,head)
-            now=_source_profile(repo,head,set(present)|_cited_files(prev))
-            before=_source_profile(repo,base,changed|set(deleted))
-            result.update(mode='patch',source_bytes=sum(now.values())+sum(before.values()))
-        else:
-            rows=_signals(repo,head,wait=not defer)
-            plan,report=_window_plan(rows,_cited_files(prev))
-            modes={'signal':{'source_bytes':report['sent_bytes']},'all':{'source_bytes':report['text_bytes']}}
-            result.update(source_bytes=report['sent_bytes'],modes=modes,coverage=report)
-    except (SignalsPending,RunError,*ai_extract.READ_ERRORS,KeyError,TypeError,ValueError) as error:
-        result.update(source_bytes=sum(int(min(size,MAX_FILE_BYTES)*1.4) for file,size in sizes.items() if not _exclusion(file,size)))
-        if isinstance(error,SignalsPending):result['pending_signals']=True
-    return result
 
 def _unit(value,rid,target):
     for unit in (value.get('units',{}).get(rid) or {}).get('units',[]):
@@ -732,49 +518,13 @@ def _is_unit(value,rid,target):
     return bool(unit) and unit['kind']!='route'
 
 
-def _full_calls(tasks,catalogs=None):
-    """Model calls of a run that explains chosen units: one per pack of them plus half again as many for the one retry
-    of an answer that fails its evidence check."""
-    sample={(rid,u.get('resource') or u['id']):u.get('sample') for rid,c in (catalogs or {}).items() for u in c['units']}
-    packs=len(_packs([(t['target'],t.get('unit_kind') or 'route',sample.get((t['repository'],t['target'])) or UNIT_UNKNOWN) for t in tasks if t.get('target')]))
-    return packs+-(-packs//2)
 
-def _failed_out(value):
-    return {(f['repository'],f['target']) for f in value.get('unit_failures',[]) if f['attempts']>=UNIT_ATTEMPTS}
 
-def _plan_full(value):
-    name,branch,lang,repository=(value[k] for k in ('project','branch','lang','repository'))
-    plan=ai_extract.plan(name,branch,lang,repository,overview=True,light=True)
-    plan['blocked']=[t for t in plan['blocked'] if t['task']=='analysis']
-    if 'expected_pins' in value:_check_pins({'pins':value['expected_pins']},plan)
-    if value.get('units') is None:value_units=_unit_catalogs(value,plan)
-    else:value_units=value['units']
-    only=(value.get('intent') or {}).get('only')
-    targets=value.get('unit_targets')
-    if targets is None:
-        by_name={(rid,name):u for rid,c in value_units.items() for u in c['units'] for name in (u['id'],u.get('resource') or u['id'])}
-        targets=[]
-        for t in only or []:
-            unit=by_name.get((t['repository'],t['target']))
-            if unit and not any(x['repository']==t['repository'] and x['target']==(unit.get('resource') or unit['id']) for x in targets):
-                targets.append({'repository':t['repository'],'target':unit.get('resource') or unit['id'],'kind':unit['kind']})
-    done={(t['repository'],t.get('target')) for t in [*value.get('completed_tasks',[]),*value.get('unavailable_resources',[])]}|_failed_out(value)
-    finished={t['repository'] for t in value.get('completed_tasks',[]) if t['task']=='overview' and not t.get('target')}
-    tasks=[] if only else [{'repository':rid,'task':'overview',**pin} for rid,pin in plan['pins'].items() if rid not in finished]
-    tasks+=[{'repository':t['repository'],'task':'overview','target':t['target'],'unit_kind':t['kind'],**plan['pins'][t['repository']]}
-            for t in targets if t['repository'] in plan['pins'] and (t['repository'],t['target']) not in done]
-    # A full analysis explains no unit: the first overview, then the map, service structure and screen groups.
-    # A stage that could not finish within its run is not asked again in that run; what it settled stays in its checkpoints.
-    closed={(t['repository'],t['task']) for t in value.get('stage_unavailable',[])}
-    if not only:tasks+=[t for t in plan['tasks'] if t['task'] in MAP_TASKS and (t['repository'],t['task']) not in closed]
-    plan.update(tasks=tasks,unit_targets=targets,unit_catalog=value_units)
-    return plan
 
 def _plan(value):
     name,branch,lang,repository=(value[k] for k in ('project','branch','lang','repository'))
     intent=value.get('intent',{'task':'all','targets':[]});chosen=intent['task']
     if chosen=='resources' and 'area' in intent:repository=intent['area']['repository']
-    if chosen=='full':return _plan_full(value)
     plan=ai_extract.plan(name,branch,lang,repository,overview=True)
     if chosen=='resources':
         if 'expected_pins' in value:_check_pins({'pins':value['expected_pins']},plan)
@@ -851,6 +601,187 @@ def _check_pins(value, plan):
     if plan['pins'] != value['pins']:
         raise RunError('pins_changed','Code, repository configuration or collected evidence changed. Start a new analysis')
 
+CALL_KINDS=('rules','labeling','structure','unit')
+
+def _full_scope(value,defer=False):
+    """Pins, unit catalogs, summaries and missing reading rules of every repository of a full analysis. No AI."""
+    plan=ai_extract.plan(value['project'],value['branch'],value['lang'],value['repository'],overview=True,light=True)
+    out={}
+    for rid,pin in plan['pins'].items():
+        conf,raw,_,head=ai_extract.context(value['project'],rid,value['branch'])
+        catalog=_unit_catalogs(value,{'pins':{rid:pin}},defer)[rid]
+        index=_pinned_index(conf['path'],raw[value['branch']],head)
+        sizes=_tracked(conf['path'],head);files=[f for f,z in sizes.items() if not _exclusion(f,z)]
+        out[rid]={'pin':pin,'repo':conf['path'],'catalog':catalog,'sizes':sizes,'files':files,
+                  'missing':sorted(n for n in lang_rules.needed(files) if not lang_rules.load(n)),
+                  'summary':analysis_label.summary(catalog,index,index.get('project_description') or '')}
+    return out
+
+def _saved_labels(history,rid):
+    """Every labeling part and structure saved for this repository, by the hash of its input (latest wins)."""
+    parts={};structures={}
+    for record in sorted(history,key=lambda r:r['created_at']):
+        saved=(record.get('labels') or {}).get(rid) or {}
+        parts.update(saved.get('parts') or {})
+        if saved.get('structure'):structures[saved['structure']['key']]=saved['structure']
+    return parts,structures
+
+def _slices(scope,partition):
+    whole=scope['summary'];ref_of={u['id']:i for i,u in enumerate(scope['catalog']['units'])}
+    return [(analysis_label._slice(whole,[u for u in whole['units'] if scope['catalog']['units'][u[0]]['id'] in set(ids)]),last) for ids,last in partition]
+
+def _full_plan(value,history,defer=False):
+    """The calls of a full analysis, known before the start: one per language without reading rules, one per labeling
+    part whose summary is not saved, and one structure call for a split summary whose structure is not saved."""
+    scopes=_full_scope(value,defer);calls=dict.fromkeys(CALL_KINDS,0);plans={}
+    for rid,scope in scopes.items():
+        units=scope['catalog']['units']
+        parts=analysis_label.parts(scope['summary'])
+        partition=[([units[u[0]]['id'] for u in p['payload']['units']],p['structure']) for p in parts if p['kind']=='labeling']
+        saved,structures=_saved_labels(history,rid)
+        calls['rules']+=len(scope['missing'])
+        keys=[analysis_label.key(payload) for payload,_ in _slices(scope,partition)]
+        # New reading rules change the summary, so every part is asked again after them.
+        todo=len(keys) if scope['missing'] else sum(k not in saved for k in keys)
+        calls['labeling']+=todo
+        if len(parts)>1:
+            ref_of={u['id']:i for i,u in enumerate(units)}
+            cached=not todo and analysis_label.key(analysis_label.structure_input(scope['summary'],[saved[k] for k in keys],ref_of)) in structures
+            calls['structure']+=0 if cached else 1
+        plans[rid]={'partition':partition}
+    calls['total']=sum(calls[k] for k in CALL_KINDS)
+    return scopes,plans,calls
+
+def _publish_shapes(value,rid,commit,labels,catalog):
+    """Write groups and system in the shapes the map screen reads, marked as an interpretation of the structure summary."""
+    groups,system=analysis_label.shapes(catalog,labels)
+    meta={'source':'ai','basis':'structure_summary','provider':'claude-cli','commit':commit,'branch':value['branch'],'language':value['lang'],'generated_at':store.now()}
+    with store.locked(value['project']):
+        _,raw,stored_rid,head=ai_extract.context(value['project'],rid,value['branch'])
+        if head!=commit:return
+        bundle=store.branch_bundle(raw,value['branch'])
+        updated=copy.deepcopy(bundle)
+        dest='system.ai' if bundle.get('system') and bundle['system'].get('source')!='ai' else 'system'
+        updated[dest]={**meta,**system}
+        if groups['groups']:updated['groups']={**meta,**groups}
+        if stored_rid:store._publish(value['project'],stored_rid,updated,{},collection=False)
+        else:
+            for name,item in updated.items():
+                if item!=bundle.get(name):store.atomic(store.home(value['project'])/(name+'.json'),item)
+
+def _counted(run_id,executor,cancelled,kind):
+    """The executor, with every call counted by kind in the run record before it is sent."""
+    def call(prompt,**_):
+        if cancelled():raise Cancelled()
+        size=len(prompt.encode())
+        with locked():
+            current=read(run_id)
+            if current['cancel_requested']:raise Cancelled()
+            stats=current.setdefault('input_stats',{'calls':0,'bytes':0,'max_prompt_bytes':0,'by_kind':{}})
+            stats['calls']+=1;stats['bytes']+=size;stats['max_prompt_bytes']=max(stats['max_prompt_bytes'],size)
+            stats.setdefault('by_kind',{})[kind]=stats['by_kind'].get(kind,0)+1
+            write(current)
+        return executor(prompt,cancelled=cancelled,timeout=TASK_SECONDS)
+    return call
+
+def _ask(call,prompt):
+    """One call, retried once; None when both fail."""
+    for _ in range(2):
+        try:return _result(call(prompt))
+        except Exception as error:
+            if isinstance(error,Cancelled) or getattr(error,'code',None) in FATAL_CODES:raise
+    return None
+
+def _update(run_id,change):
+    with locked():
+        current=read(run_id)
+        if current['cancel_requested']:raise Cancelled()
+        change(current);return write(current)
+
+def _gap(rid,part,reason):
+    return lambda v:v.setdefault('gaps',[]).append({'repository':rid,'part':part,'reason':reason[:300]})
+
+def _run_full(run_id,executor,cancelled):
+    """Reading rules, then labels and structure from the summary; each answer is saved as it arrives."""
+    value=read(run_id);history=[r for r in _runs() if r['id']!=run_id and all(r[k]==value[k] for k in ('project','branch','lang'))]
+    scopes=_full_scope(value)
+    if {rid:s['pin'] for rid,s in scopes.items()}!=value['pins']:raise RunError('pins_changed','The code changed after the analysis was prepared; start again')
+    for rid,scope in scopes.items():
+        if scope['missing']:
+            show=lambda file,repo=scope['repo'],head=scope['pin']['commit']:_git(repo,'show',f'{head}:{file}').decode('utf-8','ignore')
+            call=_counted(run_id,executor,cancelled,'rules')
+            for name in scope['missing']:
+                rule,_,_=lang_rules.obtain(name,lang_rules.needed(scope['files'])[name],scope['sizes'],show,call)
+                if not rule:_update(run_id,_gap(rid,'rules:'+name,'No valid reading rules; the connections of these files were not read'))
+            _INDEXES.clear();scope.update(_full_scope({**value,'repository':rid})[rid])
+        units=scope['catalog']['units'];ref_of={u['id']:i for i,u in enumerate(units)}
+        saved,structures=_saved_labels(history,rid)
+        labeled=[];structure=None
+        for i,(payload,last) in enumerate(_slices(scope,value['plan'][rid]['partition'])):
+            key=analysis_label.key(payload)
+            if key not in saved:
+                answer=_ask(_counted(run_id,executor,cancelled,'labeling'),analysis_label.prompt('labeling',payload,value['lang'],last and i==0))
+                if answer is None:_update(run_id,_gap(rid,f'labeling:{i}','No usable answer after one retry'));continue
+                labels,dropped=analysis_label.check(answer,{u[0]:units[u[0]]['id'] for u in payload['units']})
+                saved[key]={**labels,'dropped':dropped}
+            part=saved[key]
+            _update(run_id,lambda v,key=key,part=part:v.setdefault('labels',{}).setdefault(rid,{'commit':scope['pin']['commit'],'parts':{}})['parts'].__setitem__(key,part))
+            labeled.append(part)
+            if last and i==0:structure={'key':key,'programs':part['programs'],'links':part['links'],'dropped':0}
+        if structure is None and labeled:
+            payload=analysis_label.structure_input(scope['summary'],labeled,ref_of);key=analysis_label.key(payload)
+            structure=structures.get(key)
+            if not structure:
+                answer=_ask(_counted(run_id,executor,cancelled,'structure'),analysis_label.prompt('structure',payload,value['lang'],True))
+                if answer is None:_update(run_id,_gap(rid,'structure','No usable answer after one retry'))
+                else:
+                    labels,dropped=analysis_label.check(answer,{r:units[r]['id'] for g in payload['groups'] for r in g['units']})
+                    structure={'key':key,'programs':labels['programs'],'links':labels['links'],'dropped':dropped}
+        if structure:_update(run_id,lambda v,s=structure:v['labels'][rid].__setitem__('structure',s))
+        if labeled:
+            merged={'units':{k:v for p in labeled for k,v in p['units'].items()},'groups':[g for p in labeled for g in p['groups']],
+                    'programs':(structure or {}).get('programs',[]),'links':(structure or {}).get('links',[])}
+            _publish_shapes(value,rid,scope['pin']['commit'],merged,scope['catalog'])
+
+def _explain_unit(run_id,executor,cancelled):
+    """The explanation of one unit the user opened: one call over its read source lines, saved as soon as it is checked."""
+    value=read(run_id);target=value['unit_targets'][0];rid=target['repository']
+    task={'repository':rid,'task':'overview','target':target['target']}
+    request=_request(value,task)
+    if request['commit']!=value['pins'][rid]['commit']:raise RunError('pins_changed','The code changed; open the unit again')
+    conf,bundle,_,_=ai_extract.context(value['project'],rid,value['branch'])
+    plain=_plain_unit(value,rid,target['target'])
+    call=_counted(run_id,executor,cancelled,'unit')
+    def invoke(packet):
+        prompt=_encoded(packet)
+        if len(prompt.encode())>MAX_PROMPT_BYTES:raise RunError('source_too_large','The unit sample could not fit one call')
+        return _result(call(prompt))
+    try:overview=_quick_overview(conf['path'],request,value['lang'],invoke,cancelled,time.monotonic()+TASK_SECONDS,bundle[value['branch']],None if plain else target['target'],unit=plain)
+    except RunError as error:
+        if error.code in FATAL_CODES:raise
+        return _update(run_id,lambda v:v.setdefault('unit_failures',[]).append({'repository':rid,'target':target['target'],'attempts':1,'reason':str(error)[:300]}))
+    store_name='unit_overviews' if plain else 'scope_overviews'
+    _update(run_id,lambda v:v.setdefault(store_name,{}).setdefault(rid,{}).__setitem__(target['target'],{'repository':rid,**value['pins'][rid],**overview}))
+
+def _prepare_full(scope,history):
+    value={'id':uuid.uuid4().hex,**scope,'executor':'claude','state':'preparing','created_at':store.now(),'started_at':None,'finished_at':None,
+           'launch_epoch':None,'prepare_epoch':time.time(),'tasks':[],'blocked':[],'skipped':[],'current_task':None,'completed_tasks':[],
+           'cancel_requested':False,'error':None,'account':None}
+    only=scope['intent'].get('only')
+    if only:
+        plan=ai_extract.plan(scope['project'],scope['branch'],scope['lang'],scope['repository'],overview=True,light=True)
+        rid=only[0]['repository']
+        if rid not in plan['pins']:raise ValueError('Choose units of the current catalog')
+        value.update(pins={rid:plan['pins'][rid]},units=_unit_catalogs(value,{'pins':{rid:plan['pins'][rid]}}))
+        unit=_unit(value,rid,only[0]['target'])
+        if not unit:raise ValueError('Choose units of the current catalog')
+        value.update(unit_targets=[{'repository':rid,'target':unit.get('resource') or unit['id'],'kind':unit['kind']}],announced={**dict.fromkeys(CALL_KINDS,0),'unit':1})
+    else:
+        scopes,plans,calls=_full_plan(value,history)
+        value.update(pins={rid:s['pin'] for rid,s in scopes.items()},plan=plans,announced=calls)
+    value['announced']['total']=sum(value['announced'][k] for k in CALL_KINDS)
+    return value
+
 def prepare(project, branch='dev', lang='ko', repository='', executor='claude', launch_intended=False, intent=None, resume_from=None, expected_pins=None):
     if executor != 'claude': raise ValueError('Choose the Claude CLI executor')
     scope = _scope(project,repository,branch,lang)
@@ -860,6 +791,10 @@ def prepare(project, branch='dev', lang='ko', repository='', executor='claude', 
         for current in history:
             if current['state'] in ACTIVE and current['project']==project:
                 raise RunError('already_running','Analysis is already prepared or running for this code. Continue or cancel that run')
+        if scope['intent']['task']=='full':
+            value=_prepare_full(scope,[r for r in history if all(r[k]==scope[k] for k in ('project','branch','lang'))])
+            value['launch_intended']=launch_intended
+            return write(value)
         if expected_pins is not None:scope['expected_pins']=expected_pins
         plan = _plan(scope)
         scope.pop('expected_pins',None)
@@ -869,13 +804,10 @@ def prepare(project, branch='dev', lang='ko', repository='', executor='claude', 
                  'cancel_requested':False,'error':None,'account':None}
         if resume_from is not None:value['resume_from']=resume_from
         resource_run=scope['intent']['task']=='resources'
-        full_run=scope['intent']['task']=='full'
         if resource_run:value['resource_targets']=plan['resource_targets']
-        if full_run:value.update(units=plan['unit_catalog'],unit_targets=plan['unit_targets'])
-        if scope['intent']['task']=='overview' or resource_run or full_run:
+        if scope['intent']['task']=='overview' or resource_run:
             contexts={}
-            unit_of=lambda rid,target:_unit(value,rid,target) if full_run and target else None
-            store_of=lambda rid,target:'unit_overviews' if full_run and target and _is_unit(value,rid,target) else 'scope_overviews'
+            store_of=lambda rid,target:'scope_overviews'
             for old in sorted(history,key=lambda record:record['created_at']):
                 if any(old[key]!=scope[key] for key in ('project','lang','branch')):continue
                 for task in value['tasks']:
@@ -883,13 +815,9 @@ def prepare(project, branch='dev', lang='ko', repository='', executor='claude', 
                     rid=task['repository'];pin=plan['pins'][rid];target=task.get('target')
                     overview=(old.get(store_of(rid,target),{}).get(rid,{}).get(target) if target else old.get('overviews',{}).get(rid))
                     if not overview or overview.get('format')!='overview-v1' or overview.get('version')!=(SCOPED_OVERVIEW_VERSION if target else OVERVIEW_VERSION):continue
-                    unit=unit_of(rid,target) if target else None
-                    if unit and store_of(rid,target)=='unit_overviews' and not _same_unit(overview,unit):
-                        # Same commit, but the unit holds other files now (structure re-derived): never cached.
-                        continue
                     if not all(overview.get(k)==v for k,v in pin.items()):
                         if not target:continue
-                        overview=_reuse_unit(overview,pin,scope,rid,contexts,unit_of(rid,target)) if store_of(rid,target)=='unit_overviews' else _reuse_scope(overview,pin,scope,rid,contexts,not full_run)
+                        overview=_reuse_scope(overview,pin,scope,rid,contexts,True)
                         if not overview:continue
                     if target:value.setdefault(store_of(rid,target),{}).setdefault(rid,{})[target]=overview
                     else:value.setdefault('overviews',{})[rid]=overview
@@ -903,32 +831,6 @@ def prepare(project, branch='dev', lang='ko', repository='', executor='claude', 
             if resource_run:
                 if len(remaining)>scope['intent']['max_calls']:raise ValueError('The resource count changed; confirm the new maximum call count')
                 value['resource_estimate']={'total':len(plan['resource_targets']),'cached':len(value['completed_tasks']),'max_calls':len(remaining)}
-            if full_run:
-                # A unit that had no readable source on exactly this code stays skipped; it costs no call.
-                for old in sorted(history,key=lambda record:record['created_at']):
-                    if (old.get('intent') or {}).get('task')!='full' or any(old[key]!=scope[key] for key in ('project','lang','branch')):continue
-                    for entry in old.get('unavailable_resources',[]):
-                        if old.get('pins',{}).get(entry['repository'])==plan['pins'].get(entry['repository']) and entry not in value.setdefault('unavailable_resources',[]):
-                            value['unavailable_resources'].append(entry)
-                skipped={(u['repository'],u['target']) for u in value.get('unavailable_resources',[])}
-                value['tasks']=remaining=[t for t in remaining if (t['repository'],t.get('target')) not in skipped or not t.get('target')]
-                only=scope['intent'].get('only')
-                if only and len(plan['unit_targets'])!=len(only):raise ValueError('Choose units of the current catalog')
-                if only:
-                    calls=_full_calls(remaining,catalogs=value['units'])
-                    budget={'limit':scope['intent']['max_calls'],'used_before':0}
-                else:
-                    # The same count the board shows: first calls of every batch still to send, their extra calls and a retry allowance.
-                    started=time.monotonic()
-                    budget=_call_plan(value,remaining);calls=budget.pop('calls')
-                    budget.update(limit=scope['intent']['max_calls'],used_before=0,plan_seconds=round(time.monotonic()-started,2))
-                if calls>scope['intent']['max_calls']:raise ValueError('The call count changed; confirm the new maximum call count')
-                value.update(budget=budget)
-                if only:
-                    # The board of this run is the opened board plus these units' own progress.
-                    board=unit_board(project,scope['repository'],branch,lang)
-                    value['board_base']=[{k:r[k] for k in ('repository','commit','coverage','map_coverage','overview','units','map_calls_by','retired','links')} for r in board['repositories']]
-                value['unit_estimate']={'units':len(plan['unit_targets']),'cached':sum(1 for t in value['completed_tasks'] if t.get('target')),'calls':calls}
         return write(value)
 
 def status(run_id=None, project=None, repository='', branch='dev', lang='ko',view=None,resource=None):
@@ -1036,7 +938,8 @@ def start(run_id, expected_account=None):
         value = read(run_id)
         if value['state']!='preparing' or value.get('launch_epoch') is not None:
             raise RunError('already_started','This analysis has already started or finished')
-        try: _check_pins(value,_plan(value))
+        try:
+            if value['intent']['task']!='full':_check_pins(value,_plan(value))
         except Exception as error:
             code=getattr(error,'code','preparation_failed')
             failure(value,code,str(error))
@@ -1514,9 +1417,6 @@ def _strict_jobs(payload,code,raw,evidence,fail):
                 if key=='steps' and (not item.get('text') or not within(item)):fail()
                 if key=='made_by' and any(k not in routes or item['file'] not in [routes[k]['file'],*routes[k].get('services',[])] for k in item.get('routes',[])):fail()
 
-def _mount_file(route):
-    """The file the route's identity takes its mount from (its first dependency that names one)."""
-    return next((d['file'] for d in route.get('dependencies') or [] if isinstance(d,dict) and d.get('file')),'')
 
 # List items that are one thing per identity (a screen per path, a route per registration, a program per id...). A later batch can describe the same
 # identity again from another file; its details are merged, and where a value differs the first batch's value stays.
@@ -2585,27 +2485,11 @@ class CallFailed(RunError):
     """One model call gave no usable reply: no JSON, a timeout, or an executor failure that is not about the account."""
     def __init__(self,code):super().__init__('call_failed','A model call returned no usable reply ('+str(code)[:60]+')')
 
-def _full(value):return (value.get('intent') or {}).get('task')=='full'
 
 def _stage_key(rid,task):return task+'@'+rid
 
 def _batch_extra_cap(task):return max(BATCH_EXTRA_MIN,2*-int(-EXTRA_PER_BATCH.get(task,0)//1))
 
-def _admit(value,key,kind,left_after=0):
-    """Whether one more call fits the confirmed limit. Every batch not yet started keeps its first call (the floor); an extra call
-    is allowed only while one call more than that floor is left and its stage has not used its share of extra calls."""
-    budget=value.get('budget')
-    if not budget or not _full(value):return True
-    stats=value.get('input_stats') or {};by=stats.get('by_stage') or {}
-    left=budget['limit']-budget.get('used_before',0)-stats.get('calls',0)
-    if 'floor' not in budget:return left>=1  # a run that explains chosen units: one call per pack
-    done={_stage_key(t['repository'],t['task']) for t in value.get('completed_tasks',[]) if not t.get('target')}
-    done|={_stage_key(t['repository'],t['task']) for t in value.get('stage_unavailable',[])}
-    others=sum(n for k,n in budget['floor'].items() if k!=key and k not in done and not (by.get(k) or {}).get('first'))
-    if kind=='first':return left-others>=1
-    if left-others-left_after<1:return False
-    used=(by.get(key) or {}).get('extra',0)
-    return used<budget['extra'].get(key,0)+budget.get('retry',0)
 
 def _requestable(payload):
     """[[metadata path, items]] a read can name in this request: lists by entry count, text by characters, objects by keys."""
@@ -2697,61 +2581,10 @@ def _checkpoints():return root()/'checkpoints'/f'v{CHECKPOINT_VERSION}'
 
 def _scope_key(request,header,provisional):return ai_extract.digest([CHECKPOINT_VERSION,request['record_arguments'],header,provisional])
 
-def _batch_file(scope,index,ids):return _checkpoints()/scope/(ai_extract.digest([index,ids])+'.json')
 
-def _plan_key(value,task):
-    """What a stage's batches depend on, read without building them: the pinned commit and saved bundle, coverage, language and this code."""
-    conf,raw,_,head=ai_extract.context(value['project'],task['repository'],value['branch'])
-    return mapcore.cache_key(PLAN_VERSION,CHECKPOINT_VERSION,mapcore.code_digest(),(value.get('intent') or {}).get('coverage','signal'),value['lang'],
-                             conf['path'],head,task['task'],ai_extract.digest(json.loads(json.dumps(raw.get(value['branch']),default=str))),
-                             ai_extract.digest(json.loads(json.dumps(_verified_sources(value,task['repository']),default=str))) if task['task']=='system' else None,'plan')
 
-def _stage_plan(value,task,build=True):
-    """The batches one map-family task of a full analysis sends: {'direct': one plain call} or {'scope', 'keys'} of its batches,
-    with 'left' the batches no settled checkpoint answers yet. Cached; build=False returns None instead of building it
-    (the board opens without reading every file). ValueError: the stage cannot be planned yet (it needs the map saved first)."""
-    key=_plan_key(value,task)
-    # One cache kind per stage and coverage: the cache keeps a few entries per kind, and a board needs all six plans of a repository.
-    kind=f"plans-{task['task']}-{(value.get('intent') or {}).get('coverage','signal')}"
-    plan=mapcore.cache_read(kind,key)
-    if not isinstance(plan,dict) or plan.get('version')!=PLAN_VERSION:
-        if not build:return None
-        request=_request(value,task)
-        conf,_,_,_=ai_extract.context(value['project'],task['repository'],value['branch'])
-        payload=_payload(value,task,request,blobs={})
-        _stage_prompt(task,payload)
-        if len(_encoded(payload).encode())<=MAX_PROMPT_BYTES:plan={'version':PLAN_VERSION,'direct':True}
-        else:
-            header,units=_batch_units(value,task,request,payload,conf['layout'])
-            batch_header,budget=_full_shape(task,header,units,payload)
-            batches,unfit=plan_batches(batch_header,units,budget)
-            plan={'version':PLAN_VERSION,'scope':_scope_key(request,header,{}),'keys':[ai_extract.digest([i,[u['id'] for u in b]]) for i,b in enumerate(batches,1)],'unfit':len(unfit)}
-        mapcore.cache_write(kind,key,plan)
-    if plan.get('direct'):return {**plan,'batches':1,'left':1}
-    return {**plan,'batches':len(plan['keys']),'left':sum(1 for k in plan['keys'] if not (_checkpoints()/plan['scope']/(k+'.json')).exists())}
 
-def _rough_batches(catalog,task,mode):
-    """Batches of a stage that cannot be planned yet (its input is not built, or it needs the map saved first): an upper bound
-    from the bytes the map reads, the tracked file list for the structure and the screen count for the groups."""
-    estimate=catalog.get('map') or {}
-    if task=='analysis':size=((estimate.get('modes') or {}).get(mode) or estimate).get('source_bytes',0)*1.2
-    elif task=='system':size=catalog['coverage'].get('tracked',0)*120+40000
-    else:size=estimate.get('screens',0)*400
-    return max(1,math.ceil(size/(MAX_PROMPT_BYTES//2)))
 
-def _call_plan(value,tasks):
-    """What the call limit of a full analysis is made of: one first call per batch of every stage still to run (the floor), extra calls
-    per batch, and a retry allowance for a call lost to a cancel or an interruption. The board and prepare() both count with this."""
-    floor={};extra={}
-    for t in tasks:
-        key=_stage_key(t['repository'],t['task'])
-        if t['task'] in MAP_TASKS:
-            plan=_planned(value,t)
-            left=plan['left'] if plan else _rough_batches(value['units'][t['repository']],t['task'],(value.get('intent') or {}).get('coverage','signal'))
-            floor[key]=left;extra[key]=_extra_of(t['task'],left)
-        elif t['task']=='overview' and not t.get('target'):floor[key]=1;extra[key]=0
-    total=sum(floor.values());retry=1+total//8 if total else 0
-    return {'floor':floor,'extra':extra,'retry':retry,'calls':total+sum(extra.values())+retry}
 
 def _record_scope(run_id,task,scope):
     with locked():
@@ -2760,8 +2593,8 @@ def _record_scope(run_id,task,scope):
         write(current)
 
 def generate(value,task,request,executor,cancelled,deadline,check,blobs=None):
-    full=_full(value)
-    deferred=None if full else []
+    full=False  # a full analysis never reaches generate(); it labels from the summary (_run_full)
+    deferred=[]
     repo=None;raw=None
     if task['task']!='briefing':
         conf,bundle,_,_=ai_extract.context(value['project'],task['repository'],value['branch'])
@@ -2785,10 +2618,7 @@ def generate(value,task,request,executor,cancelled,deadline,check,blobs=None):
         if len(prompt.encode())>MAX_PROMPT_BYTES:raise RunError('source_too_large','An analysis context could not fit a bounded input')
         with locked():
             current=read(value['id']);stats=current.setdefault('input_stats',{'calls':0,'bytes':0,'max_prompt_bytes':0})
-            if not _admit(current,stage,kind,left_after):raise CallDenied(kind)
             stats['calls']+=1;stats['bytes']+=len(prompt.encode());stats['max_prompt_bytes']=max(stats['max_prompt_bytes'],len(prompt.encode()))
-            if full:
-                row=stats.setdefault('by_stage',{}).setdefault(stage,{'first':0,'extra':0});row[kind]=row.get(kind,0)+1
             write(current)
         try:
             reply=executor(prompt,cancelled=cancelled,timeout=min(TASK_SECONDS,max(1,int(deadline-time.monotonic()))))
@@ -3182,19 +3012,7 @@ def _store_partial(current,task,request,result,covered,total):
         'state':'partial','commit':pins['commit'],'configuration':pins['configuration'],'covered':covered,'total':total,
         'count':len(rows),'items':rows[:PARTIAL_ITEMS],'updated_at':store.now()}
 
-def _note_unit_failures(value,rid,targets,reason):
-    for target in targets:
-        entry=next((f for f in value.setdefault('unit_failures',[]) if f['repository']==rid and f['target']==target),None)
-        if entry:entry.update(attempts=entry['attempts']+1,reason=reason[:300])
-        else:value['unit_failures'].append({'repository':rid,'target':target,'attempts':1,'reason':reason[:300]})
 
-def _record_unit_failures(run_id,rid,targets,reason,cancelled):
-    with locked():
-        value=read(run_id)
-        if value['cancel_requested']:raise Cancelled()
-        _check_pins(value,_plan(value))
-        _note_unit_failures(value,rid,targets,reason)
-        value.update(current_task=None);write(value)
 
 def _save(task,request,result):
     if task['task'] in ('analysis','system'):
@@ -3207,13 +3025,6 @@ def _save(task,request,result):
     if task['task']=='briefing': return briefing.record(**args)
     return ai_extract.task_record(**args)
 
-def _close_stage(run_id,task,error,cancelled):
-    """A map, structure or groups stage that cannot finish closes alone: the run goes on with the next stage and ends as completed with gaps."""
-    with locked():
-        value=read(run_id)
-        if value['cancel_requested']:raise Cancelled()
-        value.setdefault('stage_unavailable',[]).append({'repository':task['repository'],'task':task['task'],'code':getattr(error,'code',None) or 'invalid_result','reason':str(error)[:300]})
-        value.update(state='running',current_task=None,batch_progress=None);write(value)
 
 def run(run_id, executor=None):
     """Synchronous worker entry; executor(prompt, cancelled=callable, timeout=seconds) is injectable."""
@@ -3237,10 +3048,16 @@ def run(run_id, executor=None):
                 import cli_executor
                 if not value.get('account'): raise RunError('CLI_ACCOUNT_CHANGED','Check the Claude connection and start analysis from the app')
                 executor=lambda prompt,**kwargs:cli_executor.execute(prompt,expected_account=value['account'],**kwargs)
+            if (value.get('intent') or {}).get('task')=='full':
+                (_explain_unit if value['intent'].get('only') else _run_full)(run_id,executor,cancelled)
+                with locked():
+                    value=read(run_id)
+                    if value['cancel_requested']:raise Cancelled()
+                    value.update(state='completed',current_task=None,finished_at=store.now())
+                    return _seal(value)
             resource_run=(value.get('intent') or {}).get('task')=='resources'
-            full_run=(value.get('intent') or {}).get('task')=='full'
-            task_limit=len(value['tasks'])+1 if resource_run else 2*value['intent']['max_calls']+len(value['unit_targets'])+len(value['tasks'])+8 if full_run else MAX_TASKS
-            deadline=started+(max(MAX_SECONDS,task_limit*TASK_SECONDS) if resource_run or full_run else MAX_SECONDS)
+            task_limit=len(value['tasks'])+1 if resource_run else MAX_TASKS
+            deadline=started+(max(MAX_SECONDS,task_limit*TASK_SECONDS) if resource_run else MAX_SECONDS)
             for _ in range(task_limit):
                 if cancelled(): raise Cancelled()
                 if time.monotonic()>deadline: raise RunError('timeout','Analysis reached its time limit. Retry to finish remaining tasks')
@@ -3249,15 +3066,8 @@ def run(run_id, executor=None):
                 with locked():
                     value=read(run_id)
                     value.update(tasks=plan['tasks'],blocked=plan['blocked'],skipped=plan['skipped']);write(value)
-                if not plan['tasks'] and full_run and not value['intent'].get('only') and not value.get('catalog_refreshed') and not plan['blocked']:
-                    # The saved map and structure may have introduced screens and programs the frozen catalog did not know; they are listed, not asked.
-                    with locked():
-                        value=read(run_id)
-                        if value['cancel_requested']: raise Cancelled()
-                        fresh=_unit_catalogs(value,plan)
-                        value['units'].update(fresh);value.update(catalog_refreshed=True);write(value)
                 if not plan['tasks']:
-                    if value.get('unavailable_resources') and not full_run:
+                    if value.get('unavailable_resources'):
                         raise RunError('analysis_blocked','Saved all eligible resource explanations; '+str(len(value['unavailable_resources']))+' resource scopes had no eligible source evidence')
                     if plan['blocked']: raise RunError('analysis_blocked','Some analysis is blocked: '+str(plan['blocked'][0].get('reason','Review project settings')))
                     with locked():
@@ -3272,13 +3082,6 @@ def run(run_id, executor=None):
                 task=plan['tasks'][0]
                 if resource_run and len(value['resource_targets'])>=RESOURCE_PACK_SIZE:
                     targets=[t['target'] for t in plan['tasks'][:SIMPLE_RESOURCE_PACK_SIZE] if t['repository']==task['repository']]
-                    if len(targets)>1:task={**task,'pack_targets':targets}
-                elif full_run and task.get('target'):
-                    # The same grouping the call limit was counted with: path groups four at a time, other units by sample bytes.
-                    sample={u.get('resource') or u['id']:u.get('sample') for u in value['units'][task['repository']]['units']}
-                    ahead=[(t['target'],t.get('unit_kind') or 'route',sample.get(t['target']) or UNIT_UNKNOWN)
-                           for t in plan['tasks'] if t['repository']==task['repository'] and t.get('target')]
-                    targets=_packs(ahead)[0]
                     if len(targets)>1:task={**task,'pack_targets':targets}
                 request=_request(value,task)
                 args=request['record_arguments']
@@ -3299,12 +3102,7 @@ def run(run_id, executor=None):
                 try:
                     result=generate(value,task,request,executor,cancelled,deadline,check,blobs)
                 except RunError as error:
-                    if full_run and task['task'] in MAP_TASKS and error.code not in FATAL_CODES:
-                        _close_stage(run_id,task,error,cancelled);continue
-                    if full_run and task.get('target') and error.code=='invalid_result':
-                        _record_unit_failures(run_id,task['repository'],task.get('pack_targets') or [task['target']],str(error),cancelled)
-                        continue
-                    if not (resource_run or full_run) or error.code!='scope_unavailable':raise
+                    if not resource_run or error.code!='scope_unavailable':raise
                     with locked():
                         value=read(run_id)
                         if value['cancel_requested']:raise Cancelled()
@@ -3329,9 +3127,7 @@ def run(run_id, executor=None):
                             value.setdefault(store_name,{}).setdefault(rid,{})[target]={'repository':rid,**value['pins'][rid],**overview}
                             value['completed_tasks'].append({'repository':rid,'task':'overview','target':target})
                         value.update(state='running',current_task=None);write(value)
-                        if packed.get('invalid_scopes') and full_run:
-                            _note_unit_failures(value,rid,packed['invalid_scopes'],'Result did not match its own evidence');write(value)
-                        elif packed.get('invalid_scopes'):raise InvalidClaim('Some resource results did not match their own evidence; verified resources were saved')
+                        if packed.get('invalid_scopes'):raise InvalidClaim('Some resource results did not match their own evidence; verified resources were saved')
                         continue
                     if task['task']=='overview':
                         rid=task['repository']
@@ -3339,11 +3135,7 @@ def run(run_id, executor=None):
                         if task.get('target'):value.setdefault('unit_overviews' if _is_unit(value,rid,task['target']) else 'scope_overviews',{}).setdefault(rid,{})[task['target']]=overview
                         else:value.setdefault('overviews',{})[rid]=overview
                     else:
-                        try:_save(task,request,result)
-                        except ValueError as error:
-                            if not full_run:raise
-                            value.setdefault('stage_unavailable',[]).append({'repository':task['repository'],'task':task['task'],'code':'invalid_result','reason':str(error)[:300]})
-                            value.update(state='running',current_task=None,batch_progress=None);write(value);continue
+                        _save(task,request,result)
                         if scope_key:shutil.rmtree(_checkpoints()/scope_key,ignore_errors=True)
                         done=(value.get('partial_results',{}).get(task['repository']) or {}).get(task['task'])
                         if done:done.update(state='published',items=[])
