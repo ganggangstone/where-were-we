@@ -429,7 +429,7 @@ Object.assign(UI_EN,{'워크스페이스 패키지':'Workspace packages','내부
 Object.assign(UI_EN,{'영역 AI 설명 (베타)':'Area AI explanations (beta)','저장된 설명':'Saved explanation','경로 영역':'Path area','모든 경로':'All paths'});
 Object.assign(UI_EN,{"표시 버전":"Map version","이 코드만 · 서버 연결 유지":"This code only · server links kept","코드 간 서버 연결 가능":"Code can link to servers","확인된 길 없음 · 직접 주소로 열리거나 미연결":"No links found · direct URL or unconnected","코드·지도 유지":"Code and map kept","Claude Code 분석 또는 AI 요청":"Claude Code analysis or AI request"});
 Object.assign(UI_EN,{'베타':'Beta','자동 분석':'Automatic analysis','AI 채팅에 요청':'Ask in your AI chat','요금·한도: 연결한 AI':'Rates and limits: your AI'});
-Object.assign(UI_EN,{'분석하기':'Analyze','「분석하기」가 서비스 구성을 만든다.':'「Analyze」 builds the architecture.','코드가 부름':'Code calls','같은 파일을 다른 버전으로 씀':'Uses another version of the same file','읽기 규칙':'reading rules','읽은 언어 없음':'No language read','JS/TS 상대 경로 import·재내보내기':'JS/TS relative imports and re-exports','이 코드에서 화면(페이지 주소)을 찾지 못했다.':'No screens (page addresses) were found in this code.','화면을 기능 묶음으로 나누지 않았다. 「분석하기」가 묶음을 만든다.':'Screens are not grouped into features yet. 「Analyze」 makes the groups.','이 코드에서 화면을 찾지 못해 묶을 화면이 없다.':'No screens were found in this code, so there is nothing to group.','이 코드에서 데이터 모델이나 테이블을 찾지 못했다.':'No data models or tables were found in this code.'});
+Object.assign(UI_EN,{'화면 수':'Screens','서버 기능 수':'Server functions','자세한 목록':'Detailed lists','로컬에서 읽은 코드 구성이다. 「분석하기」가 이름과 서비스 구성을 더한다.':'Code layout read locally. 「Analyze」 adds names and the service architecture.','분석하기':'Analyze','「분석하기」가 서비스 구성을 만든다.':'「Analyze」 builds the architecture.','코드가 부름':'Code calls','같은 파일을 다른 버전으로 씀':'Uses another version of the same file','읽기 규칙':'reading rules','읽은 언어 없음':'No language read','JS/TS 상대 경로 import·재내보내기':'JS/TS relative imports and re-exports','이 코드에서 화면(페이지 주소)을 찾지 못했다.':'No screens (page addresses) were found in this code.','화면을 기능 묶음으로 나누지 않았다. 「분석하기」가 묶음을 만든다.':'Screens are not grouped into features yet. 「Analyze」 makes the groups.','이 코드에서 화면을 찾지 못해 묶을 화면이 없다.':'No screens were found in this code, so there is nothing to group.','이 코드에서 데이터 모델이나 테이블을 찾지 못했다.':'No data models or tables were found in this code.'});
 const UI_PATTERN = new RegExp(Object.keys(UI_EN).sort((a, b) => b.length - a.length).map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'g');
 function tr(text) { return S.lang === 'en' ? String(text).replace(UI_PATTERN, match => UI_EN[match]) : String(text); }
 function ui(parts, ...values) { return parts.reduce((out, part, i) => out + tr(part) + (i < values.length ? values[i] : ''), ''); }
@@ -1592,7 +1592,7 @@ function savedScopeButton(resource) {
 }
 function standaloneRoutes(flow) {
   const identity=(r,path)=>JSON.stringify([r.method,path,r.server.file,r.server.line]);
-  const linked=new Set(flow.connections.map(row=>identity(row,row.server_path || row.path)));
+  const linked=new Set((bareGroups(flow)?[]:flow.connections).map(row=>identity(row,row.server_path || row.path)));
   return flow.registered_routes.filter(row=>!linked.has(identity(row,row.path)));
 }
 const ROUTES_PER_PAGE=8;
@@ -1647,8 +1647,10 @@ function registeredRoutesView(flow,state,evidence) {
   const controls=pages>1?`<div class="ctl"><button class="btn quiet" data-route-page="${page-1}" ${page===0?'disabled':''}>${tr('이전')}</button><span>${page+1} / ${pages}</span><button class="btn quiet" data-route-page="${page+1}" ${page+1===pages?'disabled':''}>${tr('다음')}</button></div>`:'';
   return `<details class="sect" id="registeredRoutes" ${state.routesOpen?'open':''}><summary>${tr('서버 경로 (베타)')} · ${routes.length}</summary>${picker}${explainArea}${list}${controls}${capped?`<div class="s">${tr('저장된 경로')} ${flow.registered_routes.length}/${flow.coverage.routes}</div>`:''}</details>`;
 }
+// 화면 동작이 하나도 없는 기능 묶음은 서버 경로 이름만 되풀이한다. 그 경로는 서버 경로 목록에 둔다.
+const bareGroups=flow=>!!flow?.feature_groups?.length && !flow.feature_groups.some(group=>group.connection_indexes.some(i=>flow.connections[i]?.actions?.length));
 function serviceFlowView(flow,state,evidence) {
-  if(!flow)return '';
+  if(!flow || bareGroups(flow))return '';
   const {connections,coverage:counts}=flow;
   if(!connections.length && !counts.requests && !counts.routes)return '';
   const features=[];
@@ -1900,8 +1902,9 @@ function bindStructureIndex() {
   graph.querySelectorAll('[data-url]').forEach(a=>{if(a.tagName==='A')a.href=a.dataset.url;a.onclick=e=>{e.preventDefault();e.stopPropagation();invoke('open_url',{url:a.dataset.url});};});
 }
 function sysView(m) {
-  const y = S.system;
-  if ((m.structure_index || m.structure_indexes?.length) && !y?.nodes?.length && !y?.externals?.length && !y?.unknown?.length && !y?.others?.length) {
+  let y = S.system; const local = shownSystem(m) !== y;
+  if (local) y = shownSystem(m);
+  else if ((m.structure_index || m.structure_indexes?.length) && !y?.nodes?.length && !y?.externals?.length && !y?.unknown?.length && !y?.others?.length) {
     return `<div class="ctl">${proposalSwitch()}<span class="s">${tr('「분석하기」가 서비스 구성을 만든다.')}</span></div>`;
   }
   if (!y) return ui`<div class="hint">서비스 구성이 아직 없습니다.<br><br>「분석하기」가 서비스 구성을 만든다.</div>`; const stale = y.checked && m.commit && !m.commit.startsWith(y.checked);
@@ -1911,8 +1914,9 @@ function sysView(m) {
   const samples = [LINKS.some(l => l.style !== 'copy') ? ['calls', '코드가 부름'] : null, LINKS.some(l => l.style === 'copy') ? ['shared', '같은 파일을 다른 버전으로 씀'] : null].filter(Boolean);
   let h = `<div class="legend"><span>${tr('구성 요소')} <b class="strong">${y.nodes.filter(n => n.kind !== 'user').length}</b>${y.externals.length ? ` · ${tr('바깥 서비스')} <b class="strong">${y.externals.length}</b>` : ''}</span>
     ${samples.length ? lineLegend(samples) : ''}${locked ? `<span class="s">🔒 ${tr(NEED.ops)}</span>` : ''}
-    ${proposalSwitch()}<span class="spacer"></span>${stale ? tr('<span class="pill warn">지도와 기준 커밋이 다름</span>') : ''}</div>`;
-  h += `<div class="sysrow"><div class="graph" id="sys">${WIRES}`;
+    ${proposalSwitch()}${local ? `<span class="s" data-local-system>${tr('로컬에서 읽은 코드 구성이다. 「분석하기」가 이름과 서비스 구성을 더한다.')}</span>` : ''}<span class="spacer"></span>${stale ? tr('<span class="pill warn">지도와 기준 커밋이 다름</span>') : ''}</div>`;
+  // 선이 없는 로컬 그림은 상자를 창 폭에 맞춰 줄지어 놓는다.
+  h += local && !LINKS.length ? '<div class="sysrow"><div class="flat" id="sys">' : `<div class="sysrow"><div class="graph" id="sys">${WIRES}`;
   for (const n of y.nodes) {
     const o = ORIGIN[n.origin]; const lock = (n.unknown || []).some(u => u.needs === 'ops');
     h += `<div class="card node ${n.kind} ${n.id === S.node ? 'sel' : ''} ${S.node && !near.has(n.id) && n.id !== S.node ? 'dim' : ''}" data-node="${esc(n.id)}" data-w="${esc(n.id)}"><div class="nm">${esc(n.name)}${lock ? ' 🔒' : ''}</div>
@@ -1921,11 +1925,50 @@ function sysView(m) {
   h += '</div>' + (y.externals.length ? ui`<div class="fcol extcol"><div class="zone">바깥 서비스 ${y.externals.length}</div>` : '<div>');
   y.externals.forEach((x, i) => { const users = y.nodes.filter(n => (n.uses || []).includes(x.id));
     h += ui`<div class="card node external ${S.node && !users.some(n => n.id === S.node) ? 'dim' : ''}"><div class="nm">${esc(x.name)}</div><div class="s">${esc(x.what)}</div><div class="s">쓰는 곳: ${users.map(n => esc(n.name)).join(', ') || tr('없음')}</div></div>`; });
-  h += ui`</div></div><div class="sect"><h4>선 ${LINKS.length}개</h4><div class="group">` + LINKS.map((l, i) => { const a = y.nodes.find(n => n.id === l.from), b = y.nodes.find(n => n.id === l.to);
-    return `<div class="row ${S.node && l.from !== S.node && l.to !== S.node ? 'dim' : ''}"><span class="wn inline">${i + 1}</span><div class="grow"><div class="tw"><b class="strong">${esc(a.name)} → ${esc(b.name)}</b> ${esc(linkLabel(l))}</div></div>${l.sure === 'doc' ? tr('<span class="pill">문서로만 확인</span>') : l.sure === 'calc' ? tr('<span class="pill">사본 비교로 계산</span>') : ''}${l.ev?.[0]?.origin === 'cited' ? `<span class="pill">${tr('관련 코드')}</span>` : ''}${evHtml(m, l.ev)}</div>`; }).join('') + ui`</div></div>
-    <div class="sect"><h4>지도 밖의 구성 요소</h4><div class="group">` + y.others.map(o => `<div class="row"><div class="grow"><div class="tw"><b class="strong">${esc(o.name)}</b> ${esc(o.what)}</div></div>${evHtml(m, o.ev)}</div>`).join('') + (y.others.length ? '' : tr('<div class="row"><div class="grow empty">없음</div></div>')) + `</div></div>`;
+  h += '</div></div>'; if (local && !LINKS.length) return h;
+  h += ui`<div class="sect"><h4>선 ${LINKS.length}개</h4><div class="group">` + LINKS.map((l, i) => { const a = y.nodes.find(n => n.id === l.from), b = y.nodes.find(n => n.id === l.to);
+    return `<div class="row ${S.node && l.from !== S.node && l.to !== S.node ? 'dim' : ''}"><span class="wn inline">${i + 1}</span><div class="grow"><div class="tw"><b class="strong">${esc(a.name)} → ${esc(b.name)}</b> ${esc(linkLabel(l))}</div></div>${l.sure === 'doc' ? tr('<span class="pill">문서로만 확인</span>') : l.sure === 'calc' ? tr('<span class="pill">사본 비교로 계산</span>') : ''}${l.ev?.[0]?.origin === 'cited' ? `<span class="pill">${tr('관련 코드')}</span>` : ''}${evHtml(m, l.ev)}</div>`; }).join('') + '</div></div>';
+  if (local) return h;
+  h += ui`<div class="sect"><h4>지도 밖의 구성 요소</h4><div class="group">` + y.others.map(o => `<div class="row"><div class="grow"><div class="tw"><b class="strong">${esc(o.name)}</b> ${esc(o.what)}</div></div>${evHtml(m, o.ev)}</div>`).join('') + (y.others.length ? '' : tr('<div class="row"><div class="grow empty">없음</div></div>')) + `</div></div>`;
   return h;
 }
+// AI 구성이 없을 때 보여 줄 로컬 그림: 연결한 코드마다(코드가 하나면 최상위 폴더마다) 상자 하나.
+// 선은 지정한 서버로 가는 고정 주소 요청(여러 코드)이나 폴더 사이 import(코드 하나)만 긋는다.
+function localSystem(m) {
+  if (m._local !== undefined) return m._local;
+  const indexes = m.structure_indexes || (m.structure_index ? [m.structure_index] : []);
+  const screens = prefix => (m.screens || []).filter(s => s.file?.startsWith(prefix)).length;
+  const fact = (screenCount, routes, count) => [[tr('화면 수'), screenCount], [tr('서버 기능 수'), routes], [tr('파일 수'), count]].filter(([, n]) => n).map(([k, n]) => k + ' ' + n.toLocaleString()).join(' · ');
+  const joined = new Map(), join = (from, to, label, ev) => { const l = joined.get(from + '>' + to) || joined.set(from + '>' + to, { from, to, labels: [], ev: [] }).get(from + '>' + to); l.labels.push(label); if (l.ev.length < 3) l.ev.push(ev); };
+  let nodes = [], configured = [];
+  if (indexes.length > 1) {
+    nodes = indexes.map(index => ({ id: index.repository, name: connectionDisplayName(index.repository), kind: 'program',
+      what: fact(screens(index.repository + '/'), index.service_flow?.coverage?.routes || 0, (m.inventories || []).find(row => row.repository === index.repository)?.files ?? index.files.length) }));
+    for (const row of m.cross_repository_connections || []) join(row.client.repository, row.server.repository, row.method + ' ' + row.path, { file: row.client.repository + '/' + row.client.file, line: row.client.line });
+    // 지정한 서버인데 코드에서 맞는 요청을 찾지 못한 쌍은 project.py 의 「지정한 서버 연결」 선을 그대로 둔다.
+    const repo = id => (S.system?.nodes || []).find(n => n.id === id)?.repository;
+    configured = (S.system?.links || []).map(l => ({ ...l, from: repo(l.from), to: repo(l.to) })).filter(l => l.from && l.to && !joined.has(l.from + '>' + l.to));
+  } else if (indexes.length) {
+    // 상자는 Git 추적 파일 전체를 폴더로 나누고, 언어·import 는 읽은 소스 파일에서 가져온다.
+    const index = indexes[0], q = file => index.repository ? index.repository + '/' + file : file, read = new Map(index.files.map(f => [f.file, f]));
+    const paths = (m.inventories || [m.inventory]).find(row => row && (row.repository || '') === (index.repository || ''))?.paths;
+    const files = (paths || index.files.map(f => f.file)).filter(path => !path.split('/').some(part => part.startsWith('.'))).map(path => read.get(path) || { file: path });
+    let depth = 1; const top = file => file.split('/').slice(0, -1).slice(0, depth).join('/') || '/';
+    // 모든 파일이 한 폴더 아래 있으면 한 단계 더 내려가 나눈다.
+    while (depth < 4 && new Set(files.map(f => top(f.file))).size === 1 && files.some(f => f.file.split('/').length > depth + 1)) depth++;
+    const groups = new Map(); for (const f of files) (groups.get(top(f.file)) || groups.set(top(f.file), []).get(top(f.file))).push(f);
+    // ponytail: 파일이 많은 폴더 12개만 그린다. 더 필요하면 폴더를 접어 펼치는 그림으로 바꾼다.
+    const kept = new Set([...groups.keys()].sort((a, b) => groups.get(b).length - groups.get(a).length).slice(0, 12));
+    const routes = index.service_flow?.registered_routes || [];
+    nodes = [...kept].map(dir => ({ id: 'dir:' + dir, name: dir === '/' ? dir : dir + '/', kind: 'program', what: fact(screens(q(dir === '/' ? '' : dir + '/')), routes.filter(r => r.server && top(r.server.file) === dir).length, groups.get(dir).length) }));
+    for (const l of index.imports) { const a = top(l.file), b = top(l.target); if (a !== b && kept.has(a) && kept.has(b)) join('dir:' + a, 'dir:' + b, 'import', { file: q(l.file), line: l.line }); }
+  }
+  const links = [...joined.values()].map(l => ({ from: l.from, to: l.to, ev: l.ev, label: l.labels[0] === 'import' ? 'import ' + l.labels.length : l.labels[0] + (l.labels.length > 1 ? ' +' + (l.labels.length - 1) : '') }));
+  links.push(...configured);
+  return m._local = nodes.length ? { nodes, links, externals: [], others: [], unknown: [] } : null;
+}
+// 분석 전 코드는 project.py 가 자리 상자(kind repository)만 둔다. 그때는 로컬 그림을 보여 준다.
+const shownSystem = m => { const y = S.system; return !y?.nodes?.some(n => n.kind !== 'repository') && !y?.externals?.length && !y?.unknown?.length && !y?.others?.length && localSystem(m) || y; };
 function sysInspector(m) {
   const y = S.system; if (!y || (m.structure_index || m.structure_indexes?.length) && !y.nodes.length && !y.unknown?.length) return '';
   const n = y.nodes.find(x => x.id === S.node);
@@ -1951,7 +1994,7 @@ function sysInspector(m) {
 }
 // 상자 위치를 재서 선과 번호를 얹는다. 위치는 화면 크기에 따라 달라져 여기서만 계산한다.
 function drawWires() {
-  const box = $('sys'); const links = S._wires; if (!box || !links || !box.getBoundingClientRect) return; const o = box.getBoundingClientRect(); const svg = $('wires');
+  const box = $('sys'); const links = S._wires; if (!box || !links || !box.getBoundingClientRect) return; const o = box.getBoundingClientRect(); const svg = $('wires'); if (!svg) return;
   const rect = (id) => { const r = box.querySelector(`[data-w="${id}"]`).getBoundingClientRect(); return { x: r.left - o.left, y: r.top - o.top, w: r.width, h: r.height }; };
   const edge = (r, tx, ty) => { const cx = r.x + r.w / 2, cy = r.y + r.h / 2, dx = tx - cx, dy = ty - cy; const k = Math.min(dx ? Math.abs(r.w / 2 / dx) : Infinity, dy ? Math.abs(r.h / 2 / dy) : Infinity); return [cx + dx * k, cy + dy * k]; };
   box.querySelectorAll('.wn, .wn-label').forEach(e => e.remove()); svg.querySelectorAll('line, path.wire').forEach(e => e.remove());
@@ -2272,11 +2315,13 @@ function render() {
   let components=sys?sysView(m):'';
   // 결과가 먼저다: 서비스 구성 그림과 선 목록, 그다음 모듈 연결, 맨 아래에 접힌 파일 목록.
   // 기능 흐름이 있는 코드는 그 흐름이 결과라서 앞에 두고 구성 요소를 접는다.
-  const featureFlow=sys && (m.structure_indexes || [m.structure_index]).some(index=>index?.service_flow?.feature_groups?.length);
+  const featureFlow=sys && shownSystem(m)===S.system && (m.structure_indexes || [m.structure_index]).some(index=>index?.service_flow?.feature_groups?.length && !bareGroups(index.service_flow));
   if(featureFlow){
     components=`<details class="sect" id="serviceComponents" ${S.componentsScope===S.moduleGraph?.scope || S.node?'open':''}><summary>${tr('구성 요소')}</summary>${components}</details>`;
   }
-  const sysBody=sys?(featureFlow?structure+components:components+structure)+inventoryView(m):'';
+  // 개발자용 목록은 그림과 선 목록 아래 「자세한 목록」 하나에 접어 둔다.
+  const lists=structure+inventoryView(m),listsOpen=S.listsOpen || S.moduleGraph?.routesOpen || S.inventoryOpen;
+  const sysBody=sys?(featureFlow?structure+components+inventoryView(m):components+(lists?`<details class="sect" id="detailLists" ${listsOpen?'open':''}><summary>${tr('자세한 목록')}</summary>${lists}</details>`:'')):'';
   $('map').innerHTML = searchPanel(m) + (view === 'changes' ? changesView(m) : sys ? sysBody : view === 'focus' ? focusView(m) : view === 'feat' ? featView(m) : storyMap(m)); $('insp').innerHTML = view === 'changes' ? changesInspector(m) : sys ? sysInspector(m) : view === 'focus' ? focusFeatureInspector(m) : view === 'feat' ? featInspector(m) : mapInspector(m);
   S._wires = null;
   if (view === 'focus' && S.focus) { const d = focusData(m); S._wires = d ? [...d.left.map((_, i) => ({ from: 'L' + i, to: 'C', h: true })), ...d.right.map((_, i) => ({ from: 'C', to: 'R' + i, h: true }))] : null; drawWires(); }
@@ -2327,11 +2372,12 @@ function render() {
       render();
     };
   });
+  if($('detailLists'))$('detailLists').ontoggle=e=>{S.listsOpen=e.target.open;};
   if($('serviceComponents'))$('serviceComponents').ontoggle=e=>{
     S.componentsScope=e.target.open?S.moduleGraph?.scope:null;
     if(e.target.open)drawWires();
   };
-  if (sys && S.system) { S._wires = sysLinks(S.system).map((l, i) => ({ ...l, n: i + 1, dim: !!S.node && l.from !== S.node && l.to !== S.node })); drawWires(); document.querySelectorAll('.card[data-node], .row[data-node]').forEach(el => el.onclick = () => { selectProgram(el.dataset.node); });
+  if (sys && shownSystem(m)) { S._wires = sysLinks(shownSystem(m)).map((l, i) => ({ ...l, n: i + 1, dim: !!S.node && l.from !== S.node && l.to !== S.node })); drawWires(); document.querySelectorAll('.card[data-node], .row[data-node]').forEach(el => el.onclick = () => { selectProgram(el.dataset.node); });
     if ($('toMap')) $('toMap').onclick = () => { S.view = 'map'; render(); } }
   const pick=p=>selectScreen(p,view==='focus');
   document.querySelectorAll('[data-scr]').forEach(el => el.onclick = () => pick(el.dataset.scr));

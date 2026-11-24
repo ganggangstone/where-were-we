@@ -1326,13 +1326,39 @@ class Flows(unittest.TestCase):
         self.check(r'''
  S.branchDetails=null;S.system=null;S.proposal=null;S.view='sys';
  M().inventories=[{repository:'web',commit:'aaaaaaaa1111',files:2,directories:[['',1],['<sample>',1]]}];render();
- const box=$('map').querySelector('details');
+ const box=$('map').querySelector('[data-inventory]');
  assert(box.querySelector('summary').textContent.includes(tr('Git 추적 파일')+' · 2'),'Tracked file count is visible');
  box.querySelector('summary').click();render();
- const expanded=$('map').querySelector('details[open]');assert(expanded,'Opening survives a renderer update');
+ const expanded=$('map').querySelector('details[data-inventory][open]');assert(expanded,'Opening survives a renderer update');
  assert(expanded.innerText.includes('aaaaaaaa1111') && expanded.innerText.includes(tr('루트 디렉터리')),'The tree is pinned and root files are counted');
  assert(expanded.innerText.includes('<sample>') && !expanded.querySelector('sample'),'Names are escaped');
  assert(!window.calls.some(c=>c.command==='analysis_run_start'),'Inventory needs no model turn');
+''')
+
+    def test_structure_shows_a_local_picture_before_analysis(self):
+        self.check(r'''
+ const idx=(repository,files,imports=[],routes=0)=>({repository,commit:'aaaaaaaa1111',version:1,coverage:{indexed_files:files.length,candidate_files:files.length,languages:{python:{indexed_files:files.length,candidate_files:files.length}}},
+  files:files.map(file=>({file,language:'python',declarations:[]})),imports,service_flow:{connections:[],registered_routes:[],coverage:{routes,requests:0,unresolved_requests:0}}});
+ S.branchDetails=null;S.proposal=null;S.view='sys';
+ // Several codes: one card per code; a matched request between codes is a numbered line with its source line.
+ S.system={nodes:[{id:'web::repository',repository:'web',kind:'repository',name:'[web] web',what:''},{id:'api::repository',repository:'api',kind:'repository',name:'[api] api',what:''}],links:[],externals:[],others:[],unknown:[]};
+ let m=M();delete m._local;m.repositories=[{id:'web',path:'/fictional/web'},{id:'api',path:'/fictional/api'}];
+ m.structure_indexes=[idx('web',['ui/app.py']),idx('api',['srv/main.py'],[],3)];m.inventories=[{repository:'web',commit:'aaaaaaaa1111',files:5,paths:['ui/app.py']},{repository:'api',commit:'aaaaaaaa1111',files:7,paths:['srv/main.py']}];
+ m.cross_repository_connections=[{method:'GET',path:'/items',client:{repository:'web',commit:'aaaaaaaa1111',file:'ui/app.py',line:4},server:{repository:'api',commit:'aaaaaaaa1111',file:'srv/main.py',line:9}}];
+ render();
+ const sys=$('sys');assert(sys && sys.querySelectorAll('.card').length===2,'One card per connected code');
+ assert(main().includes(tr('로컬에서 읽은 코드 구성이다. 「분석하기」가 이름과 서비스 구성을 더한다.')),'The sentence says what Analyze adds');
+ assert(sys.innerText.includes(tr('서버 기능 수')+' 3') && sys.innerText.includes(tr('파일 수')+' 7'),'Cards carry plain counts');
+ assert(main().includes('GET /items') && main().includes('app.py:4'),'The line is listed with its source line');
+ const lists=$('detailLists');assert(lists && !lists.open,'Developer lists are folded under one section');
+ assert(lists.querySelector('[data-inventory]') && !$('map').querySelector(':scope > details[data-inventory]'),'File lists sit inside the folded section');
+ // One code: one card per top-level folder, import lines between folders.
+ S.system={...S.system,nodes:[S.system.nodes[0]]};m=M();delete m._local;m.repositories=[{id:'web',path:'/fictional/web'}];m.cross_repository_connections=[];
+ m.structure_indexes=[idx('web',['ui/app.py','core/db.py'],[{file:'ui/app.py',target:'core/db.py',line:2}])];m.inventories=[{repository:'web',commit:'aaaaaaaa1111',files:2,paths:['ui/app.py','core/db.py']}];
+ render();
+ assert($('sys').querySelectorAll('.card').length===2 && $('sys').innerText.includes('ui/') && $('sys').innerText.includes('core/'),'One card per folder');
+ assert(main().includes('import 1'),'An import between folders is a line');
+ assert(!window.calls.some(c=>c.command==='analysis_run_start'),'The picture needs no model turn');
 ''')
 
     def test_structure_choice_resets_per_project_and_matches_app_control(self):
