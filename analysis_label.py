@@ -65,7 +65,8 @@ def summary(catalog, index, description=''):
         if unit['kind'] == 'screen' and unit.get('path'):
             screens.append([ref, unit['path']])
     links = [[refs[a], refs[b], n] for a, row in (catalog.get('links') or {}).items() if a in refs for b, n in row if b in refs]
-    return {'description': (description or '')[:600], 'folders': folders, 'units': units, 'links': links, 'screens': screens}
+    description = description.get('text', '') if isinstance(description, dict) else description if isinstance(description, str) else ''
+    return {'description': description[:600], 'folders': folders, 'units': units, 'links': links, 'screens': screens}
 
 
 def _area(summary_, unit):
