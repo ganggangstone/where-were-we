@@ -1789,6 +1789,7 @@ function structureIndexView(m,includePurpose=true,featuresOnly=false) {
   const boundaries=!coverage.languages?[tr('로컬 Python import')]:[
     present('python')?'Python import':'',
     present('javascript') || present('typescript')?tr('JS/TS 상대 경로 import·재내보내기')+(index.version>=11?' · '+tr('로컬 .cjs require'):''):'',
+    present('html')?'HTML':'',
     present('go')?tr('Go 모듈 내부 import'):'',
     ...Object.keys(counts).filter(name=>!(name in STRUCTURE_LANGUAGES) && present(name)).map(name=>`${esc(languageName(name))} ${tr('읽기 규칙')}`)
   ].filter(Boolean);
