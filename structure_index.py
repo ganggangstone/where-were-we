@@ -21,7 +21,7 @@ from express_routes import app_factories, express_routes, factory_routes
 
 MAX_DIRECTORY_FILES = 128
 MAX_DIRECTORY_BYTES = 4 * 1024 * 1024
-MAX_FILES = 2048
+MAX_FILES = 4096
 MAX_BYTES = 64 * 1024 * 1024
 MAX_FILE_BYTES = 512 * 1024
 MAX_DECLARATIONS = 20_000
