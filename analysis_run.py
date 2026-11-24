@@ -139,8 +139,9 @@ def unit_board(project,repository='',branch='dev',lang='ko',run=None):
     value={'project':project,'branch':branch,'lang':lang,'repository':scope['repository'],'intent':{'task':'full','targets':[]}}
     history=[r for r in _runs() if all(r[k]==scope[k] for k in ('project','lang','branch'))]
     history.sort(key=lambda r:r['created_at'])
-    scopes,_,calls=_full_plan(value,[r for r in history if not run or r['id']!=run['id']],defer=True)
     live=run and run.get('state') in ACTIVE
+    # A live run's own saves are its progress, not results to skip; a finished run's saves count like any other.
+    scopes,_,calls=_full_plan(value,[r for r in history if not live or r['id']!=run['id']],defer=True)
     contexts={}
     repositories=[]
     for rid,full in scopes.items():
@@ -851,6 +852,7 @@ def status(run_id=None, project=None, repository='', branch='dev', lang='ko',vie
                      (repository in v.get('scope_overviews',{}) or repository in v.get('overviews',{}))]
         if not matches:return None
         selected=max(matches,key=lambda v:v['created_at'])
+        if view=='latest':return {'id':selected['id'],'state':selected['state']}
         # A later attempt can fail before it produces its own overview. Keep the
         # latest verified sample per repository accessible across app restarts.
         saved={};scoped={};scope_pins={};contexts={}
@@ -2121,7 +2123,7 @@ def main():
     parser.add_argument('command',choices=('prepare','start','status','cancel','retry','worker','providers','active','repair-structure'))
     parser.add_argument('value',nargs='?');parser.add_argument('--project');parser.add_argument('--run-id')
     parser.add_argument('--repository',default='');parser.add_argument('--branch',default='dev');parser.add_argument('--lang',default='ko')
-    parser.add_argument('--view',choices=('progress','catalog','resource','units','units_quick','unit','signals'));parser.add_argument('--resource')
+    parser.add_argument('--view',choices=('progress','catalog','resource','units','units_quick','unit','signals','latest'));parser.add_argument('--resource')
     parser.add_argument('--intent',type=json.loads);parser.add_argument('--executor',default='claude');parser.add_argument('--expected-account');parser.add_argument('--apply',action='store_true')
     args=parser.parse_args()
     if args.command=='providers': result=providers()

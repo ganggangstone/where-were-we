@@ -307,6 +307,30 @@ document.hidden=false;listeners.visibilitychange();await flush();await flush();
 assert(calls.filter(c=>c.args && c.args.view==='units').length===before+1 && $('insp').innerHTML.includes('/orders'),'Showing the window loads the board');
 """)
 
+    def test_open_panel_notices_a_run_started_elsewhere_and_shows_its_saved_result(self):
+        self.check_js(self.BOARD + r"""
+serve();status=null;await open();await AnalysisRun.check();await flush();
+assert($('insp').innerHTML.includes('Analyze · 3 calls'),'Idle board before the outside run');
+const full=(state,extra)=>({...runRecord(state),intent:{task:'full',targets:[]},repository:'',...extra});
+status=full('running',{unit_board:unitBoard({announced:{total:3},used:{labeling:1}})});
+await tick();await flush();
+assert(calls.some(c=>c.args && c.args.view==='latest'),'The idle panel reads only the latest run id and state');
+assert($('insp').innerHTML.includes('cancelFullAnalysis') && $('insp').innerHTML.includes('AI calls 1/3'),'The run started elsewhere shows as running');
+status=full('completed',{unit_board:unitBoard({calls:{total:0}})});native=(command,args)=>command==='analysis_run_status'&&args.view==='units'?unitBoard({calls:{total:0}}):undefined;
+for(let i=0;i<3;i++)await tick();
+assert($('insp').innerHTML.includes('Nothing left to analyze') && !$('insp').innerHTML.includes('Analyze · 3 calls'),'After it finishes, the board shows the saved result');
+""")
+
+    def test_a_board_load_for_an_earlier_scope_does_not_block_the_new_one(self):
+        self.check_js(self.BOARD + r"""
+status=null;let hold=true;const pending=[];
+native=(command,args)=>command==='analysis_run_status'&&args.view==='units'?(hold?new Promise(r=>pending.push(r)):unitBoard()):undefined;
+await open();await flush();
+hold=false;S.lang='ko';S.loadToken=2;render();AnalysisRun.open();await flush();await flush();
+pending.forEach(r=>r(unitBoard()));await flush();await flush();
+assert($('insp').innerHTML.includes('/orders'),'The new language loads its own board while the old load is still out');
+""")
+
     def test_account_problem_replaces_the_start_and_zero_detailed_is_not_shown(self):
         self.check_js(self.BOARD + r"""
 const named=()=>({repositories:[{repository:'service',units:[['folder:a','folder','a',2,'named',''],['folder:b','folder','b',2,'local','']]}],totals:{units:2,named:1,local:1},calls:{rules:0,labeling:1,structure:0,unit:0,total:1}});
@@ -442,7 +466,7 @@ await tick();assert($('insp').innerHTML.includes('1/2'),'Completed plus pending 
 assert($('insp').innerHTML.includes('Saving…'),'Saving is visible');
 status=runRecord('completed',{intent,tasks:[],completed_tasks:[{task:'overview'},{task:'briefing'}],current_task:null});
 await tick();assert(reads===1,'Completion reads saved results once');
-assert(timers.size===0,'Completed runs stop polling');
+assert([...timers.values()].every(t=>t.ms>=4000),'Completed runs stop polling; only the slow check for a run started elsewhere stays');
 assert(S.changes===baseline && S.settings===settings && S.chi===3,'Existing read preserves history, comparison and selection');
 assert($('viewAppAnalysis'),'A single-task result keeps its one way to open');
 await AnalysisRun.check();assert(reads===1,'Repeated status does not repeatedly reload results');
@@ -504,7 +528,7 @@ await $('retryAppAnalysis').onclick();await flush();
 assert(count('analysis_run_retry')===1,'Retry is explicit');
 assert(calls.find(c=>c.command==='analysis_run_retry').args.expectedAccount.email===account.email,'Retry pins visible account');
 await $('cancelAppAnalysis').onclick();await flush();assert(AnalysisRun.stateLabel()==='Cancelled','Cancel state is shown');
-assert(timers.size===0,'Cancelled run stops polling');
+assert([...timers.values()].every(t=>t.ms>=4000),'Cancelled run stops polling; only the slow check for a run started elsewhere stays');
 provider={providers:[{provider:'claude',available:true,authenticated:true,account:{...account,email:'new@example.invalid'}}]};
 AnalysisRun.checkAccount();await flush();
 native=(command,args)=>{if(command==='analysis_run_retry')throw JSON.stringify({error:{code:'CLI_ACCOUNT_CHANGED'}});};

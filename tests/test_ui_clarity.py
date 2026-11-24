@@ -63,6 +63,7 @@ try{
   S.agentPurpose='analysis';S.analysisRequest={state:'prepared'};renderAgentPrompt();
   text=visibleText(pane);const visibleButtons=()=>[...pane.querySelectorAll('button')].filter(b=>b.checkVisibility());
   assert(visibleButtons().filter(b=>b.classList.contains('primary')).map(b=>b.id).join()==='cpAgent'&&text.includes(tr('요청 복사')),'One primary copy action');
+  assert(!text.includes(tr('요청 복사됨'))&&text.includes(tr('요청 준비됨 · 복사해 AI 채팅에 붙여넣기')),'No copy is claimed before one happened');
   assert(!pane.querySelector('.request-steps')&&!/[123]\. /.test(text),'No numbered step cards');
   assert(!pane.querySelector('.request-flow'),'The flow is replaced by request status after selection');
   assert(!visibleButtons().some(b=>b.dataset.analysisTask),'Other analyses are collapsed after a request is prepared');

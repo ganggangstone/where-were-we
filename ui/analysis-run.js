@@ -84,7 +84,15 @@ const AnalysisRun = (() => {
   };
   function schedule(token) {
     clearTimeout(timer);
-    if (current(token) && active() && !document.hidden) timer = setTimeout(() => check(), 1500);
+    if (!current(token) || document.hidden) return;
+    if (active()) timer = setTimeout(() => check(), 1500);
+    // While the panel is open, a run started elsewhere (MCP, another window) is noticed by a cheap read of the latest run.
+    else if (shown()) timer = setTimeout(() => peek(token), 4000);
+  }
+  async function peek(token) {
+    let value=null;try{value=decode(await invoke('analysis_run_status',{scope:scope(),view:'latest'}));}catch{}
+    if(!current(token))return;
+    if(value && (value.id!==run?.id || value.state!==run?.state))void check();else schedule(token);
   }
   async function accept(value, token) {
     if (!current(token)) return;
@@ -403,8 +411,9 @@ const AnalysisRun = (() => {
   const unitKey=row=>JSON.stringify([row.repo,row.id]);
   async function loadBoard(token) {
     const requested=boardScopeKey();
-    if(!S.project || loadingBoard)return;
-    loadingBoard=true;boardQuick=null;
+    // A load for an earlier scope (language, reload) must not block this one.
+    if(!S.project || loadingBoard===requested)return;
+    loadingBoard=requested;boardQuick=null;
     // The pinned commit and file counts arrive at once; the units follow as soon as they are calculated.
     if(!liveBoard())paint();
     void invoke('analysis_run_status',{scope:scope(),view:'units_quick'}).then(decode).then(value=>{
@@ -423,7 +432,7 @@ const AnalysisRun = (() => {
         if(ready){value=decode(await invoke('analysis_run_status',{scope:scope(),view:'units'}));if(!current(token))return;if(Array.isArray(value?.repositories))board=value;}
       }
     } catch(value) { if(current(token)){boardScope=requested;board=null;boardError=value;} }
-    finally { loadingBoard=false;boardQuick=null; }
+    finally { if(loadingBoard===requested){loadingBoard=false;boardQuick=null;} }
     if(current(token))paint();
   }
   function unitSummary(b) {
