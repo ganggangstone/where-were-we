@@ -28,6 +28,30 @@ while the run goes on.
 The project-overview call is not part of 「분석하기」. The summary already carries the project description that
 the structure index reads from the README.
 
+「분석하기」 is the only app run that names units, groups screens and builds the service structure. The service
+structure and screen-group views have no buttons of their own; an empty view says that 「분석하기」 in 「AI 지도」
+builds it. The copy-request path for another AI agent (MCP `request_ai_task`) is separate and unchanged.
+
+## Details asked one at a time
+
+Each of these runs only when the user asks for that one thing.
+
+| Detail | Entry point | Calls |
+| --- | --- | --- |
+| Unit explanation | 「AI 설명 · 호출 1회」 on an opened unit card | one call over bounded lines of that unit (`_quick_overview`) |
+| Route explanation | 「AI 설명 (베타)」 on a route in the map (`scope_overview`) | one call over bounded lines of that route (`_quick_overview`) |
+| Path-group explanations | 「영역 AI 설명 (베타)」 in the map (`resources`) | one call per pack of route scopes, at most the confirmed `max_calls` |
+| Action steps (동작 과정) | 「이 동작의 과정 알아보기」 (`steps`) | batches, below |
+| Program jobs (하는 일) | 「이 프로그램이 하는 일 알아보기」 on a program (`jobs`) | batches, below |
+| Change explanation | 「변경 설명 만들기」 (`briefing`) | batches, below |
+
+In `_quick_overview` local code picks the source lines, the model cites integer refs and local code fills file,
+line and quote. Steps, jobs and briefing send their whole input (route handler files, every file in the program's
+code folders, or the collected change evidence). When that input does not fit one call (`MAX_PROMPT_BYTES`), it is
+split into batches. A batch may ask for more pinned source (`needs`) for up to `MAX_READ_ROUNDS` calls. A detail
+reads the local map of the pinned commit and saves through the same checks as the MCP path
+(`ai_extract.task_record`, `briefing.record`).
+
 ## Call count
 
 Before the start, `analysis_run._full_plan` counts the calls. The count is fixed by the summary alone:
