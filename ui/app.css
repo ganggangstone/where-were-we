@@ -222,7 +222,10 @@ details .kv { margin:var(--space-3) var(--space-0) var(--space-0); word-break:br
 .sys.three { grid-template-columns:repeat(3, 1fr) }
 /* 전체 구조: 상자 자리는 dagre 가 잡는다 */
 .sysrow { display:block }
-.flat { display:flex; flex-wrap:wrap; gap:var(--space-4) } .flat .card { width:var(--size-node); margin:var(--space-0) }
+.flat { display:grid; grid-template-columns:repeat(auto-fill,minmax(var(--size-node),1fr)); gap:var(--space-4) } .flat .card { margin:var(--space-0) }
+[data-kind-members] { word-break:keep-all }
+.lead { font:var(--font-heading); color:var(--color-text); margin:var(--space-0) var(--space-0) var(--space-4) }
+.wire.set { stroke-dasharray:var(--space-1) var(--space-2) } .legend-sample.set { border-top-style:dotted }
 .graph { position:relative; flex:none } .graph .card { position:absolute; width:var(--size-node); margin:var(--space-0); z-index:1 }
 .extcol { display:grid; grid-template-columns:repeat(auto-fill, minmax(var(--size-column), 1fr)); gap:var(--space-3); margin-top:var(--space-6) } .extcol .zone { grid-column:1 / -1 }
 .prompt { white-space:pre-wrap; word-break:break-all; background:var(--color-bg-group); border:var(--border-hairline); border-radius:var(--radius-card); padding:var(--space-4); margin-top:var(--space-4); user-select:text }

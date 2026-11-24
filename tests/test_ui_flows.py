@@ -737,7 +737,7 @@ class Flows(unittest.TestCase):
         import shutil
         source=(ROOT/'ui/index.html').read_text();run=(ROOT/'ui/analysis-run.js').read_text()
         code=source[source.index('const UI_EN = {'):source.index('function ui(parts')]
-        strings=['관련 코드','근거','서비스 구성이 아직 없습니다.','「분석하기」가 서비스 구성을 만든다.','분석하기','코드가 부름','같은 파일을 다른 버전으로 씀','읽기 규칙','읽은 언어 없음','JS/TS 상대 경로 import·재내보내기','이 코드에서 화면(페이지 주소)을 찾지 못했다.','이 코드에서 데이터 모델이나 테이블을 찾지 못했다.','이 코드에서 화면을 찾지 못해 묶을 화면이 없다.','일부 설명의 근거 코드가 바뀌었습니다. 「분석하기」로 다시 만든다.']
+        strings=['관련 코드','근거','서비스 구성이 아직 없습니다.','「분석하기」가 서비스 구성을 만든다.','분석하기','코드가 부름','같은 파일을 다른 버전으로 씀','읽기 규칙','읽은 언어 없음','JS/TS 상대 경로 import·재내보내기','이 코드에서 화면(페이지 주소)을 찾지 못했다.','이 코드에서 데이터 모델이나 테이블을 찾지 못했다.','이 코드에서 화면을 찾지 못해 묶을 화면이 없다.','일부 설명의 근거 코드가 바뀌었습니다. 「분석하기」로 다시 만든다.','요청을 보냄','연결 설정에서 지정','코드에서 찾은 연결','가져다 씀','맨 위 폴더','연결한 코드마다 상자 하나다. 선은 한 코드가 다른 코드에 요청을 보내는 곳이다. 「분석하기」를 누르면 AI가 이름과 설명을 붙인다.','이 코드의 파일을 종류별로 나눈 그림이다. 「분석하기」를 누르면 AI가 부분마다 이름과 설명을 붙인다.']
         script=code+f";const S={{lang:'en'}};console.log(JSON.stringify({json.dumps(strings,ensure_ascii=False)}.map(tr)))"
         result=subprocess.run([shutil.which('node'),'-e',script],capture_output=True,text=True,timeout=60)
         self.assertEqual(result.returncode,0,result.stderr)
@@ -1199,10 +1199,10 @@ class Flows(unittest.TestCase):
  S.view='sys';render();
  const text=main();
  if(S.lang==='ko'){assert(!text.includes('Repository · 3 screens') && text.includes('코드 · 화면 3개'),'The generated code box is described in Korean');
-  assert(text.includes('Configured API destination') && text.includes('지정한 서버 연결'),'Only the generated connection label is translated');}
+  assert(text.includes('Configured API destination') && text.includes('요청을 보냄') && text.includes('연결 설정에서 지정'),'Only the generated connection label is translated and says it comes from the connection settings');}
  else assert(text.includes('Code · screens: 3'),'The generated code box is described in English');
  assert(text.includes('Repository · 9 screens'),'User or AI written text is not rewritten');
- $('q').value=tr('지정한 서버 연결');$('q').dispatchEvent(new Event('input'));
+ $('q').value=tr('요청을 보냄');$('q').dispatchEvent(new Event('input'));
  assert(document.querySelector('[data-search-result]'),'Search finds the translated connection label');
  $('q').value='';$('q').dispatchEvent(new Event('input'));
  S.changes={last_refresh:'2026-10-01T00:00:00Z',entries:[{at:'2026-10-01T00:00:00Z',since:'2026-09-24T00:00:00Z',repository:'web',branches:{},prs:[
@@ -1347,17 +1347,25 @@ class Flows(unittest.TestCase):
  m.cross_repository_connections=[{method:'GET',path:'/items',client:{repository:'web',commit:'aaaaaaaa1111',file:'ui/app.py',line:4},server:{repository:'api',commit:'aaaaaaaa1111',file:'srv/main.py',line:9}}];
  render();
  const sys=$('sys');assert(sys && sys.querySelectorAll('.card').length===2,'One card per connected code');
- assert(main().includes(tr('로컬에서 읽은 코드 구성이다. 「분석하기」가 이름과 서비스 구성을 더한다.')),'The sentence says what Analyze adds');
- assert(sys.innerText.includes(tr('서버 기능 수')+' 3') && sys.innerText.includes(tr('파일 수')+' 7'),'Cards carry plain counts');
+ const lead=$('map').querySelector('p.lead[data-local-system]');assert(lead && lead.textContent.includes(tr('「분석하기」')) && !/해요/.test(lead.textContent),'A plain sentence above the picture says what it is and what Analyze adds');
+ assert(sys.innerText.includes(S.lang==='en'?'Server functions 3':'서버 기능 3개') && sys.innerText.includes(S.lang==='en'?'Files 7':'파일 7개'),'Cards carry plain counts');
  assert(main().includes('GET /items') && main().includes('app.py:4'),'The line is listed with its source line');
  const lists=$('detailLists');assert(lists && !lists.open,'Developer lists are folded under one section');
  assert(lists.querySelector('[data-inventory]') && !$('map').querySelector(':scope > details[data-inventory]'),'File lists sit inside the folded section');
- // One code: one card per top-level folder, import lines between folders.
- S.system={...S.system,nodes:[S.system.nodes[0]]};m=M();delete m._local;m.repositories=[{id:'web',path:'/fictional/web'}];m.cross_repository_connections=[];
- m.structure_indexes=[idx('web',['ui/app.py','core/db.py'],[{file:'ui/app.py',target:'core/db.py',line:2}])];m.inventories=[{repository:'web',commit:'aaaaaaaa1111',files:2,paths:['ui/app.py','core/db.py']}];
+ // A line from the connection settings without a matching request in code says so in plain words.
+ S.system.links=[{from:'web::repository',to:'api::repository',label:'Configured API destination',sure:'doc',ev:[]}];m=M();delete m._local;m.cross_repository_connections=[];render();
+ assert(main().includes(tr('요청을 보냄')) && main().includes(tr('연결 설정에서 지정')) && !main().includes(tr('문서로만 확인')),'A configured line names where it comes from');
+ assert(document.querySelector('#sys path.wire.set') && $('map').querySelector('.legend-sample.set'),'Configured lines are drawn and listed apart from lines found in code');
+ // One code: one card per kind of file in plain words, import lines between kinds.
+ S.system={...S.system,nodes:[S.system.nodes[0]],links:[]};m=M();delete m._local;m.repositories=[{id:'web',path:'/fictional/web'}];m.cross_repository_connections=[];
+ const paths=['srv/app.py','srv/jobs.py','models/item.py','web/page.html','README.md','tests/test_app.py','build.gradle','k8s/deploy.yml','.github/ci.yml'];
+ m.structure_indexes=[idx('web',['srv/app.py','srv/jobs.py','models/item.py'],[{file:'srv/app.py',target:'models/item.py',line:2}])];m.inventories=[{repository:'web',commit:'aaaaaaaa1111',files:paths.length,paths}];
  render();
- assert($('sys').querySelectorAll('.card').length===2 && $('sys').innerText.includes('ui/') && $('sys').innerText.includes('core/'),'One card per folder');
- assert(main().includes('import 1'),'An import between folders is a line');
+ const cards=[...$('sys').querySelectorAll('.card')].map(c=>c.querySelector('.nm').textContent);
+ const names=S.lang==='en'?['Screens','Program code','Data','Tests','Documents','Other files']:['화면','프로그램 코드','데이터','테스트','문서','그 밖의 파일'];
+ assert(JSON.stringify(cards)===JSON.stringify(names),'One card per kind of file, config and build files folded into one card: '+cards);
+ assert($('sys').innerText.includes(S.lang==='en'?'Files 3':'파일 3개') && $('sys').innerText.includes('srv') && $('sys').innerText.includes('k8s'),'Cards name their largest folders');
+ assert(main().includes(tr('가져다 씀')+' 1'),'An import between kinds is a line in plain words');
  assert(!window.calls.some(c=>c.command==='analysis_run_start'),'The picture needs no model turn');
 ''')
 
