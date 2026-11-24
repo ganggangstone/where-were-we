@@ -1314,8 +1314,7 @@ class Flows(unittest.TestCase):
  const graph=()=>$('map').querySelector('[data-work-features]');
  assert(S.view==='feat' && graph() && !$('regroup'),'What it does starts from verified local features without empty screen grouping');
  assert(!graph().querySelector('#registeredRoutes')?.open,'The route list starts closed');graph().querySelector('#registeredRoutes').open=true;
- assert(graph().innerText.includes('GET /items') && graph().innerText.includes('tool-0'),'Current map includes both locally registered API and command');
- graph().querySelector('[data-registered-route] summary').click();
+ assert(graph().querySelector('[data-registered-route]').innerText.replace(/\s+/g,' ').includes('GET /items') && graph().innerText.includes('tool-0'),'Current map includes both locally registered API and command');
  assert(graph().innerText.includes('list_items') && graph().innerHTML.includes('api.py:8'),'Handler and evidence can be inspected in place');
  graph().querySelector('[data-cli-page="1"]').click();
  assert(graph().innerText.includes('tool-12') && !$('moduleFile'),'CLI paging keeps the feature-only view');
@@ -1366,6 +1365,9 @@ class Flows(unittest.TestCase):
  assert(JSON.stringify(cards)===JSON.stringify(names),'One card per kind of file, config and build files folded into one card: '+cards);
  assert($('sys').innerText.includes(S.lang==='en'?'Files 3':'파일 3개') && $('sys').innerText.includes('srv') && $('sys').innerText.includes('k8s'),'Cards name their largest folders');
  assert(main().includes(tr('가져다 씀')+' 1'),'An import between kinds is a line in plain words');
+ // Inside the folded section each list is a titled panel with one sentence, and a folder shows how many files it holds.
+ $('detailLists').open=true;const box=$('map').querySelector('[data-inventory]');assert(box.classList.contains('list-panel') && box.querySelector('summary .panel-note').textContent===tr('Git이 관리하는 모든 파일이다. 폴더별 파일 수를 보거나 파일을 열 때 연다.'),'A file list says what it is and when to open it');
+ box.querySelector('summary').click();await new Promise(r=>setTimeout(r,10));const folder=$('map').querySelector('[data-inventory] [data-inventory-dir="srv"]');assert(folder && folder.parentElement.querySelector('[data-folder-files]').textContent==='2','Folders show their file counts');
  assert(!window.calls.some(c=>c.command==='analysis_run_start'),'The picture needs no model turn');
 ''')
 

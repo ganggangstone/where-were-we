@@ -429,7 +429,7 @@ Object.assign(UI_EN,{'워크스페이스 패키지':'Workspace packages','내부
 Object.assign(UI_EN,{'영역 AI 설명 (베타)':'Area AI explanations (beta)','저장된 설명':'Saved explanation','경로 영역':'Path area','모든 경로':'All paths'});
 Object.assign(UI_EN,{"표시 버전":"Map version","이 코드만 · 서버 연결 유지":"This code only · server links kept","코드 간 서버 연결 가능":"Code can link to servers","확인된 길 없음 · 직접 주소로 열리거나 미연결":"No links found · direct URL or unconnected","코드·지도 유지":"Code and map kept","Claude Code 분석 또는 AI 요청":"Claude Code analysis or AI request"});
 Object.assign(UI_EN,{'베타':'Beta','자동 분석':'Automatic analysis','AI 채팅에 요청':'Ask in your AI chat','요금·한도: 연결한 AI':'Rates and limits: your AI'});
-Object.assign(UI_EN,{'맨 위 폴더':'top folder','연결 설정에서 지정':'Set when connecting','코드에서 찾은 연결':'Found in code','가져다 씀':'Uses','연결한 코드마다 상자 하나다. 선은 한 코드가 다른 코드에 요청을 보내는 곳이다. 「분석하기」를 누르면 AI가 이름과 설명을 붙인다.':'Each box is one connected code. A line means one code sends requests to another. 「Analyze」 adds names and explanations.','이 코드의 파일을 종류별로 나눈 그림이다. 「분석하기」를 누르면 AI가 부분마다 이름과 설명을 붙인다.':'This picture sorts the files of this code by kind. 「Analyze」 adds a name and an explanation to each part.','화면 수':'Screens','서버 기능 수':'Server functions','자세한 목록':'Detailed lists','분석하기':'Analyze','「분석하기」가 서비스 구성을 만든다.':'「Analyze」 builds the architecture.','코드가 부름':'Code calls','같은 파일을 다른 버전으로 씀':'Uses another version of the same file','읽기 규칙':'reading rules','읽은 언어 없음':'No language read','JS/TS 상대 경로 import·재내보내기':'JS/TS relative imports and re-exports','이 코드에서 화면(페이지 주소)을 찾지 못했다.':'No screens (page addresses) were found in this code.','화면을 기능 묶음으로 나누지 않았다. 「분석하기」가 묶음을 만든다.':'Screens are not grouped into features yet. 「Analyze」 makes the groups.','이 코드에서 화면을 찾지 못해 묶을 화면이 없다.':'No screens were found in this code, so there is nothing to group.','이 코드에서 데이터 모델이나 테이블을 찾지 못했다.':'No data models or tables were found in this code.'});
+Object.assign(UI_EN,{'서버가 받는 주소 목록이다. 어떤 주소를 어느 파일이 처리하는지 찾을 때 연다.':'Addresses the server accepts. Open it to find which file handles an address.','개발자용: 파일끼리 서로 가져다 쓰는 관계다. 파일을 고치기 전에 어디에 닿는지 볼 때 연다.':'For developers: which files use which. Open it before changing a file to see what it touches.','README 설명과 패키지 정보다. 이 코드가 무엇을 하는지 글로 확인할 때 연다.':'README text and package details. Open it to read what this code does.','Git이 관리하는 모든 파일이다. 폴더별 파일 수를 보거나 파일을 열 때 연다.':'Every file Git tracks. Open it to count files per folder or open a file.','화면 동작과 서버 주소를 이어서 찾은 기능이다. 기능을 누르면 요청이 어디서 시작해 어디로 가는지 보인다.':'Features found by joining screen actions to server addresses. Choose one to see where its request starts and ends.','한 코드가 다른 코드의 서버 주소로 보내는 요청이다.':'Requests one code sends to another code’s server addresses.','맨 위 폴더':'top folder','연결 설정에서 지정':'Set when connecting','코드에서 찾은 연결':'Found in code','가져다 씀':'Uses','연결한 코드마다 상자 하나다. 선은 한 코드가 다른 코드에 요청을 보내는 곳이다. 「분석하기」를 누르면 AI가 이름과 설명을 붙인다.':'Each box is one connected code. A line means one code sends requests to another. 「Analyze」 adds names and explanations.','이 코드의 파일을 종류별로 나눈 그림이다. 「분석하기」를 누르면 AI가 부분마다 이름과 설명을 붙인다.':'This picture sorts the files of this code by kind. 「Analyze」 adds a name and an explanation to each part.','화면 수':'Screens','서버 기능 수':'Server functions','자세한 목록':'Detailed lists','분석하기':'Analyze','「분석하기」가 서비스 구성을 만든다.':'「Analyze」 builds the architecture.','코드가 부름':'Code calls','같은 파일을 다른 버전으로 씀':'Uses another version of the same file','읽기 규칙':'reading rules','읽은 언어 없음':'No language read','JS/TS 상대 경로 import·재내보내기':'JS/TS relative imports and re-exports','이 코드에서 화면(페이지 주소)을 찾지 못했다.':'No screens (page addresses) were found in this code.','화면을 기능 묶음으로 나누지 않았다. 「분석하기」가 묶음을 만든다.':'Screens are not grouped into features yet. 「Analyze」 makes the groups.','이 코드에서 화면을 찾지 못해 묶을 화면이 없다.':'No screens were found in this code, so there is nothing to group.','이 코드에서 데이터 모델이나 테이블을 찾지 못했다.':'No data models or tables were found in this code.'});
 const UI_PATTERN = new RegExp(Object.keys(UI_EN).sort((a, b) => b.length - a.length).map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'g');
 function tr(text) { return S.lang === 'en' ? String(text).replace(UI_PATTERN, match => UI_EN[match]) : String(text); }
 function ui(parts, ...values) { return parts.reduce((out, part, i) => out + tr(part) + (i < values.length ? values[i] : ''), ''); }
@@ -1504,18 +1504,18 @@ function inventoryBrowser(m,row,key,coverage) {
   };
   const state=S.inventoryBrowse?.key===key?S.inventoryBrowse:{dir:'',page:0};
   const prefix=state.dir?state.dir+'/':'';
-  const children=new Map();
+  const children=new Map(),counts=new Map();
   for(const path of row.paths){
     if(!path.startsWith(prefix))continue;
-    const tail=path.slice(prefix.length),slash=tail.indexOf('/');
-    children.set(slash<0?tail:tail.slice(0,slash),slash>=0);
+    const tail=path.slice(prefix.length),slash=tail.indexOf('/'),name=slash<0?tail:tail.slice(0,slash);
+    children.set(name,slash>=0);counts.set(name,(counts.get(name) || 0)+1);
   }
   const entries=[...children.entries()].sort(([a,folderA],[b,folderB])=>Number(folderB)-Number(folderA) || a.localeCompare(b));
   const size=40,pages=Math.ceil(entries.length/size),page=Math.max(0,Math.min(state.page,pages-1));
   const fileUrl=path=>'zed://file'+codeLocation(m,row.repository?row.repository+'/'+path:path).split('/').map(encodeURIComponent).join('/');
   const rows=entries.slice(page*size,(page+1)*size).map(([name,folder])=>{
     const path=prefix+name;
-    if(folder)return `<li><button class="btn quiet mono" data-inventory-dir="${esc(path)}">${esc(name)}/</button> ${badge(path)}</li>`;
+    if(folder)return `<li><button class="btn quiet mono" data-inventory-dir="${esc(path)}">${esc(name)}/</button> <span class="s" data-folder-files>${counts.get(name).toLocaleString()}</span> ${badge(path)}</li>`;
     const url=fileUrl(path);
     const selected=S.inventoryFile?.key===key && S.inventoryFile.file===path;
     const inspect=/\.(py|[mc]?js|jsx|[mc]?ts|tsx|html?|go)$/.test(name)?`<button class="btn quiet" data-inspect-path="${esc(path)}" aria-expanded="${!!selected}">${tr('파일 구조 (베타)')}</button>`:'';
@@ -1539,7 +1539,7 @@ function inventoryView(m) {
     const label=row.repository && rows.length>1 ? connectionDisplayName(row.repository) : '';
     const key=JSON.stringify([S.project,row.repository || '',row.commit]),open=S.inventoryOpen===key;
     const legacyCounts=()=>`<table><thead><tr><th>${tr('최상위 폴더')}</th><th>${tr('파일 수')}</th></tr></thead><tbody>${row.directories.map(([dir,count])=>`<tr><td>${dir?esc(dir):tr('루트 디렉터리')}</td><td>${esc(count)}</td></tr>`).join('')}</tbody></table>`;
-    return `<details class="sect" data-inventory="${esc(key)}" ${open?'open':''}><summary>${esc([label,tr(indexes.some(index=>index.service_flow?.feature_groups?.length)?'파일':'Git 추적 파일'),row.files].filter(x=>x!=='').join(' · '))}</summary>${open?`<p class="mono" title="${esc(row.commit)}">${esc(row.commit.slice(0,12))}</p>${Array.isArray(row.paths)?inventoryBrowser(m,row,key,indexes.find(index=>(index.repository || '')===(row.repository || '') && index.commit===row.commit)?.coverage):legacyCounts()}`:''}</details>`;
+    return `<details class="sect list-panel" data-inventory="${esc(key)}" ${open?'open':''}>${panelHead(esc([label,tr(indexes.some(index=>index.service_flow?.feature_groups?.length)?'파일':'Git 추적 파일')].filter(Boolean).join(' · ')),row.files,'Git이 관리하는 모든 파일이다. 폴더별 파일 수를 보거나 파일을 열 때 연다.')}${open?`<p class="mono" title="${esc(row.commit)}">${esc(row.commit.slice(0,12))}</p>${Array.isArray(row.paths)?inventoryBrowser(m,row,key,indexes.find(index=>(index.repository || '')===(row.repository || '') && index.commit===row.commit)?.coverage):legacyCounts()}`:''}</details>`;
   }).join('');
 }
 function flowActionName(action) {
@@ -1597,7 +1597,7 @@ function standaloneRoutes(flow) {
   const linked=new Set(flow.connections.map(row=>identity(row,row.server_path || row.path)));
   return flow.registered_routes.filter(row=>!linked.has(identity(row,row.path)));
 }
-const ROUTES_PER_PAGE=8;
+const ROUTES_UNGROUPED=16;
 function crossRepositoryView(m,connections,state) {
   if(!connections.length)return '';
   const site=(side,label)=>{
@@ -1609,7 +1609,7 @@ function crossRepositoryView(m,connections,state) {
   const size=8,pages=Math.ceil(connections.length/size),page=Math.min(state.crossPage || 0,pages-1);
   const rows=connections.slice(page*size,(page+1)*size).map(row=>`<details class="sect" data-cross-connection><summary><strong class="mono">${esc(row.method+' '+row.path)}</strong> · ${esc(connectionDisplayName(row.client.repository))} → ${esc(connectionDisplayName(row.server.repository))}</summary>${compactTrace(row)}<p class="s">${tr('지정한 서버와 경로 일치')}</p>${site(row.client,'요청을 보내는 코드')}${site(row.server,'받는 서버 함수')}</details>`).join('');
   const nav=pages>1?`<div class="ctl"><button class="btn quiet" data-cross-page="${page-1}" ${page===0?'disabled':''}>${tr('이전')}</button><span>${page+1} / ${pages}</span><button class="btn quiet" data-cross-page="${page+1}" ${page+1===pages?'disabled':''}>${tr('다음')}</button></div>`:'';
-  return `<section class="sect"><h2>${tr('연결한 코드 간 요청 (베타)')}</h2>${rows}${nav}</section>`;
+  return `<section class="sect"><h2>${tr('연결한 코드 간 요청 (베타)')}</h2><p class="panel-note">${tr('한 코드가 다른 코드의 서버 주소로 보내는 요청이다.')}</p>${rows}${nav}</section>`;
 }
 function registeredRoutesView(flow,state,evidence) {
   if(!flow?.registered_routes?.length)return '';
@@ -1617,9 +1617,8 @@ function registeredRoutesView(flow,state,evidence) {
   const resourceFor=new Map((flow.registered_route_groups || []).flatMap(group=>group.registered_route_indexes.map(i=>[flow.registered_routes[i],group.resource])));
   const capped=flow.coverage.routes>flow.registered_routes.length;
   if(!routes.length && !capped)return '';
-  const size=ROUTES_PER_PAGE;
   const areas=new Map();
-  if(routes.length>size*2){
+  if(routes.length>ROUTES_UNGROUPED){
     for(const route of routes){
       const parts=(resourceFor.get(route) || route.path).split('/').filter(Boolean);
       let depth=parts[0]==='api'?1:0;
@@ -1634,21 +1633,27 @@ function registeredRoutesView(flow,state,evidence) {
   const picker=areas.size>1?`<label class="ctl">${tr('경로 영역')} <select id="routeArea"><option value="">${tr('모든 경로')} · ${routes.length}</option>${[...areas.keys()].sort().map(prefix=>`<option value="${esc(prefix)}" ${prefix===area?'selected':''}>${esc(prefix)} · ${areas.get(prefix).length}</option>`).join('')}</select></label>`:'';
   const resources=area?[...new Set(visible.map(route=>resourceFor.get(route)).filter(Boolean))].sort():[];
   const explainArea=resources.length?`<button class="btn quiet" id="explainRouteArea" data-resources="${esc(JSON.stringify(resources))}">${tr('영역 AI 설명 (베타)')} · ${resources.length}</button>`:'';
-  const pages=Math.ceil(visible.length/size),page=Math.max(0,Math.min(state.routePage || 0,pages-1));
-  const list=visible.slice(page*size,(page+1)*size).map(route=>{
-    const defaults=route.basis==='declared_defaults'?`<small>${tr('설정 기본값')}</small>`:'';
+  // 한 줄에 한 경로: 방식 · 주소 · 받는 함수(읽고 쓰는 데이터) · 코드 위치. 펼칠 것 없이 한 표로 읽는다.
+  const row=route=>{
+    const defaults=route.basis==='declared_defaults'?` <small>${tr('설정 기본값')}</small>`:'';
     const filesystem=route.framework==='next_app_router';
-    const sites=[...(filesystem?[]:[route.server]),...route.mounts || []];
+    const sites=[...(filesystem?[]:[route.server]),...route.mounts || [],...(route.data_steps || []).filter(step=>step.file && step.line)];
     const unique=new Map(sites.map(site=>[JSON.stringify([site.file,site.line]),site]));
     const refs=[...unique.values()].map(site=>evidence(site.file,site.line)).join(' · ');
-    const proof=filesystem?`<div>${tr('Next.js 파일 경로')} · ${evidence(route.server.file,route.server.line)}</div>${refs?`<div class="s">${tr('패키지·설정')} · ${refs}</div>`:''}`:refs;
+    const where=filesystem?`<span class="s">${tr('Next.js 파일 경로')}</span> ${evidence(route.server.file,route.server.line)}${refs?` · <span class="s">${tr('패키지·설정')}</span> ${refs}`:''}`:refs;
+    const models=[...new Set((route.data_steps || []).filter(step=>step.model && ['read','write'].includes(step.operation)).map(step=>step.model+' · '+tr(step.operation==='read'?'읽기':'쓰기')))];
     const resource=resourceFor.get(route);
     const explain=resource?`<button class="btn quiet" data-explain-route="${esc(resource)}">${tr('AI 설명 (베타)')}</button>`:'';
-    return `<details class="sect" data-registered-route="${esc(resource || '')}"><summary><strong class="mono">${esc(route.method+' '+route.path)}</strong> ${defaults}${savedScopeButton(resource)}</summary>${compactTrace(route)}<details><summary>${tr('근거')}</summary>${proof}${flowDataSteps(route.data_steps,evidence)}</details>${explain}</details>`;
-  }).join('');
-  const controls=pages>1?`<div class="ctl"><button class="btn quiet" data-route-page="${page-1}" ${page===0?'disabled':''}>${tr('이전')}</button><span>${page+1} / ${pages}</span><button class="btn quiet" data-route-page="${page+1}" ${page+1===pages?'disabled':''}>${tr('다음')}</button></div>`:'';
-  return `<details class="sect" id="registeredRoutes" ${state.routesOpen?'open':''}><summary>${tr('서버 경로 (베타)')} · ${routes.length}</summary>${picker}${explainArea}${list}${controls}${capped?`<div class="s">${tr('저장된 경로')} ${flow.registered_routes.length}/${flow.coverage.routes}</div>`:''}</details>`;
+    return `<tr data-registered-route="${esc(resource || '')}"><td class="mono">${esc(route.method)}</td><td class="mono">${esc(route.path)}${defaults}</td><td>${route.server.function?`<code data-trace-stage="server">${esc(route.server.function)}</code>`:''}${models.length?` <code data-trace-stage="data">${esc(models.join(', '))}</code>`:''}</td><td>${where}</td><td>${savedScopeButton(resource)}${explain}</td></tr>`;
+  };
+  const table=list=>`<table class="route-table"><tbody>${list.map(row).join('')}</tbody></table>`;
+  // 경로가 많으면 앞 주소 구간으로 묶고, 묶음을 열면 그 경로들이 나온다.
+  const grouped=areas.size>1 && !area;
+  const list=grouped?`<div class="route-areas">${[...areas.keys()].sort().map(prefix=>`<details class="route-area" data-route-area="${esc(prefix)}"><summary><span class="mono">${esc(prefix)}</span> · ${areas.get(prefix).length}</summary>${table(areas.get(prefix))}</details>`).join('')}</div>`:table(visible);
+  return `<details class="sect list-panel" id="registeredRoutes" ${state.routesOpen?'open':''}>${panelHead('서버 경로 (베타)',routes.length,'서버가 받는 주소 목록이다. 어떤 주소를 어느 파일이 처리하는지 찾을 때 연다.')}${picker}${explainArea}${list}${capped?`<div class="s">${tr('저장된 경로')} ${flow.registered_routes.length}/${flow.coverage.routes}</div>`:''}</details>`;
 }
+// 자세한 목록 안의 칸 제목: 이름 · 개수, 그 아래 무엇이고 언제 여는지 한 문장.
+const panelHead=(title,count,sentence)=>`<summary><strong>${tr(title)}</strong>${count===''?'':' · '+(typeof count==='number'?count.toLocaleString():count)}<span class="panel-note">${tr(sentence)}</span></summary>`;
 function serviceFlowView(flow,state,evidence) {
   if(!flow)return '';
   const {connections,coverage:counts}=flow;
@@ -1677,7 +1682,7 @@ function serviceFlowView(flow,state,evidence) {
     const description=actions.length?actions.join(' · '):[...new Set(members.map(edge=>edge.method))].join(' · ');
     return `<button class="btn quiet" data-local-resource="${esc(group.resource)}" aria-expanded="${group===resource}"><strong>${esc(group.resource)}</strong>${group===resource?'':' · '+esc(description)}</button>${savedScopeButton(group.resource)}`;
   }).join('');
-  const groupHeader=cards?`<div class="flow-header"><h2>${tr('기능 (베타)')}</h2><div class="ctl">${cards}</div></div>`:'';
+  const groupHeader=cards?`<div class="flow-header"><div><h2>${tr('기능 (베타)')}</h2><p class="panel-note">${tr('화면 동작과 서버 주소를 이어서 찾은 기능이다. 기능을 누르면 요청이 어디서 시작해 어디로 가는지 보인다.')}</p></div><div class="ctl">${cards}</div></div>`:'';
   if(groups.length && !resource)return `<section class="sect ${cards?'resource-flow':''}" data-http-flow>${groupHeader}</section>`;
   const conditional=link?.basis==='declared_defaults';
   const template=link?.basis==='path_template';
@@ -1789,9 +1794,9 @@ function structureIndexView(m,includePurpose=true,featuresOnly=false) {
   const metadata=`${includePurpose?purposeView(m,index):''}${status}`;
   const docs=readmeFeaturesView(index,evidence);
   if(featuresOnly)return `<section class="sect" id="moduleGraph" data-work-features>${indexes.length>1?repoControl:''}${http}${cli}${docs}</section>`;
-  const modules=`<details id="moduleDetails" ${state.moduleOpen?'open':''}><summary>${tr('모듈 연결 (베타)')}</summary>`;
-  const heading=resourceMap?`${indexes.length>1?repoControl:''}${http}${cli}<details class="sect" id="flowSources" ${state.sourcesOpen?'open':''}><summary>${tr('문서·모듈')}</summary>${includePurpose?purposeView(m,index):''}${indexes.length>1?commit:status}${workspace}${docs}${modules}`:`${metadata}${workspace}${cli}${http}${docs}${modules}`;
-  const end='</details>'+(resourceMap?'</details>':'');
+  const modules=`<details class="sect list-panel" id="moduleDetails" ${state.moduleOpen?'open':''}>${panelHead('모듈 연결 (베타)','','개발자용: 파일끼리 서로 가져다 쓰는 관계다. 파일을 고치기 전에 어디에 닿는지 볼 때 연다.')}`;
+  const heading=resourceMap?`${indexes.length>1?repoControl:''}${http}${cli}<details class="sect list-panel" id="flowSources" ${state.sourcesOpen?'open':''}>${panelHead('문서·모듈','','README 설명과 패키지 정보다. 이 코드가 무엇을 하는지 글로 확인할 때 연다.')}${includePurpose?purposeView(m,index):''}${indexes.length>1?commit:status}${workspace}${docs}</details>${modules}`:`${metadata}${workspace}${cli}${http}${docs}${modules}`;
+  const end='</details>';
   // 확인 범위는 이 코드에 실제로 있는 언어의 읽는 방식만 적는다. 읽기 규칙으로 읽은 언어도 이름을 적는다.
   const present=name=>counts[name]?.candidate_files>0;
   const boundaries=!coverage.languages?[tr('로컬 Python import')]:[
@@ -1855,8 +1860,7 @@ function bindStructureIndex() {
     const area={repository,prefix:S.moduleGraph.routeArea,commit:index.commit,resources:JSON.parse(e.currentTarget.dataset.resources)};
     openAnalysisPanel('resource_batch','',repository,area);
   };
-  if($('routeArea'))$('routeArea').onchange=e=>update({routeArea:e.target.value,routePage:0,routesOpen:true},'routeArea');
-  graph.querySelectorAll('[data-route-page]').forEach(button=>button.onclick=()=>update({routePage:Number(button.dataset.routePage),routesOpen:true}));
+  if($('routeArea'))$('routeArea').onchange=e=>update({routeArea:e.target.value,routesOpen:true},'routeArea');
   if($('flowSources'))$('flowSources').ontoggle=e=>{S.moduleGraph.sourcesOpen=e.target.open;};
   if($('moduleDetails'))$('moduleDetails').ontoggle=e=>{S.moduleGraph.moduleOpen=e.target.open;};
   graph.querySelectorAll('[data-package-target]').forEach(button=>button.onclick=()=>{
@@ -1874,7 +1878,7 @@ function bindStructureIndex() {
     box?.querySelector('[data-inspect-directory]')?.focus();
   });
   graph.querySelectorAll('[data-cli-page]').forEach(button=>button.onclick=()=>update({cliPage:Number(button.dataset.cliPage)}));
-  if($('moduleRepository'))$('moduleRepository').onchange=e=>update({repository:e.target.value,file:'',page:{},http:undefined,action:0,resource:null,cliPage:0,workspacePage:0,routeArea:'',routePage:0,crossPage:0,routesOpen:undefined},'moduleRepository');
+  if($('moduleRepository'))$('moduleRepository').onchange=e=>update({repository:e.target.value,file:'',page:{},http:undefined,action:0,resource:null,cliPage:0,workspacePage:0,routeArea:'',crossPage:0,routesOpen:undefined},'moduleRepository');
   graph.querySelectorAll('[data-local-resource]').forEach(button=>button.onclick=()=>update({resource:button.getAttribute('aria-expanded')==='true'?null:button.dataset.localResource,http:undefined,action:0}));
   if($('explainLocalScope'))$('explainLocalScope').onclick=()=>openAnalysisPanel('scope_overview',S.moduleGraph.resource,S.moduleGraph.repository || '');
   graph.querySelectorAll('[data-flow-operation]').forEach(button=>button.onclick=()=>{
@@ -2342,7 +2346,7 @@ function render() {
   }
   // 개발자용 목록은 그림과 선 목록 아래 「자세한 목록」 하나에 접어 둔다.
   const lists=structure+inventoryView(m),listsOpen=S.listsOpen || S.moduleGraph?.routesOpen || S.inventoryOpen;
-  const sysBody=sys?(featureFlow?structure+components+inventoryView(m):components+(lists?`<details class="sect" id="detailLists" ${listsOpen?'open':''}><summary>${tr('자세한 목록')}</summary>${lists}</details>`:'')):'';
+  const sysBody=sys?(featureFlow?structure+components+inventoryView(m):components+(lists?`<details class="sect" id="detailLists" ${listsOpen?'open':''}><summary>${tr('자세한 목록')}</summary><div class="list-grid">${lists}</div></details>`:'')):'';
   $('map').innerHTML = searchPanel(m) + (view === 'changes' ? changesView(m) : sys ? sysBody : view === 'focus' ? focusView(m) : view === 'feat' ? featView(m) : storyMap(m)); $('insp').innerHTML = view === 'changes' ? changesInspector(m) : sys ? sysInspector(m) : view === 'focus' ? focusFeatureInspector(m) : view === 'feat' ? featInspector(m) : mapInspector(m);
   S._wires = null;
   if (view === 'focus' && S.focus) { const d = focusData(m); S._wires = d ? [...d.left.map((_, i) => ({ from: 'L' + i, to: 'C', h: true })), ...d.right.map((_, i) => ({ from: 'C', to: 'R' + i, h: true }))] : null; drawWires(); }

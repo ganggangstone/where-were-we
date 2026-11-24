@@ -104,14 +104,15 @@ class RefreshFirstWebKit(unittest.TestCase):
  index.service_flow.registered_route_groups=Array.from({length:10},(_,i)=>({resource:'/api/v2/teams/'+i,registered_route_indexes:[registered.length+i]}));
  await doRefresh();const chooseArea=value=>{const menu=$('routeArea');menu.value=value;menu.dispatchEvent(new Event('change'));};
  check($('routeArea').value==='' && [...$('routeArea').options].some(o=>o.text.endsWith('/api/v2/teams · 10')),'Versioned prefix and distinct standalone count');
- chooseArea('/api/v2/teams');routes().querySelector('[data-route-page="1"]').click();check(routes().querySelectorAll('[data-registered-route]').length===2 && routes().innerText.includes('/api/v2/teams/9'),'Page within one path area');
+ check(!routes().querySelector('[data-route-page]') && routes().querySelector('[data-route-area="/api/v2/teams"] summary').textContent.endsWith('· 10'),'Long route lists group by area with counts instead of pages');
+ chooseArea('/api/v2/teams');check(routes().querySelectorAll('[data-registered-route]').length===10 && routes().innerText.includes('/api/v2/teams/9'),'One area lists all its routes');
  $('explainRouteArea').click();
  check(S.analysisChoice.area.resources.length===10 && S.analysisChoice.area.commit===index.commit && S.analysisChoice.maxCalls===10 && $('resourceLimits').innerText.includes('10') && !$('chooseResourceBatch') && !calls.some(c=>c.command==='analysis_run_start'),'Area preview binds all pages, commit and cost before any model call');
  S.agentPrompt=null;S.analysisChoice=null;S.agentPurpose=null;index.service_flow.registered_route_groups=[];AnalysisRun.syncScope();
- chooseArea('');check(routes().innerText.includes('/internal/0'),'All areas restore the first page');
+ chooseArea('');check(routes().querySelector('[data-route-area="/internal"]') && !routes().querySelector('[data-route-area][open]'),'All areas return to the closed groups');
  index.service_flow.registered_routes=registered;await doRefresh();routes().open=true;
- check(routes().querySelectorAll('[data-registered-route]').length===8 && !routes().innerText.includes('/items'),'Registered routes page omits already connected endpoints');
- routes().querySelector('[data-route-page="1"]').click();const route=routes().querySelector('[data-registered-route]');route.open=true;route.querySelector('details').open=true;
+ check(routes().querySelectorAll('[data-registered-route]').length===9 && !routes().innerText.includes('/items'),'Registered routes page omits already connected endpoints');
+ const route=[...routes().querySelectorAll('[data-registered-route]')].at(-1);
  check(route.querySelector('[data-trace-stage="server"]').textContent==='handler8' && !route.querySelector('[data-trace-stage="client"]') && route.innerText.includes('app/api/internal/route.ts:28'),'A standalone server handler has its own source and no invented client');
  check(route.innerText.includes(tr('Next.js 파일 경로')) && route.innerText.includes('package.json:26') && route.innerText.split('app/api/internal/route.ts:28').length===2,'Filesystem provenance identifies the route file and supporting package evidence once');
  window.runningAnalysis={id:'saved',state:'completed',project:'First',repository:'',branch:'dev',lang:S.lang,intent:{task:'overview',targets:[]},completed_tasks:[],tasks:[],saved_overviews:[{
@@ -179,8 +180,7 @@ class RefreshFirstWebKit(unittest.TestCase):
  check(!$('insp').innerText.includes('Profile evidence') && $('startAppAnalysis'),'A changed pin hides stale path explanations');
  index.service_flow.registered_route_groups=[{resource:'/internal/8',registered_route_indexes:[9]}];
  S.agentPrompt=null;await doRefresh();const list=$('registeredRoutes');list.open=true;
- if(!list.querySelector('[data-explain-route]'))list.querySelector('[data-route-page="1"]').click();
- const standalone=$('registeredRoutes').querySelector('[data-explain-route]');standalone.closest('[data-registered-route]').open=true;
+  const standalone=$('registeredRoutes').querySelector('[data-explain-route]');
  window.runningAnalysis.saved_scope_overviews=[{...record,resource:'/internal/8',feature_groups:[{name:'Internal route',connection_ids:[1]}],connections:[{id:1,kind:'server_registration',method:'GET',path:'/internal/8',server:{file:'api.py',line:28,quote:'def handler8():'}}]}];
  standalone.click();await new Promise(r=>setTimeout(r,20));await AnalysisRun.check();$('insp').querySelector('[data-overview-feature]').click();
  check($('insp').innerText.includes('api.py:28') && !$('insp').innerText.includes(S.lang==='en'?'Request code':'요청 코드') && !$('startAppAnalysis'),'Saved server registration opens without implying a request caller or another model turn');

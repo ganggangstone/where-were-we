@@ -224,6 +224,17 @@ details .kv { margin:var(--space-3) var(--space-0) var(--space-0); word-break:br
 .sysrow { display:block }
 .flat { display:grid; grid-template-columns:repeat(auto-fill,minmax(var(--size-node),1fr)); gap:var(--space-4) } .flat .card { margin:var(--space-0) }
 [data-kind-members] { word-break:keep-all }
+/* 자세한 목록: 닫힌 칸은 두 줄 카드로 나란히, 연 칸은 한 줄 전체를 쓴다. */
+.list-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(calc(var(--size-node) * 2),1fr)); gap:var(--space-3); align-items:start; margin-top:var(--space-3) }
+.list-grid > *, .list-grid #moduleGraph > * { grid-column:1 / -1; margin:var(--space-0) } .list-grid #moduleGraph { display:contents }
+.list-grid details.list-panel:not([open]), .list-grid #moduleGraph > details.list-panel:not([open]) { grid-column:auto }
+details.list-panel { padding:var(--space-3) var(--space-4); border:var(--border-hairline); border-radius:var(--radius-control); background:var(--color-bg-group) }
+details.list-panel > summary { margin:var(--space-0); color:var(--color-text); font:var(--font-body) }
+.panel-note { display:block; color:var(--color-text-secondary); font:var(--font-secondary); margin:var(--space-1) var(--space-0) var(--space-0) }
+.route-table { width:100%; border-collapse:collapse; margin-top:var(--space-2); font:var(--font-secondary) }
+.route-table td { padding:var(--space-1) var(--space-2); border-top:var(--border-hairline); vertical-align:top; overflow-wrap:anywhere }
+.route-table td:first-child { width:var(--space-8); color:var(--color-text-secondary) } .route-table td:last-child { text-align:right; white-space:nowrap }
+.route-areas { display:grid; grid-template-columns:repeat(auto-fill,minmax(var(--size-column),1fr)); gap:var(--space-1) var(--space-4); margin-top:var(--space-2) } .route-area[open] { grid-column:1 / -1 } .route-area > summary { margin:var(--space-0) }
 .lead { font:var(--font-heading); color:var(--color-text); margin:var(--space-0) var(--space-0) var(--space-4) }
 .wire.set { stroke-dasharray:var(--space-1) var(--space-2) } .legend-sample.set { border-top-style:dotted }
 .graph { position:relative; flex:none } .graph .card { position:absolute; width:var(--size-node); margin:var(--space-0); z-index:1 }
