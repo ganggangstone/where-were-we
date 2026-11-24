@@ -164,12 +164,16 @@ def normalize(data,ctx):
                       'prs':[known[p] for p in refs],**{field:claim(card.get(field)) for field in FIELDS},
                       'terms':[{'term':term['term'],'explanation':claim(term['explanation'])} for term in terms if isinstance(term,dict) and isinstance(term.get('term'),str)],
                       'merge':'merged' if refs else 'not_established','deployment':'not_verified','runtime':'not_verified'})
-    if covered!=set(known):raise ValueError('Every collected PR must be covered; no omitted PRs')
+    # Only the oldest PRs may be left out, each named in left_out, and every other PR must be covered.
+    left=data.get('left_out',[])
+    if not isinstance(left,list) or any(p not in known for p in left) or len(set(left))!=len(left) or set(left)&covered or left and not data.get('unknown'):raise ValueError('Invalid left-out PRs')
+    if left and covered and max(known[p]['merged_at'] for p in left)>min(known[p]['merged_at'] for p in covered):raise ValueError('Only the oldest PRs may be left out')
+    if covered!=set(known)-set(left):raise ValueError('Every collected PR must be covered; no omitted PRs')
     unknown=data.get('unknown',[])
     if not isinstance(unknown,list) or any(not isinstance(v,str) for v in unknown):raise ValueError('Invalid unknown facts')
     if ctx['input']['has_changes'] and not cards and not unknown:raise ValueError('Explain the changes or explicitly identify the missing evidence')
     cards.sort(key=lambda c:('high','medium','low').index(c['priority']))
-    return {'cards':cards,'unknown':unknown,'pr_count':len(known),'sources':{sid:ctx['sources'][sid] for sid in sorted(used)},
+    return {'cards':cards,'unknown':unknown,'pr_count':len(known),**({'left_out':left} if left else {}),'sources':{sid:ctx['sources'][sid] for sid in sorted(used)},
             'evidence_check':'literal-collected-text-match; semantics are AI-inferred'}
 
 def record(project,repository,branch,lang,input_hash,previous,result_json,provider='mcp-agent'):

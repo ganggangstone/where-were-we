@@ -1860,6 +1860,8 @@ BRIEF_BODY_CHARS = 3000        # of each PR or issue body; a quote from the kept
 BRIEF_STRUCTURE_CHARS = 8000
 REF_RULE=(' Source rows are [ref, line, text]. Cite a line only as {"ref": n} with a supplied ref; never write file, line or quote yourself. '
           'Only the supplied lines were read; record what they do not establish in unknown. Do not request further reads.')
+LEFT_OUT={'ko':'PR이 많아 최근 PR {sent}개만 설명했다. 그보다 오래된 PR {left}개는 설명하지 않았다.',
+          'en':'Only the newest {sent} PRs are explained; {left} older PRs were left out because of the input limit.'}
 NOT_READ={'ko':'입력 한도에 들어가지 않아 이 경로의 코드를 읽지 않았다. 동작 과정은 확인되지 않았다.',
           'en':"This route's code was not read because it did not fit the input limit; its steps are not established."}
 NOT_ANSWERED={'ko':'이 경로의 코드를 보냈지만 답에 동작 과정이 없었다. 동작 과정은 확인되지 않았다.',
@@ -1935,14 +1937,14 @@ def _detail(value,task,request,call,validate):
                 (pr['repository']+':issue:'+briefing.digest(i.get('url') or i.get('number'))[:16]+k for k in (':title',':body')) if s in ctx['sources']]
         claimed={s for ids in linked.values() for s in ids}
         shared=[text(sid) for sid in ctx['sources'] if sid not in claimed]
-        budget=DETAIL_BYTES-_size(shared);groups=[[]];size=largest=0
-        for pr in ctx['input']['prs']:
+        # The newest PRs that fit the fixed number of calls are explained; the older rest is named in unknown.
+        budget=DETAIL_BYTES-_size(shared);groups=[[]];size=0;left=[]
+        for pr in sorted(ctx['input']['prs'],key=lambda pr:pr['merged_at'],reverse=True):
             n=_size([text(s) for s in linked[pr['id']]])+_size(pr)
+            if left or groups[-1] and size+n>budget and len(groups)==MAX_BRIEFING_CALLS:left.append(pr['id']);continue
             if groups[-1] and size+n>budget:groups.append([]);size=0
-            groups[-1].append(pr);size+=n;largest=max(largest,n)
-        if len(groups)>MAX_BRIEFING_CALLS or largest>budget:
-            raise RunError('source_too_large',f'The change evidence needs more than {MAX_BRIEFING_CALLS} calls; no PR was left out, so nothing was sent')
-        cards=[];unknown=[]
+            groups[-1].append(pr);size+=n
+        cards=[];unknown=[LEFT_OUT[lang].format(left=len(left),sent=len(ctx['input']['prs'])-len(left))] if left else []
         for i,group in enumerate(groups):
             ids={s for pr in group for s in linked[pr['id']]};part={'input':{**ctx['input'],'prs':group},'sources':ctx['sources']}
             part['input']['sources']=[s for s in ctx['input']['sources'] if s['id'] in ids or s['id'] not in claimed]
@@ -1954,7 +1956,7 @@ def _detail(value,task,request,call,validate):
             got=answer(packet,check)
             for card in got['cards']:cards.append({**card,'id':(f'p{i+1}-'+card['id'])[:48] if len(groups)>1 else card['id']})
             unknown+=[u for u in got.get('unknown',[]) if u not in unknown]
-        return {'cards':cards,'unknown':unknown}
+        return {'cards':cards,'unknown':unknown,**({'left_out':left} if left else {})}
     conf,bundle,_,head=ai_extract.context(value['project'],task['repository'],value['branch'])
     repo=conf['path'];raw=bundle[value['branch']];commit=request['commit']
     if head!=commit:raise RunError('pins_changed','Code changed; start again')

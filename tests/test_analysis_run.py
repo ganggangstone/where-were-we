@@ -445,7 +445,7 @@ else:
 
     def briefing_prs(self,count,body=1000):
         self.seed_map();raw=self.raw()
-        prs=[{'number':n,'title':f'Fix problem number {n}','body':f'Body of change {n}. '+'x'*body,'merged_at':'2026-10-01T12:00:00+00:00',
+        prs=[{'number':n,'title':f'Fix problem number {n}','body':f'Body of change {n}. '+'x'*body,'merged_at':f'2026-10-01T12:{n:02d}:00+00:00',
               'base':'dev','branch':f'fix-{n}','issues':[]} for n in range(1,count+1)]
         raw['changes']={'last_result':{'since':'2026-10-01T00:00:00+00:00','at':'2026-10-02T00:00:00+00:00','changed':True,'evidence':{
             'commits':{'dev':{'from':self.commit,'to':self.commit}},'comparison':{'since':'last_refresh','since_time':''},
@@ -467,7 +467,7 @@ else:
         self.assertEqual(done['state'],'completed',done.get('error'));self.assertEqual(len(calls),2)
         self.assertEqual(len(briefing.stored('demo')['results'][briefing.key('','dev','en')]['cards']),3)
 
-    def test_briefing_many_prs_split_into_at_most_four_calls_and_too_many_fail_without_calls(self):
+    def test_briefing_many_prs_split_into_at_most_four_calls_and_older_prs_left_out_plainly(self):
         value=self.briefing_prs(12);calls=[]
         def executor(prompt,**kwargs):calls.append(self.packet(prompt));return self.briefing_reply(prompt)
         with patch.object(analysis_run,'DETAIL_BYTES',6*1024):done=analysis_run.run(value['id'],executor)
@@ -475,8 +475,18 @@ else:
         self.assertTrue(all(len(s['text'])<=analysis_run.BRIEF_BODY_CHARS for p in calls for s in p['sources']))
         saved=briefing.stored('demo')['results'][briefing.key('','dev','en')]
         self.assertEqual(len(saved['cards']),12);self.assertEqual(saved['pr_count'],12)
-        value=self.briefing_prs(40,3000)
-        with patch.object(analysis_run,'DETAIL_BYTES',6*1024):done=analysis_run.run(value['id'],lambda *a,**k:self.fail('No call when PRs would be dropped'))
-        self.assertEqual(done['state'],'failed');self.assertEqual(done['error']['code'],'source_too_large')
+        value=self.briefing_prs(40,3000);calls=[]
+        with patch.object(analysis_run,'DETAIL_BYTES',6*1024):done=analysis_run.run(value['id'],executor)
+        self.assertEqual(done['state'],'completed',done.get('error'));self.assertEqual(len(calls),analysis_run.MAX_BRIEFING_CALLS)
+        sent=[int(pr['number']) for p in calls for pr in p['input']['prs']]
+        self.assertEqual(sorted(sent),list(range(41-len(sent),41)))  # the newest PRs
+        saved=briefing.stored('demo')['results'][briefing.key('','dev','en')]
+        self.assertEqual(saved['pr_count'],40);self.assertEqual(len(saved['left_out']),40-len(sent))
+        self.assertIn(f'{40-len(sent)} older PRs were left out',saved['unknown'][0])
+        ctx={'input':{'prs':[{'id':'r:pr:1','merged_at':'2026-10-01T00:00:00+00:00'},{'id':'r:pr:2','merged_at':'2026-10-02T00:00:00+00:00'}],'has_changes':True},'sources':{'s':{'text':'quoted text','url':None}}}
+        card={'id':'c','title':'t','prs':['r:pr:1'],**{f:{'text':'x','unknown':True} for f in briefing.FIELDS}}
+        with self.assertRaises(ValueError):briefing.normalize({'cards':[card],'unknown':['older left out'],'left_out':['r:pr:2']},ctx)  # a newer PR cannot be left out
+        with self.assertRaises(ValueError):briefing.normalize({'cards':[{**card,'prs':['r:pr:2']}],'left_out':['r:pr:1']},ctx)  # nor silently
+        self.assertEqual(briefing.normalize({'cards':[{**card,'prs':['r:pr:2']}],'unknown':['older left out'],'left_out':['r:pr:1']},ctx)['left_out'],['r:pr:1'])
 
 if __name__=='__main__':unittest.main()
