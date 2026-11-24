@@ -146,7 +146,7 @@ const UI_EN = {
   "결과 보기":"View results",
   "요청 내용 보기":"View request text",
   "분석 요청을 준비하지 못했습니다. 오류 내용을 확인하세요.":"Could not prepare the analysis request. Check the error details.",
-  "AI에게 서비스 구성 요청":"Ask your AI for the architecture",
+  "「AI 지도」의 「분석하기」가 서비스 구성을 만든다.":"「Analyze」 in 「AI map」 builds the architecture.",
   "이 동작의 과정 알아보기":"Explain this action step by step",
   "AI 채팅에 붙여 넣어 실행합니다.":"Paste into your AI chat to run.",
   "분석 화면에서 Claude Code로 바로 분석하거나 AI에게 보낼 요청을 만듭니다.":"Opens the analysis panel to analyze with Claude Code or prepare a request for your AI.",
@@ -216,7 +216,6 @@ const UI_EN = {
   '연결된 코드를 읽는 중…': 'Reading the connected code…', '서비스를 읽지 못했습니다. 오류 내용을 확인하세요.': 'Could not read the service. Check the error details.', '최신 지도를 가져오지 못했습니다. 오류 내용을 확인하세요.': 'Could not get the latest map. Check the error details.',
   '테스트가 연결된 요청 비율 (통과 여부 아님)': 'Requests with linked tests (not pass/fail)', 'AI가 정리한 이름': 'AI labels',
   '옅은 카드는 선택 화면과 연결됨 · 라벨의 화살표가 이동 방향': 'Tinted cards connect to the selection; labels show navigation direction',
-  '화면 주소·제목·버튼 글자만 AI에게 넘겨 묶음과 이름을 다시 받습니다': 'Your AI regroups screens using only their paths, headings, and button labels',
   '묶음·이름 다시 제안': 'Regroup screens', '→ 선택 화면': '→ Selected screen', '선택 화면 →': 'Selected screen →',
   '이 버전에만': 'This version only', '지도에 표시할 버전': 'Map version', '코드 이름 없음': 'Unnamed code',
   '비교 버전과 다름': 'Differs from the compared version', '코드 버전': 'Code version',
@@ -286,7 +285,7 @@ const UI_EN = {
   '새 화면': 'New screens', '묶음 없음': 'No group', '화면에 새로 생긴 서버 요청': 'New screen requests', '화면에서 사라진 서버 요청': 'Removed screen requests',
   '새로 생긴 화면 사이 길': 'New navigation links', '끊긴 화면 사이 길': 'Removed navigation links', '화면이 부르지 않는 새 서버 기능': 'New endpoints without screen callers',
   'AI가 적은 것 중 근거 줄이 바뀐 것': 'AI references affected by code changes', '전체 구조 근거 ': 'System references: ', '서버 밖 프로그램이 하는 일 근거 ': 'Worker job references: ',
-  '일부 설명의 근거 코드가 바뀌었습니다. 현재 코드로 다시 확인하세요.': 'Code cited by some explanations has changed. Check them against the current code.',
+  '일부 설명의 근거 코드가 바뀌었습니다. 「분석하기」로 다시 만든다.': 'Code cited by some explanations has changed. 「Analyze」 builds it again.',
   '작업하던 AI에게 이 프로그램이 하는 일을 현재 코드로 다시 읽어 달라고 요청하세요.': 'Ask your coding AI to reanalyze this program using the current code.', '지도와 연결하지 못한 변경': 'Changes without a map match',
   '곳 더': ' more', '이슈 #': 'Issue #', ' · 파일 ': ' · Files: ', '화면 변경': 'Screen change', '서버 흐름': 'Server flow', 'DB·배포·설정': 'Database & deployment', '화면이 달라진 PR': 'PRs that change screens', '서버 코드의 흐름이 달라진 PR': 'PRs that change server behavior',
   'DB·배포·설정·서버 밖 프로그램이 달라진 PR': 'PRs that change databases, deployment, configuration, or workers', '이전 기록': 'Earlier records', '설명 구간': 'Explanation period', '새로고침 기록 구간': 'Refresh record period', '자세한 변경 내용': 'Change details', '확인이 필요한 내용': 'Needs verification', '바뀐 점': 'What changed', '새 화면 · 사라진 화면': 'Added / removed screens',
@@ -632,9 +631,7 @@ const ACTION_UI = {
   analysis_request: ['analyzeMap','status','분석 요청을 준비하는 중…'],
   analysis_plan: ['planAnalysis','status','분석 요청을 준비하는 중…'],
   briefing_request: ['requestBriefing','status','분석 요청을 준비하는 중…'],
-  make_system: ['remakeSys', 'status', '분석 요청을 준비하는 중…'],
-  make_steps: ['mk', 'mklog', '분석 요청을 준비하는 중…'],
-  suggest_groups: ['regroup', 'status', '분석 요청을 준비하는 중…']
+  make_steps: ['mk', 'mklog', '분석 요청을 준비하는 중…']
 };
 function renderPendingActions() {
   for (const [command, [button, log, message]] of Object.entries(ACTION_UI)) {
@@ -1291,7 +1288,7 @@ function storyMap(m) {
   let h = ui`<div class="legend"><span><b class="strong">${visibleScreens(m).length}</b> 화면 · <b class="strong">${gs.length}</b> 묶음</span>
     <span title="테스트가 연결된 요청 비율 (통과 여부 아님)"><i class="dot ok"></i>테스트 연결</span>${aiCount?ui`<span><span class="ai">AI가 정리한 이름</span> ${aiCount}개</span>`:''}
     ${S.sel && !S.sel.startsWith('!') ? lineLegend([['selected','선택과 연결됨']]) : ''}
-    <span class="spacer"></span><button class="btn plain" id="regroup" title="화면 주소·제목·버튼 글자만 AI에게 넘겨 묶음과 이름을 다시 받습니다">화면을 기능별로 정리하기</button></div><div class="cols">`;
+</div><div class="cols">`;
   // 고른 기능은 지도에서 빼거나 흐리지 않고 그 묶음 줄만 강조한다.
   const feat = selectedFeature(m);
   for (const g of gs) { const on = !!feat && featureId(g) === feat.id;
@@ -1887,13 +1884,13 @@ function bindStructureIndex() {
 function sysView(m) {
   const y = S.system;
   if ((m.structure_index || m.structure_indexes?.length) && !y?.nodes?.length && !y?.externals?.length && !y?.unknown?.length && !y?.others?.length) {
-    return `<div class="ctl">${proposalSwitch()}<button class="btn quiet" id="remakeSys">${tr('AI에게 서비스 구성 요청')}</button></div>`;
+    return `<div class="ctl">${proposalSwitch()}<span class="s">${tr('「AI 지도」의 「분석하기」가 서비스 구성을 만든다.')}</span></div>`;
   }
-  if (!y) return ui`<div class="hint">서비스 구성이 아직 없습니다.<br><br><button class="btn primary" id="remakeSys">AI에게 서비스 구성 요청</button></div>`; const stale = y.checked && m.commit && !m.commit.startsWith(y.checked);
+  if (!y) return ui`<div class="hint">서비스 구성이 아직 없습니다.<br><br>「AI 지도」의 「분석하기」가 서비스 구성을 만든다.</div>`; const stale = y.checked && m.commit && !m.commit.startsWith(y.checked);
   const LINKS = sysLinks(y); const near = new Set(LINKS.filter(l => l.from === S.node || l.to === S.node).flatMap(l => [l.from, l.to]));
   let h = ui`<div class="legend"><span><b class="strong">${y.nodes.filter(n => n.kind !== 'user').length}</b> 덩어리 · 바깥 서비스 <b class="strong">${y.externals.length}</b></span>
     ${lineLegend([['calls','호출·읽기·쓰기'],['shared','공유']])}<span class="s" title="${esc(tr(NEED.ops))}" aria-label="${tr('운영 확인')}">🔒</span>${metaList([['작성',esc(y.written || '—')],['원문 대조',`<span class="mono">${esc(y.checked || tr('안 함'))}</span>`]])}
-    ${proposalSwitch()}<span class="spacer"></span><button class="btn plain" id="remakeSys">AI에게 서비스 구성 요청</button>${stale ? tr('<span class="pill warn">지도와 기준 커밋이 다름</span>') : ''}</div>
+    ${proposalSwitch()}<span class="spacer"></span>${stale ? tr('<span class="pill warn">지도와 기준 커밋이 다름</span>') : ''}</div>
     <div class="sysrow"><div class="graph" id="sys">${WIRES}`;
   for (const n of y.nodes) {
     const o = ORIGIN[n.origin]; const lock = (n.unknown || []).some(u => u.needs === 'ops');
@@ -2026,7 +2023,7 @@ function changesView(m) {
     h += sect(tr('끊긴 화면 사이 길'), b.flows_removed, x => `<div class="row"><div class="grow"><div class="t">${esc(displayIds(x.from_name))} → ${esc(displayIds(x.to_name))}</div><div class="s">${esc(x.label || tr('아이콘 버튼'))}</div></div></div>`);
     h += sect(tr('화면이 부르지 않는 새 서버 기능'), b.routes_added_no_screen, x => `<div class="row"><div class="grow"><div class="t">${esc(displayIds(x.name))}</div><div class="s mono">${esc(x.what)} · ${esc(x.file.split('/').pop())}</div></div></div>`); }
   const st = e.ai_stale || {}; if (st.system || st.jobs)
-    h += ui`<div class="sect"><h4>AI가 적은 것 중 근거 줄이 바뀐 것</h4><div class="group">${st.system ? ui`<div class="row"><div class="grow"><div class="t">전체 구조 근거 ${st.system}줄</div><div class="s">일부 설명의 근거 코드가 바뀌었습니다. 현재 코드로 다시 확인하세요.</div></div><button class="btn quiet" id="remakeSys">AI에게 서비스 구성 요청</button></div>` : ''}${st.jobs ? ui`<div class="row"><div class="grow"><div class="t">서버 밖 프로그램이 하는 일 근거 ${st.jobs}줄</div><div class="s">작업하던 AI에게 이 프로그램이 하는 일을 현재 코드로 다시 읽어 달라고 요청하세요.</div></div></div>` : ''}</div></div>`;
+    h += ui`<div class="sect"><h4>AI가 적은 것 중 근거 줄이 바뀐 것</h4><div class="group">${st.system ? ui`<div class="row"><div class="grow"><div class="t">전체 구조 근거 ${st.system}줄</div><div class="s">일부 설명의 근거 코드가 바뀌었습니다. 「분석하기」로 다시 만든다.</div></div></div>` : ''}${st.jobs ? ui`<div class="row"><div class="grow"><div class="t">서버 밖 프로그램이 하는 일 근거 ${st.jobs}줄</div><div class="s">작업하던 AI에게 이 프로그램이 하는 일을 현재 코드로 다시 읽어 달라고 요청하세요.</div></div></div>` : ''}</div></div>`;
   // PR: 기능 묶음별로, 묶음에 안 걸리면 서버 밖 프로그램별로, 그것도 아니면 NO_PLACE
   const by = new Map(); for (const p of e.prs) { const keys = p.groups.length ? p.groups : p.programs.length ? p.programs : [NO_PLACE]; for (const k of keys) { if (!by.has(k)) by.set(k, []); by.get(k).push(p); } }
   h += ui`<div class="sect"><h4>지도에서 바뀐 위치 · 병합된 변경(PR) ${e.prs.length}</h4></div>`;
@@ -2119,7 +2116,7 @@ function featView(m) {
   const f = featureGraph(m);
   if(local && !f.gs.length)return local;
   const sel = selectedFeature(m)?.i ?? null; const near = (i) => sel == null || i === sel || f.links.some(l => (l.a === sel && l.b === i) || (l.b === sel && l.a === i)); const on = (l) => sel == null || l.a === sel || l.b === sel;
-  let h = ui`<div class="legend"><span><b class="strong">${f.gs.length}</b> 기능 묶음 · 화면 <b class="strong">${visibleScreens(m).length}</b></span>${lineLegend([['calls','화면 이동'],['shared','데이터 전달']])}${S.groups ? `<span class="pill ai">${tr('AI가 정리한 이름')}</span>` : `<span class="pill">${tr('화면 주소')}</span>`}<span class="spacer"></span><button class="btn plain" id="regroup" title="화면 주소·제목·버튼 글자만 AI에게 넘겨 묶음과 이름을 다시 받습니다">화면을 기능별로 정리하기</button></div><div class="sys three" id="sys">${WIRES}`;
+  let h = ui`<div class="legend"><span><b class="strong">${f.gs.length}</b> 기능 묶음 · 화면 <b class="strong">${visibleScreens(m).length}</b></span>${lineLegend([['calls','화면 이동'],['shared','데이터 전달']])}${S.groups ? `<span class="pill ai">${tr('AI가 정리한 이름')}</span>` : `<span class="pill">${tr('화면 주소')}</span>`}</div><div class="sys three" id="sys">${WIRES}`;
   f.gs.forEach((g, i) => { const st = f.stat[i];
     h += ui`<div class="card node gc${f.pos[i].col} gr${f.pos[i].row} ${i === sel ? 'sel' : ''} ${near(i) ? '' : 'dim'}" data-feat="${i}" data-w="G${i}"><div class="nm"><span class="${g.ai ? 'ai' : ''}">${esc(g.name)}</span></div><div class="s">${esc(g.description || '')}</div>
       <div class="meta"><span>화면 ${g.list.length} · 서버에 하는 일 ${st.reqs}</span>${st.reqs ? ui`<span class="bar" title="테스트 연결 ${st.tested}/${st.reqs}"><i style="width:${Math.round(st.tested / st.reqs * 100)}%"></i></span>` : ''}</div><div class="meta">${st.ext.map(x => `<span class="pill">${esc(x)}</span>`).join('')}</div></div>`; });
@@ -2262,7 +2259,6 @@ function render() {
   if ($('unfocus')) $('unfocus').onclick = () => { S.focus = null; render(); };
   $('map').scrollTop = top; $('map').scrollLeft = left; $('insp').scrollTop = itop;
   document.querySelectorAll('[data-proposal]').forEach(b => b.onclick = () => { S.showProposal = b.dataset.proposal === '1'; S.node = null; render(); });
-  if ($('remakeSys')) $('remakeSys').onclick=()=>openAnalysisPanel('make_system');
   if ($('requestBriefing')) $('requestBriefing').onclick=()=>openAnalysisPanel('briefing_request');
   if(sys)document.querySelectorAll('[data-inventory]').forEach(box=>{
     box.onchange=e=>{
@@ -2337,7 +2333,6 @@ function render() {
   if ($('mk')) $('mk').onclick=()=>openAnalysisPanel('make_steps',S.sel);
   document.querySelectorAll('[data-mk]').forEach(b => b.onclick = () => openAnalysisPanel('make_steps','@routes:'+JSON.stringify([b.dataset.mk])));
   if ($('makeProgramJobs')) $('makeProgramJobs').onclick=()=>openAnalysisPanel('make_jobs',S.node);
-  if ($('regroup')) $('regroup').onclick=()=>openAnalysisPanel('suggest_groups');
   renderPendingActions();
   if (S.agentPrompt != null) renderAgentPrompt();
   if(sys || view==='feat')bindStructureIndex();

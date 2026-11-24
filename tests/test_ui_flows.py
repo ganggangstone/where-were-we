@@ -804,9 +804,8 @@ class Flows(unittest.TestCase):
  S.projectInfo.repositories.find(r=>r.id==='api').analysis={dev:{stale:true}};renderRepositories();
  assert($('repository-bar').innerText.includes(tr('GitHub 작업 정보 미확인')) && $('repository-bar').innerText.includes(tr('최근 확인')),'Unavailable GitHub data remains separate from the local map status');
  document.querySelector('[data-reanalyze="api"]').click();await wait();
- await $('startAppAnalysis').onclick();await wait();
- let sent=calls.filter(c=>c.command==='analysis_run_start').at(-1).args.scope;
- assert(sent.repository==='api' && sent.intent.task==='analysis','Stale repository button preserves repository');
+ assert(!$('startAppAnalysis') && S.analysisChoice?.target==='api','Stale repository button opens the board for that repository');
+ let sent;
  S.agentPrompt=null;S.analysisChoice=null;
  const route={...M().backend_routes[0],file:'api/app/alone.py',function:'standalone',path:'/alone'};
  window.mutateBundle=b=>b.dev.backend_routes.push(route);
@@ -818,8 +817,6 @@ class Flows(unittest.TestCase):
  assert(sent.intent.targets[0].target==='@routes:["app/alone.py::standalone"]','Server-only route stays selected');
  await $('viewAppAnalysis').onclick();await wait();
  assert(S.view==='focus' && S.focus.id==='api/app/alone.py::standalone','Saved steps return to selected server context');
- openAnalysisPanel('suggest_groups');await wait();await $('startAppAnalysis').onclick();await wait();
- await $('viewAppAnalysis').onclick();await wait();assert(S.view==='feat','Saved groups open features');
  openAnalysisPanel('briefing_request');await wait();await $('startAppAnalysis').onclick();await wait();
  await $('viewAppAnalysis').onclick();await wait();assert(S.view==='changes','Saved briefing opens changes');
 ''')
@@ -888,7 +885,7 @@ class Flows(unittest.TestCase):
  document.querySelector('[data-analysis-task="analysis_request"]').click();await new Promise(r=>setTimeout(r,20));
  assert(calls.some(c=>c.command==='analysis_request' && c.args.repository==='web'),'Request goes to the chosen code');
  assert(pane().includes(tr('요청 복사')),'The prepared request is shown');
- S.view='sys';S.system=null;S.branchDetails=null;render();$('remakeSys').click();await new Promise(r=>setTimeout(r,20));
+ S.view='sys';S.system=null;S.branchDetails=null;render();assert(!$('remakeSys') && document.body.textContent.includes(tr('「AI 지도」의 「분석하기」가 서비스 구성을 만든다.')),'The structure points to 분석하기 instead of its own button');$('analyzeMap').click();await new Promise(r=>setTimeout(r,20));
  assert(!$('status').textContent && !calls.some(c=>c.command==='analysis_plan'),'Contextual buttons open the panel without preparing a request');
  document.querySelector('[data-analysis-task="analysis_plan"]').click();await new Promise(r=>setTimeout(r,20));
  assert(!$('status').textContent && calls.some(c=>c.command==='analysis_plan' && c.args.repository===''),'Contextual buttons request all connected code without forcing a code choice');
@@ -903,7 +900,7 @@ class Flows(unittest.TestCase):
  const plan={tasks:[{repository:'web',task:'analysis',commit:'aaaaaaaa1111'},{repository:'web',task:'groups',commit:'aaaaaaaa1111'},{repository:'',task:'briefing',commit:'h'}],blocked,
   requirements:[{repository:'web',task:'analysis',before:null,commit:'aaaaaaaa1111'},{repository:'web',task:'groups',before:null,commit:'aaaaaaaa1111'},{repository:'',task:'briefing',before:null,commit:'h'}],handoff:'Unified handoff',up_to_date:false};
  window.planResult=plan;
- S.view='feat';render();$('regroup').click();await wait();
+ S.view='feat';render();assert(!$('regroup'),'Grouping has no button of its own');$('analyzeMap').click();await wait();
  assert(S.agentPurpose==='analysis' && !calls.some(c=>['analysis_plan','suggest_groups','analysis_run_start'].includes(c.command)),'Grouping opens the panel without preparing or starting analysis');
  document.querySelector('[data-analysis-task="analysis_plan"]').click();await wait();
  assert(calls.filter(c=>c.command==='analysis_plan').length===1 && !calls.some(c=>c.command==='suggest_groups'),'Grouping uses the unified request');
@@ -921,7 +918,7 @@ class Flows(unittest.TestCase):
  await $('checkAnalysisResults').onclick();
  assert(S.analysisRequest.state==='saved','Only nothing left completes it');
  assert(!calls.some(c=>c.command==='refresh'),'Checking results never refreshes');
- S.view='sys';render();$('remakeSys').click();await wait();
+ S.view='sys';render();$('analyzeMap').click();await wait();
  document.querySelector('[data-analysis-task="analysis_plan"]').click();await wait();
  assert(pane().includes(tr('최신 결과')) && !$('cpAgent'),'Nothing to do reports up to date without a copy step');
  $('analysisTarget').value='*';$('analysisTarget').dispatchEvent(new Event('change'));
@@ -1411,7 +1408,7 @@ class AutoRead(unittest.TestCase):
     def test_returning_to_the_app_reads_the_copied_request_without_clicking(self):
         self.check(r"""
  await copied();const n=reads();done();
- assert(!$('automaticAnalysis').open && $('automaticAnalysis').contains($('startAppAnalysis')),'App execution is a separate collapsed option');
+ assert(!$('automaticAnalysis').open && !$('startAppAnalysis'),'The map starts only from the board, not the collapsed option');
  $('toggleAutomaticAnalysis').click();renderAgentPrompt();
  assert($('automaticAnalysis').open,'A status repaint preserves the open automatic panel');
  $('toggleAutomaticAnalysis').click();

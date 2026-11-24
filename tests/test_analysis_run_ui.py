@@ -55,7 +55,7 @@ function render(){AnalysisRun.syncScope();if(S.agentPrompt!=null && S.agentPurpo
 const account = {auth_method:'claude.ai',email:'fictional@example.invalid',subscription_type:'pro'};
 const available = {providers:[{provider:'claude',available:true,authenticated:true,account}]};
 const runRecord = (state='running',extra={}) => ({id:'run-1',project:S.project,repository:S.repository,branch:S.branch,lang:S.lang,
-  state,tasks:[{task:'analysis'}],completed_tasks:[],current_task:{task:'analysis'},error:null,cancel_requested:false,...extra});
+  intent:{task:'overview',targets:[]},state,tasks:[{task:'overview'}],completed_tasks:[],current_task:{task:'overview'},error:null,cancel_requested:false,...extra});
 let status = null, provider = available;
 async function invoke(command,args){
   calls.push({command,args:JSON.parse(JSON.stringify(args||{}))});
@@ -283,22 +283,17 @@ assert(!/해요|이에요|예요|할게요/.test(html),'No informal ending');
 
     def test_saved_task_and_input_progress_are_distinct_and_intent_is_not_reused(self):
         self.check_js(r'''
-await flush();status=runRecord('running',{intent:{task:'all',targets:[]},completed_tasks:[{task:'analysis'}],input_stats:{calls:4,bytes:12000},batch_progress:{task:'system',completed:2,total:7}});
+const briefing={task:'briefing',targets:[]};S.analysisChoice={task:'briefing_request'};
+await flush();status=runRecord('running',{intent:briefing,completed_tasks:[{task:'briefing'}],input_stats:{calls:4,bytes:12000},batch_progress:{task:'briefing',completed:2,total:7}});
 await open();await AnalysisRun.check();await flush();
 assert($('insp').innerHTML.includes('1/2 tasks saved'),'Saved task count');
 assert($('insp').innerHTML.includes('Input calls: 4') && $('insp').innerHTML.includes('Current task input units: 2/7'),'Input units are not saved tasks');
-status.batch_progress={task:'analysis',completed:4,total:4,discovering:true};
-await AnalysisRun.check();await flush();
-assert($('insp').innerHTML.includes('Initial input units reviewed: 4 · Total not yet known') && !$('insp').innerHTML.includes('4/4'),'Initial batch is not a whole-run denominator');
-S.lang='ko';
-assert(AnalysisRun.html().includes('먼저 살펴본 입력 조각 4개 · 전체 개수 집계 전'),'Korean initial progress');
-S.lang='en';
-status=runRecord('failed',{intent:{task:'all',targets:[]}});
-S.analysisChoice={task:'suggest_groups'};AnalysisRun.open();await flush();
+status=runRecord('failed',{intent:briefing});
+S.analysisChoice={task:'resource_batch',maxCalls:1};AnalysisRun.open();await flush();
 assert($('startAppAnalysis') && !$('retryAppAnalysis'),'Another intent is not offered as this request’s retry');
 await $('startAppAnalysis').onclick();await flush();
 const args=calls.filter(c=>c.command==='analysis_run_start').at(-1).args;
-assert(args.scope.intent.task==='groups' && args.scope.intent.targets.length===0,'Explicit grouping intent reaches native bridge');
+assert(args.scope.intent.task==='resources' && args.scope.intent.max_calls===1,'The chosen intent reaches native bridge');
 ''')
 
     def test_explicit_local_scope_sends_only_selected_resource(self):
@@ -347,10 +342,10 @@ assert(!$('startFullAnalysis') && $('insp').innerHTML.includes('1 AI call') && $
 await $('startAppAnalysis').onclick();await flush();
 assert(calls.filter(c=>c.command==='analysis_run_start').at(-1).args.scope.intent.task==='overview','Default button requests the bounded overview');
 status=null;await AnalysisRun.check();
-S.analysisChoice={task:'analysis_plan'};AnalysisRun.open();await flush();
-assert($('insp').innerHTML.includes('Analyze map and structure'),'Map and structure analysis keeps its own label');
-await $('startAppAnalysis').onclick();await flush();
-assert(calls.filter(c=>c.command==='analysis_run_start').at(-1).args.scope.intent.task==='all','Map button requests the complete plan');
+for(const task of ['analysis_plan','analysis_request','make_system','suggest_groups']){
+ S.analysisChoice={task};AnalysisRun.open();await flush();
+ assert(!$('startAppAnalysis'),'The map, groups and service structure start only from the board: '+task);
+}
 ''')
 
     def test_provider_account_and_charge_before_explicit_start(self):
@@ -385,11 +380,12 @@ assert(!calls.some(c=>['analysis_run_start','analysis_run_retry'].includes(c.com
 
     def test_progress_completion_uses_existing_read_without_moving_history(self):
         self.check_js(r'''
+const intent={task:'briefing',targets:[]};S.analysisChoice={task:'briefing_request'};
 await open();await $('startAppAnalysis').onclick();await flush();
-status=runRecord('saving',{completed_tasks:[{task:'analysis'}],tasks:[{task:'system'}],current_task:{task:'system'}});
+status=runRecord('saving',{intent,completed_tasks:[{task:'overview'}],tasks:[{task:'briefing'}],current_task:{task:'briefing'}});
 await tick();assert($('insp').innerHTML.includes('1/2'),'Completed plus pending task count');
 assert($('insp').innerHTML.includes('Saving…'),'Saving is visible');
-status=runRecord('completed',{tasks:[],completed_tasks:[{task:'analysis'},{task:'system'}],current_task:null});
+status=runRecord('completed',{intent,tasks:[],completed_tasks:[{task:'overview'},{task:'briefing'}],current_task:null});
 await tick();assert(reads===1,'Completion reads saved results once');
 assert(timers.size===0,'Completed runs stop polling');
 assert(S.changes===baseline && S.settings===settings && S.chi===3,'Existing read preserves history, comparison and selection');
@@ -484,25 +480,6 @@ assert(!$('viewAppAnalysis') && !$('retryAppAnalysis'),'No hidden cross-scope re
 assert($('startAppAnalysis'),'Selected scope can be explicitly started after the other run finishes');
 ''')
 
-    def test_verified_preview_opens_before_save_and_is_scoped_to_this_commit(self):
-        self.check_js(r'''
-await flush();
-for(const [lang,title] of [['en','Features verified so far'],['ko','분석 중 확인한 기능']]){
- S.lang=lang;AnalysisRun.syncScope();
- status=runRecord('running',{current_task:{task:'analysis',repository:'',commit:'a1b2c3d4'},
-   preview:{repository:'',commit:'a1b2c3d4',items:[{kind:'request',name:'Save <items>',file:'handlers/save',line:21,quote:'<save items>'}]}});
- await open();await AnalysisRun.check();await flush();
- assert($('analysisPreview0') && $('insp').innerHTML.includes(title),'Scope and translated preview');
- await $('analysisPreview0').onclick();
- assert($('insp').innerHTML.includes('handlers/save:21') && $('insp').innerHTML.includes('&lt;save items>'),'Escaped source and line are readable');
- assert(count('analysis_run_start')===0 && reads===0,'Opening preview is local');
- await AnalysisRun.check();
- assert($('insp').innerHTML.includes('handlers/save:21'),'Expanded source survives polling');
- status={...status,preview:{...status.preview,commit:'wrong'}};
- await AnalysisRun.check();assert(!$('analysisPreview0'),'No evidence from another commit');
-}
-''')
-
     def test_saved_partial_overview_reopens_after_cancel_and_hides_stale_configuration(self):
         self.check_js(r'''
 await open();
@@ -555,26 +532,13 @@ status.current_legacy_pin.configuration='changed';await AnalysisRun.check();
 assert(!$('savedOverview0'),'Configuration mismatch hides the sample');
 ''')
 
-    def test_completed_program_evidence_matches_saved_repository_commit(self):
-        self.check_js(r'''
-await open();
-const hash='aecb78901234',group={repository:'service',commit:hash,items:[{kind:'program',name:'CLI command',file:'shell',line:2,quote:'run command'}]};
-status=runRecord('completed',{completed_tasks:[],program_observations:[group],pins:{service:{commit:hash}}});
-native=command=>command==='read_project'?{project:{repositories:[{id:'service',commits:{dev:hash.slice(0,8)}}]},dev:{},main:null,branch_details:{}}:undefined;
-await AnalysisRun.check();renderAgentPrompt();
-await $('analysisPreview0').onclick();
-assert($('insp').innerHTML.includes('shell:2') && $('insp').innerHTML.includes('Verified programs'),'Completed program can be inspected');
-S.projectInfo.repositories[0].commits.dev='another';renderAgentPrompt();
-assert(!$('analysisPreview0'),'Program from a previous commit is hidden');
-''')
-
     def test_entry_points_offer_both_app_run_and_existing_mcp_copy(self):
         self.assertIn('<script src="analysis-run.js"></script>', UI)
         self.assertIn('id="automaticAnalysis"', UI)
         self.assertLess(UI.index("AnalysisRun.overviewHtml()"),UI.index('id="automaticAnalysis"'))
         self.assertIn('id="cpAgent"', UI)
         self.assertIn('data-analysis-task=', UI)
-        for entry in ('remakeSys', 'requestBriefing', 'mk', 'regroup'):
+        for entry in ('requestBriefing', 'mk'):
             line = next(line for line in UI.splitlines() if f"$('{entry}').onclick=" in line)
             self.assertIn('openAnalysisPanel(', line)
         self.assertIn("requestAgentAction('analysis_plan',{},true)", UI)
