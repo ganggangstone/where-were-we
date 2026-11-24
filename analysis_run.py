@@ -760,7 +760,7 @@ def _explain_unit(run_id,executor,cancelled):
     conf,bundle,_,_=ai_extract.context(value['project'],rid,value['branch'])
     plain=_plain_unit(value,rid,target['target'])
     try:
-        packet,finalize=_quick_overview(conf['path'],request,value['lang'],None,cancelled,time.monotonic()+TASK_SECONDS,bundle[value['branch']],None if plain else target['target'],unit=plain)
+        packet,finalize=_quick_overview(conf['path'],request,value['lang'],None,cancelled,time.monotonic()+TASK_SECONDS,bundle[value['branch']],None if plain else target['target'],unit=plain,whole=True)
         prompt=_encoded(packet)
         if len(prompt.encode())>MAX_PROMPT_BYTES:raise RunError('source_too_large','The unit sample could not fit one call')
         overview=_ask(_counted(run_id,executor,cancelled,'unit'),prompt,finalize)
@@ -1585,8 +1585,11 @@ def _unit_anchors(index,unit):
         anchors[file]=rows  # a plain file has no declarations; its text is sampled evenly
     return anchors
 
-def _quick_overview(repo,request,language,invoke,cancelled,deadline,raw,resource=None,ref_offset=0,unit=None):
-    """One bounded call per repository. A reference selects an actual pinned line."""
+UNIT_BYTES = 80 * 1024  # source rows of one opened unit: its own files whole while they fit, then neighbours as context
+
+def _quick_overview(repo,request,language,invoke,cancelled,deadline,raw,resource=None,ref_offset=0,unit=None,whole=False):
+    """One bounded call per repository. A reference selects an actual pinned line.
+    whole (one opened unit or resource): its files go whole while they fit UNIT_BYTES, so a call inside a body is read, not guessed."""
     commit=request['commit']
     index=_pinned_index(repo,raw,commit)
     if unit:anchors,flows,total_scopes=_unit_anchors(index,unit),[],0
@@ -1616,8 +1619,13 @@ def _quick_overview(repo,request,language,invoke,cancelled,deadline,raw,resource
     if plain and len(selected)<4:
         fallback=sorted(_first_files(repo,commit,request)-set(selected))
         selected.extend(fallback[:4-len(selected)])
-    selected=set(selected)
+    own_order={f:i for i,f in enumerate(selected)};selected=set(selected);neighbours=set()
+    if whole and unit:
+        own_order={f:i for i,f in enumerate(unit['files'][:8])}
+        neighbours={e['target'] for e in index['imports'] if e['file'] in own_order and e['target'] not in own_order and not _secret(e['target'])}
+        neighbours=set(sorted(neighbours)[:4]);selected|=set(own_order)|neighbours
     snapshots=export_source(repo,commit,selected={commit:selected},cancelled=cancelled,deadline=deadline)
+    left=UNIT_BYTES
     sources=[];references={};own={}
     if resource:
         # The selected resource's lines run from its handler line to the next other route's line; the rest of the file is context.
@@ -1628,23 +1636,27 @@ def _quick_overview(repo,request,language,invoke,cancelled,deadline,raw,resource
             f,a=flow['server']['file'],flow['server']['line']
             b=min([n for n,same in others.get(f,()) if n>a and not same]+[a+61])
             own.setdefault(f,set()).update(range(a,b))
-    for source in snapshots[0]['files']:
+    for source in sorted(snapshots[0]['files'],key=lambda s:(s['file'] in neighbours,own_order.get(s['file'],len(own_order)),s['file'])) if whole else snapshots[0]['files']:
         lines=[row for row in source['lines'] if len(row['text'].strip())>=6]
-        # Spread the excerpt across the file, including its first and last usable lines.
-        offsets=sorted({i*(len(lines)-1)//23 for i in range(24)}) if len(lines)>24 else range(len(lines))
+        cost=sum(_size([0,r['line'],r['text'].strip()[:200]])+8 for r in lines)
         evidence=anchors.get(source['file'],{})
-        by_number={row['line']:row for row in lines}
-        pinned=[by_number[n] for n in evidence if n in by_number]
-        sampled=pinned+[lines[i] for i in offsets if lines[i]['line'] not in evidence]
+        if whole and source['file'] not in neighbours and cost<=left:
+            left-=cost;sampled=lines;cap=len(lines);width=200
+        else:
+            # Spread the excerpt across the file, including its first and last usable lines.
+            offsets=sorted({i*(len(lines)-1)//23 for i in range(24)}) if len(lines)>24 else range(len(lines))
+            by_number={row['line']:row for row in lines}
+            pinned=[by_number[n] for n in evidence if n in by_number]
+            sampled=pinned+[lines[i] for i in offsets if lines[i]['line'] not in evidence];cap=24;width=160
         rows=[]
-        for row in sampled[:24]:
-            text=row['text'].strip()[:160]
+        for row in sampled[:cap]:
+            text=row['text'].strip()[:width]
             ref=ref_offset+len(references)+1
             references[ref]={'file':source['file'],'line':row['line'],'quote':text}
             # A unit packet carries many rows, so they use the compact [ref, line, text(, declaration)] form.
             rows.append([ref,row['line'],text,*([evidence[row['line']]] if evidence.get(row['line']) else [])] if unit else {'ref':ref,'line':row['line'],'text':text,**evidence.get(row['line'],{}),
                         **({'context':True} if source['file'] in own and row['line'] not in own[source['file']] else {})})
-        if rows:sources.append({'file':source['file'],'lines':rows})
+        if rows:sources.append({'file':source['file'],'lines':rows,**({'context':True} if source['file'] in neighbours else {})})
     result={'format':'overview-v1','version':SCOPED_OVERVIEW_VERSION if resource or unit else OVERVIEW_VERSION,'files':[s['file'] for s in sources],'items':[],
             'scope_coverage':{'total':total_scopes,'selected':[]}}
     if unit:
@@ -1713,7 +1725,8 @@ def _quick_overview(repo,request,language,invoke,cancelled,deadline,raw,resource
     if resource and not connections:raise RunError('scope_unavailable','No eligible source evidence for the selected resource')
     if unit:
         packet['resource']=unit['id'];packet['unit_kind']=unit['kind']
-        packet['prompt']+=' Describe only the selected unit (its kind is unit_kind) and the supplied evidence. Source rows are [ref, line, text] with an optional fourth object of declaration metadata. Name its role in a short noun phrase and explain what it does without repeating file paths.'
+        packet['prompt']+=' Describe only the selected unit (its kind is unit_kind) and the supplied evidence. Source rows are [ref, line, text] with an optional fourth object of declaration metadata. Name its role in a short noun phrase and explain what it does without repeating file paths.'+(
+            ' Files with context:true are code the unit imports, shown for orientation; do not describe them as its own behaviour.' if neighbours else '')
     elif resource:
         packet['resource']=resource
         packet['prompt']+=' Describe only the selected resource and the supplied evidence.'+(' Rows with context:true are neighbouring code shown for orientation; they are not part of the selected resource, so do not describe them as its behaviour.' if own else '')

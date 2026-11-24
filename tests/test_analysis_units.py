@@ -263,6 +263,17 @@ class FullRun(unittest.TestCase):
         self.assertTrue(others and all(r.get('context') for r in others),rows)
         self.assertIn('context:true',packet['prompt'])
 
+    def test_an_opened_unit_sends_its_bodies_whole_and_imported_code_as_context(self):
+        (self.repo/'lib/m0.py').write_text('from tools.m1 import tools_1\ndef long_job():\n'+''.join(f'    step_{i} = {i}  # step\n' for i in range(60))+'    tools_1()  # the call\n')
+        self.save_code()
+        unit=next(r[0] for r in self.board()['repositories'][0]['units'] if r[0].startswith('folder:lib'))
+        job=analysis_run.prepare('demo',lang='en',repository='service',intent={'task':'full','targets':[],'only':[{'repository':'service','target':unit}]})
+        calls=[];done=analysis_run.run(job['id'],self.executor(calls))
+        self.assertEqual(done['state'],'completed',done.get('error'))
+        packet=json.loads(calls[0].split('\n',1)[1]);files={s['file']:s for s in packet['sources']}
+        self.assertIn('tools_1()  # the call',[r[2] for r in files['lib/m0.py']['lines']])  # past the 24 sampled rows
+        self.assertTrue(files['tools/m1.py']['context'] and not files['lib/m0.py'].get('context'))
+
 
 class LinkEvidence(unittest.TestCase):
     """A link's evidence is the local line that makes it; without one, the cited declarations are kept as related code."""
