@@ -600,6 +600,7 @@ class Connections(TemporaryProject):
                 (path/'client.js').write_text("fetch('/items');")
             else:
                 (path/'main.py').write_text("from fastapi import FastAPI\napp=FastAPI()\n@app.get('/items')\ndef items(): pass")
+                (path/'mock.html').write_text('<p>'+'x'*structure_index.MAX_FILE_BYTES+'</p>')  # too large to read; never registers a route
             git('add','.')
             git('-c','user.name=Test','-c','user.email=test@example.invalid','commit','-qm',rid)
             pin[rid]=git('rev-parse','HEAD')
@@ -615,6 +616,9 @@ class Connections(TemporaryProject):
         self.assertEqual(read(),[dict(method='GET',path='/items',basis='configured',
                                       client=dict(repository='web',commit=pin['web'],file='client.js',line=1),
                                       server=dict(repository='api',commit=pin['api'],file='main.py',line=3,function='items'))])
+        links=project.read_bundle('example')['system']['links']
+        self.assertEqual([(l['from'],l['to'],l['label'],[(e['file'],e['line'],e['origin']) for e in l['ev']]) for l in links],
+                         [('web::repository','api::repository','Requests matched across codes',[('web/client.js',1,'local_link')])])  # no settings-only line beside it
         repos[0]['api_targets']=['api','other']
         publish()
         self.assertEqual(read(),[])

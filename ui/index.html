@@ -475,7 +475,7 @@ const displayIds = (text) => String(text ?? '').replace(/\[([a-z][a-z0-9-]*)\]/g
 // 수집기가 만든 고정 영어 문구만 언어에 맞춘다. 같은 글자라도 AI·사용자가 적은 값(다른 종류·근거 있음)은 그대로 둔다.
 // 연결 설정(api_targets)에서 그은 선: 코드에서 찾은 선이 아니라 사용자가 연결할 때 정한 것이다.
 const setLink = (l) => l.label === 'Configured API destination' && l.sure === 'doc' && !l.ev?.length;
-const linkLabel = (l) => setLink(l) ? tr('요청을 보냄') : l.label;
+const linkLabel = (l) => setLink(l) || l.label === 'Requests matched across codes' && l.sure === true ? tr('요청을 보냄') : l.label;
 const nodeWhat = (n) => { const hit = n.kind === 'repository' && n.origin === 'repo' && String(n.what).match(/^Repository · (\d+) screens$/); return hit ? ui`코드 · 화면 ${hit[1]}개` : n.what; };
 const PR_PLACES = { '지도와 연결하지 못한 변경':'Changes without a map match', '여러 화면에 똑같이 들어 있는 부품':'Parts shared by several screens', '앱 전체에 걸친 화면 부품':'App-wide screen parts', '문서':'Docs', '배포·CI':'Deployment · CI' };
 const tableName = (t) => { const i = String(t).indexOf('::'); return i < 0 ? t : t.slice(i + 2) + ' · ' + (t.startsWith('shared::') ? tr('함께 쓰는 데이터') : connectionDisplayName(t.slice(0, i))); };

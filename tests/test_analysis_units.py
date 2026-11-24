@@ -276,23 +276,40 @@ class FullRun(unittest.TestCase):
 
 
 class LinkEvidence(unittest.TestCase):
+    def test_outside_services_named_in_code_and_connected_codes_are_offered_locally(self):
+        texts={'api/mail.py':"import boto3\nstore=boto3.client('s3')\nKEY=os.environ['STRIPE_API_KEY']\n# redis://only-a-comment\nsubprocess.run(['ffmpeg','-i',x])\nDOC='https://www.w3.org/x'\n"}
+        hints=analysis_label.hints(texts)
+        self.assertEqual(hints,[('STRIPE','api/mail.py',3),('ffmpeg','api/mail.py',5),('s3','api/mail.py',2)])  # comments and well-known hosts are not services
+        catalog={'units':[{'id':'folder:api','kind':'folder','name':'api','files':['api/mail.py'],'file_count':1},
+                          {'id':'folder:skills','kind':'folder','name':'skills','files':['skills/a.md'],'file_count':1,'reading':'local'}]}
+        spots={}
+        whole=analysis_label.summary(catalog,{'files':[]},'',(),spots,hints,[['Shop','sends requests to']])
+        self.assertEqual(whole['externals'],[[e,0,n] for e,n in zip(sorted(spots['evidence'])[-3:],('STRIPE','ffmpeg','s3'))])
+        self.assertEqual([spots['evidence'][x[0]] for x in whole['externals']],[['api/mail.py',3],['api/mail.py',5],['api/mail.py',2]])
+        self.assertEqual((whole['codes'],[u[1] for u in whole['units']]),([['Shop','sends requests to']],['folder','local']))  # a skills folder is named, not hidden
+        prompt=analysis_label.prompt('labeling',whole,'ko',True)
+        self.assertIn('non-developer',prompt);self.assertIn('externals rows',prompt)
+        structure=analysis_label.structure_input(whole,[{'groups':[{'name':'Mail','description':'','units':[0]}]}],{0:0})
+        self.assertEqual([(g['name'],g['units']) for g in structure['groups']],[('Mail',[0]),('(not grouped)',[1])])  # the skills folder reaches the structure call
+
     """A link's evidence is the local line that makes it; without one, the cited declarations are kept as related code."""
-    def test_import_lines_back_a_link_and_other_links_keep_cited_lines(self):
+    def test_only_links_backed_by_local_lines_are_drawn_and_each_folder_has_one_program(self):
         catalog={'units':[{'id':'folder:web','kind':'folder','files':['web/a.ts','web/b.ts']},{'id':'folder:api','kind':'folder','files':['api/s.py']},
-                          {'id':'folder:jobs','kind':'folder','files':['jobs/j.py']}]}
-        labels={'units':{},'groups':[],'programs':[{'name':n,'kind':'program','what':'','units':[u],'ev':[['api/s.py',2]]} for n,u in
-                                                   (('Web','folder:web'),('API','folder:api'),('Jobs','folder:jobs'))],
-                'links':[{'from':0,'to':1,'label':'calls','ev':[['web/b.ts',9]]},{'from':2,'to':1,'label':'uses','ev':[['jobs/j.py',1]]},
-                         {'from':1,'to':0,'label':'backwards','ev':[['api/s.py',2]]}]}
+                          {'id':'folder:jobs','kind':'folder','files':['jobs/j.py']},{'id':'file:run.py','kind':'file','files':['run.py']}]}
+        labels={'units':{},'groups':[],'programs':[{'name':n,'kind':'program','what':'','units':u,'ev':[['api/s.py',2],['api/s.py',2]]} for n,u in
+                                                   (('Web',['folder:web']),('API',['folder:api','file:run.py']),('Jobs',['folder:jobs']),('Again',['folder:web']))],
+                'links':[{'from':0,'to':1,'label':'calls'},{'from':2,'to':1,'label':'uses'},{'from':1,'to':0,'label':'backwards'}],
+                'externals':[{'name':'Mail','what':'sends mail','ev':[['api/s.py',5]],'users':[1]}]}
         flows=[('web/b.ts',4,'api/s.py'),('web/a.ts',7,'api/s.py'),('web/a.ts',3,'api/s.py'),('web/a.ts',1,'web/b.ts')]  # the most-connected file first
         line=lambda file,number:f'{file} line {number}'
         _,system=analysis_label.shapes(catalog,labels,line,flows)
         rows=lambda ev:[(e['file'],e['line'],e['quote'],e['origin']) for e in ev]
-        self.assertEqual(rows(system['links'][0]['ev']),[('web/a.ts',3,'web/a.ts line 3','local_link'),('web/b.ts',4,'web/b.ts line 4','local_link')])
-        self.assertEqual(rows(system['links'][1]['ev']),[('jobs/j.py',1,'jobs/j.py line 1','cited')])  # no local line: the cited one, shown as related code
-        # The local map shows web -> api only; the api -> web link is kept as given, with no local evidence.
-        self.assertEqual((system['links'][2]['from'],system['links'][2]['to'],rows(system['links'][2]['ev'])),('p2','p1',[('api/s.py',2,'api/s.py line 2','cited')]))
-        self.assertEqual({e['origin'] for n in system['nodes'] for e in n['ev']},{'cited'})
+        # Only web -> api has import lines; a link the model named without local lines is not drawn.
+        self.assertEqual([(l['from'],l['to'],rows(l['ev'])) for l in system['links']],
+                         [('p1','p2',[('web/a.ts',3,'web/a.ts line 3','local_link'),('web/b.ts',4,'web/b.ts line 4','local_link')])])
+        self.assertEqual([(n['name'],n['code']) for n in system['nodes']],[('Web',['web']),('API',['.','api']),('Jobs',['jobs'])])  # 'Again' repeats web: dropped
+        self.assertEqual(rows(system['nodes'][1]['ev']),[('api/s.py',2,'api/s.py line 2','cited')])  # duplicate evidence once
+        self.assertEqual((system['externals'][0]['name'],system['nodes'][1]['uses']),('Mail',['x1']))
         index={'imports':[{'file':'tests/test_web.py','line':1,'target':'api/s.py'},{'file':'web/a.ts','line':3,'target':'api/s.py'}],
                'service_flow':{'connections':[{'client':{'file':'web/b.ts','line':4},'server':{'file':'api/s.py','line':2}}]}}
         self.assertEqual(analysis_label.edges(index),[('web/a.ts',3,'api/s.py'),('web/b.ts',4,'api/s.py')])  # a test file shows no connection

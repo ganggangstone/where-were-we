@@ -305,19 +305,20 @@ def empty_map():return {'repo':'','commit':'','screens':[],'api_functions':[],'b
 def analysis_results(raw,branch):
     selected=branch_bundle(raw,branch)
     current=raw.get(branch) or {}
-    def metadata(value):
+    import mapcore
+    def metadata(value,worded=False):
         if not value or value.get('source')!='ai':return None
         stamp={key:value.get(key) for key in ('generated_at','source','provider','commit','branch','language')}
         return {'version':hashlib.sha256(json.dumps(stamp,sort_keys=True,ensure_ascii=False).encode()).hexdigest(),
                 'commit':value.get('commit'),'generated_at':value.get('generated_at'),'language':value.get('language'),'configuration':value.get('configuration'),
-                'stale':bool(value.get('stale') or (current.get('analysis') or {}).get('stale') or
+                'stale':bool(value.get('stale') or worded and value.get('wording')!=mapcore.WORDING or (current.get('analysis') or {}).get('stale') or
                              value.get('commit') and current.get('commit') and not
                              (str(value['commit']).startswith(current['commit']) or str(current['commit']).startswith(value['commit'])))}
     return {'analysis':metadata((raw.get(branch) or {}).get('analysis')),
             'groups':metadata(selected.get('groups')),
             'system':({**metadata(selected['system.ai']),'proposal':True} if (selected.get('system.ai') or {}).get('source')=='ai' else metadata(selected.get('system'))),
-            'steps':{key:metadata(value) for key,value in (selected.get('flows') or {}).get('routes',{}).items()},
-            'jobs':{key:metadata(value) for key,value in (selected.get('jobs') or {}).get('nodes',{}).items()}}
+            'steps':{key:metadata(value,True) for key,value in (selected.get('flows') or {}).get('routes',{}).items()},
+            'jobs':{key:metadata(value,True) for key,value in (selected.get('jobs') or {}).get('nodes',{}).items()}}
 def analysis_scope(snapshot,layout):
     """Describe what was established; successful collection does not prove completeness."""
     if not snapshot:return None
@@ -402,7 +403,10 @@ def _configured_connections(repositories, raws, role, selected, state):
         graph = index.get('service_flow') or {}
         routes = graph.get('registered_routes', [])
         coverage = index.get('coverage') or {}
-        if (coverage.get('truncated') or coverage.get('skipped_files') or coverage.get('unavailable_languages')
+        # HTML is read only for the requests it sends, so a skipped HTML file never hides a registered route.
+        # ponytail: a partly parsed script (coverage partial_files) may hide a route; block on it if a wrong match shows up.
+        script_skips = sum(v['candidate_files'] - v['indexed_files'] for k,v in (coverage.get('languages') or {}).items() if k != 'html')
+        if (script_skips or coverage.get('skipped_files') is None or coverage.get('unavailable_languages')
                 or (graph.get('coverage') or {}).get('routes') != len(routes)):
             continue
         maps[rid] = (pin, graph, repo.get('layout') or {})
@@ -591,12 +595,25 @@ def _compose(name, conf, state, raws, repository='', branch='dev'):
                         for v in delta.get(key,[]):v['from']=screen(v['from']);v['to']=screen(v['to'])
                 for pr in e.get('prs',[]):pr['repository']=rid;pr['title']=tag(pr['title']);pr['screens']=[screen(p) for p in pr.get('screens',[])]
                 bundle['changes']['entries'].append(e)
-    # Explicit repository-level API destinations are not claimed as code-proven.
+    # A request whose fixed path matches one configured destination route joins the programs holding the two lines;
+    # other configured destinations are drawn as settings, not claimed as code-proven.
+    def holder(rid,path):
+        own=[n for n in bundle['system']['nodes'] if n['repository']==rid]
+        fits=[(len(c),n) for n in own for c in n.get('code',[]) if c==rid+'/.' or path.startswith(c+'/')]
+        return max(fits,key=lambda x:x[0])[1] if fits else own[0] if own else None
+    proven={}
+    for c in (bundle['dev'] if bundle['dev']['available'] else bundle['main'])['cross_repository_connections']:
+        a,b=holder(c['client']['repository'],qfile(c['client']['repository'],c['client']['file'])),holder(c['server']['repository'],qfile(c['server']['repository'],c['server']['file']))
+        if a and b:
+            row=proven.setdefault((a['id'],b['id']),[])
+            if len(row)<3:row.append({'file':qfile(c['client']['repository'],c['client']['file']),'line':c['client']['line'],'quote':c['method']+' '+c['path'],'origin':'local_link','repository':c['client']['repository']})
+    bundle['system']['links']+=[{'from':a,'to':b,'label':'Requests matched across codes','style':'solid','sure':True,'ev':ev} for (a,b),ev in proven.items()]
+    joined={(n['repository'],m['repository']) for a,b in proven for n in bundle['system']['nodes'] if n['id']==a for m in bundle['system']['nodes'] if m['id']==b}
     for repo in conf['repositories']:
         for target in repo['api_targets']:
             source_node=next((n for n in bundle['system']['nodes'] if n['repository']==repo['id']),None)
             target_node=next((n for n in bundle['system']['nodes'] if n['repository']==target),None)
-            if source_node and target_node:bundle['system']['links'].append({'from':source_node['id'],'to':target_node['id'],'label':'Configured API destination','sure':'doc','ev':[]})
+            if source_node and target_node and (repo['id'],target) not in joined:bundle['system']['links'].append({'from':source_node['id'],'to':target_node['id'],'label':'Configured API destination','sure':'doc','ev':[]})
     if repository:
         selected_nodes={n['id'] for n in bundle['system']['nodes'] if n['repository']==repository}
         related=set(selected_nodes)

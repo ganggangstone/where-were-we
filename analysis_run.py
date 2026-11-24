@@ -31,8 +31,8 @@ import source_signals
 
 ACTIVE = {'preparing', 'running', 'saving'}
 TERMINAL = {'completed', 'failed', 'cancelled'}
-OVERVIEW_VERSION = 7
-SCOPED_OVERVIEW_VERSION = 5
+OVERVIEW_VERSION = 8
+SCOPED_OVERVIEW_VERSION = 6
 MAX_FILE_BYTES = 300_000
 GENERATED_NAMES = {'package-lock.json','pnpm-lock.yaml','yarn.lock','go.sum','poetry.lock','cargo.lock','composer.lock','gemfile.lock','uv.lock'}
 GENERATED_SUFFIXES = ('.lock','.min.js','.min.css','.map')
@@ -578,11 +578,28 @@ def _full_scope(value,defer=False):
         index=_pinned_index(conf['path'],raw[value['branch']],head)
         sizes=_tracked(conf['path'],head);files=[f for f,z in sizes.items() if not _exclusion(f,z)]
         spots={}
-        whole=analysis_label.summary(catalog,index,index.get('project_description') or '',_known_routes(raw[value['branch']],index,head),spots)
+        whole=analysis_label.summary(catalog,index,index.get('project_description') or '',_known_routes(raw[value['branch']],index,head),spots,
+                                     _external_hints(conf['path'],head,defer),_connected_codes(value['project'],rid))
         out[rid]={'pin':pin,'repo':conf['path'],'catalog':catalog,'sizes':sizes,'files':files,
                   'missing':sorted(n for n in lang_rules.needed(files) if not lang_rules.load(n)),
                   'summary':whole,'spots':spots,'flows':analysis_label.edges(index)}
     return out
+
+def _external_hints(repo,commit,defer=False):
+    """Outside services the code names (analysis_label.hints), read from the code files whose signal scan found such a line.
+    A board that does not wait for the scan offers none."""
+    try:signals=_signals(repo,commit,wait=not defer)
+    except SignalsPending:return []
+    rows=sorted(f for f,r in signals.items() if r['classes'].get('external') and r['kind'] not in ('doc','support'))[:400]
+    entries=[e for e in _eligible(repo,commit,set(rows))]
+    return analysis_label.hints({file:text for file,text,_ in source_signals.stream(repo,entries)})
+
+def _connected_codes(name,rid):
+    """[[other code, 'sends requests to' | 'receives requests from']] from the project's connection settings."""
+    repos=(store.config(name) or {}).get('repositories',[])
+    names={r['id']:r.get('name') or r['id'] for r in repos}
+    mine=next((r for r in repos if r['id']==rid),{})
+    return [[names[t],'sends requests to'] for t in mine.get('api_targets',[]) if t in names]+[[names[r['id']],'receives requests from'] for r in repos if rid in r.get('api_targets',[])]
 
 def _known_routes(selected,index,head):
     """The requests the local map knows, keyed "file::function" as the map screen names them: the saved map's mounted
@@ -1669,7 +1686,7 @@ def _quick_overview(repo,request,language,invoke,cancelled,deadline,raw,resource
     packet={'lang':language,'sources':sources,
             'prompt':'Describe directly evidenced features and structure in the selected language. '
                      'Use supplied declaration and import metadata when describing relationships. An import alone does not establish a runtime call. Each item names one feature, component or relationship, explains its role in one sentence and selects its supporting ref. '
-                     'Select a primary ref and up to three other, distinct evidence_refs for claims spanning multiple lines. Each factual step needs a supporting line. Return at most 12 items. Skip unsupported claims. Empty items are valid. Do not request further reads.',
+                     'Select a primary ref and up to three other, distinct evidence_refs for claims spanning multiple lines. Each factual step needs a supporting line. Return at most 12 items. Skip unsupported claims. Empty items are valid. Do not request further reads. '+mapcore.PLAIN,
             'schema':{'items':[{'name':'feature or component','role':'role as a noun phrase, at most 24 characters','description':'what it does','ref':ref_offset+1,'evidence_refs':[]}]}}
     by_line={(row['file'],row['line']):ref for ref,row in references.items()}
     for member in members:
