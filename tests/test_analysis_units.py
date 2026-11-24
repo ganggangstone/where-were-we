@@ -199,6 +199,19 @@ class FullRun(unittest.TestCase):
         rows={r[0]:r for r in self.board()['repositories'][0]['units']}
         self.assertTrue(rows['route:/carts'][2].startswith('Name '))
 
+    def test_a_second_press_after_route_rules_sends_nothing(self):
+        for name,text in {'web/app.rb':"get '/carts' do\nend\n",'web/store.rb':'class Store\nend\n','web/item.rb':'class Item\nend\n'}.items():
+            (self.repo/name).parent.mkdir(parents=True,exist_ok=True);(self.repo/name).write_text(text)
+        self.save_code()
+        rules={**lang_rules_test.RUBY,'routes':[{'regex':r'''^\s*(get|post)\s+['"](/[^'"]*)['"]''','method':1,'path':2}]}
+        calls=[];job,done=self.analyse(calls,rules=rules)
+        self.assertEqual((job['announced']['rules'],job['announced']['labeling'],len(calls),done['state']),(1,1,2,'completed'))
+        rows=self.board()['repositories'][0]['units']
+        self.assertTrue(rows and any(r[0]=='route:/carts' for r in rows))
+        again=[];job,done=self.analyse(again,fail=lambda prompt:True)  # the route units the rules added keep the part's key
+        self.assertEqual((again,job['announced']['total'],done['state']),([],0,'completed'))
+        self.assertEqual(self.board()['repositories'][0]['units'],rows)
+
     def test_failed_reading_rules_keep_the_folder_map_and_say_so(self):
         for i in range(4):(self.repo/f'app/m{i}.rb').parent.mkdir(exist_ok=True);(self.repo/f'app/m{i}.rb').write_text(f'class M{i}\nend\n')
         self.save_code()

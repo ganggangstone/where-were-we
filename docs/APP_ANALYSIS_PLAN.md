@@ -68,7 +68,9 @@ changed. When nothing changed, it makes no call.
 
 When reading rules are needed, every labeling part is counted, because the rules change the summary.
 The unit partition is fixed when the run is prepared, so the announced count still holds after the rules arrive.
-Units the rules add (route units of that language) join the last labeling part.
+After the rules, the parts are cut again from the new summary when it splits into the announced number of parts,
+so a later press with nothing changed finds the same keys. Otherwise the units the rules add (route units of that
+language) join the last labeling part.
 
 ## What the AI may claim
 

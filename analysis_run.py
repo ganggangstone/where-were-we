@@ -611,11 +611,15 @@ def _saved_labels(history,rid):
     return parts,structures
 
 def _slices(scope,partition):
-    """The labeling payloads of the announced partition. Units the reading rules added after it was fixed (routes of
-    another language) join the last part, so the number of calls stays the one announced."""
-    whole=scope['summary'];units=scope['catalog']['units'];placed={i for ids,_ in partition for i in ids}
-    late=[u for u in whole['units'] if units[u[0]]['id'] not in placed]
-    return [(analysis_label._slice(whole,[u for u in whole['units'] if units[u[0]]['id'] in set(ids)]+(late if n==len(partition)-1 else [])),last)
+    """The labeling payloads of the announced partition. A payload depends only on the current summary: when it splits
+    into as many parts as announced, those parts are used as they are, so a later press with nothing changed makes the
+    same keys. Otherwise units the reading rules added after the partition was fixed (routes of another language) join
+    the last part in summary order, so the number of calls stays the one announced."""
+    whole=scope['summary'];units=scope['catalog']['units']
+    fresh=[(p['payload'],p['structure']) for p in analysis_label.parts(whole) if p['kind']=='labeling']
+    if len(fresh)==len(partition):return fresh
+    placed={i for ids,_ in partition for i in ids}
+    return [(analysis_label._slice(whole,[u for u in whole['units'] if units[u[0]]['id'] in set(ids) or n==len(partition)-1 and units[u[0]]['id'] not in placed]),last)
             for n,(ids,last) in enumerate(partition)]
 
 def _full_plan(value,history,defer=False):
