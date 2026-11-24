@@ -1618,7 +1618,16 @@ def _quick_overview(repo,request,language,invoke,cancelled,deadline,raw,resource
         selected.extend(fallback[:4-len(selected)])
     selected=set(selected)
     snapshots=export_source(repo,commit,selected={commit:selected},cancelled=cancelled,deadline=deadline)
-    sources=[];references={}
+    sources=[];references={};own={}
+    if resource:
+        # The selected resource's lines run from its handler line to the next other route's line; the rest of the file is context.
+        others={}
+        for scope,rows in _resource_rows(index.get('service_flow') or {}).items():
+            for flow in rows:others.setdefault(flow['server']['file'],set()).add((flow['server']['line'],scope==resource))
+        for _,flow in flows:
+            f,a=flow['server']['file'],flow['server']['line']
+            b=min([n for n,same in others.get(f,()) if n>a and not same]+[a+61])
+            own.setdefault(f,set()).update(range(a,b))
     for source in snapshots[0]['files']:
         lines=[row for row in source['lines'] if len(row['text'].strip())>=6]
         # Spread the excerpt across the file, including its first and last usable lines.
@@ -1633,7 +1642,8 @@ def _quick_overview(repo,request,language,invoke,cancelled,deadline,raw,resource
             ref=ref_offset+len(references)+1
             references[ref]={'file':source['file'],'line':row['line'],'quote':text}
             # A unit packet carries many rows, so they use the compact [ref, line, text(, declaration)] form.
-            rows.append([ref,row['line'],text,*([evidence[row['line']]] if evidence.get(row['line']) else [])] if unit else {'ref':ref,'line':row['line'],'text':text,**evidence.get(row['line'],{})})
+            rows.append([ref,row['line'],text,*([evidence[row['line']]] if evidence.get(row['line']) else [])] if unit else {'ref':ref,'line':row['line'],'text':text,**evidence.get(row['line'],{}),
+                        **({'context':True} if source['file'] in own and row['line'] not in own[source['file']] else {})})
         if rows:sources.append({'file':source['file'],'lines':rows})
     result={'format':'overview-v1','version':SCOPED_OVERVIEW_VERSION if resource or unit else OVERVIEW_VERSION,'files':[s['file'] for s in sources],'items':[],
             'scope_coverage':{'total':total_scopes,'selected':[]}}
@@ -1706,7 +1716,7 @@ def _quick_overview(repo,request,language,invoke,cancelled,deadline,raw,resource
         packet['prompt']+=' Describe only the selected unit (its kind is unit_kind) and the supplied evidence. Source rows are [ref, line, text] with an optional fourth object of declaration metadata. Name its role in a short noun phrase and explain what it does without repeating file paths.'
     elif resource:
         packet['resource']=resource
-        packet['prompt']+=' Describe only the selected resource and the supplied evidence.'
+        packet['prompt']+=' Describe only the selected resource and the supplied evidence.'+(' Rows with context:true are neighbouring code shown for orientation; they are not part of the selected resource, so do not describe them as its behaviour.' if own else '')
     if connections:
         packet['connections']=connections
         packet['schema']['feature_groups']=[{'name':'short feature name','connection_ids':[connections[0]['id']]}]

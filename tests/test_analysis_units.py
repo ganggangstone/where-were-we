@@ -252,6 +252,17 @@ class FullRun(unittest.TestCase):
         self.assertEqual((done['state'],len(calls)),('completed',1))
         self.assertEqual({r[0]:r[4] for r in self.board()['repositories'][0]['units']}[unit],'saved')
 
+    def test_an_opened_route_marks_the_other_routes_lines_as_context(self):
+        job=analysis_run.prepare('demo',lang='en',repository='service',intent={'task':'full','targets':[],'only':[{'repository':'service','target':'route:/reports'}]})
+        calls=[];done=analysis_run.run(job['id'],self.executor(calls))
+        self.assertEqual(done['state'],'completed',done.get('error'))
+        packet=json.loads(calls[0].split('\n',1)[1]);rows={r['line']:r for s in packet['sources'] if s['file']=='api.py' for r in s['lines']}
+        own=[n for n,r in rows.items() if "'/reports'" in r['text'] or 'def reports' in r['text']]
+        self.assertTrue(own and not any(rows[n].get('context') for n in own),rows)
+        others=[r for r in rows.values() if '/orders' in r['text'] or '/users' in r['text']]
+        self.assertTrue(others and all(r.get('context') for r in others),rows)
+        self.assertIn('context:true',packet['prompt'])
+
 
 class LinkEvidence(unittest.TestCase):
     """A link's evidence is the local line that makes it; without one, the cited declarations are kept as related code."""
