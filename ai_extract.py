@@ -955,6 +955,8 @@ def task_result(raw,task,branch,target,data,repo,commit,lang,configuration=None,
         outputs=data.get('routes')
         if not isinstance(outputs,dict) or not outputs or any(k not in inputs['routes'] for k in outputs):raise ValueError('Choose known route targets')
         updated['flows']=updated.get('flows') or {'routes':{}};flows=updated['flows']['routes']
+        notes=[n.get('text') if isinstance(n,dict) else n for n in data.get('unknown',[]) if isinstance(n,(str,dict))] if isinstance(data.get('unknown'),list) else []
+        notes=[n.strip() for n in notes if isinstance(n,str) and n.strip()]
         for key,got in outputs.items():
             if not isinstance(got,dict):raise ValueError('Invalid route steps')
             route=inputs['routes'][key];steps=[]
@@ -965,7 +967,9 @@ def task_result(raw,task,branch,target,data,repo,commit,lang,configuration=None,
             reason=text(got,'unknown').strip()
             # Steps the code does not establish are recorded as unknown; supplied steps must still verify.
             if not steps and (got.get('steps') or not reason):raise ValueError('No usable step evidence; previous steps preserved')
-            flow={**meta,**({'unknown':reason} if not steps else {}),'name':text(got,'name'),'file':route['file'],'function':route['function'],'steps':steps,
+            # A batch note (sources left unread) stays with every route of that answer, as jobs keep theirs.
+            note=' '.join([*([reason] if not steps else []),*notes])
+            flow={**meta,**({'unknown':note} if note else {}),'name':text(got,'name'),'file':route['file'],'function':route['function'],'steps':steps,
                   'hash':hashlib.sha1(git(repo,'show',commit+':'+route['file']).encode()).hexdigest()[:12]}
             flows[key]=flow
             for r in updated[branch]['backend_routes']:

@@ -192,6 +192,12 @@ class AnalysisRun(unittest.TestCase):
         with patch.object(analysis_run,'MAX_READ_ROUNDS',2):done=analysis_run.run(value['id'],endless)
         self.assertEqual(done['state'],'completed',done.get('error'))
         self.assertIn('read rounds allowed',json.dumps(self.raw()['dev']['task_outputs']['jobs']['nodes']['api']['unknown']))
+        def endless_steps(prompt,**kwargs):
+            p=json.loads(prompt.split('\n',1)[1])
+            return {'batch':p['batch']['id'],'covered':p['batch']['units'],'needs':[{'query':'zz'+str(len(rounds)),'start':1,'limit':1}],'result':self.routes()}
+        with patch.object(analysis_run,'MAX_READ_ROUNDS',2):done=analysis_run.run(self.steps()['id'],endless_steps)
+        self.assertEqual(done['state'],'completed',done.get('error'))
+        self.assertIn('read rounds allowed',self.raw()['dev']['task_outputs']['flows']['routes'][self.ROUTE]['unknown'])
 
     def test_literal_searches_in_one_analysis_do_not_reread_pinned_blobs(self):
         import subprocess
