@@ -404,7 +404,7 @@ class Analysis(unittest.TestCase):
         for role in ('dev','main'):
             bundle=project.read_bundle('demo',branch=role);model=mapcore.Map('demo',role)
             self.assertEqual(bundle['groups']['names']['/@service/items'],role)
-            self.assertEqual(bundle['system']['nodes'][0]['name'],'[service] '+role)
+            self.assertEqual(bundle['system']['nodes'][0]['name'],role)  # one code: no code-name prefix
             self.assertEqual(bundle['jobs']['nodes']['service::worker']['jobs'][0]['name'],role)
             self.assertEqual(model.ai_name(model.m['backend_routes'][0]),role)
             self.assertEqual(bundle['branch_details'][role]['groups']['names']['/@service/items'],role)

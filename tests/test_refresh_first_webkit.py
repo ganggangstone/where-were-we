@@ -188,7 +188,7 @@ class RefreshFirstWebKit(unittest.TestCase):
  await doRefresh();
  const box=()=>$('map').querySelector('[data-inventory]');
  check(purpose().compareDocumentPosition(box()) & Node.DOCUMENT_POSITION_FOLLOWING,'The source description precedes an unsupported-language inventory');
- check(box().open && box().innerText.includes(pin) && box().innerText.includes(tr('파일 경로 표시 한도 도달')),'Unsupported repositories open a pinned, explicitly partial path inventory');
+ check(!box().open,'The path inventory starts collapsed');box().querySelector('summary').click();await new Promise(r=>setTimeout(r,50));check(box().open && box().textContent.includes(pin) && box().textContent.includes(tr('파일 경로 표시 한도 도달')),'The path inventory starts collapsed and opens to a pinned, explicitly partial list');
  check(box().querySelector('[data-directory-coverage]').innerText===tr('확인한 파일')+' 2/80','Folder badges use saved coverage for the selected revision');
  box().querySelector('[data-inventory-dir="src"]').click();
  check(box().querySelector('[data-directory-coverage]').parentNode.querySelector('[data-inspect-directory]'),'Folder coverage stays beside its scoped inspection action');
