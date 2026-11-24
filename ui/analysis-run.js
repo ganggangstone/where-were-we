@@ -374,10 +374,11 @@ const AnalysisRun = (() => {
   // ---- Full code analysis: units are saved as they finish and read as a map and cards, not as a wall of text ----
   const KINDS={route:['경로','Paths'],screen:['화면','Screens'],program:['프로그램','Programs'],package:['패키지','Packages'],cli:['CLI','CLI'],folder:['폴더','Folders'],map:['지도','Map'],system:['서비스 구성','Service structure'],groups:['화면 묶음','Screen groups']};
   const MAP_KINDS=['map','system','groups'];
-  const UNIT_STATES={saved:['저장됨','Saved'],named:['이름·설명 있음','Named and described'],working:['분석 중','Analyzing'],local:['로컬 확인','Checked locally'],pending:['설명 없음','No explanation'],failed:['검증 실패','Failed'],stale:['오래됨','Outdated']};
+  const UNIT_STATES={saved:['저장됨','Saved'],explained:['자세한 설명 있음','Detailed explanation'],named:['이름·설명 있음','Named and described'],working:['분석 중','Analyzing'],local:['로컬 확인','Checked locally'],pending:['설명 없음','No explanation'],failed:['검증 실패','Failed'],stale:['오래됨','Outdated']};
   // A unit's saved state is its detailed explanation; the map rows (groups, service structure) are simply saved.
-  const stateText=row=>row.state==='saved' && !MAP_KINDS.includes(row.kind)?text('자세한 설명 있음','Detailed explanation'):text(...UNIT_STATES[row.state]);
-  const STATE_ORDER=['working','saved','named','local','failed','stale','pending'];
+  const stateText=row=>row.state==='saved' && !MAP_KINDS.includes(row.kind)?text(...UNIT_STATES.explained):text(...UNIT_STATES[row.state]);
+  const legendKey=row=>row.state==='saved' && !MAP_KINDS.includes(row.kind)?'explained':row.state;
+  const STATE_ORDER=['working','explained','saved','named','local','failed','stale','pending'];
   const LOCAL_KINDS={doc:['문서','Documents'],data:['데이터','Data'],support:['테스트·외부 코드','Tests and vendored code']};
   let unitEdges=new Map(),linkStore={scope:'',repos:{}};
   const REASONS={secret:['비밀 파일','Credential files'],binary:['이미지·바이너리','Binary files'],large:['300KB 초과','Over 300KB'],generated:['생성·잠금 파일','Generated or lock files']};
@@ -488,16 +489,17 @@ const AnalysisRun = (() => {
     }
     const openIndex=unitRows.findIndex(row=>unitKey(row)===openedUnit),linkedSet=new Set(openIndex>=0?[...(unitEdges.get(openIndex)?.out || []),...(unitEdges.get(openIndex)?.in || [])]:[]);
     const aiTotal=total-(t.local || 0);
-    const explained=unitRows.filter(r=>!MAP_KINDS.includes(r.kind) && r.state==='saved').length;
-    const present=STATE_ORDER.filter(k=>t[k]);
-    const bar=`<div class="unit-bar" role="img" aria-label="${t.saved || 0}/${aiTotal}">${present.map(k=>`<i data-state="${k}" style="width:${(t[k]*100/total).toFixed(2)}%"></i>`).join('')}</div>`;
-    const filters=`<div class="unit-legend" role="group" aria-label="${text('상태 필터','State filter')}"><button type="button" data-unit-filter="all" aria-pressed="${unitFilter==='all'}">${text('전체','All')} ${total}</button>${present.map(k=>`<button type="button" data-unit-filter="${k}" data-state="${k}" aria-pressed="${unitFilter===k}"><i aria-hidden="true"></i>${text(...UNIT_STATES[k])} ${t[k]}</button>`).join('')}</div>${t.retired?`<p class="s unit-retired">${text('현재 구조에 없는 이전 단위 '+t.retired+'개의 설명은 기록에만 남아 있고 위 개수에 넣지 않습니다.',t.retired+' explanations of earlier units that the current structure no longer has stay in history only and are not counted above.')}</p>`:''}`;
+    const explained=unitRows.filter(r=>legendKey(r)==='explained').length;
+    const n={...t,explained,saved:t.saved-explained};
+    const present=STATE_ORDER.filter(k=>n[k]);
+    const bar=`<div class="unit-bar" role="img" aria-label="${t.saved || 0}/${aiTotal}">${present.map(k=>`<i data-state="${k==='explained'?'saved':k}" style="width:${(n[k]*100/total).toFixed(2)}%"></i>`).join('')}</div>`;
+    const filters=`<div class="unit-legend" role="group" aria-label="${text('상태 필터','State filter')}"><button type="button" data-unit-filter="all" aria-pressed="${unitFilter==='all'}">${text('전체','All')} ${total}</button>${present.map(k=>`<button type="button" data-unit-filter="${k}" data-state="${k==='explained'?'saved':k}" aria-pressed="${unitFilter===k}"><i aria-hidden="true"></i>${text(...UNIT_STATES[k])} ${n[k]}</button>`).join('')}</div>${t.retired?`<p class="s unit-retired">${text('현재 구조에 없는 이전 단위 '+t.retired+'개의 설명은 기록에만 남아 있고 위 개수에 넣지 않습니다.',t.retired+' explanations of earlier units that the current structure no longer has stay in history only and are not counted above.')}</p>`:''}`;
     const lanes=Object.keys(KINDS).filter(k=>unitRows.some(r=>r.kind===k)).map(kind=>{
       const set=unitRows.map((row,i)=>[row,i]).filter(([row])=>row.kind===kind);
       return `<div class="unit-lane"><span class="unit-kind">${text(...KINDS[kind])}<b>${set.filter(([row])=>row.state==='saved').length}/${set.filter(([row])=>row.state!=='local').length}</b></span><span class="unit-cells">${set.map(([row,i])=>`<button class="unit-cell" type="button" data-unit-cell="${i}" data-state="${row.state}" ${linkedSet.has(i)?'data-linked="1"':''} title="${esc(row.name)} · ${stateText(row)}" aria-label="${esc(row.name)} · ${stateText(row)}"></button>`).join('')}</span></div>`;
     }).join('');
-    const rank=row=>STATE_ORDER.indexOf(row.state);
-    const listed=unitRows.map((row,i)=>[row,i]).filter(([row])=>unitFilter==='all' || row.state===unitFilter).sort((a,b)=>rank(a[0])-rank(b[0]) || a[1]-b[1]);
+    const rank=row=>STATE_ORDER.indexOf(legendKey(row));
+    const listed=unitRows.map((row,i)=>[row,i]).filter(([row])=>unitFilter==='all' || legendKey(row)===unitFilter).sort((a,b)=>rank(a[0])-rank(b[0]) || a[1]-b[1]);
     const shown=listed.slice(0,unitLimit),opened=unitRows.findIndex(row=>unitKey(row)===openedUnit);
     if(opened>=0 && !shown.some(([,i])=>i===opened))shown.unshift([unitRows[opened],opened]);
     const hidden=listed.length-shown.length;

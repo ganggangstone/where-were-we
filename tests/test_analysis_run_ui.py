@@ -143,6 +143,24 @@ assert(!html.includes('Checking files') && html.includes('Analyze · 2 calls') &
 assert(calls.filter(c=>c.args && c.args.view==='signals').length===1 && units===2,'One scan request, then the board is read again');
 """)
 
+    def test_legend_counts_detailed_units_apart_from_saved_map_rows_and_adds_up(self):
+        self.check_js(self.LOCAL_BOARD + r"""
+const mixed=()=>({repositories:[{repository:'service',units:[
+ ['route:/a','route','/a',3,'saved',''],['route:/b','route','/b',2,'saved',''],['route:/c','route','/c',2,'named',''],['route:/d','route','/d',2,'pending',''],
+ ['groups','groups','groups',1,'saved',''],['system','system','system',1,'saved','']]}],
+ totals:{units:6,saved:4,named:1,pending:1},calls:{rules:0,labeling:0,structure:0,unit:0,total:0}});
+const legend=()=>[...$('insp').innerHTML.matchAll(/data-unit-filter="(\w+)"[^>]*>(?:<i[^>]*><\/i>)?([^<]*)</g)].map(m=>m[2].trim());
+native=(command,args)=>command==='analysis_run_status'&&args.view==='units'?mixed():undefined;
+status=null;await open();await AnalysisRun.check();await flush();
+const first=legend();
+assert(first.includes('All 6') && first.includes('Detailed explanation 2') && first.includes('Saved 2') && first.includes('Named and described 1') && first.includes('No explanation 1'),'Legend labels: '+first);
+assert(first.slice(1).reduce((n,x)=>n+Number(x.match(/(\d+)$/)[1]),0)===6,'Legend rows add up to the unit total');
+unitHandles['unit-filter'].find(b=>b.dataset.unitFilter==='explained').onclick();
+assert(($('insp').innerHTML.match(/data-unit-card=/g) || []).length===2,'The detailed legend row filters the two detailed units');
+await open();await AnalysisRun.check();await flush();
+assert(JSON.stringify(legend())===JSON.stringify(first),'Same legend after reopening');
+""")
+
     def test_running_board_filters_opens_saved_units_and_cancels(self):
         self.check_js(self.BOARD + r"""
 await open();
@@ -278,7 +296,7 @@ assert(!calls.some(c=>['analysis_run_start','analysis_request'].includes(c.comma
         self.check_js(self.BOARD + r"""
 S.lang='ko';serve();status=null;await open();await AnalysisRun.check();await flush();
 const html=$('insp').innerHTML;
-for(const word of ['전체 코드 분석','베타','분석 중','설명 없음','저장됨','자세한 설명 있음','이름·설명 있음','분석하기 · 호출 3회','색인 한도 도달','제외 3'])assert(html.includes(word),'Korean label '+word);
+for(const word of ['전체 코드 분석','베타','분석 중','설명 없음','자세한 설명 있음','이름·설명 있음','분석하기 · 호출 3회','색인 한도 도달','제외 3'])assert(html.includes(word),'Korean label '+word);
 assert(!/해요|이에요|예요|할게요/.test(html),'No informal ending');
 """)
 
