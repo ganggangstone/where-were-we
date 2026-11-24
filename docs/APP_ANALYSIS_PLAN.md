@@ -44,16 +44,30 @@ Each of these runs only when the user asks for that one thing.
 | Unit explanation | 「AI 설명 · 호출 1회」 on an opened unit card | one call over bounded lines of that unit (`_quick_overview`) |
 | Route explanation | 「AI 설명 (베타)」 on a route in the map (`scope_overview`) | one call over bounded lines of that route (`_quick_overview`) |
 | Path-group explanations | 「영역 AI 설명 (베타)」 in the map (`resources`) | one call per pack of route scopes, at most the confirmed `max_calls` |
-| Action steps (동작 과정) | 「이 동작의 과정 알아보기」 (`steps`) | batches, below |
-| Program jobs (하는 일) | 「이 프로그램이 하는 일 알아보기」 on a program (`jobs`) | batches, below |
-| Change explanation | 「변경 설명 만들기」 (`briefing`) | batches, below |
+| Action steps (동작 과정) | 「이 동작의 과정 알아보기」 (`steps`) | at most 3 (`MAX_STEPS_CALLS`), below |
+| Program jobs (하는 일) | 「이 프로그램이 하는 일 알아보기」 on a program (`jobs`) | one, below |
+| Change explanation | 「변경 설명 만들기」 (`briefing`) | at most 4 (`MAX_BRIEFING_CALLS`), below |
 
-In `_quick_overview` local code picks the source lines, the model cites integer refs and local code fills file,
-line and quote. Steps, jobs and briefing send their whole input (route handler files, every file in the program's
-code folders, or the collected change evidence). When that input does not fit one call (`MAX_PROMPT_BYTES`), it is
-split into batches. A batch may ask for more pinned source (`needs`) for up to `MAX_READ_ROUNDS` calls. A detail
-reads the local map of the pinned commit and saves through the same checks as the MCP path
-(`ai_extract.task_record`, `briefing.record`).
+In every detail, local code picks bounded source lines and numbers them; the model cites a line only by its integer
+ref, and local code fills file, line and quote (`_quick_overview`, `analysis_run._detail`). A reply that names a ref
+it was not given, writes a quote itself or asks for further reads (`needs`) is invalid. Each call that fails or
+returns an invalid answer is retried once; when the retry fails too, the run fails and the saved result stays.
+Detail results are saved through the same checks as the MCP path (`ai_extract.task_record`, `briefing.record`).
+
+- **Steps.** Per route: the handler file from the handler's declaration (about 120 lines) and around the
+  registration line, then the route's service files and the files the handler file imports, each up to 60 lines
+  around their source signals. At most `ROUTE_BYTES` (16 KB) per route and `DETAIL_BYTES` (96 KB) per call. Routes
+  that do not fit `MAX_STEPS_CALLS` calls, and routes an answer leaves out, are saved with `steps: []` and an
+  `unknown` text saying their steps are not established.
+- **Jobs.** Up to `MAX_JOB_FILES` (8) files in the program's code folders, ranked by source signals (entry points,
+  schedulers, workers first), each up to 160 lines around its signals and `DETAIL_BYTES / 8`. The known routes go
+  along as metadata. The saved `unknown` says how many of the program's files were read (「프로그램 파일 M개 중 N개만
+  읽었다.」).
+- **Briefing.** The collected change evidence, with each PR or issue body cut to `BRIEF_BODY_CHARS` (3000) and the
+  structure evidence to `BRIEF_STRUCTURE_CHARS` (8000); a cut source is marked `truncated`. PRs are packed with
+  their linked issues into groups of at most `DETAIL_BYTES`; each call covers every PR of its group, and the cards
+  are joined. When more than `MAX_BRIEFING_CALLS` groups would be needed, the run fails with `source_too_large`
+  before any call, so no PR is left out silently.
 
 ## Call count
 
