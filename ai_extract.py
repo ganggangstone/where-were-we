@@ -975,12 +975,10 @@ def task_result(raw,task,branch,target,data,repo,commit,lang,configuration=None,
             for r in updated[branch]['backend_routes']:
                 if r['file']+'::'+str(r.get('function'))==key:r['flow']=flow
     else:
-        jobs=program_jobs(inputs['node'],data)
-        if not jobs['jobs']:
-            # No jobs is a finished answer only when stated with unknown, never when supplied jobs were rejected.
-            reason=unknown(data.get('unknown',[]))
-            if rows(data,'jobs') or not reason:raise ValueError('No usable job trigger evidence; previous jobs preserved')
-            jobs['unknown']=reason
+        jobs=program_jobs(inputs['node'],data);reason=unknown(data.get('unknown',[]))
+        # No jobs is a finished answer only when stated with unknown, never when supplied jobs were rejected.
+        if not jobs['jobs'] and (rows(data,'jobs') or not reason):raise ValueError('No usable job trigger evidence; previous jobs preserved')
+        if reason:jobs['unknown']=reason
         updated['jobs']=updated.get('jobs') or {'nodes':{}}
         updated['jobs']['nodes'][target]=jobs
     # Task results travel with their exact branch map, rather than overwriting
