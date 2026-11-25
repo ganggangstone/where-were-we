@@ -1111,7 +1111,7 @@ class Flows(unittest.TestCase):
     def test_names_proposals_history_settings_and_recovery_paths(self):
         self.check(r'''
  S.view='map';render();
- assert(!/\[(web|api)\]/.test(main()) && main().includes('First list [Web screens]'),'Screens show the connection display name, not the internal ID');
+ assert(!/\[(web|api)\]/.test(main()) && main().includes('First list') && !main().includes('First list [Web screens]'),'Screens never show the internal ID and drop the code name when only one code has screens');
  document.querySelector('[data-scr="web::/items"]').click();
  assert(!pane().includes('· web') && pane().includes('Web screens'),'Inspector uses the display name');
  const reqRow=document.querySelector('[data-req]');assert(reqRow.innerText.includes(tr('테스트 연결 ')+'1'),'Tests are named, not a colour dot');
