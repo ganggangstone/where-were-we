@@ -333,13 +333,19 @@ TAG_RE = re.compile(r"<button\b")
 JSX_TEXT_RE = re.compile(r">([^<>{}]+)<")
 
 def jsx_text(inner):
-    """JSX 안쪽에서 사람이 읽는 글자만. {식} 은 뺀다."""
+    """JSX 안쪽에서 사람이 읽는 글자만. {식} 은 뺀다.
+    글자 사이에 낀 식("작품 {n}개")은 값이 빠진 말이 되지 않게 "…" 로 남기고, 글자 앞뒤 끝에 붙은 식({아이콘} 저장)은 뺀다."""
     depth, plain = 0, []
     for ch in inner:  # {식} 안의 > 와 < 가 글자로 읽히지 않게 식을 먼저 지운다
         depth += ch == "{"
         if not depth: plain.append(ch)
         depth -= ch == "}" and depth > 0
-    parts = [" ".join(html.unescape(t).split()) for t in JSX_TEXT_RE.findall(">" + "".join(plain) + "<")]
+        if ch == "}" and not depth: plain.append("\x00")
+    parts = []
+    for t in JSX_TEXT_RE.findall(">" + "".join(plain) + "<"):
+        t = " ".join(html.unescape(t).split())
+        t = re.sub(r"^[\x00 ]+(?=\s|$)|(?:^|(?<=\s))[\x00 ]+$", "", t)  # 끝에 따로 선 식
+        parts.append(" ".join(re.sub(r"\x00+", "…", t).split()))
     parts = [t for t in parts if re.search(r"\w", t)]  # 글자·숫자가 없는 조각(":", "·")은 버튼 글자가 아니다
     return " ".join(parts)
 
