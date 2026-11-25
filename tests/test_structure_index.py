@@ -48,6 +48,21 @@ class Structure(unittest.TestCase):
             self.assertEqual(sum(row['skipped_files'] for row in by_dir.values()),limited['coverage']['skipped_files'])
             self.assertNotIn('directories',index['coverage'])
 
+    def test_absolute_import_names_the_nearest_package_root_before_the_repository_root(self):
+        with tempfile.TemporaryDirectory() as root:
+            git = lambda *args: subprocess.check_output(['git','-C',root,*args]).decode().strip()
+            git('init','-q')
+            sources = {'scripts/jobs/run.py':'', 'sub/scripts/__init__.py':'', 'sub/scripts/jobs/__init__.py':'', 'sub/scripts/jobs/run.py':'',
+                       'sub/scripts/jobs/main.py':'import scripts.jobs.run\nimport scripts.only\n', 'scripts/only.py':'',
+                       'tool/main.py':'import scripts.jobs.run\n'}
+            for name,text in sources.items():
+                path=Path(root)/name;path.parent.mkdir(parents=True,exist_ok=True);path.write_text(text)
+            git('add','.');git('-c','user.name=Test','-c','user.email=test@example.invalid','commit','-qm','x')
+            index=structure_index.build(root,git('rev-parse','HEAD'))
+            self.assertEqual(sorted((e['file'],e['target']) for e in index['imports']),
+                             [('sub/scripts/jobs/main.py','scripts/only.py'),('sub/scripts/jobs/main.py','sub/scripts/jobs/run.py'),
+                              ('tool/main.py','scripts/jobs/run.py')])
+
     def test_selected_file_uses_only_its_blob_and_resolves_unsampled_imports(self):
         import json
         import sys

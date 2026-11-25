@@ -29,7 +29,7 @@ MAX_DECLARATIONS = 20_000
 MAX_IMPORTS = 20_000
 
 
-VERSION = 32
+VERSION = 33
 JS_EXTENSIONS = {'.js', '.jsx', '.mjs', '.cjs'}
 LANGUAGES = ('python', 'javascript', 'typescript', 'html', 'go')
 TS_EXTENSIONS = {'.ts', '.tsx', '.mts', '.cts'}
@@ -757,6 +757,12 @@ def build(repo, commit, excluded=None, *, only_file=None, directory=None, page=1
                    if (file := root + base + suffix) in candidates}
         return next(iter(matches)) if len(matches) == 1 else None
 
+    def near_roots(file):
+        parents = [p.as_posix() + '/' for p in PurePosixPath(file).parents if p.as_posix() != '.']
+        while parents and parents[0] + '__init__.py' in candidates:
+            parents.pop(0)
+        return parents
+
     files = []
     routes = []
     requests = []
@@ -945,7 +951,10 @@ def build(repo, commit, excluded=None, *, only_file=None, directory=None, page=1
                         root = parents[node.level - 1].as_posix()
                         roots = ('' if root == '.' else root + '/',)
                 for module in modules:
-                    target = module_file(module.replace('.', '/'), roots)
+                    base = module.replace('.', '/')
+                    # An absolute import names its package root (the nearest folder above the file's packages) or one of
+                    # that root's parents first; the repository root is the fallback.
+                    target = (None if getattr(node, 'level', 0) else next((t for r in near_roots(file) if (t := module_file(base, (r,)))), None)) or module_file(base, roots)
                     if not target:
                         unresolved += 1
                     elif target != file:
