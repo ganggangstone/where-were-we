@@ -43,7 +43,7 @@ def _folder(unit):
 
 
 _EXTERNAL = re.compile(r'\b(redis|postgres(?:ql)?|mysql|mongodb|amqps?|kafka|nats|sqs|smtp|grpc)://|\b([A-Z][A-Z0-9]*(?:_[A-Z0-9]+)*?)_(?:API_KEY|DSN|BUCKET|ENDPOINT|SECRET_KEY|ACCESS_KEY)\b'
-                       r'|boto3\.(?:client|resource)\(\s*[\'"]([\w-]+)|\bnew\s+(\w+?)(?:Client|Sdk|SDK)\(|\b(stripe|twilio|sendgrid|openai|anthropic|sentry_sdk|firebase_admin)\b'
+                       r'|boto3\.(?:client|resource)\(\s*[\'"]([\w-]+)|\bnew\s+(\w+?)(?:Client|Sdk|SDK)\(|(?:(?<=import )|(?<=from )|(?<=[\'"])(?=\w+[\'"])|(?=\w+\.\w))\b(stripe|twilio|sendgrid|openai|anthropic|sentry_sdk|firebase_admin)\b'
                        r'|\b(?:subprocess\.(?:run|Popen|call|check_call|check_output)|execFile|spawn|shutil\.which)\(\s*\[?\s*[\'"]([\w.-]+)[\'"]'
                        r'|[\'"]https?://([a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,})[/\'"?:]', re.I)
 _PLAIN_HOSTS = re.compile(r'(^|\.)(localhost|example\.\w+|w3\.org|schema\.org|github\.com|githubusercontent\.com|mozilla\.org|python\.org|npmjs\.\w+)$')

@@ -282,6 +282,8 @@ class LinkEvidence(unittest.TestCase):
     def test_outside_services_named_in_code_and_connected_codes_are_offered_locally(self):
         texts={'api/mail.py':"import boto3\nstore=boto3.client('s3')\nKEY=os.environ['STRIPE_API_KEY']\n# redis://only-a-comment\nsubprocess.run(['ffmpeg','-i',x])\nDOC='https://www.w3.org/x'\n"}
         hints=analysis_label.hints(texts)
+        # An SDK name counts only as an import, a call on it or a whole string, not as a word inside text.
+        self.assertEqual([h[0] for h in analysis_label.hints({'a.py':'import stripe\nWORDS = r"stripe[sd]?|plaid"\nopenai.chat(x)\nNAME = "anthropic words"\n'})],['openai','stripe'])
         self.assertEqual([analysis_label.program_file(f) for f in ('api/mail.py','run.sh','site/x.css','page.html','.env.dev.example','tests/a.py','docs/a.md')],
                          [True,True,False,False,False,False,False])
         self.assertEqual(hints,[('STRIPE','api/mail.py',3),('ffmpeg','api/mail.py',5),('s3','api/mail.py',2)])  # comments and well-known hosts are not services
