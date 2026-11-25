@@ -15,15 +15,15 @@ import project as project_store
 
 PROJECT = sys.argv[1]
 if os.path.exists(os.path.join(mapcore.ROOT, PROJECT, "project.json")):
-    import project
-    print(project.refresh_project(PROJECT, since=sys.argv[3] if len(sys.argv) > 3 else "7"))
+    print(project_store.refresh_project(PROJECT, since=sys.argv[3] if len(sys.argv) > 3 else "7"))
     sys.exit(0)
 HOME = os.path.join(mapcore.ROOT, PROJECT)
 REPO = sys.argv[2] if len(sys.argv) > 2 else (project_store.read(Path(HOME)/'dev.json') or project_store.read(Path(HOME)/'main.json'))['repo']
 SINCE = sys.argv[3] if len(sys.argv) > 3 else "7"
 NOW = datetime.now(timezone.utc)
 
-if not os.environ.get('WHERE_WERE_WE_COLLECTION_STAGE') and project_store.github_origin(REPO):
+GITHUB_ORIGIN = project_store.github_origin(REPO)
+if not os.environ.get('WHERE_WERE_WE_COLLECTION_STAGE') and GITHUB_ORIGIN:
     try:print(project_store.refresh_legacy(PROJECT,REPO,SINCE))
     except ValueError as error:sys.exit(str(error))
     sys.exit(0)
@@ -39,11 +39,10 @@ def git(*args):
     result = subprocess.run(["git", "-C", REPO, *args], capture_output=True, text=True)
     if result.returncode:
         if args and args[0]=='fetch' and os.environ.get('WHERE_WERE_WE_GITHUB'):
-            import project
-            sys.exit(str(project.github_error(json.loads(os.environ['WHERE_WERE_WE_GITHUB']),'fetch')))
+            sys.exit(str(project_store.github_error(json.loads(os.environ['WHERE_WERE_WE_GITHUB']),'fetch')))
         sys.exit(result.stderr.strip() or "Git command failed")
     return result.stdout.strip()
-if 'WHERE_WERE_WE_REMOTE_STATUS' not in os.environ and not project_store.github_origin(REPO):
+if 'WHERE_WERE_WE_REMOTE_STATUS' not in os.environ and not GITHUB_ORIGIN:
     os.environ['WHERE_WERE_WE_REMOTE_STATUS']='not_configured'
 has_origin=subprocess.run(['git','-C',REPO,'remote','get-url','origin'],capture_output=True).returncode==0
 if has_origin and os.environ.get('WHERE_WERE_WE_REMOTE_STATUS')!='unavailable':
@@ -54,6 +53,7 @@ os.environ["WHERE_WERE_WE_COMMITS"] = json.dumps(PINNED)
 log, moved = "", {}
 extracted = {}
 refs = mapcore.configured_refs()
+EXTRACTOR = mapcore.extractor_id(HOME)
 
 def extract_basic(commit, destination):
     """Multiple roles and comparisons can point at one immutable tree in this refresh."""
@@ -90,13 +90,12 @@ for b in ("dev", "main"):
         cur['analysis']['observed_commit']=ref
         cur['analysis']['stale']=have not in (now,ref)
         ai_extract.refresh_test_links(cur,mapcore.tests_conf(HOME))
-        import project as project_store
         project_store.atomic(Path(path),cur)
         log += f"{b}: AI map retained; " + ("AI analysis required\n" if cur['analysis']['stale'] else "current\n")
         continue
     if have != now:
         log += extract_basic(ref,path); moved[b] = (have, now)
-    elif cur.get("extractor") != mapcore.extractor_id(HOME):  # 테스트 규칙 등 뽑는 방법만 바뀌었으면 같은 커밋을 다시 뽑는다
+    elif cur.get("extractor") != EXTRACTOR:  # 테스트 규칙 등 뽑는 방법만 바뀌었으면 같은 커밋을 다시 뽑는다
         log += extract_basic(ref,path)
     elif cur.get('structure_index') and __import__('structure_index').outdated(cur['structure_index'], REPO, ref):  # 새로 저장한 읽기 규칙(lang_rules)도 같은 커밋을 다시 읽게 한다
         log += extract_basic(ref,path)
@@ -115,11 +114,12 @@ def base_map(branch, commit):
         path=os.path.join(HOME,name)
         if os.path.exists(path):
             value=json.loads(Path(path).read_text())
-            if value.get('commit') and commit.startswith(value['commit']) and value.get('extractor')==mapcore.extractor_id(HOME) and (value.get('analysis') or {}).get('source')!='ai':return value
+            if value.get('commit') and commit.startswith(value['commit']) and value.get('extractor')==EXTRACTOR and (value.get('analysis') or {}).get('source')!='ai':return value
     path=os.path.join(HOME,branch+'.base.json')
     extract_basic(commit,path)
     return json.loads(Path(path).read_text())
 
+BUNDLE=project_store.read_bundle(PROJECT,briefings=False)  # the comparison loop writes only .base/.current-basic files, outside the bundle
 bases={}
 comparison_keys={}
 previous_result=ch.get('last_result') or {}
@@ -131,7 +131,7 @@ for branch, pinned in PINNED.items():
     # Local groups and flow names affect the human-readable diff independently
     # of the Git commits. Use the same effective branch details as mapcore.Map.
     details=project_store.branch_bundle({branch:cur,**{k:project_store.read(Path(HOME)/(k+'.json')) for k in ('groups','flows')}},branch)
-    inputs=[os.path.realpath(REPO),base,pinned,mapcore.extractor_id(HOME),details.get('groups'),details.get('flows')]
+    inputs=[os.path.realpath(REPO),base,pinned,EXTRACTOR,details.get('groups'),details.get('flows')]
     key=hashlib.sha256(json.dumps(inputs,sort_keys=True,ensure_ascii=False).encode()).hexdigest()
     comparison_keys[branch]=key
     previous_delta=(previous_result.get('evidence') or {}).get('structure',{}).get(branch)
@@ -144,9 +144,9 @@ for branch, pinned in PINNED.items():
         extract_basic(pinned,path)
         cur=json.loads(Path(path).read_text())
         log += branch+': structural comparison uses basic collection; AI-only details require agent analysis\n'
-    delta=mapcore.diff(mapcore.Map(PROJECT,branch,base_map(branch,base)),mapcore.Map(PROJECT,branch,cur))
+    delta=mapcore.diff(mapcore.Map(PROJECT,branch,base_map(branch,base),bundle=BUNDLE),mapcore.Map(PROJECT,branch,cur,bundle=BUNDLE))
     entry['branches'][branch]={'from':base[:8],'to':pinned[:8],'scope':'basic',**delta}
-m = mapcore.Map(PROJECT, "dev" if os.path.exists(os.path.join(HOME,"dev.json")) else "main")
+m = mapcore.Map(PROJECT, "dev" if os.path.exists(os.path.join(HOME,"dev.json")) else "main", bundle=BUNDLE)
 def place(p):  # 화면에 안 걸리는 PR 의 자리
     fs = p["files"]
     if p.get("common_files"): return ["여러 화면에 똑같이 들어 있는 부품"]
