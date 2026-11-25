@@ -23,7 +23,6 @@ FOLDER_MAX_FILES = 12
 LOCAL_MAX_FILES = 200   # a local unit costs no call, so one card can stand for a whole documents or tests area
 LINKS_PER_UNIT = 6
 STORED_FILES = 64
-KINDS = ('route', 'package', 'cli', 'screen', 'program', 'folder')
 
 
 def _route_files(service, indexed):

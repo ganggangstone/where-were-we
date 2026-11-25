@@ -125,7 +125,7 @@ class Commit(unittest.TestCase):
             git('add', '.');git('commit', '-qm', 'x')
             head = git('rev-parse', 'HEAD').strip()
             entries = [(row.split('\t')[1], row.split('\t')[0].split()[2].encode()) for row in git('ls-tree', '-r', head).splitlines()]
-            serial = ss._scan_serial(folder, entries, 11, True)
+            serial = ss._scan_serial(folder, entries, 11)
             old = (ss.PARALLEL_MIN, ss.os.cpu_count)
             ss.PARALLEL_MIN = 2;ss.os.cpu_count = lambda: 4
             self.addCleanup(lambda: (setattr(ss, 'PARALLEL_MIN', old[0]), setattr(ss.os, 'cpu_count', old[1])))

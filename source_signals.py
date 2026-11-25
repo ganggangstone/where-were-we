@@ -26,9 +26,6 @@ import sys
 import threading
 from pathlib import PurePosixPath
 
-VERSION = 1
-
-
 @functools.lru_cache(maxsize=1)
 def digest():
     """Identity of this scanner (rules and thresholds), for caches of its output."""
@@ -49,8 +46,6 @@ SUPPORT_NAME = re.compile(r'(^|[._-])(test|tests|spec|mock|fixture)([._-]|$)|_te
 
 _STRING = r"""['"`][^'"`\n]{1,200}['"`]"""
 _PATH_LITERAL = r"""['"`]/[\w\-{}$:.*/%?=&<>\[\]]*['"`]|['"`][^'"`\n]*(?:\{\w*\}|<\w+(?::\w+)?>|/:\w+)[^'"`\n]*['"`]"""
-_WEAK = r'(?:get|post|put|patch|delete|head|options|any|all|api|use|match|http\w*|handle\w*|mapping)'
-_STRONG = r'(?:route|routes|router|path|re_path|url|urls|endpoint|mount|include|scope|namespace|resource|resources|rule|add_url_rule|add_route|add_api_route|add_resource|handle_func|handlefunc|map_?get|map_?post|map_?put|map_?delete)'
 # Every rule starts with a literal (or a quote/angle/at-sign) so the regex engine can skip to candidates quickly;
 # trailing \b keeps most partial words out. Rules are recall-oriented: a signal line only decides what is sent.
 RULES = (
@@ -72,7 +67,7 @@ LOWER = (0, 1, 5, 6)
 _CI = {}
 
 
-def _pattern(index, name, pattern, text, low):
+def _pattern(index, pattern, text, low):
     if index not in LOWER or low is not None:
         return pattern, low if index in LOWER else text
     if index not in _CI:
@@ -123,7 +118,7 @@ def _hits(text):
     low = text.lower()
     low = low if len(low) == len(text) else None
     for index, (name, pattern) in enumerate(RULES):
-        pattern, haystack = _pattern(index, name, pattern, text, low)
+        pattern, haystack = _pattern(index, pattern, text, low)
         for match in pattern.finditer(haystack):
             line = bisect.bisect_right(starts, match.start())
             found.setdefault(name, set()).add(line)
@@ -218,10 +213,10 @@ PARALLEL_MIN = 600   # files; a smaller commit is scanned in this process (start
 MAX_WORKERS = 6
 
 
-def _scan_serial(repo, entries, overhead, signals):
+def _scan_serial(repo, entries, overhead):
     rows = {}
     for file, text, data in stream(repo, entries):
-        row = scan_text(file, text) if signals else {'windows': [], 'clips': {}, 'kind': '', 'lines': 0, 'classes': {}, 'truncated': False}
+        row = scan_text(file, text)
         lines = text.splitlines() if row['windows'] else ()
         wrapper = len(file) + 34
         row['size'] = len(data) + (data.count(b'\n') + (1 if data and not data.endswith(b'\n') else 0)) * overhead + data.count(b'"') + data.count(b'\\') + data.count(b'\t') + wrapper
@@ -238,21 +233,21 @@ def _scan_worker(repo, entries, overhead):
     return {f: unpack(r) for f, r in json.loads(process.stdout).items()}
 
 
-def scan_commit(repo, commit, entries, overhead, signals=True):
+def scan_commit(repo, commit, entries, overhead):
     """Scan every (path, oid) once through git cat-file streams.
 
     Returns {path: scan row, with 'size' (bytes of the whole serialized text) and 'sent' (bytes of the windows)}.
     Only regular UTF-8 text blobs are scanned; the caller decides which paths are eligible. A large commit is split
     over a few worker interpreters; any worker failure falls back to scanning it all here, so the result is the same."""
     workers = min(MAX_WORKERS, (os.cpu_count() or 1) - 1)
-    if not signals or workers < 2 or len(entries) < PARALLEL_MIN or not sys.executable:
-        return _scan_serial(repo, entries, overhead, signals)
+    if workers < 2 or len(entries) < PARALLEL_MIN or not sys.executable:
+        return _scan_serial(repo, entries, overhead)
     chunks = [entries[i::workers] for i in range(workers)]
     try:
         with concurrent.futures.ThreadPoolExecutor(workers) as pool:
             parts = list(pool.map(lambda chunk: _scan_worker(repo, chunk, overhead), chunks))
     except (OSError, ValueError, KeyError, subprocess.SubprocessError):
-        return _scan_serial(repo, entries, overhead, signals)
+        return _scan_serial(repo, entries, overhead)
     found = {f: r for part in parts for f, r in part.items()}
     return {f: found[f] for f, _ in entries if f in found}
 
@@ -307,4 +302,4 @@ def window_rows(lines, spans, clips):
 
 if __name__ == '__main__':
     entries = [(f, o.encode()) for f, o in json.load(sys.stdin)]
-    print(json.dumps({f: pack(r) for f, r in _scan_serial(sys.argv[1], entries, int(sys.argv[2]), True).items()}))
+    print(json.dumps({f: pack(r) for f, r in _scan_serial(sys.argv[1], entries, int(sys.argv[2])).items()}))

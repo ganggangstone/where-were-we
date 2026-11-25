@@ -254,11 +254,6 @@ def execute(prompt, *, cancelled=None, timeout=600, expected_account=None):
         raise CLIExecutionError('CLI_INVALID_OUTPUT', 'Claude Code did not return the requested JSON object'+where+'. No analysis was saved.') from None
 
 
-class ClaudeCLIExecutor:
-    availability = staticmethod(availability)
-    execute = staticmethod(execute)
-
-
 def _supervise(watch_fd, status_fd, timeout, command):
     """Private process guardian; owns only the group created by _run()."""
     stopping = False
