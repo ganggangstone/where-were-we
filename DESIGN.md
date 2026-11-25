@@ -300,13 +300,11 @@ app:
   node-width: 184px
   search-width: 240px
   flow-width: 1060px
-  status-max: 36vw
   dot: 8px
   badge: 20px
   bar: 4px
   bar-min: 40px
   bar-inline: 90px
-  desc-min: 34px
   lane-indent-1: 12%
   lane-indent-2: 24%
   lane-indent-3: 36%
