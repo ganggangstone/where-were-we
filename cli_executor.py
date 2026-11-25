@@ -248,8 +248,10 @@ def execute(prompt, *, cancelled=None, timeout=600, expected_account=None):
         if not isinstance(data, dict):
             raise ValueError()
         return json.dumps(data, ensure_ascii=False)
-    except (ValueError, TypeError):
-        raise CLIExecutionError('CLI_INVALID_OUTPUT', 'Claude Code did not return the requested JSON object. No analysis was saved.') from None
+    except (ValueError, TypeError) as error:
+        # The parser's position (never the text) tells a retry what to fix.
+        where = f' ({error.msg} at character {error.pos})' if isinstance(error, json.JSONDecodeError) else ''
+        raise CLIExecutionError('CLI_INVALID_OUTPUT', 'Claude Code did not return the requested JSON object'+where+'. No analysis was saved.') from None
 
 
 class ClaudeCLIExecutor:

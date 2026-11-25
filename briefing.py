@@ -143,19 +143,19 @@ def normalize(data,ctx):
         if not isinstance(value,dict) or not isinstance(value.get('text'),str) or not value['text'].strip():raise ValueError('Explain a claim or its missing evidence')
         if value.get('unknown') is True:return {'text':value['text'],'unknown':True,'evidence':[]}
         ev=value.get('evidence')
-        if not isinstance(ev,list) or not ev:raise ValueError('A factual explanation requires evidence')
+        if not isinstance(ev,list) or not ev:raise ValueError('A factual explanation requires evidence, or unknown:true')
         evidence=[]
         for item in ev:
             if not isinstance(item,dict):raise ValueError('Invalid claim evidence')
             sid=item.get('source');quote=item.get('quote')
-            if sid not in ctx['sources'] or not isinstance(quote,str) or len(quote.strip())<6 or quote not in ctx['sources'][sid]['text']:raise ValueError('Briefing quote does not match collected evidence')
+            if sid not in ctx['sources'] or not isinstance(quote,str) or len(quote.strip())<6 or quote not in ctx['sources'][sid]['text']:raise ValueError(f'Briefing quote does not match collected evidence: source {sid!r} has no exact text {str(quote)[:80]!r}')
             used.add(sid);evidence.append({'source':sid,'quote':quote,'url':ctx['sources'][sid]['url']})
         return {'text':value['text'],'unknown':False,'evidence':evidence}
     for card in data['cards']:
         cid=card.get('id','');refs=card.get('prs')
-        if not re.fullmatch(r'[a-z][a-z0-9-]{0,47}',cid) or cid in ids:raise ValueError('Use unique problem IDs')
-        if not isinstance(card.get('title'),str) or not card['title'].strip() or not isinstance(refs,list) or any(not isinstance(p,str) or p not in known for p in refs) or len(refs)!=len(set(refs)):raise ValueError('Use collected PR references')
-        if known and not refs:raise ValueError('A problem card must name its related PRs')
+        if not re.fullmatch(r'[a-z][a-z0-9-]{0,47}',cid) or cid in ids:raise ValueError(f'Use unique problem IDs (lowercase, digits, hyphens): {str(cid)[:48]!r}')
+        if not isinstance(card.get('title'),str) or not card['title'].strip() or not isinstance(refs,list) or any(not isinstance(p,str) or p not in known for p in refs) or len(refs)!=len(set(refs)):raise ValueError(f'Use collected PR references in prs: card {cid!r}')
+        if known and not refs:raise ValueError(f'A problem card must name its related PRs: card {cid!r}')
         if not ctx['input']['has_changes']:raise ValueError('No collected changes support these cards')
         ids.add(cid);covered.update(refs)
         terms=card.get('terms',[])
@@ -168,7 +168,7 @@ def normalize(data,ctx):
     left=data.get('left_out',[])
     if not isinstance(left,list) or any(p not in known for p in left) or len(set(left))!=len(left) or set(left)&covered or left and not data.get('unknown'):raise ValueError('Invalid left-out PRs')
     if left and covered and max(known[p]['merged_at'] for p in left)>min(known[p]['merged_at'] for p in covered):raise ValueError('Only the oldest PRs may be left out')
-    if covered!=set(known)-set(left):raise ValueError('Every collected PR must be covered; no omitted PRs')
+    if covered!=set(known)-set(left):raise ValueError(f'Every collected PR must be covered; no omitted PRs: missing {sorted(set(known)-set(left)-covered)[:10]}')
     unknown=data.get('unknown',[])
     if not isinstance(unknown,list) or any(not isinstance(v,str) for v in unknown):raise ValueError('Invalid unknown facts')
     if ctx['input']['has_changes'] and not cards and not unknown:raise ValueError('Explain the changes or explicitly identify the missing evidence')

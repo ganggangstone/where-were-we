@@ -465,14 +465,38 @@ else:
         def executor(prompt,**kwargs):
             calls.append(prompt);return self.briefing_reply(prompt,'invented quote text' if len(calls)==1 else None)
         done=analysis_run.run(value['id'],executor)
-        self.assertEqual(done['state'],'completed',done.get('error'));self.assertEqual(len(calls),2)
+        self.assertEqual(done['state'],'completed',done.get('error'));self.assertEqual(len(calls),2);self.assertEqual(value['announced']['total'],1)
+        # The retry names what the check rejected; the first ask does not.
+        self.assertIn("no exact text 'invented quote text'",calls[1]);self.assertNotIn('rejected',calls[0])
         self.assertFalse([s for c in calls for s in self.packet(c)['input']['sources'] if s.get('kind')=='issue'])
         self.assertEqual(len(briefing.stored('demo')['results'][briefing.key('','dev','en')]['cards']),3)
 
+    def test_briefing_answer_that_is_not_json_is_retried_with_the_parse_error(self):
+        import cli_executor
+        value=self.briefing_prs(2);calls=[]
+        def executor(prompt,**kwargs):
+            calls.append(prompt)
+            if len(calls)==1:raise cli_executor.CLIExecutionError('CLI_INVALID_OUTPUT',"Claude Code did not return the requested JSON object (Expecting ',' delimiter at character 9)")
+            return self.briefing_reply(prompt)
+        done=analysis_run.run(value['id'],executor)
+        self.assertEqual(done['state'],'completed',done.get('error'));self.assertEqual(len(calls),2)
+        self.assertIn('at character 9',calls[1]);self.assertIn('bracket nesting',calls[1])
+
+    def test_briefing_rejected_twice_keeps_the_reason(self):
+        value=self.briefing_prs(2);calls=[]
+        def executor(prompt,**kwargs):
+            calls.append(prompt);reply=self.briefing_reply(prompt);reply['cards']=reply['cards'][:1];return reply
+        done=analysis_run.run(value['id'],executor)
+        self.assertEqual(done['state'],'failed');self.assertEqual(len(calls),2)
+        self.assertIn('missing',calls[1]);self.assertIn('Every collected PR must be covered',done['error']['message'])
+        self.assertIn(':pr:',done['error']['message'])
+
     def test_briefing_many_prs_split_into_at_most_four_calls_and_older_prs_left_out_plainly(self):
-        value=self.briefing_prs(12);calls=[]
+        calls=[]
         def executor(prompt,**kwargs):calls.append(self.packet(prompt));return self.briefing_reply(prompt)
-        with patch.object(analysis_run,'DETAIL_BYTES',6*1024):done=analysis_run.run(value['id'],executor)
+        with patch.object(analysis_run,'DETAIL_BYTES',6*1024):
+            value=self.briefing_prs(12);done=analysis_run.run(value['id'],executor)
+        self.assertEqual(value['announced']['total'],len(calls))  # the announced count is the planned calls
         self.assertEqual(done['state'],'completed',done.get('error'));self.assertTrue(1<len(calls)<=analysis_run.MAX_BRIEFING_CALLS)
         self.assertTrue(all(len(s['text'])<=analysis_run.BRIEF_BODY_CHARS for p in calls for s in p['sources']))
         saved=briefing.stored('demo')['results'][briefing.key('','dev','en')]

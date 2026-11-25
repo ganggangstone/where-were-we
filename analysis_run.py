@@ -700,13 +700,26 @@ def _counted(run_id,executor,cancelled,kind):
         return executor(prompt,cancelled=cancelled,timeout=TASK_SECONDS)
     return call
 
-def _ask(call,prompt,check=lambda answer:answer):
-    """One call, retried once when it fails or its answer does not pass check; None when both fail."""
+def _ask(call,prompt,check=lambda answer:answer,why=None):
+    """One call, retried once when it fails or its answer does not pass check; a rejected answer's retry names the reason.
+    None when both fail; why (a list) then gains the last reason."""
+    reason=None
     for _ in range(2):
-        try:return check(_result(call(prompt)))
+        try:answer=call(prompt if reason is None else RETRY_NOTE.format(' '.join(reason.split()))+prompt)
         except Exception as error:
             if isinstance(error,Cancelled) or getattr(error,'code',None) in FATAL_CODES:raise
+            last=str(error)[:300]
+            # An answer that is not one JSON object is a rejected answer too; its retry names the parse error.
+            if getattr(error,'code',None)=='CLI_INVALID_OUTPUT':reason=last+'; check bracket nesting and escape quotes inside strings'
+            continue
+        try:return check(_result(answer))
+        except Exception as error:
+            if isinstance(error,Cancelled) or getattr(error,'code',None) in FATAL_CODES:raise
+            reason=last=str(error).removesuffix('; saved results were retained')[:300]
+    if why is not None:why.append(last)
     return None
+
+RETRY_NOTE='Your previous answer to this same request was rejected by the local check ({}). Answer again and fix that. '
 
 def _update(run_id,change):
     with locked():
@@ -745,8 +758,8 @@ def _run_full(run_id,executor,cancelled):
         for i,(payload,last) in enumerate(_slices(scope,value['plan'][rid]['partition'])):
             key=analysis_label.key(payload)
             if key not in saved:
-                answer=_ask(_counted(run_id,executor,cancelled,'labeling'),analysis_label.prompt('labeling',payload,value['lang'],last and i==0))
-                if answer is None:_update(run_id,_gap(rid,f'labeling:{i}','No usable answer after one retry'));continue
+                why=[];answer=_ask(_counted(run_id,executor,cancelled,'labeling'),analysis_label.prompt('labeling',payload,value['lang'],last and i==0),why=why)
+                if answer is None:_update(run_id,_gap(rid,f'labeling:{i}','No usable answer after one retry: '+why[0]));continue
                 labels,dropped=analysis_label.check(answer,{u[0]:units[u[0]]['id'] for u in payload['units']},_spots_of(scope,payload))
                 saved[key]={**labels,'dropped':dropped}
             part=saved[key]
@@ -757,8 +770,8 @@ def _run_full(run_id,executor,cancelled):
             payload=analysis_label.structure_input(scope['summary'],labeled,ref_of);key=analysis_label.key(payload)
             structure=structures.get(key)
             if not structure:
-                answer=_ask(_counted(run_id,executor,cancelled,'structure'),analysis_label.prompt('structure',payload,value['lang'],True))
-                if answer is None:_update(run_id,_gap(rid,'structure','No usable answer after one retry'))
+                why=[];answer=_ask(_counted(run_id,executor,cancelled,'structure'),analysis_label.prompt('structure',payload,value['lang'],True),why=why)
+                if answer is None:_update(run_id,_gap(rid,'structure','No usable answer after one retry: '+why[0]))
                 else:
                     labels,dropped=analysis_label.check(answer,{r:units[r]['id'] for g in payload['groups'] for r in g['units']},_spots_of(scope,payload))
                     structure={'key':key,'programs':labels['programs'],'links':labels['links'],'externals':labels['externals'],'dropped':dropped}
@@ -781,8 +794,8 @@ def _explain_unit(run_id,executor,cancelled):
         packet,finalize=_quick_overview(conf['path'],request,value['lang'],None,cancelled,time.monotonic()+TASK_SECONDS,bundle[value['branch']],None if plain else target['target'],unit=plain,whole=True)
         prompt=_encoded(packet)
         if len(prompt.encode())>MAX_PROMPT_BYTES:raise RunError('source_too_large','The unit sample could not fit one call')
-        overview=_ask(_counted(run_id,executor,cancelled,'unit'),prompt,finalize)
-        if overview is None:raise RunError('invalid_result','No valid answer after one retry')
+        why=[];overview=_ask(_counted(run_id,executor,cancelled,'unit'),prompt,finalize,why)
+        if overview is None:raise RunError('invalid_result','No valid answer after one retry: '+why[0])
     except RunError as error:
         if error.code in FATAL_CODES:raise
         return _update(run_id,lambda v:v.setdefault('unit_failures',[]).append({'repository':rid,'target':target['target'],'attempts':2 if error.code=='invalid_result' else 1,'reason':str(error)[:300]}))
@@ -829,6 +842,9 @@ def prepare(project, branch='dev', lang='ko', repository='', executor='claude', 
                  'blocked':plan['blocked'],'skipped':plan['skipped'],'current_task':None,'completed_tasks':[],
                  'cancel_requested':False,'error':None,'account':None}
         if resume_from is not None:value['resume_from']=resume_from
+        if scope['intent']['task']=='briefing':
+            calls=sum(len(_briefing_groups(briefing.context(project,t['repository'],branch))[0]) for t in value['tasks'])
+            value['announced']={**dict.fromkeys(CALL_KINDS,0),'briefing':calls,'total':calls}
         resource_run=scope['intent']['task']=='resources'
         if resource_run:value['resource_targets']=plan['resource_targets']
         if scope['intent']['task']=='overview' or resource_run:
@@ -1946,6 +1962,30 @@ def _ref_schema(schema):
     if 'quote' in schema:schema={'ref':1,**{k:v for k,v in schema.items() if k not in ('file','line','quote')}}
     return {k:_ref_schema(v) for k,v in schema.items()}
 
+def _briefing_groups(ctx):
+    """The PR groups of a briefing (one call each, newest first, at most MAX_BRIEFING_CALLS), the PRs left out, each PR's sources and the shared sources."""
+    def text(sid):
+        source=ctx['sources'][sid];limit=BRIEF_STRUCTURE_CHARS if source['kind']=='structure' else BRIEF_BODY_CHARS if sid.endswith(':body') else None
+        return {'id':sid,'text':source['text'][:limit],**({'truncated':True} if limit and len(source['text'])>limit else {})}
+    linked={}
+    for pr in ctx['input']['prs']:
+        linked[pr['id']]=[pr['title_source'],pr['body_source']]+[s for i in pr['issues'] for s in
+            (pr['repository']+':issue:'+briefing.digest(i.get('url') or i.get('number'))[:16]+k for k in (':title',':body')) if s in ctx['sources']]
+    claimed={s for ids in linked.values() for s in ids}
+    # An issue no supplied PR links explains none of the changes; it is not sent.
+    claimed|={sid for sid,source in ctx['sources'].items() if source.get('kind')=='issue'}
+    shared=[text(sid) for sid in ctx['sources'] if sid not in claimed]
+    # The newest PRs that fit the fixed number of calls are explained; the older rest is named in unknown.
+    # The source list sent with each call (its shared rows and each PR's rows) counts toward the budget too.
+    listed={s['id']:s for s in ctx['input']['sources']}
+    budget=DETAIL_BYTES-_size(shared)-_size([s for i,s in listed.items() if i not in claimed]);groups=[[]];size=0;left=[]
+    for pr in sorted(ctx['input']['prs'],key=lambda pr:pr['merged_at'],reverse=True):
+        n=_size([text(s) for s in linked[pr['id']]])+_size(pr)+_size([listed[s] for s in linked[pr['id']] if s in listed])
+        if left or groups[-1] and size+n>budget and len(groups)==MAX_BRIEFING_CALLS:left.append(pr['id']);continue
+        if groups[-1] and size+n>budget:groups.append([]);size=0
+        groups[-1].append(pr);size+=n
+    return groups,left,linked,claimed,shared,text
+
 def _detail(value,task,request,call,validate):
     """steps, jobs or briefing: locally chosen bounded input, a fixed number of calls (each retried once), local checks,
     then the saved shape the MCP path saves (ai_extract.task_record, briefing.record)."""
@@ -1953,32 +1993,13 @@ def _detail(value,task,request,call,validate):
     def answer(packet,check):
         prompt=_encoded(packet)
         if len(prompt.encode())>MAX_PROMPT_BYTES:raise RunError('source_too_large','A detail input could not fit one call')
-        got=_ask(call,prompt,check)
-        if got is None:raise RunError('invalid_result','No valid answer after one retry; saved results were retained')
+        why=[];got=_ask(call,prompt,check,why)
+        if got is None:raise RunError('invalid_result','No valid answer after one retry: '+why[0][:240]+'; saved results were retained')
         return got
     if task['task']=='briefing':
         ctx=briefing.context(value['project'],task['repository'],value['branch'])
         if ctx['hash']!=request['record_arguments']['input_hash']:raise RunError('pins_changed','Briefing evidence changed; start again')
-        def text(sid):
-            source=ctx['sources'][sid];limit=BRIEF_STRUCTURE_CHARS if source['kind']=='structure' else BRIEF_BODY_CHARS if sid.endswith(':body') else None
-            return {'id':sid,'text':source['text'][:limit],**({'truncated':True} if limit and len(source['text'])>limit else {})}
-        linked={}
-        for pr in ctx['input']['prs']:
-            linked[pr['id']]=[pr['title_source'],pr['body_source']]+[s for i in pr['issues'] for s in
-                (pr['repository']+':issue:'+briefing.digest(i.get('url') or i.get('number'))[:16]+k for k in (':title',':body')) if s in ctx['sources']]
-        claimed={s for ids in linked.values() for s in ids}
-        # An issue no supplied PR links explains none of the changes; it is not sent.
-        claimed|={sid for sid,source in ctx['sources'].items() if source.get('kind')=='issue'}
-        shared=[text(sid) for sid in ctx['sources'] if sid not in claimed]
-        # The newest PRs that fit the fixed number of calls are explained; the older rest is named in unknown.
-        # The source list sent with each call (its shared rows and each PR's rows) counts toward the budget too.
-        listed={s['id']:s for s in ctx['input']['sources']}
-        budget=DETAIL_BYTES-_size(shared)-_size([s for i,s in listed.items() if i not in claimed]);groups=[[]];size=0;left=[]
-        for pr in sorted(ctx['input']['prs'],key=lambda pr:pr['merged_at'],reverse=True):
-            n=_size([text(s) for s in linked[pr['id']]])+_size(pr)+_size([listed[s] for s in linked[pr['id']] if s in listed])
-            if left or groups[-1] and size+n>budget and len(groups)==MAX_BRIEFING_CALLS:left.append(pr['id']);continue
-            if groups[-1] and size+n>budget:groups.append([]);size=0
-            groups[-1].append(pr);size+=n
+        groups,left,linked,claimed,shared,text=_briefing_groups(ctx)
         cards=[];unknown=[LEFT_OUT[lang].format(left=len(left),sent=len(ctx['input']['prs'])-len(left))] if left else []
         for i,group in enumerate(groups):
             ids={s for pr in group for s in linked[pr['id']]};part={'input':{**ctx['input'],'prs':group},'sources':ctx['sources']}
