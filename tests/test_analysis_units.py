@@ -156,6 +156,15 @@ class FullRun(unittest.TestCase):
         self.assertEqual((again,job['announced']['total'],done['state']),([],0,'completed'))
         self.assertEqual(self.board()['repositories'][0]['units'],rows)
 
+    def test_progress_writes_that_only_count_a_call_reuse_the_board_and_the_saved_board_equals_a_fresh_one(self):
+        self.board();built=[];saves=[];real_board,real_save=analysis_run.unit_board,analysis_run._save_progress
+        with patch.object(analysis_run,'unit_board',lambda *a,**k:built.append(1) or real_board(*a,**k)),\
+             patch.object(analysis_run,'_save_progress',lambda *a,**k:saves.append(1) or real_save(*a,**k)):job,done=self.analyse([])
+        self.assertEqual(done['state'],'completed');self.assertLess(len(built),len(saves))
+        saved=analysis_run.status(job['id'],view='progress')['unit_board'];analysis_run._BOARD.clear()
+        self.assertEqual(saved,analysis_run._progress(analysis_run.read(job['id']))['unit_board'])
+        self.assertEqual(saved['used'],{'labeling':1})
+
     def test_a_split_summary_labels_each_area_then_builds_the_structure_and_one_failed_part_leaves_the_rest(self):
         with patch.object(analysis_label,'BOUND',300):
             calls=[];first=[]

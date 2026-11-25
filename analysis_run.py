@@ -5,6 +5,7 @@ import copy
 import codecs
 from contextlib import contextmanager
 import fcntl
+import functools
 import hashlib
 import collections
 import json
@@ -95,12 +96,20 @@ def _cancellation_probe(run_id):
         return stopped
     return cancelled
 
-def _progress(value):
+_BOARD={}  # run id -> (what the board reads from the run, board): the last board this process built for a run
+BOARD_INPUTS=('project','repository','branch','lang','state','intent','pins','unit_targets','labels','gaps','scope_overviews','unit_overviews','unit_failures')
+
+def _progress(value,board=None):
     excluded={'scope_overviews','overviews','program_observations','resource_targets','saved_overviews','saved_scope_overviews',
               'unit_overviews','units','unit_targets','unit_failures','partial_results','board_base','labels','plan'}
     result={k:v for k,v in value.items() if k not in excluded}
     if (value.get('intent') or {}).get('task')=='full' and 'pins' in value and value.get('state') in TERMINAL|ACTIVE:
-        try:result['unit_board']=unit_board(value['project'],value['repository'],value['branch'],value['lang'],run=value)
+        # A write that only counts a call changes nothing the board reads but the call counts: reuse the last board.
+        inputs=json.dumps([value.get(k) for k in BOARD_INPUTS],sort_keys=True,default=str);cached=_BOARD.get(value.get('id'))
+        try:
+            if board is None:board=cached[1] if cached and cached[0]==inputs else unit_board(value['project'],value['repository'],value['branch'],value['lang'],run=value)
+            _BOARD.clear();_BOARD[value.get('id')]=(inputs,board)
+            result['unit_board']={**board,'announced':value.get('announced'),'used':(value.get('input_stats') or {}).get('by_kind',{})}
         except (ValueError,RunError,*ai_extract.READ_ERRORS):pass
     completed=value.get('completed_tasks',[])
     tasks=value.get('tasks',[])
@@ -132,12 +141,12 @@ def _label_rows(saved,gaps,working):
     return [['task:groups','groups','groups',0,*state('groups',bool(saved.get('parts')),'labeling')],
             ['task:system','system','system',0,*state('system',bool(saved.get('structure')),'structure')]]
 
-def unit_board(project,repository='',branch='dev',lang='ko',run=None):
+def unit_board(project,repository='',branch='dev',lang='ko',run=None,runs=None):
     """Per-unit states and labels for the current code, read from the local index and every saved run. Never calls AI.
     calls: the calls 분석하기 would make now (rules, labeling, structure), counted as prepare() counts them."""
     scope=_scope(project,repository,branch,lang)
     value={'project':project,'branch':branch,'lang':lang,'repository':scope['repository'],'intent':{'task':'full','targets':[]}}
-    history=[r for r in _runs() if all(r[k]==scope[k] for k in ('project','lang','branch'))]
+    history=[r for r in (_runs() if runs is None else runs) if all(r[k]==scope[k] for k in ('project','lang','branch'))]
     history.sort(key=lambda r:r['created_at'])
     live=run and run.get('state') in ACTIVE
     # A live run's own saves are its progress, not results to skip; a finished run's saves count like any other.
@@ -239,8 +248,8 @@ def _progress_revision(record):
     info=record.stat()
     return [info.st_ino,info.st_mtime_ns,info.st_size]
 
-def _save_progress(value,record):
-    summary=_progress(value)
+def _save_progress(value,record,board=None):
+    summary=_progress(value,board)
     try:store.atomic(record.with_suffix('.progress'),{'revision':_progress_revision(record),'value':summary})
     except OSError:pass  # The canonical record can always regenerate this read cache.
     return summary
@@ -264,23 +273,24 @@ def _read_progress(run_id):
                 fcntl.flock(stream,fcntl.LOCK_UN)
     return _save_progress(_recover(read(run_id)),record)
 
-def write(value):
+def write(value,board=None):
     if value['state'] in TERMINAL or value.get('cancel_requested') or not value.get('current_task'):
         value.pop('preview',None)
     value['updated_at'] = store.now()
     record=path(value['id'])
     store.atomic(record,value)
-    _save_progress(value,record)
+    _save_progress(value,record,board)
     return value
 
 def _seal(value):
     """Write an ended run. A full run is shown by the live board; check that it opens first and record why when it does not."""
+    board=None
     if (value.get('intent') or {}).get('task')=='full' and not (value.get('intent') or {}).get('only'):
-        try:unit_board(value['project'],value['repository'],value['branch'],value['lang'])
+        try:board=unit_board(value['project'],value['repository'],value['branch'],value['lang'],run=value)
         except Exception as error:
             # The ended run is kept; the board that cannot open is named, not hidden.
             value['seal_error']={'type':type(error).__name__,'message':str(error)[:300]}
-    return write(value)
+    return write(value,board)
 
 def failure(value, code, message):
     value.update(state='failed', error={'code':code, 'message':message[:1000]}, finished_at=store.now())
@@ -310,6 +320,12 @@ def _recover(value):
 
 def _runs():
     return [_recover(store.read(p)) for p in sorted(root().glob('*.json'))]
+
+def _summary(record):
+    """An ended run's small cached progress while it is current; otherwise the full record, recovered as _runs() does."""
+    cached=store.read(record.with_suffix('.progress')) or {}
+    if cached.get('revision')==_progress_revision(record) and cached['value']['state'] in TERMINAL:return cached['value']
+    return _recover(store.read(record))
 
 def providers():
     import cli_executor
@@ -377,13 +393,21 @@ def _exclusion(file,size):
     if size>MAX_FILE_BYTES:return 'large'
     return None
 
+@functools.lru_cache(maxsize=8)
+def _ls_tree(repo,commit,sizes):
+    """The raw recursive tree listing of a commit. A commit never changes, so one read serves every caller in this process."""
+    return _git(repo,'ls-tree','-rlz' if sizes else '-rz','--full-tree',commit)
+
+def _blobs(repo,commit,sizes=False):
+    """(raw path, blob size if sizes else blob id) of the regular files of a commit; each caller decodes the path its own way."""
+    for entry in _ls_tree(repo,commit,sizes).split(b'\0'):
+        if not entry:continue
+        meta,raw_path=entry.split(b'\t',1);mode,kind,*_,last=meta.split()
+        if mode in (b'100644',b'100755') and kind==b'blob':yield raw_path,last
+
 def _tracked(repo,commit):
     files={}
-    for entry in _git(repo,'ls-tree','-rlz','--full-tree',commit).split(b'\0'):
-        if not entry:continue
-        meta,raw_path=entry.split(b'\t',1)
-        mode,kind,_,size=meta.split()
-        if mode not in (b'100644',b'100755') or kind!=b'blob':continue
+    for raw_path,size in _blobs(repo,commit,True):
         try:files[raw_path.decode('utf-8')]=int(size)
         except (UnicodeError,ValueError):continue
     return files
@@ -402,12 +426,12 @@ def _pinned_index(repo,selected,head):
     saved=(selected or {}).get('structure_index') or {}
     if saved.get('commit')==head and saved.get('version')==structure_index.VERSION and (saved.get('rules') or '')==digest:return saved
     key=mapcore.cache_key(repo,head,structure_index.VERSION,mapcore.code_digest(),digest)
-    if key in _INDEXES:return _INDEXES[key]
+    if _INDEXES.get(repo,(None,))[0]==key:return _INDEXES[repo][1]
     built=mapcore.cache_read('index',key)
     if not built or built.get('commit')!=head or built.get('version')!=structure_index.VERSION:
         built=structure_index.build(repo,head,excluded=_secret,rules=rules)
         mapcore.cache_write('index',key,built)
-    _INDEXES.clear();_INDEXES[key]=built
+    _INDEXES[repo]=(key,built)  # one index per repository, so a multi-repository board does not evict its other indexes
     return built
 
 
@@ -442,10 +466,7 @@ SOURCE_ROW_OVERHEAD = 11  # bytes the compact [line,"text"] form adds to each so
 def _eligible(repo,commit,paths=None):
     """(file, blob id) of the regular, non-secret, non-binary-suffix files of a pinned commit."""
     entries=[]
-    for entry in _git(repo,'ls-tree','-rz','--full-tree',commit).split(b'\0'):
-        if not entry:continue
-        meta,raw_path=entry.split(b'\t',1);mode,kind,oid=meta.split()
-        if mode not in (b'100644',b'100755') or kind!=b'blob':continue
+    for raw_path,oid in _blobs(repo,commit):
         try:file=raw_path.decode('utf-8')
         except UnicodeError:continue
         if (paths is None or file in paths) and not _secret(file) and PurePosixPath(file).suffix.lower() not in BINARY_SUFFIXES:entries.append((file,oid))
@@ -465,14 +486,14 @@ def _signals(repo,commit,wait=True):
     Derived data of the commit and the scanner, cached under .analysis-cache (never project data).
     wait=False returns only what is already cached (SignalsPending otherwise) so a board can open before the scan."""
     key=mapcore.cache_key(repo,commit,source_signals.digest(),SOURCE_ROW_OVERHEAD,'signals')
-    if key in _SIGNALS:return _SIGNALS[key]
+    if _SIGNALS.get(repo,(None,))[0]==key:return _SIGNALS[repo][1]
     rows=mapcore.cache_read('signals',key)
     if not isinstance(rows,dict) or rows.get('commit')!=commit:
         if not wait:raise SignalsPending()
         rows={'commit':commit,'files':{f:source_signals.pack(r) for f,r in _scan(repo,commit).items()}}
         mapcore.cache_write('signals',key,rows)
     files={f:source_signals.unpack(r) for f,r in rows['files'].items()}
-    _SIGNALS.clear();_SIGNALS[key]=files
+    _SIGNALS[repo]=(key,files)
     return files
 
 def _unit(value,rid,target):
@@ -876,15 +897,18 @@ def prepare(project, branch='dev', lang='ko', repository='', executor='claude', 
 
 def status(run_id=None, project=None, repository='', branch='dev', lang='ko',view=None,resource=None):
     if view=='signals':return unit_signals(project,repository,branch,lang)
+    if view=='units':
+        # Only the run files are read under the lock; the board (git and the local index) is built outside it.
+        with locked():runs=_runs()
+        return unit_board(project,repository,branch,lang,runs=runs)
     with locked():
-        if view=='units':return unit_board(project,repository,branch,lang)
         if view=='units_quick':return unit_quick(project,repository,branch,lang)
         if view=='unit':return unit_result(project,repository,branch,lang,resource)
         if view=='progress':return _read_progress(run_id)
         if view=='resource' and (not isinstance(resource,str) or not resource.startswith('/')):raise ValueError('Choose a resource path')
         if run_id: return _recover(read(run_id))
         scope = _scope(project,repository,branch,lang)
-        values=_runs()
+        values=[_summary(p) for p in sorted(root().glob('*.json'))] if view=='latest' else _runs()
         active_project=[v for v in values if v['project']==project and v['state'] in ACTIVE]
         matches=active_project or [v for v in values if all(v[k]==scope[k] for k in scope)]
         if not matches and view in ('catalog','resource'):
@@ -1125,12 +1149,9 @@ def _request(value,task):
 def _first_files(repo,head,request):
     """Choose inexpensive evidence across directories. Every other file stays queued."""
     files={}
-    for entry in _git(repo,'ls-tree','-rlz','--full-tree',head).split(b'\0'):
-        if not entry:continue
-        meta,path=entry.split(b'\t',1)
-        mode,kind,_,size=meta.split()
-        path=path.decode('utf-8')
-        if mode not in (b'100644',b'100755') or kind!=b'blob' or _secret(path) or PurePosixPath(path).suffix.lower() in BINARY_SUFFIXES:continue
+    for raw_path,size in _blobs(repo,head,True):
+        path=raw_path.decode('utf-8')
+        if _secret(path) or PurePosixPath(path).suffix.lower() in BINARY_SUFFIXES:continue
         files[path]=int(size)
     recheck=ai_extract.files_in(request.get('recheck',[]))
     # Review catalog rows are [id, method/type, path, function, file, source].
@@ -1171,10 +1192,9 @@ def _regular_files(repo,commit):
     key=(repo,commit)
     if key not in _REGULAR:
         regular=set()
-        for entry in _git(repo,'ls-tree','-rz','--full-tree',commit).split(b'\0'):
-            if not entry:continue
-            meta,raw_file=entry.split(b'\t',1);mode,kind,_=meta.split();file=raw_file.decode('utf-8')
-            if mode in (b'100644',b'100755') and kind==b'blob' and not _secret(file) and PurePosixPath(file).suffix.lower() not in BINARY_SUFFIXES:regular.add(file)
+        for raw_file,_ in _blobs(repo,commit):
+            file=raw_file.decode('utf-8')
+            if not _secret(file) and PurePosixPath(file).suffix.lower() not in BINARY_SUFFIXES:regular.add(file)
         _REGULAR.clear();_REGULAR[key]=regular
     return _REGULAR[key]
 
