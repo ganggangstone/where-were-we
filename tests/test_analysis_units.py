@@ -133,6 +133,7 @@ class FullRun(unittest.TestCase):
         job,done=self.analyse(calls)
         self.assertEqual(done['state'],'completed')
         self.assertEqual(len(calls),job['announced']['total']);self.assertEqual(before['calls']['total'],job['announced']['total'])
+        stats=analysis_run.read(job['id'])['input_stats'];self.assertEqual(sum(stats['by_kind'].values()),stats['calls'])
         self.assertEqual(job['announced'],{'rules':0,'labeling':1,'structure':0,'unit':0,'total':1})
         rows=self.board()['repositories'][0]['units']
         named=[r for r in rows if not r[0].startswith('task:') and r[4]!='local']

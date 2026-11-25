@@ -339,6 +339,7 @@ else:
             return {'jobs':[],'unknown':[{'text':'No jobs established by supplied source','needs':'read'}]}
         done=analysis_run.run(value['id'],jobs)
         self.assertEqual(done['state'],'completed',done.get('error'));self.assertEqual(len(calls),1)
+        self.assertEqual(done['input_stats']['by_kind'],{'jobs':1})
         raw=self.raw();self.assertEqual(raw['dev']['task_outputs']['jobs']['nodes']['api']['source'],'ai')
         # Frozen briefing evidence changes schedule a real briefing task, whose claims still pass its validator.
         # Supply a minimal frozen evidence window directly, without any external collection.
@@ -355,6 +356,7 @@ else:
         done=analysis_run.run(value['id'],executor)
         self.assertEqual(done['state'],'completed',done.get('error'))
         self.assertEqual(briefing.view('demo','','dev','en')['state'],'saved')
+        self.assertEqual(set(done['input_stats']['by_kind']),{'briefing'});self.assertEqual(sum(done['input_stats']['by_kind'].values()),done['input_stats']['calls'])
 
     # Detail tasks: locally chosen bounded input, a fixed number of calls, each retried once, cited by integer ref.
     @staticmethod

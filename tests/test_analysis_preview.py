@@ -436,7 +436,7 @@ def users(): pass
             return {'items':[{'name':'engine','description':'Workspace package','ref':members[0]['registration_ref']}]}
         done=analysis_run.run(run['id'],executor)
         self.assertEqual(done['state'],'completed',done.get('error'))
-        self.assertEqual(done['input_stats']['calls'],1)
+        self.assertEqual(done['input_stats']['calls'],1);self.assertEqual(done['input_stats']['by_kind'],{'overview':1})
         overview=analysis_run.status(project='demo',lang='en')['saved_overviews'][0]
         self.assertEqual(overview['workspace_coverage'],{'verified_packages':3,'matched_manifests':3})
         self.assertEqual(overview['workspace_dependencies'][0]['evidence']['file'],'packages/engine/package.json')
@@ -460,7 +460,7 @@ def users(): pass
         self.assertEqual(cmd['registration'],{'file':'pyproject.toml','line':4,'quote':'reports="reports:main"'})
         self.assertEqual(cmd['target_evidence']['quote'],'def main():')
         self.assertNotIn('handler_evidence',cmd)
-        self.assertEqual(done['input_stats']['calls'],1)
+        self.assertEqual(done['input_stats']['calls'],1);self.assertEqual(done['input_stats']['by_kind'],{'overview':1})
 
     def test_resource_batch_includes_standalone_registration_without_inventing_a_client(self):
         import structure_index

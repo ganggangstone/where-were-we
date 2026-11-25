@@ -712,15 +712,14 @@ def _publish_shapes(value,rid,commit,labels,catalog,repo,flows=()):
             for name,item in updated.items():
                 if item!=bundle.get(name):store.atomic(store.home(value['project'])/(name+'.json'),item)
 
-def _count(run_id,size,kind=None):
-    """Count one call in the run record before it is sent. A call counted by kind also stops when a cancel was saved;
-    a call without a kind (generate's invoke) checked cancellation just before and is not counted by kind."""
+def _count(run_id,size,kind):
+    """Count one call by its kind in the run record before it is sent; a cancel saved before stops it."""
     with locked():
         current=read(run_id)
-        if kind and current['cancel_requested']:raise Cancelled()
-        stats=current.setdefault('input_stats',{'calls':0,'bytes':0,'max_prompt_bytes':0,**({'by_kind':{}} if kind else {})})
+        if current['cancel_requested']:raise Cancelled()
+        stats=current.setdefault('input_stats',{'calls':0,'bytes':0,'max_prompt_bytes':0,'by_kind':{}})
         stats['calls']+=1;stats['bytes']+=size;stats['max_prompt_bytes']=max(stats['max_prompt_bytes'],size)
-        if kind:stats.setdefault('by_kind',{})[kind]=stats['by_kind'].get(kind,0)+1
+        stats.setdefault('by_kind',{})[kind]=stats['by_kind'].get(kind,0)+1
         write(current)
 
 def _counted(run_id,executor,cancelled,kind):
@@ -1869,7 +1868,7 @@ def generate(value,task,request,executor,cancelled,deadline,check):
     def invoke(payload):
         check();prompt=_encoded(payload);size=len(prompt.encode())
         if size>MAX_PROMPT_BYTES:raise RunError('source_too_large','An analysis context could not fit a bounded input')
-        _count(value['id'],size)
+        _count(value['id'],size,task['task'])
         reply=executor(prompt,cancelled=cancelled,timeout=min(TASK_SECONDS,max(1,int(deadline-time.monotonic()))))
         check()
         return _result(reply)
