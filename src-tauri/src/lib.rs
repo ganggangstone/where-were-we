@@ -47,13 +47,6 @@ fn project_names(directory: &Path) -> Vec<String> {
     v
 }
 
-/// ~/.where-were-we/<프로젝트>/<브랜치>.json 내용. 파일이 없으면 Err.
-#[tauri::command]
-fn read_map(project: String, branch: String) -> Result<String, String> {
-    let p = root().join(&project).join(format!("{branch}.json"));
-    fs::read_to_string(&p).map_err(|e| format!("{}: {e}", p.display()))
-}
-
 #[derive(Debug)]
 struct Backend {
     python: PathBuf,
@@ -107,22 +100,24 @@ fn run_py(app: &tauri::AppHandle, script: &str, args: &[&str]) -> Result<String,
     else { Err(String::from_utf8_lossy(&out.stderr).to_string()) }
 }
 
+fn repo_arg(repository: &Option<String>) -> &str { repository.as_deref().unwrap_or("") }
+
+fn lang_flag(lang: &Option<String>) -> &'static str { if lang.as_deref() == Some("en") { "--lang=en" } else { "--lang=ko" } }
+
 /// One composed read model for the UI and MCP, including repository status.
 #[tauri::command]
 async fn read_project(app: tauri::AppHandle, project: String, repository: Option<String>) -> Result<String, String> {
-    run_py(&app, "project.py", &["read", &project, "--repository", repository.as_deref().unwrap_or("")])
+    run_py(&app, "project.py", &["read", &project, "--repository", repo_arg(&repository)])
 }
 
 #[tauri::command]
 async fn file_structure(app: tauri::AppHandle, project: String, repository: String, branch: String, commit: String, file: String) -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(move || run_py(&app, "project.py", &["file-structure", &project, "--", &repository, &branch, &commit, &file]))
-        .await.map_err(|e| e.to_string())?
+    py_blocking(app, "project.py", ["file-structure", &project, "--", &repository, &branch, &commit, &file].map(String::from).to_vec()).await
 }
 
 #[tauri::command]
 async fn directory_structure(app: tauri::AppHandle, project: String, repository: String, branch: String, commit: String, directory: String, page: Option<u32>) -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(move || run_py(&app, "project.py", &["directory-structure", &project, "--", &repository, &branch, &commit, &directory, &page.unwrap_or(1).to_string()]))
-        .await.map_err(|e| e.to_string())?
+    py_blocking(app, "project.py", ["directory-structure", &project, "--", &repository, &branch, &commit, &directory, &page.unwrap_or(1).to_string()].map(String::from).to_vec()).await
 }
 
 #[tauri::command]
@@ -155,28 +150,30 @@ async fn save_settings(app: tauri::AppHandle, json: String) -> Result<String, St
     run_py(&app, "mapcore.py", &["save-settings", &json])
 }
 
-fn task_request(app: &tauri::AppHandle, project: &str, branch: &str, lang: &str, repository: Option<&str>, task: &str, target: &str) -> Result<String, String> {
-    run_py(app, "ai_extract.py", &[project, branch, lang, "--request", "--repository", repository.unwrap_or(""), "--task", task, "--target", target])
+fn task_request(app: &tauri::AppHandle, project: &str, branch: &str, lang: &str, repository: Option<&str>, task: Option<(&str, &str)>) -> Result<String, String> {
+    let mut args = vec![project, branch, lang, "--request", "--repository", repository.unwrap_or("")];
+    if let Some((task, target)) = task { args.extend(["--task", task, "--target", target]); }
+    run_py(app, "ai_extract.py", &args)
 }
 
 /// 새로고침: refresh.py 가 fetch, 바뀐 브랜치의 지도 다시 뽑기, 수집, 달라진 것 기록을 한다. 로그를 돌려준다.
 #[tauri::command]
 async fn refresh(app: tauri::AppHandle, project: String, repo: String, since: String, repository: Option<String>) -> Result<String, String> {
     if root().join(&project).join("project.json").is_file() {
-        run_py(&app, "project.py", &["refresh", &project, "--repository", repository.as_deref().unwrap_or("")])
+        run_py(&app, "project.py", &["refresh", &project, "--repository", repo_arg(&repository)])
     } else { run_py(&app, "refresh.py", &[&project, &repo, &since]) }
 }
 
 /// Prepare group naming for the connected MCP agent.
 #[tauri::command]
 async fn suggest_groups(app: tauri::AppHandle, project: String, branch: String, lang: String, repository: Option<String>) -> Result<String, String> {
-    task_request(&app, &project, &branch, &lang, repository.as_deref(), "groups", "")
+    task_request(&app, &project, &branch, &lang, repository.as_deref(), Some(("groups", "")))
 }
 
 /// 에이전트 연결 프롬프트 (mapcore.py setup). 이 맥의 경로가 채워진다.
 #[tauri::command]
 async fn setup_prompt(app: tauri::AppHandle, lang: Option<String>, onboarding: Option<bool>) -> Result<String, String> {
-    let mut args = vec!["setup", if lang.as_deref() == Some("en") { "--lang=en" } else { "--lang=ko" }];
+    let mut args = vec!["setup", lang_flag(&lang)];
     if onboarding.unwrap_or(false) { args.push("--onboarding"); }
     run_py(&app, "mapcore.py", &args)
 }
@@ -216,38 +213,38 @@ async fn connection_status(app: tauri::AppHandle, challenge: String) -> Result<S
 /// 테스트가 안 이어진 서버 기능 하나에 대해 에이전트가 테스트를 찾게 하는 글 (mapcore.py tests).
 #[tauri::command]
 async fn tests_prompt(app: tauri::AppHandle, project: String, route: String, lang: Option<String>, repository: Option<String>) -> Result<String, String> {
-    let scope = format!("--repository={}", repository.as_deref().unwrap_or(""));
-    run_py(&app, "mapcore.py", &["tests", &project, &route, &scope, if lang.as_deref() == Some("en") { "--lang=en" } else { "--lang=ko" }])
+    let scope = format!("--repository={}", repo_arg(&repository));
+    run_py(&app, "mapcore.py", &["tests", &project, &route, &scope, lang_flag(&lang)])
 }
 
 /// Prepare program jobs for the connected MCP agent.
 #[tauri::command]
 async fn make_jobs(app: tauri::AppHandle, project: String, node: String, branch: String, lang: String, repository: Option<String>) -> Result<String, String> {
-    task_request(&app, &project, &branch, &lang, repository.as_deref(), "jobs", &node)
+    task_request(&app, &project, &branch, &lang, repository.as_deref(), Some(("jobs", &node)))
 }
 
 /// Prepare architecture for the connected MCP agent.
 #[tauri::command]
 async fn make_system(app: tauri::AppHandle, project: String, branch: String, lang: String, repository: Option<String>) -> Result<String, String> {
-    task_request(&app, &project, &branch, &lang, repository.as_deref(), "system", "")
+    task_request(&app, &project, &branch, &lang, repository.as_deref(), Some(("system", "")))
 }
 
 /// Prepare request steps for the connected MCP agent.
 #[tauri::command]
 async fn make_steps(app: tauri::AppHandle, project: String, branch: String, screen: String, lang: String, repository: Option<String>) -> Result<String, String> {
-    task_request(&app, &project, &branch, &lang, repository.as_deref(), "steps", &screen)
+    task_request(&app, &project, &branch, &lang, repository.as_deref(), Some(("steps", &screen)))
 }
 
 /// Language-independent detailed analysis, explicitly requested by the user.
 #[tauri::command]
 async fn analysis_request(app: tauri::AppHandle, project: String, branch: String, lang: String, repository: Option<String>) -> Result<String, String> {
-    run_py(&app,"ai_extract.py",&[&project,&branch,&lang,"--request","--repository",repository.as_deref().unwrap_or("")])
+    task_request(&app, &project, &branch, &lang, repository.as_deref(), None)
 }
 
 /// One request containing only missing or outdated analysis for the selected code.
 #[tauri::command]
 async fn analysis_plan(app: tauri::AppHandle, project: String, branch: String, lang: String, repository: Option<String>) -> Result<String, String> {
-    run_py(&app,"ai_extract.py",&[&project,&branch,&lang,"--plan","--repository",repository.as_deref().unwrap_or("")])
+    run_py(&app,"ai_extract.py",&[&project,&branch,&lang,"--plan","--repository",repo_arg(&repository)])
 }
 
 #[derive(serde::Deserialize)]
@@ -262,12 +259,14 @@ struct AnalysisScope {
 
 // Availability and run control can wait on a CLI or filesystem lock. Keep that
 // work off the async runtime; only the explicit start/retry commands run AI.
-async fn analysis_command(app: tauri::AppHandle, args: Vec<String>) -> Result<String, String> {
+async fn py_blocking(app: tauri::AppHandle, script: &'static str, args: Vec<String>) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let refs: Vec<&str> = args.iter().map(String::as_str).collect();
-        run_py(&app, "analysis_run.py", &refs)
+        run_py(&app, script, &refs)
     }).await.map_err(|e| e.to_string())?
 }
+
+async fn analysis_command(app: tauri::AppHandle, args: Vec<String>) -> Result<String, String> { py_blocking(app, "analysis_run.py", args).await }
 
 #[tauri::command]
 async fn analysis_providers(app: tauri::AppHandle) -> Result<String, String> {
@@ -307,7 +306,7 @@ async fn analysis_run_retry(app: tauri::AppHandle, run_id: String, expected_acco
 
 #[tauri::command]
 async fn briefing_request(app: tauri::AppHandle, project: String, branch: String, lang: String, repository: Option<String>) -> Result<String, String> {
-    run_py(&app,"briefing.py",&["request",&project,"--branch",&branch,"--lang",&lang,"--repository",repository.as_deref().unwrap_or("")])
+    run_py(&app,"briefing.py",&["request",&project,"--branch",&branch,"--lang",&lang,"--repository",repo_arg(&repository)])
 }
 
 /// zed://file/... 같은 주소를 macOS `open` 으로 연다.
@@ -389,20 +388,28 @@ fn write_update(job: &UpdateJob, stage: &str, error: Option<String>) -> Result<(
     save_update_state(&job.state,&state)
 }
 
+pub(crate) fn stamp() -> Result<u128, String> { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_err(|e| e.to_string()).map(|d| d.as_nanos()) }
+
+fn open_lock(dir: &Path) -> std::io::Result<fs::File> { fs::OpenOptions::new().create(true).truncate(false).read(true).write(true).open(dir.join(".app-update.lock")) }
+
+#[cfg(unix)]
+fn detached(command: &mut Command) { use std::os::unix::process::CommandExt; command.process_group(0); }
+#[cfg(not(unix))]
+fn detached(_: &mut Command) {}
+
 fn brew_command(brew: &Path) -> Command {
     let mut command = Command::new(brew);
     let prefix = brew.parent().unwrap_or(Path::new("/usr/bin"));
     command.env("PATH", format!("{}:/usr/bin:/bin:/usr/sbin:/sbin", prefix.display()))
         .env("HOMEBREW_NO_AUTO_UPDATE", "1").env("HOMEBREW_NO_INSTALL_CLEANUP", "1")
         .stdin(Stdio::null());
+    detached(&mut command);
     command
 }
 
 fn brew_info(brew: &Path) -> Result<serde_json::Value, String> {
     let mut command = brew_command(brew);
     command.args(["info", "--json=v2", "--cask", CASK]).stdout(Stdio::piped()).stderr(Stdio::piped());
-    #[cfg(unix)]
-    { use std::os::unix::process::CommandExt; command.process_group(0); }
     let mut child = command.spawn().map_err(|e| e.to_string())?;
     let mut stdout = child.stdout.take().ok_or("Missing Homebrew output")?;
     let mut stderr = child.stderr.take().ok_or("Missing Homebrew error output")?;
@@ -433,8 +440,6 @@ fn run_brew(job: &UpdateJob, args: &[&str], timeout: Duration) -> Result<(), Str
     let file = fs::OpenOptions::new().create(true).append(true).open(&job.log).map_err(|e| e.to_string())?;
     let mut command = brew_command(&job.brew);
     command.args(args).stdout(file.try_clone().map_err(|e| e.to_string())?).stderr(file);
-    #[cfg(unix)]
-    { use std::os::unix::process::CommandExt; command.process_group(0); }
     let mut child = command.spawn().map_err(|e| e.to_string())?;
     if wait_child(&mut child, timeout)?.success() { Ok(()) } else {
         let log = fs::read_to_string(&job.log).unwrap_or_default();
@@ -482,14 +487,10 @@ fn prepare_backup(job: &UpdateJob, copy: impl Fn(&Path, &Path) -> Result<(), Str
     fs::rename(&partial, &job.backup).map_err(|e| e.to_string())
 }
 
-fn restore_app(job: &UpdateJob) -> Result<(), String> {
-    restore_app_using(job, copy_app)
-}
-
-fn restore_app_using(job: &UpdateJob, copy: impl Fn(&Path, &Path) -> Result<(), String>) -> Result<(), String> {
+fn restore_app(job: &UpdateJob, copy: impl Fn(&Path, &Path) -> Result<(), String>) -> Result<(), String> {
     if !job.backup.join("Contents/Info.plist").is_file() { return Err("No complete recovery copy exists".into()); }
     let parent = job.app.parent().ok_or("Invalid app path")?;
-    let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_err(|e| e.to_string())?.as_nanos();
+    let stamp = stamp()?;
     let recovery = parent.join(format!(".where-were-we-recovery-{}-{stamp}", std::process::id()));
     fs::create_dir(&recovery).map_err(|e| e.to_string())?;
     let ready = recovery.join("ready.app");
@@ -521,8 +522,7 @@ pub fn run_update_helper() -> Option<i32> {
         // Keep the child PID so a failed startup can be stopped before rollback.
         let mut launch = Command::new(job.app.join("Contents/MacOS/where-were-we"));
         launch.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
-        #[cfg(unix)]
-        { use std::os::unix::process::CommandExt; launch.process_group(0); }
+        detached(&mut launch);
         match launch.spawn() {
             Err(error) => result = Err(format!("Could not reopen the updated app: {error}")),
             Ok(mut child) => {
@@ -540,7 +540,7 @@ pub fn run_update_helper() -> Option<i32> {
     }
     let mut restored = false;
     if result.is_err() && job.backup.is_dir() {
-        match restore_app(&job) {
+        match restore_app(&job, copy_app) {
             Ok(()) => restored = true,
             Err(error) => result = Err(format!("{}; {error}. Recovery copy: {}", result.unwrap_err(), job.backup.display())),
         }
@@ -579,7 +579,7 @@ fn read_update_status(directory: &Path) -> Option<UpdateState> {
     let path = directory.join(".app-update.json");
     let mut state = update_state(&path)?;
     if ["starting", "checking", "ready", "installing", "restarting"].contains(&state.stage.as_str()) {
-        if let Ok(lock) = fs::OpenOptions::new().create(true).truncate(false).read(true).write(true).open(directory.join(".app-update.lock")) {
+        if let Ok(lock) = open_lock(directory) {
             if lock.try_lock().is_ok() {
                 state.stage = "failed".into();
                 let mut message="The previous update was interrupted.".to_string();
@@ -624,13 +624,13 @@ async fn start_app_update(app: tauri::AppHandle, version: String) -> Result<(), 
         }
         if status["active"] == true { return Err("Wait for AI analysis to finish or cancel it before updating".into()); }
         fs::create_dir_all(root()).map_err(|e| e.to_string())?;
-        let lock = fs::OpenOptions::new().create(true).truncate(false).read(true).write(true).open(root().join(".app-update.lock")).map_err(|e| e.to_string())?;
+        let lock = open_lock(&root()).map_err(|e| e.to_string())?;
         lock.try_lock().map_err(|_| "Another app update is already running")?;
         let exe = std::env::current_exe().map_err(|e| e.to_string())?;
         let bundle = exe.parent().and_then(Path::parent).and_then(Path::parent).filter(|p| p.extension().is_some_and(|e| e == "app")).ok_or("Open the installed app to update")?.to_path_buf();
         let brew = ["/opt/homebrew/bin/brew", "/usr/local/bin/brew"].into_iter().map(PathBuf::from).find(|p| p.is_file()).ok_or("Homebrew was not found")?;
         managed_version(&brew_info(&brew)?, &bundle)?;
-        let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_err(|e| e.to_string())?.as_nanos();
+        let stamp = stamp()?;
         let stage = std::env::temp_dir().join(format!("where-were-we-update-{}-{stamp}", std::process::id()));
         fs::create_dir(&stage).map_err(|e| e.to_string())?;
         let helper = stage.join("updater");
@@ -645,8 +645,7 @@ async fn start_app_update(app: tauri::AppHandle, version: String) -> Result<(), 
             let mut command = Command::new(&helper);
             command.arg("--apply-update").arg(serde_json::to_string(&job).map_err(|e| e.to_string())?)
                 .stdin(Stdio::from(lock)).stdout(Stdio::null()).stderr(Stdio::null());
-            #[cfg(unix)]
-            { use std::os::unix::process::CommandExt; command.process_group(0); }
+            detached(&mut command);
             let mut child = command.spawn().map_err(|e| e.to_string())?;
             std::thread::spawn(move || {
                 loop {
@@ -749,7 +748,7 @@ pub fn run() {
             if control::listen(app.state::<std::sync::Arc<control::Hub>>().inner().clone(), &root()).is_err() {eprintln!("App control unavailable; the app remains usable.");}
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![control_poll, control_ack, control_focus, list_projects, read_map, read_project, file_structure, directory_structure, save_project, github_logins, github_accounts, use_github_account, read_settings, save_settings, open_url, refresh, suggest_groups, make_steps, make_system, make_jobs, analysis_request, analysis_plan, analysis_providers, analysis_run_start, analysis_run_status, analysis_run_cancel, analysis_run_retry, briefing_request, setup_prompt, connection_diagnose, connection_status, tests_prompt, app_version, check_release, app_update_status, start_app_update])
+        .invoke_handler(tauri::generate_handler![control_poll, control_ack, control_focus, list_projects, read_project, file_structure, directory_structure, save_project, github_logins, github_accounts, use_github_account, read_settings, save_settings, open_url, refresh, suggest_groups, make_steps, make_system, make_jobs, analysis_request, analysis_plan, analysis_providers, analysis_run_start, analysis_run_status, analysis_run_cancel, analysis_run_retry, briefing_request, setup_prompt, connection_diagnose, connection_status, tests_prompt, app_version, check_release, app_update_status, start_app_update])
         .build(tauri::generate_context!()).expect("error while building tauri application");
     app.run(|app, event| {
         if matches!(event, tauri::RunEvent::Ready) {
@@ -874,7 +873,7 @@ mod tests {
     impl Drop for UpdateFixture { fn drop(&mut self) { let _ = fs::remove_dir_all(&self.dir); } }
     fn update_fixture() -> UpdateFixture {
         use std::os::unix::fs::PermissionsExt;
-        let stamp=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let stamp=stamp().unwrap();
         static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let sequence=NEXT.fetch_add(1,std::sync::atomic::Ordering::Relaxed);
         let dir=std::env::temp_dir().join(format!("www updater test {} {stamp} {sequence}",std::process::id()));
@@ -949,14 +948,14 @@ esac
         assert!(!fixture.job.backup.exists());
         assert_eq!(fs::read(fixture.job.app.join("Contents/Info.plist")).unwrap(),original);
         prepare_backup(&fixture.job,copy_app).unwrap();
-        assert!(restore_app_using(&fixture.job,partial_copy).is_err());
+        assert!(restore_app(&fixture.job,partial_copy).is_err());
         assert_eq!(fs::read(fixture.job.app.join("Contents/Info.plist")).unwrap(),original);
     }
 
     #[test]
     fn recovery_restores_missing_apps_and_retries_a_newer_receipt() {
         let fixture=update_fixture();perform_update(&fixture.job).unwrap();
-        fs::remove_dir_all(&fixture.job.app).unwrap();restore_app(&fixture.job).unwrap();
+        fs::remove_dir_all(&fixture.job.app).unwrap();restore_app(&fixture.job,copy_app).unwrap();
         assert!(fs::read_to_string(fixture.job.app.join("Contents/Info.plist")).unwrap().contains("0.1.0"));
         fs::remove_dir_all(&fixture.job.backup).unwrap();perform_update(&fixture.job).unwrap();
         assert!(fs::read_to_string(fixture.dir.join("calls")).unwrap().contains("reinstall --cask"));

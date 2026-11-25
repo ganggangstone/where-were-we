@@ -6,7 +6,7 @@ struct Entry { request:Value, session:String, created:Instant, status:String, re
 #[derive(Default)]
 struct Mailbox { session:String, heartbeat:Option<Instant>, entries:VecDeque<Entry>, seen:HashSet<String> }
 pub struct Hub { inner:Mutex<Mailbox>, pub instance:String }
-impl Default for Hub {fn default()->Self {Self {inner:Mutex::new(Mailbox::default()),instance:format!("{:x}",std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos())}}}
+impl Default for Hub {fn default()->Self {Self {inner:Mutex::new(Mailbox::default()),instance:format!("{:x}",crate::stamp().unwrap())}}}
 impl Hub {
     pub fn submit(&self, request:Value)->Value {
         let id=request["id"].as_str().unwrap_or("");
@@ -54,7 +54,7 @@ impl Hub {
 #[cfg(unix)]
 pub fn listen(hub:Arc<Hub>,root:&std::path::Path)->Result<(),String> {
     use std::{fs,io::{BufRead,BufReader,Read,Write},os::unix::{fs::PermissionsExt,net::UnixListener}};
-    let nonce=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+    let nonce=crate::stamp().unwrap();
     let dir=std::path::PathBuf::from(format!("/tmp/where-were-we-{}-{nonce:x}",std::process::id()));
     fs::create_dir(&dir).map_err(|e|e.to_string())?;fs::set_permissions(&dir,fs::Permissions::from_mode(0o700)).map_err(|e|e.to_string())?;
     let socket=dir.join("app.sock");let listener=UnixListener::bind(&socket).map_err(|e|e.to_string())?;
