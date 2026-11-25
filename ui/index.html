@@ -478,7 +478,7 @@ const setLink = (l) => l.label === 'Configured API destination' && l.sure === 'd
 const linkLabel = (l) => setLink(l) || l.label === 'Requests matched across codes' && l.sure === true ? tr('요청을 보냄') : l.label;
 const nodeWhat = (n) => { const hit = n.kind === 'repository' && n.origin === 'repo' && String(n.what).match(/^Repository · (\d+) screens$/); return hit ? ui`코드 · 화면 ${hit[1]}개` : n.what; };
 const PR_PLACES = { '지도와 연결하지 못한 변경':'Changes without a map match', '여러 화면에 똑같이 들어 있는 부품':'Parts shared by several screens', '앱 전체에 걸친 화면 부품':'App-wide screen parts', '문서':'Docs', '배포·CI':'Deployment · CI' };
-const tableName = (t) => { const i = String(t).indexOf('::'); return i < 0 ? t : t.slice(i + 2) + ' · ' + (t.startsWith('shared::') ? tr('함께 쓰는 데이터') : connectionDisplayName(t.slice(0, i))); };
+const tableName = (t) => { const i = String(t).indexOf('::'); return i < 0 ? t : t.slice(i + 2) + (S.repository === t.slice(0, i) ? '' : ' · ' + (t.startsWith('shared::') ? tr('함께 쓰는 데이터') : connectionDisplayName(t.slice(0, i)))); };
 function renderHeader() {
   document.documentElement.lang = S.lang;
   const views = { changes:'바뀐 것', sys:'구조', work:'하는 일', feat:'기능 묶음', map:'화면 지도', focus:'연결·데이터' };
@@ -849,7 +849,7 @@ const fold = (m, p) => { if (!p || !p.startsWith('/m/')) return p; const t = p.r
 // 화면 이름: 제목(코드 원문) → AI가 붙인 이름(점선) → 주소
 const hasAI = () => !!S.groups?.groups?.length; // 빈 기본값({groups:[]})은 AI 결과가 아니다
 const aiName = (p) => (S.groups && S.groups.names && S.groups.names[p]) || null;
-function label(m, p) { const t = m.screens.find(x => x.path === p); const h = t && t.heading; if (t?.repository) return (h || aiName(p) || t.source_path) + ' ['+connectionDisplayName(t.repository)+']'; if (!h) return aiName(p) || p;
+function label(m, p) { const t = m.screens.find(x => x.path === p); const h = t && t.heading; if (t?.repository && !S.repository) return (h || aiName(p) || t.source_path) + ' ['+connectionDisplayName(t.repository)+']'; if (!h) return aiName(p) || p;
   // 같은 제목을 쓰는 화면이 여럿이면 주소가 가장 짧은 것만 제목 그대로, 나머지는 주소를 붙인다.
   const same = (m._heads ??= m.screens.reduce((o, x) => { if (x.heading && !x.redirect && !x.path.startsWith('/m/')) (o[x.heading] ??= []).push(x.path); return o; }, {}))[h] || [];
   return same.length > 1 && p !== same.slice().sort((a, b) => a.length - b.length)[0] ? h + ' · ' + p : h; }
@@ -911,7 +911,7 @@ function requests(m, path) {
   return m._req[path] = rows;
 }
 const reqName = (r) => (S.groups && S.groups.request_names && S.groups.request_names[r.file + '::' + r.function]) || null;
-const reqLabel = (r) => { const value = (r.btn && r.btn + (r.btns.length > 1 ? ui` 외 ${r.btns.length - 1}` : '') + (r.dup ? ' · ' + (flowOf(r.route)?.name || reqName(r.route) || r.route.function) : '')) || flowOf(r.route)?.name || reqName(r.route) || r.route.function; return value + (r.route?.repository ? ' ['+connectionDisplayName(r.route.repository)+']' : ''); };
+const reqLabel = (r) => { const value = (r.btn && r.btn + (r.btns.length > 1 ? ui` 외 ${r.btns.length - 1}` : '') + (r.dup ? ' · ' + (flowOf(r.route)?.name || reqName(r.route) || r.route.function) : '')) || flowOf(r.route)?.name || reqName(r.route) || r.route.function; return value + (r.route?.repository && !S.repository ? ' ['+connectionDisplayName(r.route.repository)+']' : ''); };
 const reqIsAi = (r) => !r.btn && !!(flowOf(r.route)?.name || reqName(r.route));
 const inMain = (r) => S.maps.main ? S.maps.main.backend_routes.some(x => x.method === r.method && x.path === r.path && x.mounted && x.repository === r.repository) : null;
 const openWork = (row) => (S.status ? S.status.open_prs : []).filter(p => p.files.includes(row.route.file) || p.files.includes(row.fn.file));
