@@ -520,6 +520,8 @@ class Projects(TemporaryProject):
         scoped = project.read_bundle('studio', 'web')
         self.assertEqual(len(scoped['dev']['screens']), 1)
         self.assertEqual(len(scoped['status']['open_prs']), 1)
+        self.assertEqual({p['title'] for p in data['status']['open_prs']}, {'[web] Settings','[admin] Settings'})
+        self.assertEqual(scoped['status']['open_prs'][0]['title'], 'Settings')
 
     def test_legacy_session_fields_are_not_returned_or_migrated_into_project_views(self):
         folder=self.root/'legacy';folder.mkdir()

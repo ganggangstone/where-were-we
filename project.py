@@ -526,8 +526,8 @@ def _compose(name, conf, state, raws, repository='', branch='dev'):
         result['ref']=role;bundle[role]=result
     for repo in conf['repositories']:
         rid=repo['id'];raw=raws[rid];file=lambda x:qfile(rid,x);screen=lambda x:qscreen(rid,x)
-        # The repository prefix only tells repositories apart, so a one-repository project shows plain names.
-        tag=(lambda text,name=repo['name']:'['+name+'] '+text) if len(conf['repositories'])>1 else (lambda text:text)
+        # The repository prefix only tells repositories apart, so the one shown code and a one-repository project keep plain names.
+        tag=(lambda text,name=repo['name']:'['+name+'] '+text) if len(conf['repositories'])>1 and ids!={rid} else (lambda text:text)
         related_issues={}
         active_map=bundle['dev'] if bundle['dev']['available'] else bundle['main']
         for pr in [*(raw.get('status') or {}).get('open_prs',[]),*(raw.get('status') or {}).get('merged_prs',[])]:
