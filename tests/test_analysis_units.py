@@ -83,7 +83,7 @@ class FullRun(unittest.TestCase):
     def setUp(self):
         _setup(self)
         (self.repo/'ui.ts').write_text('\n'.join(f"export function {p[1:]}(){{return fetch('{p}')}}" for p in self.PATHS))
-        (self.repo/'api.py').write_text('from fastapi import FastAPI\napp=FastAPI()\n'+'\n'.join(f"@app.get('{p}')\ndef {p[1:]}():pass" for p in self.PATHS))
+        (self.repo/'api.py').write_text('from fastapi import FastAPI\napp=FastAPI()\nMAIL=boto3.client("ses")\n'+'\n'.join(f"@app.get('{p}')\ndef {p[1:]}():pass" for p in self.PATHS))
         for folder in ('lib','tools'):
             (self.repo/folder).mkdir()
             for i in range(3):(self.repo/folder/f'm{i}.py').write_text(f'def {folder}_{i}():\n    return {i}\n')
@@ -120,7 +120,7 @@ class FullRun(unittest.TestCase):
                     'groups':[{'name':'Everything','description':'All of it','units':refs}],
                     'requests':[{'ref':q[0],'name':f'Request {q[3]}'} for q in payload['requests']],
                     'programs':[{'name':'Service','kind':'program','what':'Runs it','units':refs,'ev':[d[0] for u in payload['units'] for d in u[5]][:1]+[99999]}],'links':[],
-                    'externals':[{'name':'Mail service','what':'Sends mail','ev':[d[0] for u in payload['units'] for d in u[5]][:1],'users':[0]}]}
+                    'externals':[{'name':'Mail service','what':'Sends mail','ev':[x[0] for x in payload['externals']][:1],'users':[0]}]}
         return fake
 
     def analyse(self,calls,**kwargs):
@@ -145,7 +145,8 @@ class FullRun(unittest.TestCase):
         self.assertNotIn('Invented',[v['name'] for v in part['units'].values()]);self.assertEqual(part['dropped'],2)  # the invented unit and the unknown evidence ref
         raw=self.raw();system=raw['system.ai'] if (raw.get('system.ai') or {}).get('basis') else raw['system']
         self.assertEqual([n['name'] for n in system['nodes']],['Service']);self.assertEqual(system['basis'],'structure_summary')
-        self.assertEqual(([x['name'] for x in system['externals']],system['nodes'][0]['uses']),(['Mail service'],['x1']))  # an outside service the answer cited is kept
+        self.assertEqual(([x['name'] for x in system['externals']],system['nodes'][0]['uses']),(['Mail service'],['x1']))  # an outside service the answer cited from the offered lines is kept
+        self.assertEqual([(e['file'],e['line'],e['origin']) for e in system['externals'][0]['ev']],[('api.py',3,'local_signal')])
         # The model cited an evidence ref; local code filled the file, line and literal text of the pinned commit.
         ev=system['nodes'][0]['ev'];self.assertEqual((len(ev),ev[0]['origin']),(1,'cited'))
         self.assertEqual((self.repo/ev[0]['file']).read_text().splitlines()[ev[0]['line']-1].strip(),ev[0]['quote'])

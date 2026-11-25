@@ -613,7 +613,7 @@ def _known_routes(selected,index,head):
 
 def _spots_of(scope,payload):
     """The evidence and request refs one call's input listed; any other ref in its answer is dropped."""
-    listed={d[0] for u in payload.get('units',[]) for d in u[5]}|{d[0] for g in payload.get('groups',[]) for d in g.get('declarations',[])}
+    listed={d[0] for u in payload.get('units',[]) for d in u[5]}|{d[0] for g in payload.get('groups',[]) for d in g.get('declarations',[])}|{x[0] for x in payload.get('externals',[])}
     asked={r[0] for r in payload.get('requests',[])}
     return {'evidence':{k:v for k,v in scope['spots']['evidence'].items() if k in listed},'requests':{k:v for k,v in scope['spots']['requests'].items() if k in asked}}
 
