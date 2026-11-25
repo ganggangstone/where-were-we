@@ -4,7 +4,7 @@
 사용: extract.py <저장소 경로> <ref> [출력 json]
 저장소는 체크아웃을 건드리지 않고 `git show <ref>:<path>` 로만 읽는다.
 """
-import json, os, re, subprocess, sys
+import fnmatch, functools, json, os, re, subprocess, sys
 from collections import defaultdict
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import mapcore
@@ -364,14 +364,24 @@ def mutation_table(src):
     return t
 
 
+@functools.lru_cache(maxsize=8)
+def _definitions(src):
+    """같은 파일의 함수 정의 끝 위치. 화살표 함수(const/let) 정의가 function 정의보다 먼저다. 파일마다 한 번만 훑는다."""
+    found = {}
+    for pattern in (r"(?:const|let)\s+(\w+)\s*=\s*(?:async\s*)?(?:\([^)]*\)|\w+)\s*=>\s*", r"(?:async\s+)?function\s+(\w+)\s*\([^)]*\)\s*"):
+        for m in re.finditer(pattern, src):
+            found.setdefault(m.group(1), m.end())
+    return found
+
+
 def handler_body(src, expr):
     """onClick 식에서 실제로 실행되는 코드 조각. 이름만 있으면 같은 파일의 정의를 찾는다. 정의가 없으면(부모가 준 함수) None."""
     expr = expr.strip()
     if re.fullmatch(r"\w+", expr):
-        m = re.search(rf"(?:const|let)\s+{expr}\s*=\s*(?:async\s*)?(?:\([^)]*\)|\w+)\s*=>\s*", src) or re.search(rf"(?:async\s+)?function\s+{expr}\s*\([^)]*\)\s*", src)
-        if not m:
+        end = _definitions(src).get(expr)
+        if end is None:
             return None
-        rest = src[m.end():]
+        rest = src[end:]
         return balanced(rest, 0) if rest.startswith("{") else rest.split("\n")[0]
     return expr
 
@@ -677,6 +687,8 @@ assert module_file("generations", {"backend/app/routers/old_generations.py"}) is
 
 
 def backend_tests(be_index, be, conf):
+    # 테스트 파일을 git 프로세스 하나로 미리 읽는다(파일마다 git show 를 부르면 큰 저장소에서 수 초).
+    preload([f for f in ls() if any(fnmatch.fnmatch(f if "/" in g else os.path.basename(f), g) for g in conf["files"])])
     return mapcore.backend_test_links(be,ls(),show,conf,py_imports,module_file,normalize)
 
 

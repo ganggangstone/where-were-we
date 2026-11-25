@@ -43,6 +43,14 @@ class RouteFiles(unittest.TestCase):
         self.assertEqual(next(s for s in m['screens'] if s['path'] == '/')['heading'], 'Home')
         self.assertTrue(m['coverage']['frontend'])
 
+    def test_named_handler_reads_the_arrow_definition_before_a_function_of_the_same_name(self):
+        m = extract({
+            'web/src/App.tsx': "import { Route, Routes } from 'react-router-dom'\nimport Page from './Page'\nexport default () => <Routes><Route path=\"/\" element={<Page />} /></Routes>\n",
+            'web/src/Page.tsx': "import { useNavigate } from 'react-router-dom'\nexport default function Page(){ const navigate = useNavigate()\n"
+                                "function open() { return 1 }\nconst open = () => navigate('/orders')\nreturn <button onClick={open}>Open orders</button> }\n",
+        })
+        action = next(a for s in m['screens'] for a in s.get('actions', []) if a.get('label') == 'Open orders')
+        self.assertEqual(action['kind'], 'nav')
     def test_button_labels_are_screen_text_never_code_expressions(self):
         m = extract({
             'web/src/App.tsx': "import { Route, Routes } from 'react-router-dom'\nimport Page from './Page'\nexport default () => <Routes><Route path=\"/\" element={<Page />} /></Routes>\n",

@@ -1044,6 +1044,15 @@ def pin_request(name,branch='dev',repository=''):
         if rid and project.states(name).get(rid,{}).get('fingerprint')!=fingerprint:raise ValueError('Refresh after configuration changes first')
     return {'commit':commit,'record_arguments':{'configuration':fingerprint},'mode':None,'reason':None,'recheck':[],'inspect':[]}
 
+def warm_basic(name,branch,repos):
+    """Read the basic catalogs of several codes at once; each read is a separate collector process (about ten seconds on a large code)."""
+    def one(repo):
+        try:basic_catalog(repo['path'],context(name,repo['id'],branch)[3],repo['layout'])
+        except READ_ERRORS:pass  # the ordinary pass below reports the error for this code
+    if len(repos)>1:
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(min(4,len(repos))) as pool:list(pool.map(one,repos))
+
 def plan(name,branch='dev',lang='ko',repository='',overview=False,light=False):
     """Only missing or outdated analysis, for the connected agent to repeat after each save. Reads only.
     light: pins and freshness only; the per-task mode, reason and recheck counts are left empty (no whole-tree read)."""
@@ -1057,6 +1066,7 @@ def plan(name,branch='dev',lang='ko',repository='',overview=False,light=False):
     else:repos=[None]
     tasks=[];blocked=[];skipped=[];pins={}
     same=lambda a,b:bool(a and b) and (str(a).startswith(str(b)) or str(b).startswith(str(a)))
+    if not light:warm_basic(name,branch,[r for r in repos if r and r['refs'].get(branch)])
     for repo in repos:
         rid=repo['id'] if repo else ''
         if repo and not repo['refs'].get(branch):skipped.append({'repository':rid,'reason':'no_branch'});continue

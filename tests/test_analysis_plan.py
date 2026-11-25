@@ -45,6 +45,17 @@ class Plan(unittest.TestCase):
         for lang,token in (('ko','실제 파일을 읽어'),('en','reading the tracked files')):
             handoff=ai_extract.plan('demo','dev',lang)['handoff']
             self.assertIn(token,handoff,lang);self.assertIn('framework' if lang=='en' else '프레임워크',handoff,lang)
+    def test_basic_catalogs_of_several_codes_are_read_together(self):
+        import threading,time
+        live=[0];most=[0];lock=threading.Lock()
+        def read(path,commit,layout):
+            with lock:live[0]+=1;most[0]=max(most[0],live[0])
+            time.sleep(0.05)
+            with lock:live[0]-=1
+        repos=[{'id':rid,'path':'/demo/'+rid,'layout':{}} for rid in ('web','api','jobs')]
+        with patch.object(ai_extract,'context',return_value=(None,None,None,'c'*40)),patch.object(ai_extract,'basic_catalog',side_effect=read) as reader:
+            ai_extract.warm_basic('demo','dev',repos)
+        self.assertEqual(reader.call_count,3);self.assertGreater(most[0],1)
     def test_first_request_queues_map_then_dependents_in_one_handoff(self):
         for lang in ('ko','en'):
             plan=ai_extract.plan('demo','dev',lang)
