@@ -338,6 +338,10 @@ function helpDetails(html,title='자세히') {
   return `<details class="context-help"><summary>${esc(tr(title))}</summary>${html}</details>`;
 }
 // Shared presentation only: values are escaped by callers; no collection or analysis state is changed.
+function indexesOf(m) { return m?.structure_indexes || (m?.structure_index?[m.structure_index]:[]); }
+function indexFor(m,repo) { return indexesOf(m).find(i=>i && (i.repository || '')===repo); }
+function inventoryFor(m,repo,commit) { return (m.inventories || [m.inventory]).find(row=>row && (row.repository || '')===(repo || '') && (commit===undefined || row.commit===commit)); }
+function folded(summary,body,attrs='') { return `<details class="sect"${attrs}><summary>${summary}</summary><div class="module-scope s">${body}</div></details>`; }
 function metaList(items) {
   return `<dl class="metadata">${items.filter(([,value])=>value!==null && value!==undefined && value!=='').map(([label,value,translate=true])=>`<div><dt>${esc(translate?tr(label):label)}</dt><dd>${value}</dd></div>`).join('')}</dl>`;
 }
@@ -909,7 +913,7 @@ async function refreshConnectedCode(project,repository) {
 // Current snapshots open locally. Older maps keep their existing request-preparation flow.
 function prepareAfterRefresh(project,repository) {
   if(S.project!==project || S.repository!==repository)return;
-  const map=M(),indexes=map?.structure_indexes || (map?.structure_index?[map.structure_index]:[]);
+  const map=M(),indexes=indexesOf(map);
   if(indexes.length) {
     S.agentPrompt=null;S.view='sys';S.q='';render();setStatus('');return;
   }
@@ -1443,7 +1447,7 @@ function inventoryBrowser(m,row,key,coverage) {
 }
 function inventoryView(m) {
   const rows=m.inventories || (m.inventory ? [m.inventory] : []);
-  const indexes=m.structure_indexes || (m.structure_index?[m.structure_index]:[]);
+  const indexes=indexesOf(m);
   const scope=JSON.stringify([S.project,S.branch,S.repository,rows.map(row=>[row.repository,row.commit])]);
   if(S.inventoryScope!==scope){
     // 파일 목록은 결과 아래에 접어 둔다. 열면 그때 펼친다.
@@ -1489,7 +1493,7 @@ function flowDataSteps(steps,evidence) {
     const sites=groups.get(label);
     for (const site of [step,...step.evidence || []]) sites.set(JSON.stringify([site.file,site.line]),site);
   }
-  const rows=[...groups].map(([label,sites])=>`<details class="sect"><summary>${esc(label)}</summary><div class="module-scope s">${[...sites.values()].map(site=>evidence(site.file,site.line)).join(' · ')}</div></details>`);
+  const rows=[...groups].map(([label,sites])=>folded(esc(label),[...sites.values()].map(site=>evidence(site.file,site.line)).join(' · ')));
   return rows.length?`<div data-flow-storage><h4>${tr('서버의 데이터 접근')}</h4>${rows.join('')}</div>`:'';
 }
 function compactTrace(link,action) {
@@ -1630,7 +1634,7 @@ function purposeView(m,index) {
   if(!description?.text || !description.file || !Number.isInteger(description.line) || description.line<1)return '';
   const file=index.repository?index.repository+'/'+description.file:description.file;
   const url='zed://file'+codeLocation(m,file).split('/').map(encodeURIComponent).join('/')+':'+description.line;
-  return `<details class="sect" data-project-purpose><summary>${esc(description.text)}</summary><div class="module-scope s"><code title="${esc(index.commit)}">${esc(index.commit.slice(0,12))}</code> <button class="lnk mono" data-url="${esc(url)}" title="${esc(tr('작업 폴더에서 열기'))}">${esc(description.file)}:${description.line}</button></div></details>`;
+  return folded(esc(description.text),`<code title="${esc(index.commit)}">${esc(index.commit.slice(0,12))}</code> <button class="lnk mono" data-url="${esc(url)}" title="${esc(tr('작업 폴더에서 열기'))}">${esc(description.file)}:${description.line}</button>`,' data-project-purpose');
 }
 function readmeFeaturesView(index,evidence) {
   const features=index.documented_features || [];
@@ -1658,7 +1662,7 @@ function workspaceView(index,state,evidence,hasFolder) {
   return `<section class="sect" data-workspace-packages><h2>${tr('워크스페이스 패키지')} · ${count}</h2>${rows.join('')}${control}</section>`;
 }
 function structureIndexView(m,includePurpose=true,featuresOnly=false) {
-  const all=m.structure_indexes || (m.structure_index ? [m.structure_index] : []);
+  const all=indexesOf(m);
   const cross=m.cross_repository_connections || [];
   const indexes=featuresOnly?all.filter(index=>cross.some(row=>row.client.repository===index.repository) || index.cli_entries?.length || index.documented_features?.length ||
     index.service_flow?.connections?.length || index.service_flow?.registered_routes?.length):all;
@@ -1705,7 +1709,7 @@ function structureIndexView(m,includePurpose=true,featuresOnly=false) {
   const crossHtml=crossRepositoryView(m,cross.filter(row=>row.client.repository===index.repository),state);
   const http=crossHtml+(flow?.registered_routes?.length && !flow.connections.length?'':serviceFlowView(flow,state,evidence))+registeredRoutesView(flow,state,evidence);
   const resourceMap=!!(crossHtml || flow?.feature_groups?.length || flow?.registered_routes?.length);
-  const inventory=(m.inventories || [m.inventory]).find(row=>row && (row.repository || '')===(index.repository || '') && row.commit===index.commit);
+  const inventory=inventoryFor(m,index.repository,index.commit);
   const workspace=featuresOnly?'':workspaceView(index,state,evidence,dir=>inventory?.paths?.some(path=>path.startsWith(dir+'/')));
   const metadata=`${includePurpose?purposeView(m,index):''}${status}`;
   const docs=readmeFeaturesView(index,evidence);
@@ -1771,7 +1775,7 @@ function bindStructureIndex() {
   graph.querySelectorAll('[data-cross-page]').forEach(button=>button.onclick=()=>update({crossPage:Number(button.dataset.crossPage)}));
   if($('explainRouteArea'))$('explainRouteArea').onclick=e=>{
     const map=M(),repository=S.moduleGraph.repository || '';
-    const index=(map.structure_indexes || [map.structure_index]).find(i=>i && (i.repository || '')===repository);
+    const index=indexFor(map,repository);
     if(!index)return;
     const area={repository,prefix:S.moduleGraph.routeArea,commit:index.commit,resources:JSON.parse(e.currentTarget.dataset.resources)};
     openAnalysisPanel('resource_batch','',repository,area);
@@ -1786,7 +1790,7 @@ function bindStructureIndex() {
   });
   graph.querySelectorAll('[data-package-page]').forEach(button=>button.onclick=()=>update({workspacePage:Number(button.dataset.packagePage)}));
   graph.querySelectorAll('[data-package-folder]').forEach(button=>button.onclick=()=>{
-    const m=M(),row=(m.inventories || [m.inventory]).find(item=>item && (item.repository || '')===(S.moduleGraph.repository || ''));
+    const m=M(),row=inventoryFor(m,S.moduleGraph.repository);
     if(!row)return;
     const key=JSON.stringify([S.project,row.repository || '',row.commit]);
     S.inventoryOpen=key;S.inventoryBrowse={key,dir:button.dataset.packageFolder,page:0};S.inventoryDirectory=null;S.inventoryFile=null;render();
@@ -1888,7 +1892,7 @@ const countText = (pairs) => pairs.filter(([, n]) => n).map(([k, n]) => S.lang =
 function localSystem(m) {
   if (m._local !== undefined && m._localLang === S.lang) return m._local;
   m._localLang = S.lang;
-  const indexes = m.structure_indexes || (m.structure_index ? [m.structure_index] : []);
+  const indexes = indexesOf(m);
   const screens = prefix => (m.screens || []).filter(s => s.file?.startsWith(prefix)).length;
   const joined = new Map(), join = (from, to, label, ev) => { const l = joined.get(from + '>' + to) || joined.set(from + '>' + to, { from, to, labels: [], ev: [] }).get(from + '>' + to); l.labels.push(label); if (l.ev.length < 3) l.ev.push(ev); };
   let nodes = [], configured = [];
@@ -1902,7 +1906,7 @@ function localSystem(m) {
   } else if (indexes.length) {
     // 상자는 Git 추적 파일 전체를 종류로 나누고, import 는 읽은 소스 파일에서 가져온다.
     const index = indexes[0], q = file => index.repository ? index.repository + '/' + file : file;
-    const paths = (m.inventories || [m.inventory]).find(row => row && (row.repository || '') === (index.repository || ''))?.paths || index.files.map(f => f.file);
+    const paths = inventoryFor(m, index.repository)?.paths || index.files.map(f => f.file);
     const unq = file => index.repository && file.startsWith(index.repository + '/') ? file.slice(index.repository.length + 1) : file;
     const routes = index.service_flow?.registered_routes || [];
     const screenFiles = new Set((m.screens || []).map(s => unq(s.file || ''))), routeFiles = new Set(routes.map(r => r.server?.file).filter(Boolean));
@@ -1962,15 +1966,20 @@ window.onresize = drawWires;
 let wireWidth = 0; if (typeof ResizeObserver !== 'undefined') new ResizeObserver(() => { const w = $('map')?.clientWidth || 0; if (w !== wireWidth) { wireWidth = w; drawWires(); } }).observe($('map'));
 // 칸 그림의 선: 다른 칸으로 가는 선은 마주 보는 변끼리 잇고 번호(짧은 이름이 있으면 이름도)를 칸 사이 틈에 둔다.
 // 같은 칸 안의 선은 상자 오른쪽 여백으로 돌아 나가 번호를 그 여백에 둔다. 번호가 상자 글자를 덮지 않게 하려는 자리다.
+// 선 하나: drawGraph 만 양쪽 화살표(start)를, drawLanes 만 강조(on)를 그린다.
+function wirePath(svg, d, l, graph) { const p = document.createElementNS('http://www.w3.org/2000/svg', 'path'); for (const [k, v] of Object.entries({ d, fill: 'none', ...(l.noend ? {} : { 'marker-end': 'url(#ah)' }), ...(graph && l.start ? { 'marker-start': 'url(#ah)' } : {}), class: 'wire ' + (l.style || '') + (l.dim ? ' dim' : '') + (!graph && l.on ? ' on' : '') })) p.setAttribute(k, v); svg.appendChild(p); }
+// 번호와 이름 배지: 이름이 maxWidth 보다 넓으면 번호만 남긴다.
+function wireTag(box, l, maxWidth, name, x, y) { const t = document.createElement('span'); t.className = 'wn-label' + (l.dim ? ' dim' : '');
+  t.innerHTML = `<b class="wn inline">${l.n}</b>`; if (name) { const s = document.createElement('span'); s.textContent = name; t.appendChild(s); } if (x != null) { t.style.left = x + 'px'; t.style.top = y + 'px'; } box.appendChild(t);
+  if (name && t.offsetWidth > maxWidth) t.lastChild.remove(); return t; }
 function drawLanes(box, svg, links, rect) {
   const gap = parseFloat(getComputedStyle(box).columnGap) || 0, side = {};
   const lanes = [...box.querySelectorAll('.lane')], lane = lanes[0], laneOf = (id) => box.querySelector(`[data-w="${id}"]`).closest('.lane'); let bus = 0;
   const bottom = Math.max(...lanes.filter(x => !x.classList.contains('ext')).map(x => x.offsetTop + x.offsetHeight));
-  const add = (d, l) => { const p = document.createElementNS('http://www.w3.org/2000/svg', 'path'); for (const [k, v] of Object.entries({ d, fill: 'none', ...(l.noend ? {} : { 'marker-end': 'url(#ah)' }), class: 'wire ' + (l.style || '') + (l.dim ? ' dim' : '') + (l.on ? ' on' : '') })) p.setAttribute(k, v); svg.appendChild(p); };
-  const tag = (l, x, y, named) => { const t = document.createElement('span'); t.className = (named ? 'wn-label' : 'wn') + (l.dim ? ' dim' : ''); const name = named && l.label ? linkLabel(l) : '';
-    if (named) t.innerHTML = `<b class="wn inline">${l.n}</b>${name && name.length <= 12 ? `<span>${esc(name)}</span>` : ''}`; else t.textContent = l.n; t.style.left = x + 'px'; t.style.top = y + 'px'; box.appendChild(t);
-    // 칸 사이 틈보다 긴 이름은 상자 글자를 덮으므로 번호만 남긴다(뜻은 아래 선 목록에 있다).
-    if (named && t.children.length > 1 && t.offsetWidth > gap) t.lastChild.remove(); };
+  const add = (d, l) => wirePath(svg, d, l, false);
+  // 칸 사이 틈보다 긴 이름은 상자 글자를 덮으므로 번호만 남긴다(뜻은 아래 선 목록에 있다).
+  const tag = (l, x, y, named) => { if (named) { const name = l.label ? linkLabel(l) : ''; wireTag(box, l, gap, name.length <= 12 ? name : '', x, y); return; }
+    const t = document.createElement('span'); t.className = 'wn' + (l.dim ? ' dim' : ''); t.textContent = l.n; t.style.left = x + 'px'; t.style.top = y + 'px'; box.appendChild(t); };
   // 같은 칸 안의 선: 세로 줄을 칸 오른쪽 여백과 칸 사이 틈 앞쪽 1/3 에 고르게 벌린다. 나머지 2/3 는 칸을 건너가는 긴 선의 자리다.
   const inner = {}; for (const l of links) { const a = rect(l.from), b = rect(l.to); if (Math.abs(a.x - b.x) < 1) inner[a.x] = (inner[a.x] || 0) + 1; }
   const far = links.filter(l => Math.abs(lanes.indexOf(laneOf(l.from)) - lanes.indexOf(laneOf(l.to))) > 1).length;
@@ -1995,9 +2004,7 @@ function drawGraph(box, svg, links) {
   const els = {}; box.querySelectorAll('[data-w]').forEach(el => { els[el.dataset.w] = el; g.setNode(el.dataset.w, { width: el.offsetWidth, height: el.offsetHeight }); });
   // 선 이름은 선 위에 둔다. 상자 폭(--size-node)에 한 줄로 들어가지 않으면 번호만 두고 뜻은 아래 선 목록에 맡긴다.
   const max = box.querySelector('[data-w]')?.offsetWidth || 0;
-  const tags = links.map(l => { if (!l.n) return null; const t = document.createElement('span'); t.className = 'wn-label' + (l.dim ? ' dim' : '');
-    t.innerHTML = `<b class="wn inline">${l.n}</b>`; if (l.label) { const x = document.createElement('span'); x.textContent = linkLabel(l); t.appendChild(x); } box.appendChild(t);
-    if (l.label && t.offsetWidth > max) t.lastChild.remove(); return t; });
+  const tags = links.map(l => l.n ? wireTag(box, l, max, l.label ? linkLabel(l) : '') : null);
   links.forEach((l, i) => g.setEdge(l.from, l.to, tags[i] ? { width: tags[i].offsetWidth, height: tags[i].offsetHeight, labelpos: 'c' } : {}, 'e' + i)); dagre.layout(g);
   // 구조 그림은 창 폭을 쓴다: 단 사이를 넓혀(지금 간격의 세 배까지) 다시 배치하고, 남는 폭은 가운데에 둔다.
   const avail = box.id === 'sys' ? box.parentElement.clientWidth : 0, ranks = new Set(g.nodes().map(id => Math.round(g.node(id).x))).size;
@@ -2006,7 +2013,7 @@ function drawGraph(box, svg, links) {
   for (const [id, el] of Object.entries(els)) { const n = g.node(id); el.style.left = sx(n.x) - n.width / 2 + 'px'; el.style.top = n.y - n.height / 2 + 'px'; }
   box.style.width = width + 'px'; box.style.height = g.graph().height + 'px';
   links.forEach((l, i) => { const pts = g.edge(l.from, l.to, 'e' + i).points; const d = pts.map((p, k) => (k ? 'L' : 'M') + sx(p.x) + ' ' + p.y).join(' ');
-    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path'); for (const [k, v] of Object.entries({ d, fill: 'none', ...(l.noend ? {} : { 'marker-end': 'url(#ah)' }), ...(l.start ? { 'marker-start': 'url(#ah)' } : {}), class: 'wire ' + (l.style || '') + (l.dim ? ' dim' : '') })) path.setAttribute(k, v); svg.appendChild(path);
+    wirePath(svg, d, l, true);
     const e = g.edge(l.from, l.to, 'e' + i); if (tags[i]) { tags[i].style.left = sx(e.x) + 'px'; tags[i].style.top = e.y + 'px'; } });
 }
 
@@ -2319,7 +2326,7 @@ function render() {
   applyBranchDetails();
   renderHeader();
   const m = M();
-  const view = S.view === 'changes' ? 'changes' : S.view === 'sys' ? 'sys' : S.view === 'focus' ? 'focus' : S.view === 'feat' ? 'feat' : 'map'; const sys = view === 'sys';
+  const view = ['changes','sys','focus','feat'].includes(S.view) ? S.view : 'map'; const sys = view === 'sys';
   const work = ['feat','map','focus'].includes(view); if (work) S.workView = view;
   const press = (b, on) => { b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on)); };
   document.querySelectorAll('#view button').forEach(b => press(b, b.dataset.v === view || (b.dataset.v === 'work' && work)));
@@ -2331,7 +2338,7 @@ function render() {
   const top = $('map').scrollTop, left = $('map').scrollLeft, itop = $('insp').scrollTop, refocus = focusKey(document.activeElement);
   let structure='';
   if(sys){
-    const indexes=m.structure_indexes || (m.structure_index?[m.structure_index]:[]);
+    const indexes=indexesOf(m);
     const hasPaths=(m.inventories || [m.inventory]).some(row=>row?.paths?.length);
     structure=hasPaths && indexes.length<=1 && !indexes.some(index=>index.files?.length || index.cli_entries?.length || index.workspace_packages?.length)
       ? purposeView(m,indexes[0])+structureIndexView(m,false) : structureIndexView(m);
@@ -2339,7 +2346,7 @@ function render() {
   let components=sys?sysView(m):'';
   // 결과가 먼저다: 서비스 구성 그림과 선 목록, 그다음 모듈 연결, 맨 아래에 접힌 파일 목록.
   // 기능 흐름이 있는 저장소 하나를 볼 때는 구성 그림을 기능 흐름 위에 두고 목록을 펼쳐 보인다. 모든 저장소에서는 저장소 사이 그림이 결과다.
-  const featureFlow=sys && shownSystem(m)===S.system && !(m.structure_indexes?.length>1) && (m.structure_indexes || [m.structure_index]).some(index=>index?.service_flow?.feature_groups?.length);
+  const featureFlow=sys && shownSystem(m)===S.system && !(m.structure_indexes?.length>1) && indexesOf(m).some(index=>index?.service_flow?.feature_groups?.length);
   // 개발자용 목록은 그림과 선 목록 아래 「자세한 목록」 하나에 접어 둔다.
   const lists=structure+inventoryView(m),listsOpen=S.listsOpen || S.moduleGraph?.routesOpen || S.inventoryOpen;
   const sysBody=sys?(featureFlow?components+structure+inventoryView(m):components+(lists?`<details class="sect" id="detailLists" ${listsOpen?'open':''}><summary>${tr('자세한 목록')}</summary><div class="list-grid">${lists}</div></details>`:'')):'';
@@ -2348,13 +2355,12 @@ function render() {
   if (view === 'focus' && S.focus) { const d = focusData(m); S._wires = d ? [...d.left.map((_, i) => ({ from: 'L' + i, to: 'C', h: true })), ...d.right.map((_, i) => ({ from: 'C', to: 'R' + i, h: true }))] : null; drawWires(); }
   if (view === 'feat') { const f = featureGraph(m); const fi = selectedFeature(m)?.i ?? null; const strong = strongFeatureLinks(f); S._wires = f.links.filter(l => fi == null ? strong.has(l) : l.a === fi || l.b === fi).map(l => ({ from: 'G' + (l.back && !l.fwd ? l.b : l.a), to: 'G' + (l.back && !l.fwd ? l.a : l.b), style: l.ways.length ? '' : 'copy', noend: !l.ways.length, start: !!(l.fwd && l.back) })); drawWires();
     if ($('detailLists')) $('detailLists').ontoggle = e => { S.listsOpen = e.target.open; };
-    document.querySelectorAll('[data-feat]').forEach(el => el.onclick = () => { const id = featureId(f.gs[+el.dataset.feat]); S.agentPrompt = null; S.feat = S.feat === id ? null : id; render(); });
-    document.querySelectorAll('[data-goscr]').forEach(el => el.onclick = () => { S.view = 'map'; S.sel = el.dataset.goscr; S.open = null; render(); }); }
+    document.querySelectorAll('[data-feat]').forEach(el => el.onclick = () => { const id = featureId(f.gs[+el.dataset.feat]); S.agentPrompt = null; S.feat = S.feat === id ? null : id; render(); });}
   document.querySelectorAll('[data-search-result]').forEach(el => el.onclick = () => openTarget(S._search[+el.dataset.searchResult], false));
   if ($('clearSearch')) $('clearSearch').onclick = () => { S.q = ''; $('q').value = ''; render(); $('q').focus(); };
   document.querySelectorAll('[data-chi]').forEach(el => el.onclick = () => { S.chi = +el.dataset.chi; render(); });
   if ($('olderChanges')) $('olderChanges').onchange = (e) => { if (e.target.value) { S.chi = +e.target.value; render(); } };
-  if (view !== 'feat') document.querySelectorAll('[data-goscr]').forEach(el => el.onclick = () => { S.view = 'map'; S.sel = el.dataset.goscr; S.open = null; render(); });
+  document.querySelectorAll('[data-goscr]').forEach(el => el.onclick = () => { S.view = 'map'; S.sel = el.dataset.goscr; S.open = null; render(); });
   document.querySelectorAll('.tw[data-url]').forEach(el => el.onclick = () => invoke('open_url', { url: el.dataset.url }));
   document.querySelectorAll('[data-f]').forEach(el => el.onclick = (e) => { e.stopPropagation(); setFocus(el.dataset.f); });
   if ($('unfocus')) $('unfocus').onclick = () => { S.focus = null; render(); };
