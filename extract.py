@@ -334,7 +334,12 @@ JSX_TEXT_RE = re.compile(r">([^<>{}]+)<")
 
 def jsx_text(inner):
     """JSX 안쪽에서 사람이 읽는 글자만. {식} 은 뺀다."""
-    parts = [" ".join(t.split()) for t in JSX_TEXT_RE.findall(">" + inner + "<")]
+    depth, plain = 0, []
+    for ch in inner:  # {식} 안의 > 와 < 가 글자로 읽히지 않게 식을 먼저 지운다
+        depth += ch == "{"
+        if not depth: plain.append(ch)
+        depth -= ch == "}" and depth > 0
+    parts = [" ".join(t.split()) for t in JSX_TEXT_RE.findall(">" + "".join(plain) + "<")]
     parts = [t for t in parts if re.search(r"\w", t)]  # 글자·숫자가 없는 조각(":", "·")은 버튼 글자가 아니다
     return " ".join(parts)
 
