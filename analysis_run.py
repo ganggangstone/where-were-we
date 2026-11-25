@@ -411,18 +411,17 @@ def _ls_tree(repo,commit,sizes):
     return _git(repo,'ls-tree','-rlz' if sizes else '-rz','--full-tree',commit)
 
 def _blobs(repo,commit,sizes=False):
-    """(raw path, blob size if sizes else blob id) of the regular files of a commit; each caller decodes the path its own way."""
+    """(path, blob size if sizes else blob id) of the regular files of a commit. A path that is not UTF-8 is skipped
+    (the structure index counts it as unsupported): saved results and prompts are UTF-8 JSON."""
     for entry in _ls_tree(repo,commit,sizes).split(b'\0'):
         if not entry:continue
         meta,raw_path=entry.split(b'\t',1);mode,kind,*_,last=meta.split()
-        if mode in (b'100644',b'100755') and kind==b'blob':yield raw_path,last
+        if mode in (b'100644',b'100755') and kind==b'blob':
+            try:yield raw_path.decode('utf-8'),last
+            except UnicodeError:continue
 
 def _tracked(repo,commit):
-    files={}
-    for raw_path,size in _blobs(repo,commit,True):
-        try:files[raw_path.decode('utf-8')]=int(size)
-        except (UnicodeError,ValueError):continue
-    return files
+    return {file:int(size) for file,size in _blobs(repo,commit,True)}
 
 _INDEXES={}
 
@@ -478,9 +477,7 @@ SOURCE_ROW_OVERHEAD = 11  # bytes the compact [line,"text"] form adds to each so
 def _eligible(repo,commit,paths=None):
     """(file, blob id) of the regular, non-secret, non-binary-suffix files of a pinned commit."""
     entries=[]
-    for raw_path,oid in _blobs(repo,commit):
-        try:file=raw_path.decode('utf-8')
-        except UnicodeError:continue
+    for file,oid in _blobs(repo,commit):
         if (paths is None or file in paths) and not _secret(file) and PurePosixPath(file).suffix.lower() not in BINARY_SUFFIXES:entries.append((file,oid))
     return entries
 
@@ -1128,7 +1125,8 @@ def export_source(repo, commit, commits=None, cancelled=None, deadline=None, sel
             if not entry: continue
             meta,raw_file=entry.split(b'\t',1)
             mode,kind,oid=meta.split()
-            file=raw_file.decode('utf-8',errors='strict')
+            try:file=raw_file.decode('utf-8')
+            except UnicodeError:continue  # as _blobs: a path that is not UTF-8 cannot be cited
             if excluded and file in excluded.get(pinned,()):continue
             if selected is not None and file not in selected.get(pinned,set()):continue
             if _secret(file): omitted.append({'file':file,'reason':'credential_file'});continue
@@ -1159,8 +1157,7 @@ def _request(value,task):
 def _first_files(repo,head,request):
     """Choose inexpensive evidence across directories. Every other file stays queued."""
     files={}
-    for raw_path,size in _blobs(repo,head,True):
-        path=raw_path.decode('utf-8')
+    for path,size in _blobs(repo,head,True):
         if _secret(path) or PurePosixPath(path).suffix.lower() in BINARY_SUFFIXES:continue
         files[path]=int(size)
     recheck=ai_extract.files_in(request.get('recheck',[]))
@@ -1202,8 +1199,7 @@ def _regular_files(repo,commit):
     key=(repo,commit)
     if key not in _REGULAR:
         regular=set()
-        for raw_file,_ in _blobs(repo,commit):
-            file=raw_file.decode('utf-8')
+        for file,_ in _blobs(repo,commit):
             if not _secret(file) and PurePosixPath(file).suffix.lower() not in BINARY_SUFFIXES:regular.add(file)
         _REGULAR.clear();_REGULAR[key]=regular
     return _REGULAR[key]

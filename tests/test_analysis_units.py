@@ -256,6 +256,21 @@ class FullRun(unittest.TestCase):
         self.assertEqual(done['state'],'completed');self.assertEqual(done['gaps'][0]['part'],'rules:ruby')
         self.assertIn('folder:app',[r[0] for r in self.board()['repositories'][0]['units']])
 
+    def test_a_file_whose_name_is_not_utf8_is_skipped_and_counted_and_the_run_completes(self):
+        import os,subprocess  # the file system refuses such a name; git keeps any bytes, so write the entry into the index
+        oid=subprocess.run(['git','-C',str(self.repo),'hash-object','-w','--stdin'],input=b'def bad():\n    return 0\n',capture_output=True,check=True).stdout.strip()
+        subprocess.run(['git','-C',str(self.repo),'update-index','--index-info'],input=b'100644 '+oid+b'\tlib/bad\xff.py\n',check=True)
+        subprocess.run(['git','-C',str(self.repo),'update-index','--skip-worktree',os.fsdecode(b'lib/bad\xff.py')],check=True)  # so add -A keeps it
+        self.save_code()
+        calls=[];job,done=self.analyse(calls)
+        self.assertEqual(done['state'],'completed');self.assertEqual(len(calls),job['announced']['total'])
+        self.assertIn(b'lib/bad\xff.py',subprocess.run(['git','-C',str(self.repo),'ls-tree','-rz','HEAD'],capture_output=True).stdout)
+        unsupported=lambda ref:structure_index.build(str(self.repo),self.git('rev-parse',ref).strip())['coverage']['unsupported_files']
+        self.assertEqual(unsupported('HEAD'),unsupported('HEAD~1')+1)
+        unit=next(r[0] for r in self.board()['repositories'][0]['units'] if r[0]=='folder:lib')
+        job=analysis_run.prepare('demo',lang='en',repository='service',intent={'task':'full','targets':[],'only':[{'repository':'service','target':unit}]})
+        self.assertEqual(analysis_run.run(job['id'],self.executor([]))['state'],'completed')
+
     def test_an_opened_unit_is_explained_with_one_call_and_no_confirmation(self):
         unit=next(r[0] for r in self.board()['repositories'][0]['units'] if r[1]=='folder' and r[4]=='pending')
         job=analysis_run.prepare('demo',lang='en',repository='service',intent={'task':'full','targets':[],'only':[{'repository':'service','target':unit}]})
