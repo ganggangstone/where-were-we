@@ -107,7 +107,9 @@ fn lang_flag(lang: &Option<String>) -> &'static str { if lang.as_deref() == Some
 /// One composed read model for the UI and MCP, including repository status.
 #[tauri::command]
 async fn read_project(app: tauri::AppHandle, project: String, repository: Option<String>) -> Result<String, String> {
-    run_py(&app, "project.py", &["read", &project, "--repository", repo_arg(&repository)])
+    blocking(move || {
+        run_py(&app, "project.py", &["read", &project, "--repository", repo_arg(&repository)])
+    }).await
 }
 
 #[tauri::command]
@@ -122,32 +124,42 @@ async fn directory_structure(app: tauri::AppHandle, project: String, repository:
 
 #[tauri::command]
 async fn save_project(app: tauri::AppHandle, project: String, configuration: String) -> Result<String, String> {
-    run_py(&app, "project.py", &["configure", &project, &configuration])
+    blocking(move || {
+        run_py(&app, "project.py", &["configure", &project, &configuration])
+    }).await
 }
 
 #[tauri::command]
 async fn github_accounts(app: tauri::AppHandle, project: String, repository: String) -> Result<String, String> {
-    run_py(&app,"project.py",&["github-accounts",&project,"--repository",&repository])
+    blocking(move || {
+        run_py(&app,"project.py",&["github-accounts",&project,"--repository",&repository])
+    }).await
 }
 
 #[tauri::command]
-async fn github_logins(app: tauri::AppHandle, project: String) -> Result<String, String> {
-    run_py(&app,"project.py",&["github-logins",&project])
+async fn github_logins(app: tauri::AppHandle) -> Result<String, String> {
+    run_py(&app,"project.py",&["github-logins"])
 }
 
 #[tauri::command]
 async fn use_github_account(app: tauri::AppHandle, project: String, repository: String, account: String) -> Result<String, String> {
-    run_py(&app,"project.py",&["github-account",&project,"--repository",&repository,&account])
+    blocking(move || {
+        run_py(&app,"project.py",&["github-account",&project,"--repository",&repository,&account])
+    }).await
 }
 
 #[tauri::command]
 async fn read_settings(app: tauri::AppHandle) -> Result<String, String> {
-    run_py(&app, "mapcore.py", &["settings"])
+    blocking(move || {
+        run_py(&app, "mapcore.py", &["settings"])
+    }).await
 }
 
 #[tauri::command]
 async fn save_settings(app: tauri::AppHandle, json: String) -> Result<String, String> {
-    run_py(&app, "mapcore.py", &["save-settings", &json])
+    blocking(move || {
+        run_py(&app, "mapcore.py", &["save-settings", &json])
+    }).await
 }
 
 fn task_request(app: &tauri::AppHandle, project: &str, branch: &str, lang: &str, repository: Option<&str>, task: Option<(&str, &str)>) -> Result<String, String> {
@@ -159,23 +171,29 @@ fn task_request(app: &tauri::AppHandle, project: &str, branch: &str, lang: &str,
 /// 새로고침: refresh.py 가 fetch, 바뀐 브랜치의 지도 다시 뽑기, 수집, 달라진 것 기록을 한다. 로그를 돌려준다.
 #[tauri::command]
 async fn refresh(app: tauri::AppHandle, project: String, repo: String, since: String, repository: Option<String>) -> Result<String, String> {
-    if root().join(&project).join("project.json").is_file() {
-        run_py(&app, "project.py", &["refresh", &project, "--repository", repo_arg(&repository)])
-    } else { run_py(&app, "refresh.py", &[&project, &repo, &since]) }
+    blocking(move || {
+        if root().join(&project).join("project.json").is_file() {
+            run_py(&app, "project.py", &["refresh", &project, "--repository", repo_arg(&repository)])
+        } else { run_py(&app, "refresh.py", &[&project, &repo, &since]) }
+    }).await
 }
 
 /// Prepare group naming for the connected MCP agent.
 #[tauri::command]
 async fn suggest_groups(app: tauri::AppHandle, project: String, branch: String, lang: String, repository: Option<String>) -> Result<String, String> {
-    task_request(&app, &project, &branch, &lang, repository.as_deref(), Some(("groups", "")))
+    blocking(move || {
+        task_request(&app, &project, &branch, &lang, repository.as_deref(), Some(("groups", "")))
+    }).await
 }
 
 /// 에이전트 연결 프롬프트 (mapcore.py setup). 이 맥의 경로가 채워진다.
 #[tauri::command]
 async fn setup_prompt(app: tauri::AppHandle, lang: Option<String>, onboarding: Option<bool>) -> Result<String, String> {
-    let mut args = vec!["setup", lang_flag(&lang)];
-    if onboarding.unwrap_or(false) { args.push("--onboarding"); }
-    run_py(&app, "mapcore.py", &args)
+    blocking(move || {
+        let mut args = vec!["setup", lang_flag(&lang)];
+        if onboarding.unwrap_or(false) { args.push("--onboarding"); }
+        run_py(&app, "mapcore.py", &args)
+    }).await
 }
 
 fn connection_probe(backend: &Backend, feature: &str, lang: &str) -> Result<String, String> {
@@ -196,55 +214,71 @@ fn connection_probe(backend: &Backend, feature: &str, lang: &str) -> Result<Stri
 /// Probe only the app-owned backend. Never read or rewrite agent settings.
 #[tauri::command]
 async fn connection_diagnose(app: tauri::AppHandle, feature: String, lang: String) -> Result<String, String> {
-    let _work=BackendWork::start()?;
-    // The interpreter cannot report its own absence or execution denial.
-    match backend(&app) {
-        Ok(backend) => connection_probe(&backend, &feature, &lang),
-        Err(_) => Ok(serde_json::json!({"fresh_server":{"state":"missing_runtime"},"connection":{"state":"not_verified"}}).to_string()),
-    }
+    blocking(move || {
+        let _work=BackendWork::start()?;
+        // The interpreter cannot report its own absence or execution denial.
+        match backend(&app) {
+            Ok(backend) => connection_probe(&backend, &feature, &lang),
+            Err(_) => Ok(serde_json::json!({"fresh_server":{"state":"missing_runtime"},"connection":{"state":"not_verified"}}).to_string()),
+        }
+    }).await
 }
 
 #[tauri::command]
 async fn connection_status(app: tauri::AppHandle, challenge: String) -> Result<String, String> {
-    run_py(&app, "connection.py", &["check", "--challenge", &challenge])
-        .map_err(|_| "Connection check unavailable; run diagnostics again.".into())
+    blocking(move || {
+        run_py(&app, "connection.py", &["check", "--challenge", &challenge])
+            .map_err(|_| "Connection check unavailable; run diagnostics again.".into())
+    }).await
 }
 
 /// 테스트가 안 이어진 서버 기능 하나에 대해 에이전트가 테스트를 찾게 하는 글 (mapcore.py tests).
 #[tauri::command]
 async fn tests_prompt(app: tauri::AppHandle, project: String, route: String, lang: Option<String>, repository: Option<String>) -> Result<String, String> {
-    let scope = format!("--repository={}", repo_arg(&repository));
-    run_py(&app, "mapcore.py", &["tests", &project, &route, &scope, lang_flag(&lang)])
+    blocking(move || {
+        let scope = format!("--repository={}", repo_arg(&repository));
+        run_py(&app, "mapcore.py", &["tests", &project, &route, &scope, lang_flag(&lang)])
+    }).await
 }
 
 /// Prepare program jobs for the connected MCP agent.
 #[tauri::command]
 async fn make_jobs(app: tauri::AppHandle, project: String, node: String, branch: String, lang: String, repository: Option<String>) -> Result<String, String> {
-    task_request(&app, &project, &branch, &lang, repository.as_deref(), Some(("jobs", &node)))
+    blocking(move || {
+        task_request(&app, &project, &branch, &lang, repository.as_deref(), Some(("jobs", &node)))
+    }).await
 }
 
 /// Prepare architecture for the connected MCP agent.
 #[tauri::command]
 async fn make_system(app: tauri::AppHandle, project: String, branch: String, lang: String, repository: Option<String>) -> Result<String, String> {
-    task_request(&app, &project, &branch, &lang, repository.as_deref(), Some(("system", "")))
+    blocking(move || {
+        task_request(&app, &project, &branch, &lang, repository.as_deref(), Some(("system", "")))
+    }).await
 }
 
 /// Prepare request steps for the connected MCP agent.
 #[tauri::command]
 async fn make_steps(app: tauri::AppHandle, project: String, branch: String, screen: String, lang: String, repository: Option<String>) -> Result<String, String> {
-    task_request(&app, &project, &branch, &lang, repository.as_deref(), Some(("steps", &screen)))
+    blocking(move || {
+        task_request(&app, &project, &branch, &lang, repository.as_deref(), Some(("steps", &screen)))
+    }).await
 }
 
 /// Language-independent detailed analysis, explicitly requested by the user.
 #[tauri::command]
 async fn analysis_request(app: tauri::AppHandle, project: String, branch: String, lang: String, repository: Option<String>) -> Result<String, String> {
-    task_request(&app, &project, &branch, &lang, repository.as_deref(), None)
+    blocking(move || {
+        task_request(&app, &project, &branch, &lang, repository.as_deref(), None)
+    }).await
 }
 
 /// One request containing only missing or outdated analysis for the selected code.
 #[tauri::command]
 async fn analysis_plan(app: tauri::AppHandle, project: String, branch: String, lang: String, repository: Option<String>) -> Result<String, String> {
-    run_py(&app,"ai_extract.py",&[&project,&branch,&lang,"--plan","--repository",repo_arg(&repository)])
+    blocking(move || {
+        run_py(&app,"ai_extract.py",&[&project,&branch,&lang,"--plan","--repository",repo_arg(&repository)])
+    }).await
 }
 
 #[derive(serde::Deserialize)]
@@ -259,11 +293,15 @@ struct AnalysisScope {
 
 // Availability and run control can wait on a CLI or filesystem lock. Keep that
 // work off the async runtime; only the explicit start/retry commands run AI.
+async fn blocking(work: impl FnOnce() -> Result<String, String> + Send + 'static) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(work).await.map_err(|e| e.to_string())?
+}
+
 async fn py_blocking(app: tauri::AppHandle, script: &'static str, args: Vec<String>) -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(move || {
+    blocking(move || {
         let refs: Vec<&str> = args.iter().map(String::as_str).collect();
         run_py(&app, script, &refs)
-    }).await.map_err(|e| e.to_string())?
+    }).await
 }
 
 async fn analysis_command(app: tauri::AppHandle, args: Vec<String>) -> Result<String, String> { py_blocking(app, "analysis_run.py", args).await }
@@ -306,7 +344,9 @@ async fn analysis_run_retry(app: tauri::AppHandle, run_id: String, expected_acco
 
 #[tauri::command]
 async fn briefing_request(app: tauri::AppHandle, project: String, branch: String, lang: String, repository: Option<String>) -> Result<String, String> {
-    run_py(&app,"briefing.py",&["request",&project,"--branch",&branch,"--lang",&lang,"--repository",repo_arg(&repository)])
+    blocking(move || {
+        run_py(&app,"briefing.py",&["request",&project,"--branch",&branch,"--lang",&lang,"--repository",repo_arg(&repository)])
+    }).await
 }
 
 /// zed://file/... 같은 주소를 macOS `open` 으로 연다.
