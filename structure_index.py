@@ -8,6 +8,7 @@ from functools import lru_cache
 from pathlib import PurePosixPath
 import re
 import subprocess
+import tomllib
 import warnings
 
 import lang_rules
@@ -27,6 +28,9 @@ MAX_BYTES = 64 * 1024 * 1024
 MAX_FILE_BYTES = 512 * 1024
 MAX_DECLARATIONS = 20_000
 MAX_IMPORTS = 20_000
+MAX_MANIFEST_BYTES = 64 * 1024
+MAX_WORKSPACE_LINKS = 512
+MAX_COBRA_COMMANDS = 1024
 
 
 VERSION = 37
@@ -34,6 +38,9 @@ JS_EXTENSIONS = {'.js', '.jsx', '.mjs', '.cjs'}
 LANGUAGES = ('python', 'javascript', 'typescript', 'html', 'go')
 TS_EXTENSIONS = {'.ts', '.tsx', '.mts', '.cts'}
 SUFFIXES = JS_EXTENSIONS | TS_EXTENSIONS
+# Extensions read by the built-in readers (case-sensitive); other languages need a saved reading rule.
+BUILTIN_LANG = {'.go':'go', '.py':'python', '.html':'html', '.htm':'html',
+                **dict.fromkeys(JS_EXTENSIONS, 'javascript'), **dict.fromkeys(TS_EXTENSIONS, 'typescript')}
 
 
 @lru_cache(maxsize=4)
@@ -289,6 +296,13 @@ def _plain_description(value):
             and not any(char in value for char in '<>[]`') and any(c.isalpha() for c in value))
 
 
+def _unique_json_line(text, key, value):
+    """The line number of the only line holding "key": value as JSON, else None."""
+    literal = re.escape(json.dumps(key,ensure_ascii=False)) + r'\s*:\s*' + re.escape(json.dumps(value,ensure_ascii=False))
+    rows = [n for n,line in enumerate(text.splitlines(),1) if re.search(literal,line)]
+    return rows[0] if len(rows)==1 else None
+
+
 def _project_description(read, candidates):
     for file, raw in read(candidates):
         try:
@@ -297,7 +311,6 @@ def _project_description(read, candidates):
                 package = json.loads(text)
                 value = package.get('description') if isinstance(package, dict) else None
             elif file == 'pyproject.toml':
-                import tomllib
                 project = tomllib.loads(text).get('project')
                 value = project.get('description') if isinstance(project, dict) else None
             else:
@@ -326,16 +339,17 @@ def _project_description(read, candidates):
                         break
                     return {'file':file, 'line':index + 1, 'text':body}
                 continue
-        except (ImportError, ValueError, UnicodeError, RecursionError):
+        except (ValueError, UnicodeError, RecursionError):
             continue
         if _plain_description(value):
             if file == 'package.json':
-                literal = r'"description"\s*:\s*' + re.escape(json.dumps(value, ensure_ascii=False))
+                line = _unique_json_line(text, 'description', value)
             else:
                 literal = r'^\s*description\s*=\s*(?:' + re.escape('"' + value + '"') + '|' + re.escape("'" + value + "'") + ')'
-            matches = [n for n, source in enumerate(text.splitlines(), 1) if re.search(literal, source)]
-            if len(matches) == 1:
-                return {'file':file, 'line':matches[0], 'text':value}
+                matches = [n for n, source in enumerate(text.splitlines(), 1) if re.search(literal, source)]
+                line = matches[0] if len(matches) == 1 else None
+            if line:
+                return {'file':file, 'line':line, 'text':value}
     return None
 
 
@@ -391,6 +405,10 @@ def _documented_features(read, sources):
     return []
 
 
+def _glob_parts_ok(parts):
+    return not any(part in ('','.','..') or (part != '*' and not re.fullmatch(r'[A-Za-z0-9_@.-]+',part)) for part in parts)
+
+
 def _pnpm_patterns(raw):
     """Read only pnpm's plain block list of literal or single-segment wildcard globs."""
     try:
@@ -412,7 +430,7 @@ def _pnpm_patterns(raw):
             return []
         path = item[2].removeprefix('!')
         parts = path.removeprefix('./').split('/')
-        if any(part in ('','.','..') or (part != '*' and not re.fullmatch(r'[A-Za-z0-9_@.-]+',part)) for part in parts):
+        if not _glob_parts_ok(parts):
             return []
         patterns.append((item[2].startswith('!'),parts,index+1))
     return patterns
@@ -459,7 +477,7 @@ def _package_workspace_patterns(raw):
         if token != value:
             return []
         parts = value.removeprefix('./').split('/')
-        if any(part in ('','.','..') or (part != '*' and not re.fullmatch(r'[A-Za-z0-9_@.-]+',part)) for part in parts):
+        if not _glob_parts_ok(parts):
             return []
         patterns.append((False,parts,text.count('\n',0,offset)+1))
         offset = end
@@ -485,7 +503,7 @@ def _workspace_packages(read,config,manifests):
                 and all(p==s or p=='*' and not s.startswith('.') for p,s in zip(pattern,parts))]
         if hits and not any(negative for negative,_ in hits):
             matched[file] = (entry,hits[0][1])
-    selected = [(file,matched[file][0]) for file in sorted(matched) if matched[file][0][1]<=64*1024][:64]
+    selected = [(file,matched[file][0]) for file in sorted(matched) if matched[file][0][1]<=MAX_MANIFEST_BYTES][:64]
     packages = []
     declared = []
     for file,raw in read(selected):
@@ -499,17 +517,13 @@ def _workspace_packages(read,config,manifests):
         name = manifest.get('name')
         if not isinstance(name,str) or not re.fullmatch(r'(?:@[a-z0-9_.-]+/)?[a-z0-9][a-z0-9._-]{0,213}',name):
             continue
-        def field_line(key,value):
-            literal = re.escape(json.dumps(key,ensure_ascii=False)) + r'\s*:\s*' + re.escape(json.dumps(value,ensure_ascii=False))
-            rows = [n for n,line in enumerate(text.splitlines(),1) if re.search(literal,line)]
-            return rows[0] if len(rows)==1 else None
-        line = field_line('name',name)
+        line = _unique_json_line(text,'name',name)
         if not line:
             continue
         row = {'name':name,'directory':posixpath.dirname(file),'file':file,'line':line,
                'workspace':{'file':workspace_file,'line':matched[file][1]}}
         description = manifest.get('description')
-        if _plain_description(description) and (where := field_line('description',description)):
+        if _plain_description(description) and (where := _unique_json_line(text,'description',description)):
             row.update(description=description,description_line=where)
         packages.append(row)
         coordinates = {}
@@ -532,14 +546,14 @@ def _workspace_packages(read,config,manifests):
     names = Counter(p['name'] for p in packages)
     links = []
     if len(packages) == len(matched):
-        links = [d for d in declared if names[d['source']] == names[d['target']] == 1][:512]
+        links = [d for d in declared if names[d['source']] == names[d['target']] == 1][:MAX_WORKSPACE_LINKS]
     return packages,len(matched),links
 
 
 def _cli_entries(read, manifests, tracked, files):
     """Resolve tracked package commands without running an installer or importing code."""
     declarations = {row['file']: row['declarations'] for row in files}
-    eligible = [(f, entry) for f, entry in manifests.items() if entry[1] <= 64 * 1024]
+    eligible = [(f, entry) for f, entry in manifests.items() if entry[1] <= MAX_MANIFEST_BYTES]
     selected = sorted(eligible, key=lambda item: (item[0].count('/'), item[0]))[:64]
     result = []
     for file, raw in read(selected):
@@ -572,9 +586,8 @@ def _cli_entries(read, manifests, tracked, files):
                     result.append(row)
         else:
             try:
-                import tomllib
                 project = tomllib.loads(raw.decode()).get('project')
-            except (ImportError, ValueError, UnicodeError, RecursionError):
+            except (ValueError, UnicodeError, RecursionError):
                 continue
             scripts = project.get('scripts') if isinstance(project, dict) else None
             if not isinstance(scripts, dict):
@@ -739,19 +752,19 @@ def build(repo, commit, excluded=None, *, only_file=None, directory=None, page=1
             continue
         if scope is None:
             tracked[file] = oid
-            if file == 'pnpm-workspace.yaml' and int(size) <= 64 * 1024:
+            if file == 'pnpm-workspace.yaml' and int(size) <= MAX_MANIFEST_BYTES:
                 pnpm_workspace = (oid,int(size))
-            if (file == 'package.json' or file in next_config_names) and int(size) <= 64 * 1024:
+            if (file == 'package.json' or file in next_config_names) and int(size) <= MAX_MANIFEST_BYTES:
                 next_sources[file] = (oid, int(size))
             if file.lower() in ('readme.md','readme.rst','readme.txt','readme') or file in ('package.json','pyproject.toml'):
-                if int(size) <= 64 * 1024:
+                if int(size) <= MAX_MANIFEST_BYTES:
                     descriptions[file] = (oid, int(size))
             if posixpath.basename(file) in ('package.json', 'pyproject.toml'):
                 manifests[file] = (oid, int(size))
-        if file == 'go.mod' and int(size) <= 64 * 1024:
+        if file == 'go.mod' and int(size) <= MAX_MANIFEST_BYTES:
             go_config = (oid, int(size))
         suffix = PurePosixPath(file).suffix
-        lang = 'go' if suffix == '.go' else 'python' if suffix == '.py' else 'javascript' if suffix in JS_EXTENSIONS else 'typescript' if suffix in TS_EXTENSIONS else 'html' if suffix in ('.html','.htm') else None
+        lang = BUILTIN_LANG.get(suffix)
         if lang is None and suffix.lower() in rules:
             lang = rules[suffix.lower()]['language']
         if lang:
@@ -843,6 +856,17 @@ def build(repo, commit, excluded=None, *, only_file=None, directory=None, page=1
     unavailable = set()
     by_language = {rule['language']: rule for rule in rules.values()}
     paths = lang_rules.Paths(candidates) if by_language else None
+
+    def add(file, language, rows, edges):
+        nonlocal truncated, declarations
+        limited_rows = rows[:MAX_DECLARATIONS - declarations]
+        limited_edges = edges[:MAX_IMPORTS - len(imports)]
+        truncated |= len(rows) != len(limited_rows) or len(edges) != len(limited_edges)
+        files.append({'file':file,'language':language,'declarations':limited_rows})
+        parsed.add(file)
+        imports.extend(limited_edges)
+        declarations += len(limited_rows)
+
     for file, raw in _blobs(git, env, selected):
         language = languages[file]
         if language in by_language:
@@ -854,14 +878,8 @@ def build(repo, commit, excluded=None, *, only_file=None, directory=None, page=1
             # Route hits in tests and support code are not the service's routes.
             if source_signals.kind(file) == 'code':
                 routes.extend(found)
-            limited_rows = rows[:MAX_DECLARATIONS - declarations]
-            limited_edges = edges[:MAX_IMPORTS - len(imports)]
-            truncated |= len(rows) != len(limited_rows) or len(edges) != len(limited_edges)
-            files.append({'file':file,'language':language,'declarations':limited_rows})
-            parsed.add(file)
-            imports.extend(limited_edges)
+            add(file, language, rows, edges)
             unresolved += missing
-            declarations += len(limited_rows)
             continue
         if language == 'go':
             inside_module = not any(file.startswith(base + '/') for base in go_modules) and 'vendor' not in file.split('/')
@@ -878,14 +896,8 @@ def build(repo, commit, excluded=None, *, only_file=None, directory=None, page=1
             limited_packages = packages[:MAX_IMPORTS - len(package_imports)]
             truncated |= len(limited_packages) != len(packages)
             package_imports.extend(limited_packages)
-            limited_rows = rows[:MAX_DECLARATIONS - declarations]
-            limited_edges = edges[:MAX_IMPORTS - len(imports)]
-            truncated |= len(rows) != len(limited_rows) or len(edges) != len(limited_edges)
-            files.append({'file':file,'language':language,'declarations':limited_rows})
-            parsed.add(file)
-            imports.extend(limited_edges)
+            add(file, language, rows, edges)
             unresolved += missing
-            declarations += len(limited_rows)
             continue
         if language == 'html':
             try:
@@ -912,13 +924,7 @@ def build(repo, commit, excluded=None, *, only_file=None, directory=None, page=1
             if sdk:sdk_modules[file]=sdk
             requests.extend(file_requests)
             unresolved += missing
-            limited_rows = rows[:MAX_DECLARATIONS - declarations]
-            limited_edges = edges[:MAX_IMPORTS - len(imports)]
-            truncated |= len(rows) != len(limited_rows) or len(edges) != len(limited_edges)
-            imports.extend(limited_edges)
-            declarations += len(limited_rows)
-            files.append({'file':file, 'language':language, 'declarations':limited_rows})
-            parsed.add(file)
+            add(file, language, rows, edges)
             continue
         try:
             with warnings.catch_warnings():
@@ -1019,12 +1025,12 @@ def build(repo, commit, excluded=None, *, only_file=None, directory=None, page=1
         coverage.update(_directory_coverage(candidates, parsed))
     eligible_manifests = {path: entry for path, entry in manifests.items() if entry[0] not in denied}
     cli_entries, manifests_read = _cli_entries(read, eligible_manifests, {f for f, oid in tracked.items() if oid not in denied}, files)
-    cli_entries.extend(cobra_commands.connect(cobra_facts, go_targets, 1024))
+    cli_entries.extend(cobra_commands.connect(cobra_facts, go_targets, MAX_COBRA_COMMANDS))
     workspace_config = None
     if has_pnpm_workspace:
         if pnpm_workspace and pnpm_workspace[0] not in denied:
             workspace_config = ('pnpm-workspace.yaml',pnpm_workspace)
-    elif 'package.json' in eligible_manifests and eligible_manifests['package.json'][1]<=64*1024:
+    elif 'package.json' in eligible_manifests and eligible_manifests['package.json'][1]<=MAX_MANIFEST_BYTES:
         workspace_config = ('package.json',eligible_manifests['package.json'])
     workspace_packages,workspace_total,workspace_dependencies = _workspace_packages(read,workspace_config,eligible_manifests)
     coverage['workspace_manifests_matched'] = workspace_total
