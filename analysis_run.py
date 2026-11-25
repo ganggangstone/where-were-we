@@ -1966,11 +1966,15 @@ def _detail(value,task,request,call,validate):
             linked[pr['id']]=[pr['title_source'],pr['body_source']]+[s for i in pr['issues'] for s in
                 (pr['repository']+':issue:'+briefing.digest(i.get('url') or i.get('number'))[:16]+k for k in (':title',':body')) if s in ctx['sources']]
         claimed={s for ids in linked.values() for s in ids}
+        # An issue no supplied PR links explains none of the changes; it is not sent.
+        claimed|={sid for sid,source in ctx['sources'].items() if source.get('kind')=='issue'}
         shared=[text(sid) for sid in ctx['sources'] if sid not in claimed]
         # The newest PRs that fit the fixed number of calls are explained; the older rest is named in unknown.
-        budget=DETAIL_BYTES-_size(shared);groups=[[]];size=0;left=[]
+        # The source list sent with each call (its shared rows and each PR's rows) counts toward the budget too.
+        listed={s['id']:s for s in ctx['input']['sources']}
+        budget=DETAIL_BYTES-_size(shared)-_size([s for i,s in listed.items() if i not in claimed]);groups=[[]];size=0;left=[]
         for pr in sorted(ctx['input']['prs'],key=lambda pr:pr['merged_at'],reverse=True):
-            n=_size([text(s) for s in linked[pr['id']]])+_size(pr)
+            n=_size([text(s) for s in linked[pr['id']]])+_size(pr)+_size([listed[s] for s in linked[pr['id']] if s in listed])
             if left or groups[-1] and size+n>budget and len(groups)==MAX_BRIEFING_CALLS:left.append(pr['id']);continue
             if groups[-1] and size+n>budget:groups.append([]);size=0
             groups[-1].append(pr);size+=n

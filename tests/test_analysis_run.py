@@ -443,13 +443,13 @@ else:
         done=analysis_run.run(self.prepare(intent={'task':'jobs','targets':[{'repository':'service','target':'api'}]})['id'],executor)
         self.assertEqual(done['state'],'failed');self.assertEqual(len(calls),2);self.assertEqual(self.raw(),before)
 
-    def briefing_prs(self,count,body=1000):
+    def briefing_prs(self,count,body=1000,issues=()):
         self.seed_map();raw=self.raw()
         prs=[{'number':n,'title':f'Fix problem number {n}','body':f'Body of change {n}. '+'x'*body,'merged_at':f'2026-10-01T12:{n:02d}:00+00:00',
               'base':'dev','branch':f'fix-{n}','issues':[]} for n in range(1,count+1)]
         raw['changes']={'last_result':{'since':'2026-10-01T00:00:00+00:00','at':'2026-10-02T00:00:00+00:00','changed':True,'evidence':{
             'commits':{'dev':{'from':self.commit,'to':self.commit}},'comparison':{'since':'last_refresh','since_time':''},
-            'structure':{},'prs':prs,'issues':[],'collection':{}}}}
+            'structure':{},'prs':prs,'issues':list(issues),'collection':{}}}}
         project._publish('demo','service',raw,{},collection=False)
         return self.prepare(intent={'task':'briefing'})
     def briefing_reply(self,prompt,quote=None):
@@ -460,11 +460,13 @@ else:
                          for pr in p['input']['prs']],'unknown':[]}
 
     def test_briefing_small_set_one_call_and_bad_quote_retried_once(self):
-        value=self.briefing_prs(3);calls=[]
+        # An issue no PR links is not change evidence and is not sent.
+        value=self.briefing_prs(3,issues=[{'number':90+n,'title':f'Old unrelated issue {n}','body':'y'*4000,'url':f'https://github.com/o/r/issues/{90+n}'} for n in range(3)]);calls=[]
         def executor(prompt,**kwargs):
             calls.append(prompt);return self.briefing_reply(prompt,'invented quote text' if len(calls)==1 else None)
         done=analysis_run.run(value['id'],executor)
         self.assertEqual(done['state'],'completed',done.get('error'));self.assertEqual(len(calls),2)
+        self.assertFalse([s for c in calls for s in self.packet(c)['input']['sources'] if s.get('kind')=='issue'])
         self.assertEqual(len(briefing.stored('demo')['results'][briefing.key('','dev','en')]['cards']),3)
 
     def test_briefing_many_prs_split_into_at_most_four_calls_and_older_prs_left_out_plainly(self):
