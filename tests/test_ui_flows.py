@@ -4,6 +4,8 @@ from pathlib import Path
 
 ROOT=Path(__file__).resolve().parents[1]
 CHROME=Path('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome')
+def compiled_probe(name,directory):
+    probe=Path(directory)/'probe';subprocess.run(['swiftc','-O',str(ROOT/'tests'/name),'-o',str(probe)],check=True,capture_output=True);return probe
 # Two fictional projects. First has web+api code with an arbitrary compared ref; Second has one code and no compared version.
 BOOTSTRAP=r'''
 window.calls=[];window.errors=[];

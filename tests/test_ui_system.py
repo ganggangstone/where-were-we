@@ -1,6 +1,7 @@
 """Computed shared UI contracts, using fictional content and both app engines."""
 import json, subprocess, tempfile, unittest, re, sys, shutil
 from pathlib import Path
+from test_ui_flows import compiled_probe
 ROOT=Path(__file__).resolve().parents[1]
 CHECKS=r'''
 const errors=[];const check=(v,m)=>{if(!v)errors.push(m)};
@@ -43,8 +44,7 @@ class SharedSystem(unittest.TestCase):
  def test_webkit_shared_styles_and_long_content(self):
   if sys.platform!='darwin' or not shutil.which('swiftc'):self.skipTest('macOS WebKit required')
   with tempfile.TemporaryDirectory() as tmp:
-   path=Path(tmp)/'page.html';path.write_text(page());probe=Path(tmp)/'probe'
-   subprocess.run(['swiftc','-O',str(ROOT/'tests/webkit_style_probe.swift'),'-o',str(probe)],check=True,capture_output=True)
+   path=Path(tmp)/'page.html';path.write_text(page());probe=compiled_probe('webkit_style_probe.swift',tmp)
    for width in (1446,1280,640):
     p=subprocess.run([str(probe),str(path),str(width)],capture_output=True,text=True,timeout=30,check=True)
     self.assertEqual(json.loads(p.stdout.strip()),[],f'WKWebView {width}')
@@ -111,7 +111,7 @@ class AppSystem(unittest.TestCase):
   with tempfile.TemporaryDirectory() as tmp:
    tmp=Path(tmp);path=tmp/'actual.html';path.write_text(actual_page());probe=tmp/'probe'
    native=sys.platform=='darwin' and shutil.which('swiftc')
-   if native:subprocess.run(['swiftc','-O',str(ROOT/'tests/webkit_style_probe.swift'),'-o',str(probe)],check=True,capture_output=True)
+   if native:probe=compiled_probe('webkit_style_probe.swift',tmp)
    for mode in ('light','dark'):
     for width in (1446,1280,640):
      with self.subTest(engine='Chrome',mode=mode,width=width):

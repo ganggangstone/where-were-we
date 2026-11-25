@@ -1,6 +1,7 @@
 """Presentation checks use fictional state in Chrome; native calls are blocked."""
 import json,re,subprocess,tempfile,unittest
 from pathlib import Path
+from test_ui_flows import compiled_probe
 
 class Clarity(unittest.TestCase):
  def test_results_actions_and_warnings_remain_visible_in_flat_layout(self):
@@ -99,10 +100,10 @@ class NativeLayout(unittest.TestCase):
   if sys.platform!='darwin' or not shutil.which('swiftc'):self.skipTest('macOS WebKit and swiftc are required')
   root=Path(__file__).resolve().parents[1]
   with tempfile.TemporaryDirectory() as tmp:
-   tmp=Path(tmp);page=tmp/'page.html';probe=tmp/'probe'
+   tmp=Path(tmp);page=tmp/'page.html'
    links=''.join(f'<link rel="stylesheet" href="{(root/"ui"/n).as_uri()}">' for n in ('tokens.css','app.css'))
    page.write_text(f'<!doctype html><meta charset="utf-8">{links}<body><main><div id="map"></div><div id="insp"></div></main>')
-   subprocess.run(['swiftc','-O',str(root/'tests/webkit_layout_probe.swift'),'-o',str(probe)],check=True,capture_output=True)
+   probe=compiled_probe('webkit_layout_probe.swift',tmp)
    rows=[json.loads(line) for line in subprocess.run([str(probe),str(page)],check=True,capture_output=True,text=True,timeout=60).stdout.split()]
   empty,content,hint,empty2,content2=rows
   for row in (content,content2):

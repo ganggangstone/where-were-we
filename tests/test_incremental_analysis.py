@@ -13,6 +13,7 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import mapcore
 import project
 import ai_extract
+from test_ai_extract import repo_git
 
 FILES=53;PER=9;ROUTES=FILES*PER
 ROUTERS=[f'backend/app/routers/h{n:02d}.py' for n in range(FILES)]
@@ -50,7 +51,7 @@ class Incremental(unittest.TestCase):
         self.c0=self.commit('Synthetic service')
         self.conf=project.configure('demo',{'repositories':[{'id':'service','path':str(self.repo),'refs':{'dev':'HEAD','main':None}}]})['repositories'][0]
         project.publish('demo','service',{'dev':{**project.empty_map(),'repo':str(self.repo),'commit':self.c0,'ref':'HEAD'}},{'fingerprint':project.fingerprint(self.conf)})
-    def git(self,*args):return subprocess.run(['git','-C',str(self.repo),*args],check=True,capture_output=True,text=True).stdout
+    def git(self,*args):return repo_git(self.repo,*args)
     def write(self,files):
         for name,text in files.items():
             path=self.repo/name;path.parent.mkdir(parents=True,exist_ok=True);path.write_text(text)

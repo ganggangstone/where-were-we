@@ -10,6 +10,8 @@ import unittest
 from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import mapcore
+
+def repo_git(repo,*args):return subprocess.run(['git','-C',str(repo),*args],check=True,capture_output=True,text=True).stdout
 import project
 import ai_extract
 
@@ -54,8 +56,7 @@ class Analysis(unittest.TestCase):
             'unknown':['Authentication was not established.']}
         project.publish('demo','service',{'dev':{'repo':str(self.repo),'commit':self.commit,'ref':'HEAD','screens':[],
             'api_functions':[],'backend_routes':[],'models':{},'file_screens':{},'unresolved_calls':[],'backend_routes_without_screen':[]}},{'fingerprint':project.fingerprint(self.conf['repositories'][0])})
-    def git(self,*args):
-        return subprocess.run(['git','-C',str(self.repo),*args],check=True,capture_output=True,text=True).stdout
+    def git(self,*args):return repo_git(self.repo,*args)
     def normalize(self,data=None):
         return ai_extract.normalize(self.data if data is None else data,str(self.repo),self.commit,'HEAD')
     def test_vue_go_map_and_steps_have_verified_source_evidence(self):
