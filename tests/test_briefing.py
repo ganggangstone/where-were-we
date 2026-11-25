@@ -116,6 +116,10 @@ class Briefing(unittest.TestCase):
         self.record(self.request('web'))
         self.assertIsNone(briefing.view('demo','api','dev','en')['result'])
         self.assertIsNone(briefing.view('demo','web','dev','ko')['result'])
+        # The whole project still shows the last single-code briefing, marked as an earlier explanation.
+        whole=briefing.view('demo','','dev','en')
+        self.assertIsNone(whole['result']);self.assertEqual(whole['earlier']['repository'],'web')
+        self.assertNotIn('earlier',briefing.view('demo','api','dev','en'))
 
     def test_legacy_project_keeps_comparison_files_unchanged(self):
         repo=project.config('demo')['repositories'][0]

@@ -192,9 +192,14 @@ def record(project,repository,branch,lang,input_hash,previous,result_json,provid
     return 'Saved change briefing from '+('Claude Code' if provider=='claude-cli' else 'connected MCP agent')
 
 def view(name,repository='',branch='dev',lang='ko'):
-    ctx=context(name,repository,branch);result=stored(name)['results'].get(key(repository,branch,lang))
+    ctx=context(name,repository,branch);results=stored(name)['results'];result=results.get(key(repository,branch,lang))
     state=('stale' if result and result['input_hash']!=ctx['hash'] else 'saved' if result else 'needs_collection' if not ctx['ready'] else 'no_changes' if not ctx['input']['has_changes'] and not ctx['input']['warnings'] else 'not_analyzed')
-    return {'state':state,'result':result,'input':ctx['input'],'input_hash':ctx['hash'],'warnings':ctx['input']['warnings']}
+    value={'state':state,'result':result,'input':ctx['input'],'input_hash':ctx['hash'],'warnings':ctx['input']['warnings']}
+    if not result:
+        # The whole project shows the newest single-code briefing, and one code shows a whole-project one, as an earlier explanation.
+        other=[r for k,r in results.items() if json.loads(k)[1:]==[branch,lang] and (not repository or not json.loads(k)[0])]
+        if other:value['earlier']=max(other,key=lambda r:r.get('generated_at',''))
+    return value
 
 def project_views(name,repository=''):
     return {branch:{lang:view(name,repository,branch,lang) for lang in ('ko','en')} for branch in ('dev','main')}
