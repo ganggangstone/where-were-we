@@ -307,7 +307,7 @@ class Guide(unittest.TestCase):
     def test_partial_stale_wrong_language_and_missing_system_never_look_complete(self):
         self.check(ANALYZED+r"""
  const other=S.lang==='ko'?'en':'ko',cases=[
-  ['partial one code',()=>analyzeAll(S.lang,{},['web']),tr('일부 코드의 분석만 저장했다.')],
+  ['partial one code',()=>analyzeAll(S.lang,{},['web']),tr('일부 저장소의 분석만 저장했다.')],
   ['other language',()=>analyzeAll(other),tr('분석 결과를 다른 언어로 저장했다.')],
   ['stale',()=>analyzeAll(S.lang,{stale:true}),tr('이전 코드의 분석이다.')],
   ['old commit',()=>analyzeAll(S.lang,{commit:'ffffffff9999'}),tr('이전 코드의 분석이다.')],
@@ -656,9 +656,9 @@ class Flows(unittest.TestCase):
     def test_all_code_is_explained_and_one_code_keeps_its_configured_server_links(self):
         self.check(r'''
  const note=()=>$('repository-bar').querySelector('[data-code-scope]')?.textContent || '';
- assert(note()===tr('전체 코드'),'All code is explained beside the selector: '+note());
+ assert(note()===tr('모든 저장소'),'All code is explained beside the selector: '+note());
  $('repository').value='web';$('repository').dispatchEvent(new Event('change'));for(let i=0;i<50 && S.repository!=='web';i++)await wait();await wait();
- assert(note()===tr('이 코드만 · 서버 연결 유지'),'One code says what stays linked: '+note());
+ assert(note()===tr('이 저장소만 · 서버 연결 유지'),'One code says what stays linked: '+note());
  window.mutateBundle=b=>{b.project.repositories=b.project.repositories.slice(0,1);};await loadProject('Second',false,'');await wait();
  assert(!$('repository-bar').querySelector('[data-code-scope]'),'One connected code needs no scope note');
 ''')
@@ -716,29 +716,29 @@ class Flows(unittest.TestCase):
     def test_stale_button_names_are_not_shown(self):
         self.check(r'''
  window.mutateBundle=b=>{b.project.repositories=[];b.dev=null;b.main=null;};await loadProject('Second',false,'');await wait();
- await doRefresh();assert($('status').textContent===tr('연결한 코드가 없다. 「연결한 코드 바꾸기」에서 GitHub 주소나 코드 폴더를 추가할 수 있다.'),'No-code status names the real button: '+$('status').textContent);
+ await doRefresh();assert($('status').textContent===tr('연결한 저장소가 없다. 「저장소 추가·수정」에서 GitHub 주소나 저장소 폴더를 추가할 수 있다.'),'No-code status names the real button: '+$('status').textContent);
  window.mutateBundle=null;await loadProject('Second',false,'');await wait();
  assert(!$('branch').querySelector('[data-b=main]').title && $('manageRepositories'),'An unconfigured version has no redundant tooltip and can still be set');
  const table=[...Object.keys(UI_EN),...Object.values(UI_EN)].join('\n');
- assert(!/코드 연결에서|AI에게 알아보기에서|in Connect code|in Ask your AI/.test(table),'No stale button references remain in the dictionary');
+ assert(!/저장소 연결에서|AI에게 알아보기에서|in Connect code|in Ask your AI/.test(table),'No stale button references remain in the dictionary');
 ''')
 
     def test_entry_actions_say_their_purpose_and_the_service_name_defaults_to_the_first_code(self):
         self.check(r'''
  if($('guide').open)closeGuide('skipped');
  // Both ways are available without starting analysis.
- assert(main().includes(tr('내 코드 살펴보기')) && !main().includes(tr('살펴볼 코드 선택')),'Entry offers the two choices without a duplicate prompt: '+main());
+ assert(main().includes(tr('저장소 살펴보기')) && !main().includes(tr('살펴볼 저장소 선택')),'Entry offers the two choices without a duplicate prompt: '+main());
  assert(!window.calls.some(c=>c.command==='analysis_run_start'),'Opening the app does not run AI');
- assert($('startWithAI').textContent===tr('작업하던 AI에게 맡기기') && $('startProject').textContent===tr('코드 위치를 직접 입력'),'The two ways name what each one does');
+ assert($('startWithAI').textContent===tr('작업하던 AI에게 맡기기') && $('startProject').textContent===tr('저장소 위치를 직접 입력'),'The two ways name what each one does');
  assert($('newProject').title===tr('다른 서비스 추가'),'The header plus adds another service');
- $('startProject').click();const d=$('project-dialog');assert(d.open && d.querySelector('h2').textContent===tr('살펴볼 코드 추가'),'The editor is about code to explore');
+ $('startProject').click();const d=$('project-dialog');assert(d.open && d.querySelector('h2').textContent===tr('살펴볼 저장소 추가'),'The editor is about code to explore');
  assert($('projectName').closest('label')?.textContent.includes(tr('서비스 이름')),'The service name field has a label');
  assert($('saveProject').textContent===tr('저장'),'Saving is called saving');
  document.querySelector('[data-field="path"]').value='/fictional/lumen-web';
  $('saveProject').click();for(let i=0;i<80 && !S.project;i++)await wait();await wait();
  assert(S.project==='lumen-web' && window.savedProjects.includes('lumen-web'),'An empty service name falls back to the first code name: '+S.project);
- assert($('manageRepositories').textContent===tr('연결한 코드 바꾸기'),'The code bar button says add or edit code');
- $('manageRepositories').click();assert(d.querySelector('h2').textContent===tr('살펴보는 코드') && !d.textContent.includes(tr('기본값: 첫 코드 이름')),'Editing names the explored code without the default hint');d.close();
+ assert($('manageRepositories').textContent===tr('저장소 추가·수정'),'The code bar button says add or edit code');
+ $('manageRepositories').click();assert(d.querySelector('h2').textContent===tr('살펴보는 저장소') && !d.textContent.includes(tr('기본값: 첫 저장소 이름')),'Editing names the explored code without the default hint');d.close();
  assert($('analyzeMap').textContent.startsWith(tr('분석하기')),'The AI button says what the AI makes: '+$('analyzeMap').textContent);
  $('analyzeMap').click();assert(pane().includes(tr('분석하기')) && $('insp').querySelector('[data-analysis-task=analysis_plan]'),'The panel offers a message for the AI chat');
 ''',query='&empty=1')
@@ -753,11 +753,14 @@ class Flows(unittest.TestCase):
         import shutil
         source=(ROOT/'ui/index.html').read_text();run=(ROOT/'ui/analysis-run.js').read_text()
         code=source[source.index('const UI_EN = {'):source.index('function ui(parts')]
-        strings=['관련 코드','근거','아직 서비스 전체 그림이 없다.','예: 로그인 화면','코드를 읽지 못했다. 새로고침하면 다시 읽는다.','작업하던 AI가 앱에 연결됐다.','코드를 읽지 못했다. 새로고침하면 다시 읽는다.','아직 연결한 서비스가 없다. AI 채팅에서 연결을 마치면 여기에 지도가 나온다.','코드끼리 이어진 서버 기능 (베타)','이 서버 주소의 AI 설명 (베타)','분석하기','코드가 부름','같은 파일을 다른 버전으로 씀','읽기 규칙','읽은 언어 없음','JS/TS 상대 경로 import·재내보내기','이 코드에서 화면을 찾지 못했다.','이 코드에서 서버가 저장하는 데이터를 찾지 못했다.','이 코드에 묶을 화면이 없다.','일부 설명에 쓰인 코드가 바뀌었다. 「분석하기」로 설명을 다시 만들 수 있다.','요청을 보냄','연결 설정에서 지정','코드에서 찾은 연결','가져다 씀','맨 위 폴더','한 코드가 다른 코드의 서버를 쓰면 선으로 잇는다.','파일을 종류별로 나눈 그림이다.']
+        terms={'저장소':'Repository','브랜치':'Branch','서버 요청':'Server requests','서버 경로':'Server routes','외부 서비스':'External services','병합한 PR':'Merged PRs','열린 이슈':'Open issue','커밋':'Commit'}
+        strings=[*terms,'관련 코드','근거','아직 서비스 전체 그림이 없다.','예: 로그인 화면','코드를 읽지 못했다. 새로고침하면 다시 읽는다.','작업하던 AI가 앱에 연결됐다.','코드를 읽지 못했다. 새로고침하면 다시 읽는다.','아직 연결한 서비스가 없다. AI 채팅에서 연결을 마치면 여기에 지도가 나온다.','저장소 간 서버 요청 (베타)','이 서버 경로의 AI 설명 (베타)','분석하기','코드가 부름','같은 파일을 다른 버전으로 씀','읽기 규칙','읽은 언어 없음','JS/TS 상대 경로 import·재내보내기','이 저장소에서 화면을 찾지 못했다.','이 저장소에서 서버가 저장하는 데이터를 찾지 못했다.','이 저장소에 묶을 화면이 없다.','일부 설명에 쓰인 코드가 바뀌었다. 「분석하기」로 설명을 다시 만들 수 있다.','요청을 보냄','연결 설정에서 지정','코드에서 찾은 연결','가져다 씀','맨 위 폴더','한 저장소가 다른 저장소의 서버를 쓰면 선으로 잇는다.','파일을 종류별로 나눈 그림이다.']
         script=code+f";const S={{lang:'en'}};console.log(JSON.stringify({json.dumps(strings,ensure_ascii=False)}.map(tr)))"
         result=subprocess.run([shutil.which('node'),'-e',script],capture_output=True,text=True,timeout=60)
         self.assertEqual(result.returncode,0,result.stderr)
-        for ko,en in zip(strings,json.loads(result.stdout)):
+        rendered=dict(zip(strings,json.loads(result.stdout)))
+        self.assertEqual({ko:rendered[ko] for ko in terms},terms)
+        for ko,en in rendered.items():
             self.assertFalse(re.search('[가-힣]',en),(ko,en))
             self.assertNotEqual(ko,en)
         for ko,en in (('이름·설명 있음','Named and described'),('자세한 설명 있음','Detailed explanation'),('이름·설명','Named'),('자세한 설명','Detailed'),('내장 읽기 규칙이 없는 언어는 먼저 읽기 규칙을 받아 연결을 읽는다.','Languages without built-in readers first get reading rules, then their connections are read.')):
@@ -778,8 +781,8 @@ class Flows(unittest.TestCase):
 
     def test_code_buttons_name_the_code_and_keep_the_existing_selection(self):
         self.check(r'''
- const bar=$('branch');assert(bar.getAttribute('aria-label')===tr('지도에 표시할 버전'),'Code selector has a plain label');
- assert(bar.previousElementSibling.textContent===tr('표시 버전'),'Label is visible beside the buttons');
+ const bar=$('branch');assert(bar.getAttribute('aria-label')===tr('지도에 표시할 브랜치'),'Code selector has a plain label');
+ assert(bar.previousElementSibling.textContent===tr('표시 브랜치'),'Label is visible beside the buttons');
  assert(bar.querySelector('[data-b=dev]').textContent==='HEAD','First button names its actual ref');
  assert(bar.querySelector('[data-b=main]').textContent==='v1.0','Second button names its actual ref');
  S.projectInfo.repositories[1].refs.dev='origin/next';renderRepositories();
@@ -798,7 +801,7 @@ class Flows(unittest.TestCase):
  document.querySelector('#branch [data-b=main]').click();
  assert(S.branch==='main','Compared version is selected');
  assert(!window.errors.length,'Switching versions must not throw: '+window.errors.join(' | '));
- assert(main().includes(tr('이 버전에 선택한 화면이 없다.')),'Explain that the selection is absent in this version');
+ assert(main().includes(tr('이 브랜치에 선택한 화면이 없다.')),'Explain that the selection is absent in this version');
  document.querySelector('#branch [data-b=dev]').click();assert(S.branch==='dev' && !window.errors.length,'Switch back');
 ''')
 
@@ -870,7 +873,7 @@ class Flows(unittest.TestCase):
  window.unitBoard={repositories:[{repository:'',units:[['route:/items','route','/items',3,'saved','new'],['folder:lib','folder','lib',9,'pending','']],coverage:{tracked:12,in_units:9,indexed:9,excluded:{secret:1},truncated:false}}],totals:{units:2,saved:1,pending:1},calls:{rules:0,labeling:1,structure:0,unit:0,total:1}};
  S.view='sys';render();openAnalysisPanel();await AnalysisRun.check();await wait();
  const L=(en,ko)=>S.lang==='en'?en:ko,panel=$('insp').innerHTML;
- assert(panel.includes('unit-board') && !panel.includes(L('Full code analysis','전체 코드 분석')) && (panel.match(/<h[23]/g) || []).length===1,'The panel shows the board under one heading: '+panel.slice(0,200));
+ assert(panel.includes('unit-board') && !panel.includes(L('Full code analysis','모든 저장소 분석')) && (panel.match(/<h[23]/g) || []).length===1,'The panel shows the board under one heading: '+panel.slice(0,200));
  assert($('startFullAnalysis') && panel.includes(L('No explanation','설명 없음')),'Queued units are labeled and the start needs a click');
  assert(!calls.some(c=>c.command==='analysis_run_start'),'Showing the board starts nothing');
  $('startFullAnalysis').click();await wait();
@@ -943,7 +946,7 @@ class Flows(unittest.TestCase):
  assert(S.analysisRequest.state==='partial' && pane().includes(tr('남은 분석: ')) && pane().includes(tr('동작 과정')),'Targets that appeared after the map was saved are still needed');
  window.planResult={tasks:[],blocked,requirements:[],handoff:'',up_to_date:false};
  await $('checkAnalysisResults').onclick();
- assert(S.analysisRequest.state==='partial' && S.analysisRequest.codes.waiting.includes('api') && pane().includes(tr('결과를 기다리는 코드: ')),'A blocked code keeps the request partial');
+ assert(S.analysisRequest.state==='partial' && S.analysisRequest.codes.waiting.includes('api') && pane().includes(tr('결과를 기다리는 저장소: ')),'A blocked code keeps the request partial');
  window.planResult={tasks:[],blocked:[],requirements:[],handoff:'',up_to_date:true};
  await $('checkAnalysisResults').onclick();
  assert(S.analysisRequest.state==='saved','Only nothing left completes it');
@@ -1021,7 +1024,7 @@ class Flows(unittest.TestCase):
  const hangul=/[가-힣]/,visible=()=>[document.querySelector('header'),$('status'),$('repository-bar'),$('map'),$('insp'),...document.querySelectorAll('dialog[open]')].map(e=>{const c=e.cloneNode(true);c.querySelectorAll('[lang]').forEach(x=>x.remove());document.body.append(c);const t=c.innerText;c.remove();return t;}).join('\n');
  const checkText=(where)=>{const text=visible();
   if(S.lang==='en'){const line=text.split('\n').find(l=>hangul.test(l));assert(!line,'Korean in English UI at '+where+': '+line);}
-  else{assert(!/레포|저장소/.test(text),'Use 코드 for repositories and 데이터 for tables at '+where+': '+(text.match(/.{0,30}(레포|저장소).{0,30}/)||[''])[0]);}
+  else{assert(!/레포|바깥 서비스|서버 주소|코드 기록/.test(text),'Use the agreed UI terms at '+where);}
  };
  $('menu').open=true;checkText('menu');$('menu').open=false;
  for(const view of ['sys','feat','map','focus','changes']){S.view=view;S.focus=null;S.sel=null;render();checkText(view);}
@@ -1090,7 +1093,7 @@ class Flows(unittest.TestCase):
     def test_first_run_offers_the_next_step(self):
         self.check(r'''
  assert(!S.project,'No project exists');
- const start=$('startProject');assert(start && $('startWithAI') && main().includes(tr('코드 위치를 직접 입력')),'Empty app offers AI handoff and a manual alternative');
+ const start=$('startProject');assert(start && $('startWithAI') && main().includes(tr('저장소 위치를 직접 입력')),'Empty app offers AI handoff and a manual alternative');
  start.click();assert($('project-dialog').open,'Start opens project creation');
 ''',query='&empty=1')
 
@@ -1195,7 +1198,7 @@ class Flows(unittest.TestCase):
  S.system={...S.system,nodes:[...S.system.nodes,pn]};S.node='api::p9';
  let ph=sysInspector(pm);
  assert(ph.includes(tr('관련 코드')) && !ph.includes('<h4>'+tr('근거')+'</h4>') && ph.includes('def run():') && ph.includes('run.py:3'),'Cited program code is titled related code with its quoted line');
- assert(ph.includes(tr('코드가 오는 곳')) && ph.includes('jobs/'),'The code folders of the program are listed');
+ assert(ph.includes(tr('코드가 들어 있는 저장소')) && ph.includes('jobs/'),'The code folders of the program are listed');
  pn.ev=[{file:'api/jobs/run.py',line:3,quote:'import x',ok:true,origin:'local_link'}];ph=sysInspector(pm);
  assert(ph.includes('<h4>'+tr('근거')+'</h4>'),'A local import line is titled evidence');
  const po={...pm,repositories:[pm.repositories?.[0] || {id:'api'}]};
@@ -1214,9 +1217,9 @@ class Flows(unittest.TestCase):
  S.branchDetails.dev.system={...S.system,nodes:[...S.system.nodes,{id:'web::repository',name:'[Web screens] Web screens',kind:'repository',origin:'repo',what:'Repository · 3 screens',uses:[],ev:[],unknown:[]},{id:'web::copy',name:'Copy',kind:'program',what:'Repository · 9 screens',uses:[],ev:[],unknown:[]}],links};
  S.view='sys';render();
  const text=main();
- if(S.lang==='ko'){assert(!text.includes('Repository · 3 screens') && text.includes('코드 · 화면 3개'),'The generated code box is described in Korean');
+ if(S.lang==='ko'){assert(!text.includes('Repository · 3 screens') && text.includes('저장소 · 화면 3개'),'The generated code box is described in Korean');
   assert(text.includes('Configured API destination') && text.includes('요청을 보냄') && text.includes('연결 설정에서 지정'),'Only the generated connection label is translated and says it comes from the connection settings');}
- else assert(text.includes('Code · screens: 3'),'The generated code box is described in English');
+ else assert(text.includes('Repository · screens: 3'),'The generated code box is described in English');
  assert(text.includes('Repository · 9 screens'),'User or AI written text is not rewritten');
  $('q').value=tr('요청을 보냄');$('q').dispatchEvent(new Event('input'));
  assert(document.querySelector('[data-search-result]'),'Search finds the translated connection label');
@@ -1292,12 +1295,12 @@ class Flows(unittest.TestCase):
  assert(named.querySelector('summary').textContent==='Save <entry>' && named.innerText.includes('App.jsx:25') && !named.querySelector('entry') && !named.innerText.includes('toggle'),'A proven label is escaped and links to its own source, with only the selected action visible');
  $('httpConnection').value='0';$('httpConnection').dispatchEvent(new Event('change'));
  assert(http().innerText.includes('GET /users') && http().innerText.includes('app.js:3') && http().innerText.includes('server.py:8') && http().innerText.includes('server.py:2'),'Matched HTTP flow exposes client, mount and handler evidence');
- assert(http().innerText.includes(tr('주소 선언')) && http().innerText.includes('app.js:1') && http().innerText.includes(tr('고정 fetch 주소 · 서버 주소 대조')) && !http().innerText.includes(tr('설정·클라이언트 기본값에서 일치')),'Literal match shows its basis');
+ assert(http().innerText.includes(tr('주소 선언')) && http().innerText.includes('app.js:1') && http().innerText.includes(tr('고정 fetch 주소 · 서버 경로 대조')) && !http().innerText.includes(tr('설정·클라이언트 기본값에서 일치')),'Literal match shows its basis');
  assert(!http().querySelector('[data-flow-storage]'),'Older snapshots never imply data access');
  assert(!http().querySelector('[data-flow-actions]'),'Older links without UI evidence show no action');
  assert(http().compareDocumentPosition(graph().querySelector('.module-neighbors:not(.http-flow)')) & Node.DOCUMENT_POSITION_FOLLOWING,'HTTP flow precedes module connections');
  $('httpConnection').value='1';$('httpConnection').dispatchEvent(new Event('change'));
- assert(http().innerText.includes(tr('설정·클라이언트 기본값에서 일치')) && http().innerText.includes('settings.py:18') && !http().innerText.includes(tr('고정 fetch 주소 · 서버 주소 대조')),'Default-based link shows its condition and evidence');
+ assert(http().innerText.includes(tr('설정·클라이언트 기본값에서 일치')) && http().innerText.includes('settings.py:18') && !http().innerText.includes(tr('고정 fetch 주소 · 서버 경로 대조')),'Default-based link shows its condition and evidence');
  assert(http().innerText.includes('server.py:10') && !http().innerText.includes('server.py:8') && http().innerText.includes(tr('대상 미확인 요청')+' 1'),'Changing the selected flow refreshes all evidence without hiding unresolved requests');
  $('flowFeature').value='2.0';$('flowFeature').dispatchEvent(new Event('change'));assert($('httpConnection').value==='2','Feature and endpoint selections agree');
  assert(http().innerText.includes(tr('매개변수가 한 경로 구간일 때 일치')) && http().innerText.includes('PATCH /jobs/{id}') && http().innerText.includes('/jobs/:id'),'Template match exposes its condition and both path forms');
@@ -1365,7 +1368,7 @@ class Flows(unittest.TestCase):
   externals:[{id:'web::x1',name:'Example AI',what:'Writes text'}],others:[],unknown:[]};
  const m=M();delete m._local;S.projectInfo={...(S.projectInfo||{}),repositories:[{id:'web',name:'web'},{id:'api',name:'api'}]};render();
  const lanes=[...document.querySelectorAll('#sys .lane')];
- assert(lanes.length===3 && lanes.map(l=>l.querySelector('.zone').textContent).join('|')==='web|api|'+tr('바깥 서비스')+' 1','One titled lane per code and one for outside services');
+ assert(lanes.length===3 && lanes.map(l=>l.querySelector('.zone').textContent).join('|')==='web|api|'+tr('외부 서비스')+' 1','One titled lane per code and one for outside services');
  assert([...document.querySelectorAll('#sys .lane .nm')].every(n=>!n.textContent.startsWith('[')),'Cards inside a lane drop the code prefix');
  assert(!document.querySelector('#sys .pill'),'No unexplained chip on the cards');
  assert($('map').querySelector('p.lead[data-ai-system]') && !/해요/.test(main()),'A plain sentence above the picture');
@@ -1384,8 +1387,8 @@ class Flows(unittest.TestCase):
  m.cross_repository_connections=[{method:'GET',path:'/items',client:{repository:'web',commit:'aaaaaaaa1111',file:'ui/app.py',line:4},server:{repository:'api',commit:'aaaaaaaa1111',file:'srv/main.py',line:9}}];
  render();
  const sys=$('sys');assert(sys && sys.querySelectorAll('.card').length===2,'One card per connected code');
- const lead=$('map').querySelector('p.lead[data-local-system]');assert(lead && lead.textContent===tr('한 코드가 다른 코드의 서버를 쓰면 선으로 잇는다.') && !/해요/.test(lead.textContent),'A plain sentence above the picture identifies the picture');
- assert(sys.innerText.includes(S.lang==='en'?'Server functions 3':'서버 기능 3개') && sys.innerText.includes(S.lang==='en'?'Files 7':'파일 7개'),'Cards carry plain counts');
+ const lead=$('map').querySelector('p.lead[data-local-system]');assert(lead && lead.textContent===tr('한 저장소가 다른 저장소의 서버를 쓰면 선으로 잇는다.') && !/해요/.test(lead.textContent),'A plain sentence above the picture identifies the picture');
+ assert(sys.innerText.includes(S.lang==='en'?'Server routes 3':'서버 경로 3개') && sys.innerText.includes(S.lang==='en'?'Files 7':'파일 7개'),'Cards carry plain counts');
  assert(main().includes('GET /items') && main().includes('app.py:4'),'The line is listed with its source line');
  const lists=$('detailLists');assert(lists && !lists.open,'Developer lists are folded under one section');
  assert(lists.querySelector('[data-inventory]') && !$('map').querySelector(':scope > details[data-inventory]'),'File lists sit inside the folded section');
@@ -1436,13 +1439,13 @@ class Flows(unittest.TestCase):
  const line=(text,label)=>(text.split('\n').find(l=>l.startsWith(tr(label))) || '').slice(tr(label).length);
  results={web:{analysis:saved}};let text=await shown();
  assert(S.analysisRequest.state==='partial','The map of one code is saved');
- assert(!line(text,'결과가 저장된 코드: ') && line(text,'일부 결과만 저장된 코드: ')==='Web screens' && line(text,'결과를 기다리는 코드: ')==='API server','A code is never both saved and waiting: '+text);
+ assert(!line(text,'결과가 저장된 저장소: ') && line(text,'일부 결과만 저장된 저장소: ')==='Web screens' && line(text,'결과를 기다리는 저장소: ')==='API server','A code is never both saved and waiting: '+text);
  results={web:{analysis:saved,system:saved}};text=await shown();
- assert(line(text,'결과가 저장된 코드: ')==='Web screens' && !line(text,'일부 결과만 저장된 코드: ') && line(text,'결과를 기다리는 코드: ')==='API server','One code is complete: '+text);
+ assert(line(text,'결과가 저장된 저장소: ')==='Web screens' && !line(text,'일부 결과만 저장된 저장소: ') && line(text,'결과를 기다리는 저장소: ')==='API server','One code is complete: '+text);
  results={web:{analysis:saved,system:{...saved,proposal:true}},api:{analysis:{commit:'aaaaaaaa1111'}}};text=await shown();
- assert(S.analysisRequest.state==='proposal_partial' && line(text,'결과가 저장된 코드: ')==='Web screens' && line(text,'결과를 기다리는 코드: ')==='API server','A proposal and an earlier result keep their states: '+text);
+ assert(S.analysisRequest.state==='proposal_partial' && line(text,'결과가 저장된 저장소: ')==='Web screens' && line(text,'결과를 기다리는 저장소: ')==='API server','A proposal and an earlier result keep their states: '+text);
  results={web:{analysis:saved,system:saved},api:{analysis:saved,system:{...saved,proposal:true}}};text=await shown();
- assert(S.analysisRequest.state==='proposal' && !line(text,'결과를 기다리는 코드: ') && $('viewAnalysisResults'),'Everything saved shows the result: '+text);
+ assert(S.analysisRequest.state==='proposal' && !line(text,'결과를 기다리는 저장소: ') && $('viewAnalysisResults'),'Everything saved shows the result: '+text);
  results={web:{analysis:{commit:'aaaaaaaa1111'},system:{commit:'aaaaaaaa1111'}},api:{analysis:{commit:'aaaaaaaa1111'},system:{commit:'aaaaaaaa1111'}}};await shown();
  assert(S.analysisRequest.state==='previous','Only earlier results are not reported as new');
 ''')
@@ -1712,14 +1715,14 @@ class UxWriting(unittest.TestCase):
         self.check(r'''
  const repos=S.projectInfo.repositories;repos[0].url='https://github.com/example/web';repos[1].path='/fictional/api';repos[1].collected=false;repos[1].commits={};
  $('guideOpen').click();guideStep(2);
- assert($('guideCreate').textContent===tr('연결한 코드 수정'),'An existing service is edited, not recreated');
+ assert($('guideCreate').textContent===tr('연결한 저장소 수정'),'An existing service is edited, not recreated');
  const text=$('guide').innerText;
  assert(text.includes('https://github.com/example/web') && text.includes('/fictional/api'),'Each code shows where it comes from');
  assert(text.includes(tr('지도 준비됨')) && text.includes(tr('아직 지도 없음')),'Each code shows its own map state: '+text);
  $('guideCreate').click();
  assert($('project-dialog').open && $('projectName').disabled && $('projectName').value==='First','The editor opens the shown service');
  $('project-dialog').close();await wait();guideStep(1);
- assert($('guideCreate').textContent===tr('연결한 코드 수정'),'Same on the AI step');
+ assert($('guideCreate').textContent===tr('연결한 저장소 수정'),'Same on the AI step');
  repos[0].config_changed=true;guideStep(2);
  assert($('guide').innerText.includes(tr('설정을 바꿨다. 새로고침하면 지도에 반영된다.')) && !guideHasMap(),'Changed settings are not reported as a ready map');
  repos[0].config_changed=false;repos[1].collected=true;repos[1].commits={dev:'cccccccc3333'};assert(guideHasMap(),'Refreshed code is ready again');
@@ -1741,12 +1744,12 @@ class UxWriting(unittest.TestCase):
 
     def test_search_explains_why_it_is_unavailable_without_a_map(self):
         self.check(r'''
- assert($('q').disabled && $('q').title===tr('코드를 연결해 지도를 만들면 검색할 수 있다.'),'No service: search is disabled with a reason');
+ assert($('q').disabled && $('q').title===tr('저장소를 연결해 지도를 만들면 검색할 수 있다.'),'No service: search is disabled with a reason');
 ''',query='&empty=1')
         self.check(r'''
  assert(!$('q').disabled && $('q').placeholder===tr('예: 로그인 화면'),'With a map search is available');
  window.noMap=true;await loadProject('First');
- assert($('q').disabled && $('q').title===tr('코드를 연결해 지도를 만들면 검색할 수 있다.'),'No map: search is disabled with a reason');
+ assert($('q').disabled && $('q').title===tr('저장소를 연결해 지도를 만들면 검색할 수 있다.'),'No map: search is disabled with a reason');
 ''')
 
     def test_errors_are_explained_and_keep_the_original_text_in_details(self):
@@ -1759,7 +1762,7 @@ class UxWriting(unittest.TestCase):
  assert(githubErrorText('GITHUB_ACCESS|github.com|me|unknown_code|web').indexOf(tr('GitHub 로그인과 인터넷 연결 확인 필요.'))<0,'Unknown failures do not blame login');
  editProject(false);window.failSave=true;$('saveProject').click();await wait(60);
  const box=$('project-dialog');
- assert(box.querySelector('#projectError').innerText.startsWith(tr('연결을 저장하지 못했다. 코드 주소와 인터넷 연결 확인 필요.')) && [...box.querySelectorAll('details')].some(d=>d.textContent.includes('fictional save failure')),'Save failure keeps its original text in details');
+ assert(box.querySelector('#projectError').innerText.startsWith(tr('연결을 저장하지 못했다. 저장소 주소와 인터넷 연결 확인 필요.')) && [...box.querySelectorAll('details')].some(d=>d.textContent.includes('fictional save failure')),'Save failure keeps its original text in details');
  assert(box.querySelector('#projectError details'),'Error details stay inside the alert');
  box.close();window.failSave=false;
  window.githubFail='GITHUB_ACCESS|github.com|me|login|web';window.loginsFail='fictional login listing failure';
@@ -1939,13 +1942,13 @@ class FeatureContext(unittest.TestCase):
  assert(count('#42 ')===2,'The same number in two repositories stays distinct');
  assert(count('wt-items')===1 && text.includes('feature/items') && count('#5 ')===1 && count('#9 ')===1,'Branch, folder, merged PR and issue are shown once');
  assert(!text.includes('Order fix'),'Work of screens outside the feature is excluded');
- assert(text.includes(tr('이 기능과 이어진 작업 ')+'6'),'Heading counts open PRs, branches, folders and issues once');
+ assert(text.includes(tr('이 기능과 이어진 PR·이슈 ')+'6'),'Heading counts open PRs, branches, folders and issues once');
  $('insp').querySelector('[data-goscr="web::/items"]').click();await wait();
  $('insp').querySelectorAll('details').forEach(d=>d.open=true);const screen=$('insp').innerText;assert(screen.split('#42 ').length-1===1 && screen.split('#7 ').length-1===1,'A member screen keeps its own work list');
  window.mutateBundle=b=>{featureBundle(b);b.status=null;};await loadProject('First',false,'');S.view='feat';render();
- assert(S.feat===itemsId() && $('insp').innerText.includes(tr('GitHub 작업을 아직 가져오지 않음')) && !$('insp').innerText.includes(tr('관련 작업 없음')),'Uncollected work is not reported as none');
+ assert(S.feat===itemsId() && $('insp').innerText.includes(tr('GitHub PR과 이슈를 아직 가져오지 않음')) && !$('insp').innerText.includes(tr('관련 PR·이슈 없음')),'Uncollected work is not reported as none');
  window.mutateBundle=b=>{featureBundle(b);b.status.open_prs=b.status.open_prs.filter(p=>p.number===100);for(const k of ['merged_prs','branches','worktrees','issues'])b.status[k]=[];};await loadProject('First',false,'');render();
- assert($('insp').innerText.includes(tr('관련 작업 없음')),'Collected but unlinked work says so');
+ assert($('insp').innerText.includes(tr('관련 PR·이슈 없음')),'Collected but unlinked work says so');
 ''')
 
     def test_copy_holds_only_the_feature_context_and_screen_copy_is_unchanged(self):

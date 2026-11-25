@@ -1,7 +1,7 @@
 /* First-run guide: a full-window modal dialog over the workspace. It only calls the existing project editor,
    setup prompt, connection diagnostics, refresh and analysis panel, and never changes the workspace by itself. */
 const GUIDE_KEY='where-were-we.onboarding';
-const GUIDE_STEPS=['시작','AI에게 맡기기','연결한 코드','첫 분석'];
+const GUIDE_STEPS=['시작','AI에게 맡기기','연결한 저장소','첫 분석'];
 const G={step:0,run:0,setup:null,copied:false,connection:null,token:0,opener:null,readError:false,reading:false,plan:null,await:null,session:0};
 const GUIDE_POLL_MS=6000;
 let guideMemory=null;
@@ -40,7 +40,7 @@ function guideAnalysisState(){
 }
 const GUIDE_ANALYSIS_TEXT={
   done:'첫 AI 분석을 저장했다.',missing:'기본 지도를 만들었다. 첫 AI 분석은 아직 없다.',
-  partial:'일부 코드의 분석만 저장했다.',unchecked:'「결과 확인」에서 남은 분석을 볼 수 있다.',remaining:'첫 결과를 저장했다. 아직 남은 분석이 있다.',error:'분석이 끝났는지 확인하지 못했다.',language:'분석 결과를 다른 언어로 저장했다.',stale:'이전 코드의 분석이다.'};
+  partial:'일부 저장소의 분석만 저장했다.',unchecked:'「결과 확인」에서 남은 분석을 볼 수 있다.',remaining:'첫 결과를 저장했다. 아직 남은 분석이 있다.',error:'분석이 끝났는지 확인하지 못했다.',language:'분석 결과를 다른 언어로 저장했다.',stale:'이전 코드의 분석이다.'};
 const GUIDE_CODE_ANALYSIS={saved:'분석 저장됨',partial:'분석 일부만 저장됨',language:'다른 언어로 저장됨',stale:'최신이 아님',missing:'아직 분석 없음'};
 function openGuide(opener=document.activeElement){
   if($('guide').open)return;
@@ -57,10 +57,10 @@ function guideReturnFocus(){const back=G.opener?.isConnected&&!G.opener.closest(
 function guideStep(step){G.run++;G.step=Math.max(0,Math.min(GUIDE_STEPS.length-1,step));renderGuide();$('guideTitle').focus();}
 function guideBody(){
   const m=guideHasMap();
-  if(G.step===0)return `<h2 id="guideTitle" tabindex="-1">${tr('내 코드 지도')}</h2>
+  if(G.step===0)return `<h2 id="guideTitle" tabindex="-1">${tr('저장소 지도')}</h2>
     <div class="guide-visual">${['화면','서버','데이터'].map((name,i)=>`${i?'<span class="arrow">→</span>':''}<div class="card" title="${esc(['/items','POST /items','items'][i])}"><div class="nm">${tr(name)}</div><div class="meta"><span class="dot ${['','strong','ok'][i]}"></span>${tr(['목록 화면','항목 저장','저장된 항목'][i])}</div></div>`).join('')}</div>
     <div class="ctl"><button class="btn primary" id="guideNext">${tr('시작하기')}</button></div>`;
-  if(G.step===2)return `<h2 id="guideTitle" tabindex="-1">${tr('연결한 코드')}</h2>
+  if(G.step===2)return `<h2 id="guideTitle" tabindex="-1">${tr('연결한 저장소')}</h2>
     <p role="status" id="guideProjectState">${S.project?`<span class="dot ok"></span>${tr('연결한 서비스: ')}${esc(S.project)}`:tr('아직 연결한 서비스가 없다. AI 채팅에서 연결을 마치면 여기에 지도가 나온다.')}</p>
     ${S.project?`<ul>${guideCodes().map(guideCodeLine).join('')}</ul>`:''}
     <div class="ctl">${S.project?`<button class="btn primary" id="guideNext">${tr('다음')}</button>`:`<button class="btn primary" id="guideToAgent">${tr('AI에게 맡기기')}</button>`}${guideManual()}</div>`;
@@ -88,7 +88,7 @@ function guideAnalysisBody(m){
     <div class="ctl">${buttons}</div>`;
 }
 // A service that is already shown is edited in place; only an empty workspace starts a new one.
-function guideManual(){return `<button class="btn quiet" id="guideCreate">${tr(S.project?'연결한 코드 수정':'직접 연결하기')}</button>`;}
+function guideManual(){return `<button class="btn quiet" id="guideCreate">${tr(S.project?'연결한 저장소 수정':'직접 연결하기')}</button>`;}
 // Each connected code names where it comes from and whether its own map is ready, so a wrong folder is visible here.
 // A legacy single-folder service has no repository list; its shown map stands for its one code.
 function guideCodes(){const repos=S.projectInfo?.repositories || [],m=S.maps.dev||S.maps.main;return repos.length?repos:m?.repo?[{name:S.project,path:m.repo,collected:!!m.commit,commits:{[S.branch]:M()?.commit}}]:[];}

@@ -141,13 +141,13 @@ window.__TAURI__={core:{invoke:async(command,args)=>{
  assert(refreshes.length===1 && refreshes[0].args.repository===saved.at(-1).repositories[1].id,'First collection affects only new code');
  assert(loads.length===1 && loads[0][1]===false,'Opening the result must not trigger open-refresh');
  assert(JSON.stringify(S.projectInfo)===original,'Editing does not mutate current project state');
- assert(tr('GitHub 주소 또는 코드 폴더')==='GitHub URL or code folder','Real English translation');
+ assert(tr('GitHub 주소 또는 저장소 폴더')==='GitHub URL or repository folder','Real English translation');
  assert(document.body.textContent.includes('Reconnecting the same GitHub URL reuses'),'Retention explanation in English');
  // A collector process error after saving is visible and can be retried from Refresh.
  S.projectInfo={repositories:[],shared_data:[]};editProject(false);
  const fresh=document.querySelector('[data-field="path"]');fresh.value='example/again';fresh.dispatchEvent(new Event('change'));refreshFail=true;
- await $('saveProject').onclick();assert($('status').textContent.includes('Refresh to retry the missing code.'),'Collection failure is not hidden: '+$('status').textContent);
- S.lang='ko';editProject(true);assert(document.body.textContent.includes('GitHub 주소 또는 코드 폴더'),'Korean labels');
+ await $('saveProject').onclick();assert($('status').textContent.includes('Refresh to retry the missing repositories.'),'Collection failure is not hidden: '+$('status').textContent);
+ S.lang='ko';editProject(true);assert(document.body.textContent.includes('GitHub 주소 또는 저장소 폴더'),'Korean labels');
  document.body.dataset.urlTest='passed';
 })().catch(error=>{document.body.dataset.urlTest='failed';const pre=document.createElement('pre');pre.textContent=error.stack;document.body.append(pre);});
 '''

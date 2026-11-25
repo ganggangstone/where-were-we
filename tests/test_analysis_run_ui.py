@@ -102,7 +102,7 @@ const serve=(extra)=>{native=(command,args)=>command==='analysis_run_status'&&ar
 serve();status=null;await open();await AnalysisRun.check();await flush();
 const html=$('insp').innerHTML;
 assert(!html.includes('Full code analysis') && html.includes('Detailed 1') && html.includes('Named 2'),'No second heading; named counts include the detailed unit');
-assert(html.includes('Server URLs<b>1/2</b><small>Detailed 1</small>') && html.includes('Folders<b>1/3</b></span>'),'A lane counts named units out of units sent to AI and adds detailed ones apart');
+assert(html.includes('Server routes<b>1/2</b><small>Detailed 1</small>') && html.includes('Folders<b>1/3</b></span>'),'A lane counts named units out of units sent to AI and adds detailed ones apart');
 assert(!html.includes('checkFullAccount'),'No account button beside the start when the account works');
 assert(html.includes('Analyze · 3 calls') && html.includes('Map summary sent to Claude') && html.includes('AI interpretations of a map summary only'),'Call count, what is sent and what the AI reads before the click');
 assert(html.includes('Excluded 3') && html.includes('Index limit reached') && html.includes('Files 15/20') && html.includes('Credential files'),'Scope gaps, index limit and exclusion reasons');
@@ -392,7 +392,7 @@ assert(started.scope.repository==='backend' && started.scope.intent.task==='over
         self.check_js(r'''
 S.maps={dev:{structure_indexes:[{repository:'web',service_flow:{feature_groups:[{resource:'/one'},{resource:'/two'}]}}]}};
 S.analysisChoice={task:'resource_batch',detailTarget:'',maxCalls:2};await open();await flush();
-assert(count('analysis_run_start')===0 && $('insp').innerHTML.includes('Server URL groups: 2 · Up to 2 AI calls'),'The batch shows its cost boundary before starting');
+assert(count('analysis_run_start')===0 && $('insp').innerHTML.includes('Server route groups: 2 · Up to 2 AI calls'),'The batch shows its cost boundary before starting');
 S.maps.dev.structure_indexes[0].service_flow.feature_groups.push({resource:'/three'});
 await $('startAppAnalysis').onclick();
 const args=calls.find(c=>c.command==='analysis_run_start').args;
@@ -400,7 +400,7 @@ assert(args.scope.intent.task==='resources' && args.scope.intent.max_calls===2,'
 const one={task:'overview',repository:'web',target:'/one'},two={...one,target:'/two'};
 status=runRecord('running',{intent:args.scope.intent,current_task:two,tasks:[one,two],completed_tasks:[one]});
 await AnalysisRun.check();
-assert($('insp').innerHTML.includes('Server URL groups saved: 1 · Remaining: 1') && $('insp').innerHTML.includes('/two') && $('cancelAppAnalysis'),'Current path and remaining count with cancel');
+assert($('insp').innerHTML.includes('Server route groups saved: 1 · Remaining: 1') && $('insp').innerHTML.includes('/two') && $('cancelAppAnalysis'),'Current path and remaining count with cancel');
 status.state='cancelled';await AnalysisRun.check();assert($('retryAppAnalysis'),'Cancelled batch can resume');
 ''')
 
@@ -411,7 +411,7 @@ await $('startAppAnalysis').onclick();const intent=calls.find(c=>c.command==='an
 native=(command,args)=>{
  if(command==='analysis_run_status' && args.view==='progress')return runRecord('running',{intent,completed_tasks:2,tasks:1});
 };
-await AnalysisRun.check();assert($('insp').innerHTML.includes('Server URL groups saved: 2 · Remaining: 1'),'Compact counts without a separate result button');
+await AnalysisRun.check();assert($('insp').innerHTML.includes('Server route groups saved: 2 · Remaining: 1'),'Compact counts without a separate result button');
 assert(calls.at(-1).args.view==='progress' && calls.at(-1).args.runId==='run-1','Routine poll only asks for compact progress');
 native=(command,args)=>command==='analysis_run_status'?runRecord('completed',{intent,completed_tasks:3,tasks:0}):undefined;
 await AnalysisRun.check();assert(calls.filter(c=>c.command==='analysis_run_status' && !String(c.args.view).startsWith('units') && c.args.view!=='signals').at(-1).args.view==='catalog','Terminal transition reads the saved catalog');

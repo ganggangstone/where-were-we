@@ -370,7 +370,7 @@ window.__TAURI__={core:{invoke:async(command,args)=>{
   S.projectInfo.repositories[0].error=null;renderRepositories();
   assert(!document.querySelector('[data-github-repair]'),'Normal collection should not add an account selector');
   S.lang='ko';await editGitHubAccount('');
-  assert($('project-dialog').querySelector('h2').textContent==='이 코드에 사용할 계정','Legacy repair names the scope in the account picker heading');
+  assert($('project-dialog').querySelector('h2').textContent==='이 저장소에 사용할 계정','Legacy repair names the scope in the account picker heading');
   $('project-dialog').close();
   S.lang='en';S.project='demo';S.repository='web';S.branch='dev';S.loadToken=5;
   S.desiredProject='demo';S.desiredRepository='web';S.maps={dev:{repo:'/demo/web',screens:[]}};

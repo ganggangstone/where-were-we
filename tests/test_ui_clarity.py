@@ -34,10 +34,10 @@ try{
   S.lang=lang;S.briefings={dev:{[lang]:{state:'not_analyzed',warnings,result:null}}};
   const pane=$('insp');pane.innerHTML=(b=>b.head+b.cards+`<details><summary>${tr('자세한 목록')}</summary>${b.detail}</details>`)(briefingPanel());let text=visibleText(pane);
   assert(!text.includes('legacy'),'Internal legacy label must not be displayed');
-  const limit=tr('일부 파일이나 작업 기록이 빠졌을 수 있다.');assert(text.split(limit).length-1===2,'One limit warning per code connection, not per collection part');
+  const limit=tr('일부 파일이나 PR이나 이슈가 빠졌을 수 있다.');assert(text.split(limit).length-1===2,'One limit warning per code connection, not per collection part');
   assert(text.includes('Lumen')&&text.includes('Worker'),'Connection display names must remain distinct');
   assert(text.includes(tr('코드를 읽지 못했다. 새로고침하면 다시 읽는다.')),'An actionable collection failure remains visible');
-  const rule=tr('같은 문제를 해결한 변경끼리 설명을 묶는다.');
+  const rule=tr('같은 문제를 해결한 PR끼리 설명을 묶는다.');
   assert(!text.includes(rule),'Method explanation should be collapsed');
   assert(!pane.textContent.includes(rule),'Repeated method explanations are removed, not moved into another fold');
   assert(JSON.stringify(warnings)===input,'Presentation does not modify evidence warnings');
