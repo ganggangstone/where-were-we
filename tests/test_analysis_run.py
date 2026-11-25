@@ -508,7 +508,7 @@ else:
         self.assertEqual(sorted(sent),list(range(41-len(sent),41)))  # the newest PRs
         saved=briefing.stored('demo')['results'][briefing.key('','dev','en')]
         self.assertEqual(saved['pr_count'],40);self.assertEqual(len(saved['left_out']),40-len(sent))
-        self.assertIn(f'leaves out {40-len(sent)} older changes',saved['unknown'][0])
+        self.assertIn(f'leaves out {40-len(sent)} older PRs',saved['unknown'][0])
         ctx={'input':{'prs':[{'id':'r:pr:1','merged_at':'2026-10-01T00:00:00+00:00'},{'id':'r:pr:2','merged_at':'2026-10-02T00:00:00+00:00'}],'has_changes':True},'sources':{'s':{'text':'quoted text','url':None}}}
         card={'id':'c','title':'t','prs':['r:pr:1'],**{f:{'text':'x','unknown':True} for f in briefing.FIELDS}}
         with self.assertRaises(ValueError):briefing.normalize({'cards':[card],'unknown':['older left out'],'left_out':['r:pr:2']},ctx)  # a newer PR cannot be left out

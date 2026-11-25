@@ -52,8 +52,8 @@ def since_of(repo,last_refresh,now):
             return result.stdout.strip() if result.returncode==0 else ''
         email=git('config','user.email')
         stamp=git('log','--all','--fixed-strings','--author=<'+email+'>','-1','--format=%cI') if email else ''
-        if stamp:return datetime.fromisoformat(stamp),'내 마지막 코드 기록부터'
-        return fallback,'내 코드 기록을 찾지 못해 마지막 새로고침 뒤'
+        if stamp:return datetime.fromisoformat(stamp),'내 마지막 커밋부터'
+        return fallback,'내 커밋을 찾지 못해 마지막 새로고침 뒤'
     return fallback,'마지막 새로고침 뒤'
 
 def project_home(project):

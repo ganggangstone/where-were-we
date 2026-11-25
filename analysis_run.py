@@ -1907,8 +1907,8 @@ BRIEF_BODY_CHARS = 3000        # of each PR or issue body; a quote from the kept
 BRIEF_STRUCTURE_CHARS = 8000
 REF_RULE=(' Source rows are [ref, line, text]. Cite a line only as {"ref": n} with a supplied ref; never write file, line or quote yourself. '
           'Only the supplied lines were read; record what they do not establish in unknown. Do not request further reads.')
-LEFT_OUT={'ko':'최근 변경 {sent}건을 설명했다. 더 오래된 변경 {left}건은 빠졌다.',
-          'en':'The explanation covers {sent} recent changes. It leaves out {left} older changes.'}
+LEFT_OUT={'ko':'최근 PR {sent}건을 설명했다. 더 오래된 PR {left}건은 빠졌다.',
+          'en':'The explanation covers {sent} recent PRs. It leaves out {left} older PRs.'}
 NOT_READ={'ko':'한 번에 읽을 수 있는 양을 넘어서 이 코드를 읽지 못했다.',
           'en':"This code was too large to read in one pass."}
 NOT_ANSWERED={'ko':'AI가 이 코드의 동작 과정을 답하지 않았다.',
