@@ -608,11 +608,41 @@ def _compose(name, conf, state, raws, repository='', branch='dev'):
         return max(fits,key=lambda x:x[0])[1] if fits else own[0] if own else None
     proven={}
     for c in (bundle['dev'] if bundle['dev']['available'] else bundle['main'])['cross_repository_connections']:
+        if copy_folder(c['client']['file']):continue
         a,b=holder(c['client']['repository'],qfile(c['client']['repository'],c['client']['file'])),holder(c['server']['repository'],qfile(c['server']['repository'],c['server']['file']))
         if a and b:
             row=proven.setdefault((a['id'],b['id']),[])
             if len(row)<3:row.append({'file':qfile(c['client']['repository'],c['client']['file']),'line':c['client']['line'],'quote':c['method']+' '+c['path'],'origin':'local_link','repository':c['client']['repository']})
+    # A line backed only by lines inside a release copy of the code (a releases/dist/build/vendor/snapshot folder) is not
+    # how the program connects; a line from a program holding screen requests to one holding server routes is backed by
+    # those requests only, never by an import (a frontend entry importing a component does not call the server).
+    ai_links=[]
+    active=bundle['dev'] if bundle['dev']['available'] else bundle['main']
+    requested={}
+    for f in active['api_functions']:
+        for c in f.get('calls',[]):
+            for target in c.get('backend') or []:
+                a,b=holder(f['repository'],f['file']),holder(c.get('target_repository') or f['repository'],target['file'])
+                if a and b and a['id']!=b['id'] and a['repository']==b['repository']:
+                    row=requested.setdefault((a['id'],b['id']),[])
+                    if len(row)<3 and not copy_folder(f['file']):row.append({'file':f['file'],'line':c.get('line') or f['line'],'quote':c['method']+' '+c['path'],'origin':'local_link','repository':f['repository']})
+    servers={holder(r['repository'],r['file'])['id'] for r in active['backend_routes'] if holder(r['repository'],r['file'])}
+    callers={a for a,_ in requested}
+    for l in bundle['system']['links']:
+        if l['from'] in callers and l['to'] in servers:
+            if not requested.get((l['from'],l['to'])):continue
+            l=dict(l,ev=requested.pop((l['from'],l['to'])))
+        elif l.get('ev'):
+            ev=[e for e in l['ev'] if not copy_folder(e.get('file',''))]
+            if not ev:continue
+            l=dict(l,ev=ev)
+        ai_links.append(l)
+    ai_links+=[{'from':a,'to':b,'label':'Screen requests matched','style':'solid','sure':True,'ev':ev} for (a,b),ev in requested.items() if ev]
+    bundle['system']['links']=ai_links
     bundle['system']['links']+=[{'from':a,'to':b,'label':'Requests matched across codes','style':'solid','sure':True,'ev':ev} for (a,b),ev in proven.items()]
+    kept,alias=__import__('analysis_label').merge_externals(bundle['system']['externals'])
+    bundle['system']['externals']=kept
+    for n in bundle['system']['nodes']:n['uses']=list(dict.fromkeys(alias.get(u,u) for u in n.get('uses',[]) if alias.get(u,u)))
     joined={(n['repository'],m['repository']) for a,b in proven for n in bundle['system']['nodes'] if n['id']==a for m in bundle['system']['nodes'] if m['id']==b}
     for repo in conf['repositories']:
         for target in repo['api_targets']:
@@ -632,6 +662,11 @@ def _compose(name, conf, state, raws, repository='', branch='dev'):
         if not bundle[role]['available']:bundle[role]=None
     bundle['changes']['entries'].sort(key=lambda e:e['at'],reverse=True)
     return bundle
+
+RELEASE_COPIES={'release','releases','dist','build','vendor','snapshot','snapshots'}
+def copy_folder(path):
+    """Whether a file sits in a release copy of the code: a folder named release(s), dist, build, vendor or snapshot(s)."""
+    return any(part.lower() in RELEASE_COPIES for part in str(path).split('/')[:-1])
 
 def collection_running(name):
     path=home(name)/'.project.lock'

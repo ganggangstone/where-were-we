@@ -585,6 +585,36 @@ class Connections(TemporaryProject):
             project.publish('studio',rid,{'dev':value,'main':value},{})
         return web,api
 
+    def test_composed_structure_merges_services_and_keeps_only_evidenced_lines(self):
+        repos=[{'id':'web'},{'id':'api'}]
+        for repo in repos:
+            (self.root/repo['id']).mkdir();repo['path']=str(self.root/repo['id'])
+        project.configure('example',{'repositories':repos})
+        q=lambda text:{'file':'x.py','line':1,'quote':text}
+        web=sample(repos[0]['path']);web['api_functions']=[{'file':'ui/api.js','name':'load','line':3,'calls':[{'method':'GET','path':'/items','line':4,
+            'backend':[{'file':'server/main.py','line':2,'function':'items'}]}]}]
+        web['backend_routes']=[{'method':'GET','path':'/items','function':'items','file':'server/main.py','line':2,'mounted':True}]
+        imp=lambda f:{'file':f,'line':1,'quote':'import x','origin':'local_link'}
+        project.publish('example','web',{'dev':web,'system':{'nodes':[
+            {'id':'p1','name':'Screens','kind':'program','what':'','code':['ui'],'uses':['x1','x2']},
+            {'id':'p2','name':'Server','kind':'program','what':'','code':['server'],'uses':['x3']},
+            {'id':'p3','name':'Tools','kind':'program','what':'','code':['tools'],'uses':[]}],
+            'links':[{'from':'p1','to':'p2','label':'calls','ev':[imp('ui/main.js')]},
+                     {'from':'p3','to':'p2','label':'uses','ev':[imp('tools/releases/v1/a.py')]}],
+            'externals':[{'id':'x1','name':'Example AI','what':'','ev':[q('key = EXAMPLEAI_API_KEY')]},
+                         {'id':'x2','name':'Media tool','what':'','ev':[q('subprocess.run(["mediatool", path])')]},
+                         {'id':'x3','name':'예시 AI','what':'','ev':[q('EXAMPLEAI_API_KEY'),q('import exampleai')]}]}},{})
+        project.publish('example','api',{'dev':sample(repos[1]['path']),'system':{'nodes':[{'id':'p1','name':'Worker','kind':'program','what':'','code':['.'],'uses':['x1']}],
+            'links':[],'externals':[{'id':'x1','name':'example ai','what':'','ev':[q('import other')]}]}},{})
+        system=project.read_bundle('example')['system']
+        # Same name after case/space, or the same name in most evidence lines, is one service; a local program is none.
+        self.assertEqual([x['name'] for x in system['externals']],['Example AI'])
+        self.assertEqual({n['id']:n['uses'] for n in system['nodes']},{'web::p1':['web::x1'],'web::p2':['web::x1'],'web::p3':[],'api::p1':['web::x1']})
+        # Screens -> server is backed by the matched request, not the import; a line backed only by a release copy is dropped.
+        self.assertEqual([(l['from'],l['to'],[(e['file'],e['line'],e['quote']) for e in l['ev']]) for l in system['links']],
+                         [('web::p1','web::p2',[('web/ui/api.js',4,'GET /items')])])
+        self.assertTrue(project.copy_folder('a/dist/b.py') and not project.copy_folder('a/distance/b.py'))
+
     def test_two_pinned_structures_only_join_unique_configured_literal_routes(self):
         import subprocess
         import structure_index

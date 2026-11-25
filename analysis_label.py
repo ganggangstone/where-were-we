@@ -85,6 +85,43 @@ def hints(texts, limit=EXTERNALS):
     return [(name, file, number) for name, rows in ranked for file, number in list(rows.items())[:2]]
 
 
+def external_key(ev):
+    """(key, local_only) for an outside service's evidence lines [{quote}]: key is the name most lines show (lower case,
+    None on a tie or none), local_only is True when every name found is a program the code runs on this machine
+    (subprocess and the like: curl, ffmpeg, git), which is a local tool, not an outside service."""
+    counts, local = {}, True
+    for row in ev or []:
+        for m in _EXTERNAL.finditer(row.get('quote') or ''):
+            name = next(g for g in m.groups() if g).lower()
+            counts[name] = counts.get(name, 0) + 1
+            local = local and m.lastindex == 6
+    ranked = sorted(counts.values(), reverse=True)
+    key = max(counts, key=counts.get) if ranked and (len(ranked) == 1 or ranked[0] > ranked[1]) else None
+    return key, bool(counts) and local
+
+
+def merge_externals(externals):
+    """(kept, alias) across connected codes: one row per outside service. Two rows are one service when their names match
+    after dropping case, spaces and marks, or their evidence lines mostly name the same thing (external_key). Rows whose
+    lines only run local programs are dropped (alias None). alias maps every dropped or merged id to the kept id."""
+    norm = lambda text: re.sub(r'[\W_]+', '', str(text).lower())
+    kept, alias = [], {}
+    for x in externals:
+        key, local = external_key(x.get('ev'))
+        if local:
+            alias[x['id']] = None
+            continue
+        keys = {norm(x['name'])} | ({key} if key else set())
+        hit = next((k for k in kept if k['_keys'] & keys), None)
+        if hit:
+            alias[x['id']] = hit['id']
+            hit['_keys'] |= keys
+            hit['ev'] = (hit.get('ev') or []) + [e for e in x.get('ev') or [] if e not in hit.get('ev', [])][:max(0, 3 - len(hit.get('ev') or []))]
+        else:
+            kept.append({**x, '_keys': keys})
+    return [{k: v for k, v in x.items() if k != '_keys'} for x in kept], alias
+
+
 def summary(catalog, index, description='', routes=(), spots=None, externals=(), codes=()):
     """{'description', 'folders': [[parent, name]], 'units': [[ref, kind, name, files, folder, [[evidence ref, declaration]], [file names]]],
     'links': [[ref, ref, n]], 'screens': [[ref, path]], 'requests': [[request ref, unit ref, method, path]],
