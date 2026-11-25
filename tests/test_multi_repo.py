@@ -347,7 +347,7 @@ window.__TAURI__={core:{invoke:async(command,args)=>{
   S.projectInfo={repositories:[{id:'vue',name:'Web',collected:true,commits:{dev:'demo'},
     analysis_scope:{dev:{source:'basic',frontend:'needs_analysis',backend:'disabled'}}}]};
   S.branch='dev';renderRepositories();
-  assert($('repository-bar').textContent.includes('Not identified by basic collection'),'A successful collection must not look like complete analysis');
+  assert($('repository-bar').textContent.includes("The app couldn't find it in the code."),'A successful collection must not look like complete analysis');
   assert($('repository-bar').textContent.includes('Excluded from analysis'),'Disabled areas must be distinct from missing analysis');
   const screen=(path,file,via)=>({path,file,actions:[],api_functions:[{file:'src/api.ts',name:'load',via}]});
   assert(!commonVia({screens:[screen('/one','src/One.tsx','src/Child.tsx')]}).has('src/Child.tsx'),'A component used on one screen is not shared');
