@@ -9,7 +9,6 @@ import functools
 import hashlib
 import collections
 import json
-import math
 import os
 from pathlib import Path, PurePosixPath
 import re
@@ -34,7 +33,7 @@ ACTIVE = {'preparing', 'running', 'saving'}
 TERMINAL = {'completed', 'failed', 'cancelled'}
 OVERVIEW_VERSION = 8
 SCOPED_OVERVIEW_VERSION = 6
-MAX_FILE_BYTES = 300_000
+MAX_PROMPT_FILE_BYTES = 300_000  # larger tracked files never reach a unit or a prompt (not structure_index.MAX_PROMPT_FILE_BYTES)
 GENERATED_NAMES = {'package-lock.json','pnpm-lock.yaml','yarn.lock','go.sum','poetry.lock','cargo.lock','composer.lock','gemfile.lock','uv.lock'}
 GENERATED_SUFFIXES = ('.lock','.min.js','.min.css','.map')
 MAX_PROMPT_BYTES = 128 * 1024
@@ -153,12 +152,14 @@ def unit_board(project,repository='',branch='dev',lang='ko',run=None,runs=None):
     scopes,_,calls=_full_plan(value,[r for r in history if not live or r['id']!=run['id']],defer=True)
     contexts={}
     repositories=[]
+    latest_of={}  # repository -> target -> its latest saved explanation
+    for record in history:
+        for store_name in ('scope_overviews','unit_overviews'):
+            for rid,saved in (record.get(store_name) or {}).items():latest_of.setdefault(rid,{}).update(saved or {})
     for rid,full in scopes.items():
         catalog=full['catalog'];pin=full['pin']
-        latest={};gave_up={};labels={};gaps=[]
+        latest=latest_of.get(rid,{});gave_up={};labels={};gaps=[]
         for record in history:
-            for store_name in ('scope_overviews','unit_overviews'):
-                for target,overview in (record.get(store_name,{}).get(rid) or {}).items():latest[target]=overview
             if (record.get('intent') or {}).get('task')=='full' and record.get('pins',{}).get(rid)==pin:
                 gave_up.update({f['target']:f for f in record.get('unit_failures',[]) if f['repository']==rid})
             if (record.get('labels') or {}).get(rid):labels=record['labels'][rid];gaps=[g for g in record.get('gaps',[]) if g['repository']==rid]
@@ -168,7 +169,7 @@ def unit_board(project,repository='',branch='dev',lang='ko',run=None,runs=None):
             target=unit.get('resource') or unit['id']
             saved=latest.get(target)
             detail=''
-            if saved and saved.get('version')==SCOPED_OVERVIEW_VERSION:
+            if saved and _overview_current(saved,True):
                 if all(saved.get(k)==v for k,v in pin.items()) and (unit['kind']=='route' or _same_unit(saved,unit)):state,detail='saved',''
                 else:
                     kept=_reuse_unit(saved,pin,scope,rid,contexts,unit) if unit['kind']!='route' else _reuse_scope(saved,pin,scope,rid,contexts,False)
@@ -220,10 +221,10 @@ def unit_result(project,repository,branch,lang,target):
     found=None
     if isinstance(target,str) and target.startswith('task:'):return None
     if isinstance(target,str) and target.startswith('route:'):target=target[6:]
-    local=None
+    local=plan=catalog=None;rid=scope['repository']
     if isinstance(target,str) and target.startswith('folder:local:'):
         # What the local read knows about a documents or tests folder; a saved AI explanation (every text file sent) still wins below.
-        plan=ai_extract.plan(project,branch,lang,scope['repository'],overview=True,light=True);rid=scope['repository']
+        plan=ai_extract.plan(project,branch,lang,scope['repository'],overview=True,light=True)
         catalog=_unit_catalogs({'project':project,'branch':branch,'lang':lang},{'pins':{rid:plan['pins'][rid]}}).get(rid) or {}
         unit=next((u for u in catalog.get('units',[]) if u['id']==target),None)
         if unit:local={'local':True,'commit':catalog['commit'],'files':unit['files'],'file_count':unit['file_count'],'kinds':dict(collections.Counter(source_signals.kind(f) for f in unit['files']))}
@@ -232,14 +233,14 @@ def unit_result(project,repository,branch,lang,target):
             for store_name in ('scope_overviews','unit_overviews'):
                 if target in (record.get(store_name,{}).get(scope['repository']) or {}):found=record[store_name][scope['repository']][target]
     if not found:return local
-    plan=ai_extract.plan(project,branch,lang,scope['repository'],overview=True,light=True)
+    plan=plan or ai_extract.plan(project,branch,lang,scope['repository'],overview=True,light=True)
     pin=plan['pins'].get(scope['repository'])
     if pin and all(found.get(k)==v for k,v in pin.items()):return found
-    if pin and found.get('version')==SCOPED_OVERVIEW_VERSION:
-        rid=scope['repository'];contexts={}
+    if pin and _overview_current(found,True):
+        contexts={}
         if found.get('resource'):kept=_reuse_scope(found,pin,scope,rid,contexts,False)
         else:
-            catalog=_unit_catalogs({'project':project,'branch':branch,'lang':lang},{'pins':{rid:pin}}).get(rid) or {}
+            if catalog is None:catalog=_unit_catalogs({'project':project,'branch':branch,'lang':lang},{'pins':{rid:pin}}).get(rid) or {}
             kept=_reuse_unit(found,pin,scope,rid,contexts,next((u for u in catalog.get('units',[]) if u['id']==target),None))
         if kept:return kept
     return {**found,'stale':True}
@@ -296,6 +297,17 @@ def failure(value, code, message):
     value.update(state='failed', error={'code':code, 'message':message[:1000]}, finished_at=store.now())
     return _seal(value)
 
+def _cancelled(value):
+    value.update(state='cancelled',finished_at=store.now());return value
+
+def _complete(run_id):
+    """Seal a run whose work is done, unless a cancel was saved meanwhile."""
+    with locked():
+        value=read(run_id)
+        if value['cancel_requested']:raise Cancelled()
+        value.update(state='completed',current_task=None,finished_at=store.now())
+        return _seal(value)
+
 def _recover(value):
     """A released worker lock proves interruption; PIDs are never used to kill processes."""
     if value['state'] not in ACTIVE: return value
@@ -313,7 +325,7 @@ def _recover(value):
             value = read(value['id'])
             if value['state'] in ACTIVE:
                 if value.get('cancel_requested'):
-                    value.update(state='cancelled',finished_at=store.now());write(value)
+                    write(_cancelled(value))
                 else: failure(value,'interrupted','Analysis worker stopped. Retry to finish missing tasks; saved results were retained')
             return value
         finally: fcntl.flock(stream,fcntl.LOCK_UN)
@@ -390,7 +402,7 @@ def _exclusion(file,size):
     if PurePosixPath(file).suffix.lower() in BINARY_SUFFIXES:return 'binary'
     name=PurePosixPath(file).name.lower()
     if name in GENERATED_NAMES or name.endswith(GENERATED_SUFFIXES):return 'generated'
-    if size>MAX_FILE_BYTES:return 'large'
+    if size>MAX_PROMPT_FILE_BYTES:return 'large'
     return None
 
 @functools.lru_cache(maxsize=8)
@@ -435,11 +447,11 @@ def _pinned_index(repo,selected,head):
     return built
 
 
-def _unit_catalogs(value,plan,defer=False):
-    """Freeze the AI-free unit catalog of every pinned repository for this run."""
+def _unit_catalogs(value,plan,defer=False,context=None):
+    """Freeze the AI-free unit catalog of every pinned repository for this run. context: an ai_extract.context the caller already read."""
     catalogs={}
     for rid,pin in plan['pins'].items():
-        conf,raw,_,head=ai_extract.context(value['project'],rid,value['branch'])
+        conf,raw,_,head=context or ai_extract.context(value['project'],rid,value['branch'])
         selected=raw[value['branch']]
         if head!=pin['commit']:raise ValueError('Refresh the local structure before analyzing every unit')
         index=_pinned_index(conf['path'],selected,head)
@@ -472,8 +484,8 @@ def _eligible(repo,commit,paths=None):
         if (paths is None or file in paths) and not _secret(file) and PurePosixPath(file).suffix.lower() not in BINARY_SUFFIXES:entries.append((file,oid))
     return entries
 
-def _scan(repo,commit,paths=None,signals=True):
-    return source_signals.scan_commit(repo,commit,_eligible(repo,commit,paths),SOURCE_ROW_OVERHEAD,signals)
+def _scan(repo,commit,paths=None):
+    return source_signals.scan_commit(repo,commit,_eligible(repo,commit,paths),SOURCE_ROW_OVERHEAD)
 
 
 _SIGNALS={}
@@ -504,10 +516,6 @@ def _unit(value,rid,target):
 def _plain_unit(value,rid,target):
     unit=_unit(value,rid,target)
     return unit if unit and unit['kind']!='route' else None
-
-def _is_unit(value,rid,target):
-    unit=_unit(value,rid,target)
-    return bool(unit) and unit['kind']!='route'
 
 
 def _plan(value):
@@ -594,8 +602,8 @@ def _full_scope(value,defer=False):
     plan=ai_extract.plan(value['project'],value['branch'],value['lang'],value['repository'],overview=True,light=True)
     out={}
     for rid,pin in plan['pins'].items():
-        conf,raw,_,head=ai_extract.context(value['project'],rid,value['branch'])
-        catalog=_unit_catalogs(value,{'pins':{rid:pin}},defer)[rid]
+        context=ai_extract.context(value['project'],rid,value['branch']);conf,raw,_,head=context
+        catalog=_unit_catalogs(value,{'pins':{rid:pin}},defer,context)[rid]
         index=_pinned_index(conf['path'],raw[value['branch']],head)
         sizes=_tracked(conf['path'],head);files=[f for f,z in sizes.items() if not _exclusion(f,z)]
         spots={}
@@ -706,18 +714,22 @@ def _publish_shapes(value,rid,commit,labels,catalog,repo,flows=()):
             for name,item in updated.items():
                 if item!=bundle.get(name):store.atomic(store.home(value['project'])/(name+'.json'),item)
 
+def _count(run_id,size,kind=None):
+    """Count one call in the run record before it is sent. A call counted by kind also stops when a cancel was saved;
+    a call without a kind (generate's invoke) checked cancellation just before and is not counted by kind."""
+    with locked():
+        current=read(run_id)
+        if kind and current['cancel_requested']:raise Cancelled()
+        stats=current.setdefault('input_stats',{'calls':0,'bytes':0,'max_prompt_bytes':0,**({'by_kind':{}} if kind else {})})
+        stats['calls']+=1;stats['bytes']+=size;stats['max_prompt_bytes']=max(stats['max_prompt_bytes'],size)
+        if kind:stats.setdefault('by_kind',{})[kind]=stats['by_kind'].get(kind,0)+1
+        write(current)
+
 def _counted(run_id,executor,cancelled,kind):
     """The executor, with every call counted by kind in the run record before it is sent."""
     def call(prompt,**_):
         if cancelled():raise Cancelled()
-        size=len(prompt.encode())
-        with locked():
-            current=read(run_id)
-            if current['cancel_requested']:raise Cancelled()
-            stats=current.setdefault('input_stats',{'calls':0,'bytes':0,'max_prompt_bytes':0,'by_kind':{}})
-            stats['calls']+=1;stats['bytes']+=size;stats['max_prompt_bytes']=max(stats['max_prompt_bytes'],size)
-            stats.setdefault('by_kind',{})[kind]=stats['by_kind'].get(kind,0)+1
-            write(current)
+        _count(run_id,len(prompt.encode()),kind)
         return executor(prompt,cancelled=cancelled,timeout=TASK_SECONDS)
     return call
 
@@ -760,9 +772,9 @@ def _run_full(run_id,executor,cancelled):
         if scope['missing']:
             show=lambda file,repo=scope['repo'],head=scope['pin']['commit']:_git(repo,'show',f'{head}:{file}').decode('utf-8','ignore')
             call=_counted(run_id,executor,cancelled,'rules')
-            saved_rule=False
+            saved_rule=False;needed=lang_rules.needed(scope['files'])
             for name in scope['missing']:
-                rule,_,_=lang_rules.obtain(name,lang_rules.needed(scope['files'])[name],scope['sizes'],show,call)
+                rule,_,_=lang_rules.obtain(name,needed[name],scope['sizes'],show,call)
                 if not rule:_update(run_id,_gap(rid,'rules:'+name,'No valid reading rules; the connections of these files were not read'))
                 else:saved_rule=True
             if saved_rule:store.refresh_project(value['project'],rid)  # the snapshot (확인 범위) reads the rules too; local only, no AI
@@ -870,23 +882,22 @@ def prepare(project, branch='dev', lang='ko', repository='', executor='claude', 
         if resource_run:value['resource_targets']=plan['resource_targets']
         if scope['intent']['task']=='overview' or resource_run:
             contexts={}
-            store_of=lambda rid,target:'scope_overviews'
             for old in sorted(history,key=lambda record:record['created_at']):
                 if any(old[key]!=scope[key] for key in ('project','lang','branch')):continue
                 for task in value['tasks']:
                     rid=task['repository'];pin=plan['pins'][rid];target=task.get('target')
-                    overview=(old.get(store_of(rid,target),{}).get(rid,{}).get(target) if target else old.get('overviews',{}).get(rid))
-                    if not overview or overview.get('format')!='overview-v1' or overview.get('version')!=(SCOPED_OVERVIEW_VERSION if target else OVERVIEW_VERSION):continue
+                    overview=(old.get('scope_overviews',{}).get(rid,{}).get(target) if target else old.get('overviews',{}).get(rid))
+                    if not overview or overview.get('format')!='overview-v1' or not _overview_current(overview,bool(target)):continue
                     if not all(overview.get(k)==v for k,v in pin.items()):
                         if not target:continue
                         overview=_reuse_scope(overview,pin,scope,rid,contexts,True)
                         if not overview:continue
-                    if target:value.setdefault(store_of(rid,target),{}).setdefault(rid,{})[target]=overview
+                    if target:value.setdefault('scope_overviews',{}).setdefault(rid,{})[target]=overview
                     else:value.setdefault('overviews',{})[rid]=overview
             remaining=[]
             for task in value['tasks']:
                 rid=task['repository'];target=task.get('target')
-                cached=task['task']=='overview' and (target in value.get(store_of(rid,target),{}).get(rid,{}) if target else rid in value.get('overviews',{}))
+                cached=task['task']=='overview' and (target in value.get('scope_overviews',{}).get(rid,{}) if target else rid in value.get('overviews',{}))
                 if cached:value['completed_tasks'].append({'task':'overview','repository':rid,'target':target})
                 else:remaining.append(task)
             value['tasks']=remaining
@@ -968,8 +979,7 @@ def cancel(run_id):
         value['cancel_requested'] = True
         # The worker checks this flag before saving under this same registry lock.
         if value['launch_epoch'] is None:
-            value.update(state='cancelled',finished_at=store.now())
-            return _seal(value)
+            return _seal(_cancelled(value))
         return write(value)
 
 def retry(run_id, launch_intended=False):
@@ -984,22 +994,20 @@ def retry(run_id, launch_intended=False):
     return prepare(previous['project'],previous['branch'],previous['lang'],previous['repository'],previous['executor'],
                    launch_intended=launch_intended,intent=intent,resume_from=resume,expected_pins=expected_pins)
 
+def _refuse_start(run_id,code,message):
+    """Record why a prepared, unlaunched run cannot start, then raise."""
+    with locked():
+        value=read(run_id)
+        if value['state']=='preparing' and value.get('launch_epoch') is None: failure(value,code,message)
+    raise RunError(code,message)
+
 def start(run_id, expected_account=None):
     import cli_executor
     provider = cli_executor.availability()
     if not provider.get('available') or not provider.get('authenticated'):
-        code=provider.get('error_code') or 'executor_unavailable'
-        message=provider.get('message') or 'Sign in to the Claude CLI before starting analysis'
-        with locked():
-            value=read(run_id)
-            if value['state']=='preparing' and value.get('launch_epoch') is None: failure(value,code,message)
-        raise RunError(code,message)
+        _refuse_start(run_id,provider.get('error_code') or 'executor_unavailable',provider.get('message') or 'Sign in to the Claude CLI before starting analysis')
     if not isinstance(expected_account,dict) or not expected_account or provider.get('account')!=expected_account:
-        with locked():
-            value=read(run_id)
-            if value['state']=='preparing' and value.get('launch_epoch') is None:
-                failure(value,'CLI_ACCOUNT_CHANGED','The Claude account changed or was not confirmed. Check the connection and start again')
-        raise RunError('CLI_ACCOUNT_CHANGED','The Claude account changed or was not confirmed. Check the connection and start again')
+        _refuse_start(run_id,'CLI_ACCOUNT_CHANGED','The Claude account changed or was not confirmed. Check the connection and start again')
     with locked():
         value = read(run_id)
         if value['state']!='preparing' or value.get('launch_epoch') is not None:
@@ -1073,7 +1081,7 @@ def _prefix(repo,oid,cancelled=None,deadline=None):
 
 def _blob_lines(repo,oid,cancelled=None,deadline=None):
     """Numbered lines of a text blob, or the reason it is not text."""
-    if int(_git(repo,'cat-file','-s',oid,text=True))>MAX_FILE_BYTES:
+    if int(_git(repo,'cat-file','-s',oid,text=True))>MAX_PROMPT_FILE_BYTES:
         prefix=_prefix(repo,oid,cancelled,deadline)
         try:codecs.getincrementaldecoder('utf-8')().decode(prefix,final=False)
         except UnicodeDecodeError:return 'binary'
@@ -1081,7 +1089,9 @@ def _blob_lines(repo,oid,cancelled=None,deadline=None):
     try:text=_git(repo,'cat-file','blob',oid).decode('utf-8')
     except UnicodeDecodeError:return 'binary'
     if '\x00' in text:return 'binary'
-    return [{'line':i,'text':line} for i,line in enumerate(text.splitlines(),1)]
+    return _numbered(text)
+
+def _numbered(text):return [{'line':i,'text':line} for i,line in enumerate(text.splitlines(),1)]
 
 PREFETCH_MIN = 16  # files; fewer are read one by one
 
@@ -1099,7 +1109,7 @@ def _prefetch(repo,entries,blobs,selected,excluded):
     rows=[(file,oid) for oid,file in wanted.items()]
     by_file={file:oid for oid,file in wanted.items()}
     for file,text,_ in source_signals.stream(repo,rows):
-        blobs[by_file[file]]=[{'line':i,'text':line} for i,line in enumerate(text.splitlines(),1)]
+        blobs[by_file[file]]=_numbered(text)
     for oid in wanted:blobs.setdefault(oid,'binary')  # the stream skips blobs that are not UTF-8 text without NUL
 
 def export_source(repo, commit, commits=None, cancelled=None, deadline=None, selected=None, blobs=None, excluded=None, windows=None):
@@ -1157,7 +1167,7 @@ def _first_files(repo,head,request):
     # Review catalog rows are [id, method/type, path, function, file, source].
     known={row[4] for row in request.get('known',[]) if isinstance(row,list) and len(row)>4}
     chosen=set();parents=set()
-    paths=sorted((f for f,n in files.items() if 6<=n<=MAX_FILE_BYTES),
+    paths=sorted((f for f,n in files.items() if 6<=n<=MAX_PROMPT_FILE_BYTES),
                  key=lambda f:(f not in recheck,f not in known,abs(files[f]-1024),f))
     for file in paths:
         parent=PurePosixPath(file).parent
@@ -1268,14 +1278,16 @@ def _spelling(value):
     """An ID with case, dashes and underscores ignored: independent batches name one program 'image_worker' and 'image-worker'."""
     return re.sub(r'[^a-z0-9]','',str(value).lower()) or None
 
+def _ev_key(e):return (e.get('file'),e.get('line'),e.get('quote'))
+
 def _evidence_keys(items):
-    return {(e.get('file'),e.get('line'),e.get('quote')) for e in items or [] if isinstance(e,dict)}
+    return {_ev_key(e) for e in items or [] if isinstance(e,dict)}
 
 def _union_evidence(*lists):
     out=[];seen=set()
     for items in lists:
         for e in items or []:
-            key=(e.get('file'),e.get('line'),e.get('quote')) if isinstance(e,dict) else repr(e)
+            key=_ev_key(e) if isinstance(e,dict) else repr(e)
             if key not in seen:seen.add(key);out.append(e)
     return out
 
@@ -1433,15 +1445,28 @@ def _endpoints(flow):
     return [flow['client'],flow['server']] if 'client' in flow else [flow['server']]
 
 
-def _overview_anchors(index,resource=None):
-    """Pick connected files and keep declarations and imports from competing for every slot."""
+def _file_maps(index):
+    """Declarations of every non-secret indexed file, and its imports of other such files."""
     declarations={item['file']:item['declarations'] for item in index['files'] if not _secret(item['file'])}
     imports={}
-    incoming={}
     for edge in index['imports']:
-        if edge['file'] not in declarations or edge['target'] not in declarations:continue
-        imports.setdefault(edge['file'],[]).append(edge)
-        incoming[edge['target']]=incoming.get(edge['target'],0)+1
+        if edge['file'] in declarations and edge['target'] in declarations:imports.setdefault(edge['file'],[]).append(edge)
+    return declarations,imports
+
+def _fill_rows(rows,imports,declarations):
+    """Anchor rows of one file: up to 8 rows with its imports, then its declarations up to 24 rows."""
+    for edge in imports:
+        if len(rows)>=8:break
+        rows.setdefault(edge['line'],{'imports':edge['target']})
+    for decl in declarations:
+        if len(rows)>=24:break
+        rows.setdefault(decl['line'],{'kind':decl['kind'],'name':decl['name']})
+    return rows
+
+def _overview_anchors(index,resource=None):
+    """Pick connected files and keep declarations and imports from competing for every slot."""
+    declarations,imports=_file_maps(index)
+    incoming=collections.Counter(edge['target'] for edges in imports.values() for edge in edges)
     ranked=sorted((file for file in declarations if declarations[file] or imports.get(file)),
                   key=lambda f:(-bool(imports.get(f)),-incoming.get(f,0),-len(imports.get(f,[])),f))
     selected=[]
@@ -1497,13 +1522,7 @@ def _overview_anchors(index,resource=None):
             for _,sites in _flow_details(flow):
                 for site in sites:
                     if site['file']==file and len(rows)<24:rows.setdefault(site['line'],{})
-        for edge in imports.get(file,[]):
-            if len(rows)>=8:break
-            rows.setdefault(edge['line'],{'imports':edge['target']})
-        for decl in declarations[file]:
-            if len(rows)>=24:break
-            rows.setdefault(decl['line'],{'kind':decl['kind'],'name':decl['name']})
-        anchors[file]=rows
+        anchors[file]=_fill_rows(rows,imports.get(file,[]),declarations[file])
     return anchors,flows,len(scopes)
 
 def _scope_evidence_digest(index,resource,anchors):
@@ -1514,6 +1533,13 @@ def _scope_evidence_digest(index,resource,anchors):
     return hashlib.sha256(content.encode()).hexdigest()
 
 
+def _changed(contexts,repo,a,b):
+    """Paths changed between two commits, read once per contexts."""
+    key=('changed',repo,a,b)
+    if key not in contexts:
+        contexts[key]={p.decode() for p in _git(repo,'diff-tree','--no-renames','--no-commit-id','--name-only','-r','-z',a,b).split(b'\0') if p}
+    return contexts[key]
+
 def _reuse_scope(overview,pin,scope,rid,contexts,docs_only=True):
     """A path explanation is reused only when its model input is provably unchanged.
 
@@ -1521,7 +1547,7 @@ def _reuse_scope(overview,pin,scope,rid,contexts,docs_only=True):
     Full runs pass False: it survives changes elsewhere as long as no cited file changed and the
     recomputed connections and anchor lines (the whole packet besides unchanged file text) match."""
     import structure_index
-    if (overview.get('configuration')!=pin['configuration'] or overview.get('version')!=SCOPED_OVERVIEW_VERSION
+    if (overview.get('configuration')!=pin['configuration'] or not _overview_current(overview,True)
             or not overview.get('evidence_digest') or not overview.get('resource')):return None
     try:
         if rid not in contexts:contexts[rid]=ai_extract.context(scope['project'],rid,scope['branch'])
@@ -1531,12 +1557,8 @@ def _reuse_scope(overview,pin,scope,rid,contexts,docs_only=True):
             index=(raw.get(scope['branch']) or {}).get('structure_index') or {}
             if index.get('commit')!=head or index.get('version')!=structure_index.VERSION:return None
         else:index=_pinned_index(repo['path'],raw.get(scope['branch']),head)  # full runs may rebuild it without AI
-        pair=(rid,overview['commit'],head,docs_only)
-        if pair not in contexts:
-            changes=_git(repo['path'],'diff-tree','--no-renames','--no-commit-id','--name-only','-r','-z',overview['commit'],head)
-            paths={p.decode() for p in changes.split(b'\0') if p}
-            contexts[pair]=paths if not docs_only or all(p.startswith('docs/') and PurePosixPath(p).suffix.lower() in ('.md','.rst','.txt') for p in paths) else None
-        changed=contexts[pair]
+        paths=_changed(contexts,repo['path'],overview['commit'],head)
+        changed=paths if not docs_only or all(p.startswith('docs/') and PurePosixPath(p).suffix.lower() in ('.md','.rst','.txt') for p in paths) else None
         if changed is None or changed.intersection(overview['files']) or changed.intersection(ai_extract.files_in(overview['connections'])):return None
         anchors,_,total=_overview_anchors(index,overview['resource'])
         if _scope_evidence_digest(index,overview['resource'],anchors)!=overview['evidence_digest']:return None
@@ -1546,6 +1568,10 @@ def _reuse_scope(overview,pin,scope,rid,contexts,docs_only=True):
         return None
 
 
+def _overview_current(overview,scoped):
+    """The saved explanation has the format version this code writes (a unit or path explanation when scoped)."""
+    return overview.get('version')==(SCOPED_OVERVIEW_VERSION if scoped else OVERVIEW_VERSION)
+
 def _same_unit(overview,unit):
     """The saved explanation describes the unit as it is now: same id, file count and member digest."""
     saved=overview.get('unit') or {}
@@ -1553,20 +1579,15 @@ def _same_unit(overview,unit):
 
 def _reuse_unit(overview,pin,scope,rid,contexts,unit):
     """A saved unit explanation stays valid when none of its cited member files changed."""
-    if (not unit or overview.get('configuration')!=pin['configuration'] or overview.get('version')!=SCOPED_OVERVIEW_VERSION
-            or (overview.get('unit') or {}).get('id')!=unit['id'] or overview['unit'].get('file_count')!=unit['file_count']
-            or overview['unit'].get('digest')!=unit.get('digest')):return None
+    if not unit or overview.get('configuration')!=pin['configuration'] or not _overview_current(overview,True) or not _same_unit(overview,unit):return None
     try:
         if rid not in contexts:contexts[rid]=ai_extract.context(scope['project'],rid,scope['branch'])
         repo,_,_,head=contexts[rid]
         if head!=pin['commit']:return None
-        pair=('unit',rid,overview['commit'],head)
-        if pair not in contexts:
-            changes=_git(repo['path'],'diff-tree','--no-renames','--no-commit-id','--name-only','-r','-z',overview['commit'],head)
-            contexts[pair]={p.decode() for p in changes.split(b'\0') if p}
+        changed=_changed(contexts,repo['path'],overview['commit'],head)
         # A change among unstored members could still reorder the sampled files, so a unit larger than its stored list is reused only when nothing changed.
-        if contexts[pair].intersection(unit['files']) or contexts[pair].intersection(overview['files']):return None
-        if unit['file_count']>len(unit['files']) and contexts[pair]:return None
+        if changed.intersection(unit['files']) or changed.intersection(overview['files']):return None
+        if unit['file_count']>len(unit['files']) and changed:return None
         return {**overview,**pin,'generated_commit':overview.get('generated_commit',overview['commit'])}
     except (RunError,*ai_extract.READ_ERRORS,UnicodeError):
         return None
@@ -1623,21 +1644,9 @@ def _overview_workspace(index):
 
 def _unit_anchors(index,unit):
     """Best-ranked member files of one unit with their declarations and imports as evidence anchors."""
-    declarations={item['file']:item['declarations'] for item in index['files'] if not _secret(item['file'])}
-    imports={}
-    for edge in index['imports']:
-        if edge['file'] in declarations and edge['target'] in declarations:imports.setdefault(edge['file'],[]).append(edge)
-    anchors={}
-    for file in unit['files'][:4]:
-        rows={}
-        for edge in imports.get(file,[]):
-            if len(rows)>=8:break
-            rows.setdefault(edge['line'],{'imports':edge['target']})
-        for decl in declarations.get(file,[]):
-            if len(rows)>=24:break
-            rows.setdefault(decl['line'],{'kind':decl['kind'],'name':decl['name']})
-        anchors[file]=rows  # a plain file has no declarations; its text is sampled evenly
-    return anchors
+    declarations,imports=_file_maps(index)
+    # A plain file has no declarations; its text is sampled evenly.
+    return {file:_fill_rows({},imports.get(file,[]),declarations.get(file,[])) for file in unit['files'][:4]}
 
 UNIT_BYTES = 80 * 1024  # source rows of one opened unit: its own files whole while they fit, then neighbours as context
 
@@ -1692,7 +1701,7 @@ def _quick_overview(repo,request,language,invoke,cancelled,deadline,raw,resource
             own.setdefault(f,set()).update(range(a,b))
     for source in sorted(snapshots[0]['files'],key=lambda s:(s['file'] in neighbours,own_order.get(s['file'],len(own_order)),s['file'])) if whole else snapshots[0]['files']:
         lines=[row for row in source['lines'] if len(row['text'].strip())>=6]
-        cost=sum(_size([0,r['line'],r['text'].strip()[:200]])+8 for r in lines)
+        cost=sum(map(_row_cost,lines))
         evidence=anchors.get(source['file'],{})
         if whole and source['file'] not in neighbours and cost<=left:
             left-=cost;sampled=lines;cap=len(lines);width=200
@@ -1863,12 +1872,9 @@ def generate(value,task,request,executor,cancelled,deadline,check):
             except RunError:raise
             except (KeyError,TypeError,ValueError):raise InvalidClaim('An analysis claim did not match the task schema') from None
     def invoke(payload):
-        check();prompt=_encoded(payload)
-        if len(prompt.encode())>MAX_PROMPT_BYTES:raise RunError('source_too_large','An analysis context could not fit a bounded input')
-        with locked():
-            current=read(value['id']);stats=current.setdefault('input_stats',{'calls':0,'bytes':0,'max_prompt_bytes':0})
-            stats['calls']+=1;stats['bytes']+=len(prompt.encode());stats['max_prompt_bytes']=max(stats['max_prompt_bytes'],len(prompt.encode()))
-            write(current)
+        check();prompt=_encoded(payload);size=len(prompt.encode())
+        if size>MAX_PROMPT_BYTES:raise RunError('source_too_large','An analysis context could not fit a bounded input')
+        _count(value['id'],size)
         reply=executor(prompt,cancelled=cancelled,timeout=min(TASK_SECONDS,max(1,int(deadline-time.monotonic()))))
         check()
         return _result(reply)
@@ -1878,12 +1884,12 @@ def generate(value,task,request,executor,cancelled,deadline,check):
             try:
                 # Each scope supplies at most 4 × 24 line refs. Disjoint ranges
                 # make another scope's otherwise valid citation fail validation.
-                packet,finalize=_quick_overview(repo,request,value['lang'],None,cancelled,deadline,raw,target if not _is_unit(value,task['repository'],target) else None,ref_offset=i*100,unit=_plain_unit(value,task['repository'],target))
+                packet,finalize=_quick_overview(repo,request,value['lang'],None,cancelled,deadline,raw,target if not _plain_unit(value,task['repository'],target) else None,ref_offset=i*100,unit=_plain_unit(value,task['repository'],target))
             except RunError as error:
                 if not prepared or error.code!='scope_unavailable':raise
                 break
             candidate=[p for _,p,_ in prepared]+[packet]
-            if len(candidate)>RESOURCE_PACK_SIZE and not all(_is_unit(value,task['repository'],t) for t in task['pack_targets']):
+            if len(candidate)>RESOURCE_PACK_SIZE and not all(_plain_unit(value,task['repository'],t) for t in task['pack_targets']):
                 # An ordinary four-scope packet can carry eight endpoint pairs
                 # and 384 source rows. Extend only one-endpoint registrations
                 # without action/data traces, within the same evidence budget.
@@ -1936,6 +1942,8 @@ NOT_ANSWERED={'ko':'AI가 이 코드의 동작 과정을 답하지 않았다.',
 
 def _size(value):return len(json.dumps(value,ensure_ascii=False,separators=(',',':')).encode())
 
+def _row_cost(r):return _size([0,r['line'],r['text'].strip()[:200]])+8
+
 def _around(signals,file,limit):
     """Line spans of one file: its signal windows up to limit lines, else its first limit lines."""
     out=[];left=limit
@@ -1946,7 +1954,7 @@ def _around(signals,file,limit):
 
 def _spans(lines,signals,file,limit,budget):
     """The whole file when its rows fit budget, else its signal windows (_around)."""
-    if sum(_size([0,r['line'],r['text'].strip()[:200]])+8 for r in lines.get(file,[]))<=budget:return [(1,10**9)]
+    if sum(map(_row_cost,lines.get(file,[])))<=budget:return [(1,10**9)]
     return _around(signals,file,limit)
 
 def _rows(lines,picks,budget,refs):
@@ -1957,7 +1965,7 @@ def _rows(lines,picks,budget,refs):
         for row in lines.get(file,[]):
             text=row['text'].strip()[:200]
             if len(text)<6 or not any(a<=row['line']<=b for a,b in spans):continue
-            n=_size([0,row['line'],text])+8
+            n=_row_cost(row)
             if size+n>budget:break
             ref=len(refs)+1;refs[ref]={'file':file,'line':row['line'],'quote':text};rows.append([ref,row['line'],text]);size+=n
         if rows:out.append({'file':file,'lines':rows})
@@ -2112,7 +2120,7 @@ def run(run_id, executor=None):
                 # Acquiring this lock means the previous worker has gone.
                 # Its last model request may already have reached the provider.
                 if value.get('cancel_requested'):
-                    value.update(state='cancelled',finished_at=store.now());return write(value)
+                    return write(_cancelled(value))
                 return failure(value,'interrupted','Analysis worker stopped. Retry to finish missing tasks; saved results were retained')
             value.update(state='running',started_at=store.now(),launch_epoch=time.time());write(value)
         started=time.monotonic()
@@ -2124,11 +2132,7 @@ def run(run_id, executor=None):
                 executor=lambda prompt,**kwargs:cli_executor.execute(prompt,expected_account=value['account'],**kwargs)
             if (value.get('intent') or {}).get('task')=='full':
                 (_explain_unit if value['intent'].get('only') else _run_full)(run_id,executor,cancelled)
-                with locked():
-                    value=read(run_id)
-                    if value['cancel_requested']:raise Cancelled()
-                    value.update(state='completed',current_task=None,finished_at=store.now())
-                    return _seal(value)
+                return _complete(run_id)
             resource_run=(value.get('intent') or {}).get('task')=='resources'
             task_limit=len(value['tasks'])+1 if resource_run else MAX_TASKS
             deadline=started+(max(MAX_SECONDS,task_limit*TASK_SECONDS) if resource_run else MAX_SECONDS)
@@ -2144,11 +2148,7 @@ def run(run_id, executor=None):
                     if value.get('unavailable_resources'):
                         raise RunError('analysis_blocked','Saved all eligible resource explanations; '+str(len(value['unavailable_resources']))+' resource scopes had no eligible source evidence')
                     if plan['blocked']: raise RunError('analysis_blocked','Some analysis is blocked: '+str(plan['blocked'][0].get('reason','Review project settings')))
-                    with locked():
-                        value=read(run_id)
-                        if value['cancel_requested']: raise Cancelled()
-                        value.update(state='completed',current_task=None,finished_at=store.now())
-                        return _seal(value)
+                    return _complete(run_id)
                 task=plan['tasks'][0]
                 if resource_run and len(value['resource_targets'])>=RESOURCE_PACK_SIZE:
                     targets=[t['target'] for t in plan['tasks'][:SIMPLE_RESOURCE_PACK_SIZE] if t['repository']==task['repository']]
@@ -2196,7 +2196,7 @@ def run(run_id, executor=None):
                         rid=task['repository']
                         packed=json.loads(result)
                         for target,overview in packed['packed_overviews'].items():
-                            store_name='unit_overviews' if _is_unit(value,rid,target) else 'scope_overviews'
+                            store_name='unit_overviews' if _plain_unit(value,rid,target) else 'scope_overviews'
                             value.setdefault(store_name,{}).setdefault(rid,{})[target]={'repository':rid,**value['pins'][rid],**overview}
                             value['completed_tasks'].append({'repository':rid,'task':'overview','target':target})
                         value.update(state='running',current_task=None);write(value)
@@ -2205,7 +2205,7 @@ def run(run_id, executor=None):
                     if task['task']=='overview':
                         rid=task['repository']
                         overview={'repository':rid,**value['pins'][rid],**json.loads(result)}
-                        if task.get('target'):value.setdefault('unit_overviews' if _is_unit(value,rid,task['target']) else 'scope_overviews',{}).setdefault(rid,{})[task['target']]=overview
+                        if task.get('target'):value.setdefault('unit_overviews' if _plain_unit(value,rid,task['target']) else 'scope_overviews',{}).setdefault(rid,{})[task['target']]=overview
                         else:value.setdefault('overviews',{})[rid]=overview
                     else:_save(task,request,result)
                     value['completed_tasks'].append({k:task.get(k) for k in ('repository','task','target')})
@@ -2215,7 +2215,7 @@ def run(run_id, executor=None):
             with locked():
                 value=read(run_id)
                 if isinstance(error,Cancelled) or value['cancel_requested']:
-                    value.update(state='cancelled',finished_at=store.now(),error=None);return _seal(value)
+                    value['error']=None;return _seal(_cancelled(value))
                 # Never persist raw subprocess output (it may contain credentials/source).
                 code=getattr(error,'code',None) or 'analysis_failed'
                 message=str(error) if isinstance(error,(ValueError,RunError)) else 'Analysis could not finish. Retry to finish missing tasks; saved results were retained'
