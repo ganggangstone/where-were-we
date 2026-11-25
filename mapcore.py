@@ -334,6 +334,11 @@ def normalize_http_path(value):
     return re.sub(r"\$?\{[^}]*\}","{}",value).rstrip('/') or '/'
 
 
+def quote_near(lines, line, quote, min_len=6):
+    """The quote, ignoring whitespace, is on one of the lines within two of `line` (1-based)."""
+    q = "".join((quote or "").split())
+    return len(q) >= min_len and any(q in "".join(l.split()) for l in lines[max(0, line - 3):line + 2])
+
 def backend_test_links(be,files,read_source,conf,imports_reader=None,module_resolver=None,normalize_path=normalize_http_path):
     """Apply one set of HTTP-pattern and verified-record rules to any source language."""
     be_index=defaultdict(list)
@@ -372,8 +377,8 @@ def backend_test_links(be,files,read_source,conf,imports_reader=None,module_reso
     stale = 0
     for rec in conf["records"]:  # 에이전트가 하나씩 넘긴 것. 이 커밋에서도 그 줄(±2)에 그 글자가 있어야 센다
         r = next((r for r in be if f"{r['file']}::{r.get('function')}" == rec.get("route")), None)
-        lines = (read_source(rec.get("file", "")) or "").splitlines(); q = re.sub(r"\s+", "", rec.get("quote") or ""); ln = rec.get("line") or 0
-        if r and len(q) >= 6 and any(q in re.sub(r"\s+", "", l) for l in lines[max(0, ln - 3):ln + 2]):
+        lines = (read_source(rec.get("file", "")) or "").splitlines()
+        if r and quote_near(lines, rec.get("line") or 0, rec.get("quote")):
             hits[(r["file"], r["line"])].add(rec["file"])
         else:
             stale += 1

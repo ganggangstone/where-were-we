@@ -299,8 +299,7 @@ def record_test(route: str, file: str, line: int, quote: str, project: str = "",
     rs = [r for r in m.m.get("backend_routes", []) if r["method"] == meth.upper() and r["path"] == path.strip() and r.get("function")]
     if len(rs) != 1: return f"'{route}' 에 맞는 서버 기능이 {len(rs)}개다. find 로 주소를 확인한다."
     src = subprocess.run(["git", "-C", m.m["repo"], "show", f"{m.m['commit']}:{file}"], capture_output=True, text=True).stdout.splitlines()
-    q = "".join(quote.split())
-    if len(q) < 6 or not any(q in "".join(l.split()) for l in src[max(0, line - 3):line + 2]):
+    if not mapcore.quote_near(src, line, quote):
         return f"{file}:{line} 근처에 그 글자가 없다(지도 기준 커밋 {m.m['commit']}). 저장하지 않았다."
     pth = os.path.join(home, "tests.json"); c = json.load(open(pth)) if os.path.exists(pth) else {}
     rec = {"route": f"{rs[0]['file']}::{rs[0]['function']}", "file": file, "line": line, "quote": quote}

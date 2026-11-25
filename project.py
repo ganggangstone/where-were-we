@@ -787,8 +787,7 @@ def record_test(name,rid,route,file,line,quote):
         if len(hits)!=1:raise ValueError('Choose a unique request in this repository')
         source_file=file[len(repo['id'])+1:] if file.startswith(repo['id']+'/') else file
         result=subprocess.run(['git','-C',repo['path'],'show',m['commit']+':'+source_file],capture_output=True,text=True,check=True)
-        q=''.join(quote.split());lines=result.stdout.splitlines()
-        if len(q)<6 or line<1 or not any(q in ''.join(v.split()) for v in lines[max(0,line-3):line+2]):raise ValueError('Test evidence does not match this repository snapshot')
+        if line<1 or not __import__('mapcore').quote_near(result.stdout.splitlines(),line,quote):raise ValueError('Test evidence does not match this repository snapshot')
         value=raw.get('tests') or {};entry={'route':hits[0]['file']+'::'+hits[0]['function'],'file':source_file,'line':line,'quote':quote}
         if entry not in value.setdefault('records',[]):value['records'].append(entry)
         raw['tests']=value

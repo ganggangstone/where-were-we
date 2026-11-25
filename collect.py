@@ -181,11 +181,10 @@ if os.path.exists(sys_path):
         elif isinstance(x, list):
             for v in x: yield from walk(v)
     jpath = os.path.join(HOME, "jobs.json"); jobs = json.load(open(jpath)) if os.path.exists(jpath) else None
-    norm = lambda t: "".join((t or "").split())
     for ev in [*walk(system), *(walk(jobs) if jobs else [])]:
         if "quote" not in ev or ev.get("repo") or not isinstance(ev.get("line"), int): continue  # 다른 저장소의 근거는 대조하지 않는다
         lines = cache.setdefault(ev["file"], source_at(ev["file"]).splitlines())
-        ev["ok"] = any(norm(ev["quote"]) in norm(l) for l in lines[max(0, ev["line"] - 3):ev["line"] + 2])
+        ev["ok"] = mapcore.quote_near(lines, ev["line"], ev["quote"], min_len=0)
         n += 1; miss += not ev["ok"]
     if jobs: json.dump(jobs, open(jpath, "w"), ensure_ascii=False, indent=1)
     # 서버 말고 DB를 직접 쓰는 프로그램(code 경로가 적힌 상자)이 닿는 테이블. 그 파일들과, 거기서 가져다 쓰는 서버 services 모듈 한 단계에서 모델 이름을 찾는다.
