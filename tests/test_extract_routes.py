@@ -63,6 +63,16 @@ class RouteFiles(unittest.TestCase):
         labels = [a['label'] for s in m['screens'] for a in s['actions']]
         self.assertEqual(labels, ['', '', 'Filter', 'Save draft'])
 
+    def test_buttons_named_in_comments_are_not_actions_and_entities_are_decoded(self):
+        m = extract({
+            'web/src/App.tsx': "import { Route, Routes } from 'react-router-dom'\nimport Page from './Page'\nexport default () => <Routes><Route path=\"/\" element={<Page />} /></Routes>\n",
+            'web/src/Page.tsx': "// The tile is a <button> so siblings hold the menu.\nimport x from './x'\n"
+                                "export default function Page(){ return <div>\n"
+                                "{/* a <button> cannot nest */}\n"
+                                "<button onClick={() => go()}>R&amp;D room</button>\n</div> }\n",
+        })
+        self.assertEqual([a['label'] for s in m['screens'] for a in s['actions']], ['R&D room'])
+
     def test_route_objects_vue_router_and_next_pages(self):
         m = extract({
             'client/src/router.js': "import { createRouter } from 'vue-router'\nimport Cart from '@/views/Cart.vue'\n"

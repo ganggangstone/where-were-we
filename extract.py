@@ -4,7 +4,7 @@
 사용: extract.py <저장소 경로> <ref> [출력 json]
 저장소는 체크아웃을 건드리지 않고 `git show <ref>:<path>` 로만 읽는다.
 """
-import fnmatch, functools, json, os, re, subprocess, sys
+import fnmatch, functools, html, json, os, re, subprocess, sys
 from collections import defaultdict
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import mapcore
@@ -339,7 +339,7 @@ def jsx_text(inner):
         depth += ch == "{"
         if not depth: plain.append(ch)
         depth -= ch == "}" and depth > 0
-    parts = [" ".join(t.split()) for t in JSX_TEXT_RE.findall(">" + "".join(plain) + "<")]
+    parts = [" ".join(html.unescape(t).split()) for t in JSX_TEXT_RE.findall(">" + "".join(plain) + "<")]
     parts = [t for t in parts if re.search(r"\w", t)]  # 글자·숫자가 없는 조각(":", "·")은 버튼 글자가 아니다
     return " ".join(parts)
 
@@ -465,6 +465,11 @@ assert route_match("/admin/:p", [{"path": "/admin/users"}]) == "/admin/users"
 assert route_match("/admin/:p", [{"path": "/admin/users"}, {"path": "/admin/usage"}]) is None
 
 
+def in_comment(src, st):
+    """태그가 // 줄 주석이나 /* */ 주석 안에 적힌 글자인지."""
+    return "//" in src[src.rfind("\n", 0, st) + 1:st] or src.rfind("/*", 0, st) > src.rfind("*/", 0, st)
+
+
 def actions_in(file, fns, screens):
     """파일 안의 버튼·링크·navigate 를 동작 목록으로."""
     src = show(file) or ""
@@ -479,6 +484,7 @@ def actions_in(file, fns, screens):
     out = []
     for m in TAG_RE.finditer(src):
         st = m.start()
+        if in_comment(src, st): continue
         gt = src.find(">", st)
         if gt < 0: continue
         open_tag = src[st:gt + 1]
@@ -507,6 +513,7 @@ def actions_in(file, fns, screens):
                     "to_raw": " ".join(nav.split()) if nav else None, "file": file, "line": line})
     for m in re.finditer(r"<(?:Link|NavLink)\b", src):
         st = m.start(); gt = src.find(">", st)
+        if in_comment(src, st): continue
         open_tag = src[st:gt + 1]
         while open_tag.count("{") > open_tag.count("}"):
             gt = src.find(">", gt + 1); open_tag = src[st:gt + 1]
