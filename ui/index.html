@@ -1918,7 +1918,7 @@ function lanesView(y, near) {
   const card = (n) => { const o = ORIGIN[n.origin], lock = (n.unknown || []).some(u => u.needs === 'ops');
     return `<div class="card node ${n.kind} ${n.id === S.node ? 'sel' : ''} ${S.node && !near.has(n.id) && n.id !== S.node ? 'dim' : ''}" data-node="${esc(n.id)}" data-w="${esc(n.id)}" title="${esc(n.what)}"><div class="nm">${esc(plainName(n))}${lock ? ' 🔒' : ''}</div><div class="s one">${esc(n.what)}</div>${o && n.origin !== 'repo' && n.kind !== 'store' ? `<div class="meta"><span class="pill ${o[1]}">${tr(o[0])}</span></div>` : ''}</div>`; };
   const count = order.filter(id => y.nodes.some(n => (n.repository || '') === id)).length + (y.externals.length ? 1 : 0);
-  let h = `<div class="sysrow"><div class="lanes" id="sys" style="grid-template-columns:repeat(${count}, minmax(0, 1fr))">${WIRES}`;
+  let h = `<div class="sysrow"><div class="lanes" id="sys">${WIRES}`;
   for (const id of order) { const ns = y.nodes.filter(n => (n.repository || '') === id); if (!ns.length) continue;
     h += `<section class="lane"><h4 class="zone">${esc(id ? connectionDisplayName(id) : S.project || '')}</h4>${ns.map(card).join('')}</section>`; }
   if (y.externals.length) h += `<section class="lane ext"><h4 class="zone">${tr('바깥 서비스')} ${y.externals.length}</h4>${y.externals.map(x => { const users = y.nodes.filter(n => (n.uses || []).includes(x.id));
