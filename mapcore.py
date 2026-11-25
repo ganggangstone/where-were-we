@@ -476,6 +476,8 @@ _SAVED_RESULT_LANGUAGE = {
 # The reader is not a developer; technical names stay in the evidence. WORDING marks results asked with this instruction:
 # a saved explanation with another value is asked again.
 WORDING = 4
+# Bumped when only the request-steps instruction changes (lanes); saved steps with another value are asked again.
+STEPS_WORDING = 2
 PLAIN = ('Write for a non-developer: say what each part does for its users or the business; never put file or folder paths, '
          'function or class names, HTTP methods, URL paths, the words endpoint/route/API, library names, hashes, numbers such as (1)/(2) '
          'or internal codes in names or explanations (they belong in evidence and quotes); use plain declarative sentences. ')

@@ -277,7 +277,7 @@ def apply_result(raw,repo,refs,branch,lang,response,commit,layout,configuration=
     try:data=json.loads(text)
     except (ValueError,TypeError) as error:raise ValueError('AI output was not valid JSON; previous map was preserved') from error
     m,flows=normalize(layout_filter(data,layout),repo,commit,refs[branch]);m['analysis'].update(language=lang,configuration=configuration)
-    meta={'source':'ai','provider':provider,'commit':commit,'branch':branch,'language':lang,'configuration':configuration,'wording':mapcore.WORDING,'generated_at':m['analysis']['generated_at']}
+    meta={'source':'ai','provider':provider,'commit':commit,'branch':branch,'language':lang,'configuration':configuration,'wording':mapcore.WORDING,'steps_wording':mapcore.STEPS_WORDING,'generated_at':m['analysis']['generated_at']}
     for flow in flows['routes'].values():flow.update(meta)
     if flows['routes']:m['task_outputs']={'flows':flows}
     conf={**mapcore.TESTS_DEFAULT,'records':[],**(raw.get('tests') or {})}
@@ -582,7 +582,7 @@ def merge(raw,repo,branch,lang,data,head,configuration,sc,catalog,provider='mcp-
     models.update({t:t for r in all_routes if r.get('source')=='ai' for t in r.get('tables',[])})
     m=assemble(path,head,repo['refs'].get(branch) or prev.get('ref'),all_screens,kept_functions+got['api_functions']+basic_functions,all_routes,models,analysis)
     m['basic_drop']=sorted((set(prev.get('basic_drop') or []) if (prev.get('analysis') or {}).get('source')=='ai' else set())|(drop&{x['id'] for x in basic['backend_routes']+basic['screens']}))
-    meta={'source':'ai','provider':provider,'commit':head,'branch':branch,'language':lang,'configuration':configuration,'wording':mapcore.WORDING,'generated_at':analysis['generated_at']}
+    meta={'source':'ai','provider':provider,'commit':head,'branch':branch,'language':lang,'configuration':configuration,'wording':mapcore.WORDING,'steps_wording':mapcore.STEPS_WORDING,'generated_at':analysis['generated_at']}
     flows={key:{**flow,**meta,'hash':hashlib.sha1('\n'.join(cache[flow['file']]).encode()).hexdigest()[:12]} for key,flow in got['flows'].items()}
     outputs=carry(raw,branch,prev,m,flows,path,head)
     if outputs:m['task_outputs']=outputs
@@ -782,6 +782,8 @@ def task_request(name,task,branch='dev',lang='ko',repository='',target='',overvi
     if lang not in ('ko','en'):raise ValueError('Choose ko or en')
     with project.locked(name):
         repo,raw,rid,commit=task_context(name,task,branch,repository)
+        # The whole-project map names a screen /@code/path; the code's own map knows it as /path.
+        if task=='steps' and rid:target=project.local_screen(rid,target)
         inputs=task_input(raw,task,branch,target,repo['path'],commit)
         args={'project':name,'repository':rid,'task':task,'branch':branch,'lang':lang,'target':target,
               'commit':commit,'configuration':project.fingerprint(repo),'snapshot':task_snapshot(raw,task,branch)}
@@ -790,7 +792,10 @@ def task_request(name,task,branch='dev',lang='ko',repository='',target='',overvi
             'groups':'Group all supplied screens exactly once by user activity. Keep screen paths and route keys unchanged. Name mounted requests too. Use only supplied metadata, not source code. When input has changed_screens, saved groups stay: return "keep":"previous", place only the changed_screens (into previous_groups names or new groups), and name only them and new_routes.',
             'system':'Describe separately running programs, users, stores and copied code, their connections and external services. Each node, link, external and other item needs ev evidence. Give repository-relative code directories for each program. Include jobs for every program with repository code, including the API server and frontend: explain its purpose, trigger and steps with evidence within its code directories. made_by evidence may link supplied route keys only when supported by source. Keep existing node IDs for the same program. Use jobs:[] only when no jobs can be established and explain missing knowledge in unknown. Keep unknown operational facts in unknown. Do not invent nodes, jobs or connections. When changed_files is a list, read those changes first: if none adds, removes or changes a program, connection, store or external service, return only {"keep":"all","accounted":[{"file":path,"kind":"none"} for every changed file]}; otherwise return the full schema.',
             'jobs':'Describe jobs of the selected node. When the code establishes none, return jobs:[] with unknown explaining why. Trigger and step evidence must be within its code directories. made_by evidence identifies server code that creates the trigger; attach existing route keys only when the relation is supported. Unresolved producers stay unknown; never infer a relation from a shared table name alone.',
-            'steps':'Describe ordered request steps for the supplied route keys only. Each step needs its own file, exact line and quote. Include service calls and return values, mark uncertain interpretation. Keep route keys unchanged.'}[task]
+            'steps':'Describe ordered request steps for the supplied route keys only. Each step needs its own file, exact line and quote. Include service calls and return values. '
+                     'Give each step the lane where it happens, written exactly as one of these words in any language: "화면" (something the user sees or does on the screen), "서버" (work the server does, such as checks and calculations), '
+                     '"저장소" (reading or writing stored data), "외부" (calling an outside service). '
+                     'Set uncertain:true only when the quoted lines leave the meaning of that step open; a step the quote states directly is not uncertain. Keep route keys unchanged.'}[task]
         schema=copy.deepcopy(TASK_SCHEMAS[task])
         if overview and task=='system':
             schema['nodes'][0].pop('jobs',None)
@@ -835,7 +840,7 @@ def task_result(raw,task,branch,target,data,repo,commit,lang,configuration=None,
                 result.append({'text':item['text'],'needs':item.get('needs') if item.get('needs') in ('ops','read') else 'read'})
             else:raise ValueError('Use text and needs for unknown facts')
         return result
-    meta={'source':'ai','provider':provider,'commit':commit,'branch':branch,'language':lang,'configuration':configuration,'wording':mapcore.WORDING,'generated_at':project.now()}
+    meta={'source':'ai','provider':provider,'commit':commit,'branch':branch,'language':lang,'configuration':configuration,'wording':mapcore.WORDING,'steps_wording':mapcore.STEPS_WORDING,'generated_at':project.now()}
     updated=copy.deepcopy(raw)
     def program_jobs(node,payload):
         code=node['code'];jobs=[]

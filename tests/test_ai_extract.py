@@ -274,6 +274,14 @@ class Analysis(unittest.TestCase):
         self.assertEqual(project.states('demo')['service']['generation'],before)
         with self.assertRaisesRegex(ValueError,'target'):ai_extract.task_request('demo','steps','dev','en','service','@routes:["other.go::SaveItem"]')
         with self.assertRaisesRegex(ValueError,'node'):ai_extract.task_request('demo','jobs','dev','en','service','missing')
+        # A screen named by its whole-project path asks for the same steps as the code's own path.
+        def outcome(target):
+            try:return ai_extract.task_request('demo','steps','dev','en','service',target)['record_arguments']['target']
+            except ValueError as error:return str(error)
+        self.assertEqual(outcome('/@service/items'),outcome('/items'))
+        self.assertNotIn('known screen',outcome('/@service/items'))
+        prompt=ai_extract.task_request('demo','steps','dev','en','service','/items')['prompt']
+        self.assertIn('"저장소" (reading or writing stored data)',prompt);self.assertIn('Set uncertain:true only when',prompt)
         self.submit_task('groups',{'groups':[{'name':'First','screens':['/items']}],'names':{},'request_names':{}})
         stale=ai_extract.task_request('demo','groups','dev','en','service')
         self.submit_task('groups',{'groups':[{'name':'Second','screens':['/items']}],'names':{},'request_names':{}})
@@ -363,9 +371,12 @@ class Analysis(unittest.TestCase):
         # Steps and jobs written with an older wording instruction are asked again.
         import mapcore
         raw['dev']['analysis']['stale']=False;flow={'source':'ai','commit':raw['dev']['commit'],'language':'ko'}
-        raw['dev']['task_outputs']={'flows':{'routes':{'a::f':flow,'b::g':{**flow,'wording':mapcore.WORDING}}}}
+        raw['dev']['task_outputs']={'flows':{'routes':{'a::f':flow,'b::g':{**flow,'wording':mapcore.WORDING,'steps_wording':mapcore.STEPS_WORDING}}}}
         steps=project.analysis_results(raw,'dev')['steps']
         self.assertEqual((steps['a::f']['stale'],steps['b::g']['stale']),(True,False))
+        # A new steps instruction (lanes) asks saved steps again without touching the other wording.
+        raw['dev']['task_outputs']['flows']['routes']['b::g']['steps_wording']=mapcore.STEPS_WORDING-1
+        self.assertTrue(project.analysis_results(raw,'dev')['steps']['b::g']['stale'])
 
     def test_manual_architecture_proposal_is_reported_as_separately_saved(self):
         raw={'dev':{'commit':self.commit,'task_outputs':{'system':{'nodes':[]},'system.ai':{

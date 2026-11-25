@@ -311,7 +311,7 @@ def analysis_results(raw,branch):
         stamp={key:value.get(key) for key in ('generated_at','source','provider','commit','branch','language')}
         return {'version':hashlib.sha256(json.dumps(stamp,sort_keys=True,ensure_ascii=False).encode()).hexdigest(),
                 'commit':value.get('commit'),'generated_at':value.get('generated_at'),'language':value.get('language'),'configuration':value.get('configuration'),
-                'stale':bool(value.get('stale') or worded and value.get('wording')!=mapcore.WORDING or (current.get('analysis') or {}).get('stale') or
+                'stale':bool(value.get('stale') or worded and (value.get('wording')!=mapcore.WORDING or value.get('steps_wording',1)!=mapcore.STEPS_WORDING) or (current.get('analysis') or {}).get('stale') or
                              value.get('commit') and current.get('commit') and not
                              (str(value['commit']).startswith(current['commit']) or str(current['commit']).startswith(value['commit'])))}
     return {'analysis':metadata((raw.get(branch) or {}).get('analysis')),
@@ -338,6 +338,12 @@ def qfile(rid,value):return rid+'/'+value if value else value
 def qscreen(rid,value):
     if not value:return value
     return '/m/@'+rid+(value[2:] or '/') if value=='/m' or value.startswith('/m/') else '/@'+rid+(value if value.startswith('/') else '/'+value)
+
+def local_screen(rid,value):
+    """A full-map screen path (/@rid/x, /m/@rid/x) of this code as the code's own path; other values unchanged."""
+    for head,base in (('/m/@'+rid,'/m'),('/@'+rid,'')):
+        if value==head or value.startswith(head+'/'):return base+(value[len(head):] or ('' if base else '/'))
+    return value
 
 def qualify_map(source,repo,table_ids):
     m=copy.deepcopy(source or empty_map());rid=repo['id'];m['repository']=rid
