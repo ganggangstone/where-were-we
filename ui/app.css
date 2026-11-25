@@ -237,6 +237,9 @@ details.list-panel > summary { margin:var(--space-0); color:var(--color-text); f
 .route-areas { display:grid; grid-template-columns:repeat(auto-fill,minmax(var(--size-column),1fr)); gap:var(--space-1) var(--space-4); margin-top:var(--space-2) } .route-area[open] { grid-column:1 / -1 } .route-area > summary { margin:var(--space-0) }
 .lead { font:var(--font-heading); color:var(--color-text); margin:var(--space-0) var(--space-0) var(--space-4) }
 .wire.set { stroke-dasharray:var(--space-1) var(--space-2) } .legend-sample.set { border-top-style:dotted }
+.lanes { position:relative; display:grid; grid-template-columns:repeat(auto-fit, minmax(var(--size-column), 1fr)); gap:var(--space-8) calc(var(--space-8) * 1.5); align-items:start; max-height:70vh; overflow:auto; padding:var(--space-1) }
+.lane { display:flex; flex-direction:column; gap:var(--space-3); padding:var(--space-3); border:var(--border-hairline); border-radius:var(--radius-card); background:var(--color-bg-group) } .lane .zone { margin:var(--space-0) }
+.lane .card { padding:var(--space-3) } .lane .card .s.one { margin-top:var(--space-1); white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
 .graph { position:relative; flex:none } .graph .card { position:absolute; width:var(--size-node); margin:var(--space-0); z-index:1 }
 .extcol { display:grid; grid-template-columns:repeat(auto-fill, minmax(var(--size-column), 1fr)); gap:var(--space-3); margin-top:var(--space-6) } .extcol .zone { grid-column:1 / -1 }
 .prompt { white-space:pre-wrap; word-break:break-all; background:var(--color-bg-group); border:var(--border-hairline); border-radius:var(--radius-card); padding:var(--space-4); margin-top:var(--space-4); user-select:text }

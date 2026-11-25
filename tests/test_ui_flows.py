@@ -1334,6 +1334,23 @@ class Flows(unittest.TestCase):
  assert(!window.calls.some(c=>c.command==='analysis_run_start'),'Inventory needs no model turn');
 ''')
 
+    def test_ai_structure_draws_one_lane_per_code_and_outside_services_apart(self):
+        self.check(r'''
+ S.branchDetails=null;S.proposal=null;S.view='sys';S.node=null;
+ S.system={nodes:[{id:'web::p1',repository:'web',kind:'program',origin:'repo',name:'[web] Screens',what:'Pages people use',uses:['web::x1']},
+  {id:'web::p2',repository:'web',kind:'program',origin:'repo',name:'[web] Server',what:'Answers requests',uses:[]},
+  {id:'api::p1',repository:'api',kind:'program',origin:'repo',name:'[api] Worker',what:'Runs jobs',uses:['web::x1']}],
+  links:[{from:'web::p1',to:'web::p2',label:'Screen requests matched',sure:true,ev:[]},{from:'api::p1',to:'web::p2',label:'Configured API destination',sure:'doc',ev:[]}],
+  externals:[{id:'web::x1',name:'Example AI',what:'Writes text'}],others:[],unknown:[]};
+ const m=M();delete m._local;S.projectInfo={...(S.projectInfo||{}),repositories:[{id:'web',name:'web'},{id:'api',name:'api'}]};render();
+ const lanes=[...document.querySelectorAll('#sys .lane')];
+ assert(lanes.length===3 && lanes.map(l=>l.querySelector('.zone').textContent).join('|')==='web|api|'+tr('바깥 서비스')+' 1','One titled lane per code and one for outside services');
+ assert([...document.querySelectorAll('#sys .lane .nm')].every(n=>!n.textContent.startsWith('[')),'Cards inside a lane drop the code prefix');
+ assert(!document.querySelector('#sys .pill'),'No unexplained chip on the cards');
+ assert($('map').querySelector('p.lead[data-ai-system]') && !/해요/.test(main()),'A plain sentence above the picture');
+ assert(document.querySelectorAll('#sys path.wire').length===2 && document.querySelector('#sys path.wire.set'),'Both lines are drawn, the configured one dotted');
+''')
+
     def test_structure_shows_a_local_picture_before_analysis(self):
         self.check(r'''
  const idx=(repository,files,imports=[],routes=0)=>({repository,commit:'aaaaaaaa1111',version:1,coverage:{indexed_files:files.length,candidate_files:files.length,languages:{python:{indexed_files:files.length,candidate_files:files.length}}},

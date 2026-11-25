@@ -430,6 +430,7 @@ Object.assign(UI_EN,{'영역 AI 설명 (베타)':'Area AI explanations (beta)','
 Object.assign(UI_EN,{"표시 버전":"Map version","이 코드만 · 서버 연결 유지":"This code only · server links kept","코드 간 서버 연결 가능":"Code can link to servers","확인된 길 없음 · 직접 주소로 열리거나 미연결":"No links found · direct URL or unconnected","코드·지도 유지":"Code and map kept","Claude Code 분석 또는 AI 요청":"Claude Code analysis or AI request"});
 Object.assign(UI_EN,{'베타':'Beta','자동 분석':'Automatic analysis','AI 채팅에 요청':'Ask in your AI chat','요금·한도: 연결한 AI':'Rates and limits: your AI'});
 Object.assign(UI_EN,{'서버가 받는 주소 목록이다. 어떤 주소를 어느 파일이 처리하는지 찾을 때 연다.':'Addresses the server accepts. Open it to find which file handles an address.','개발자용: 파일끼리 서로 가져다 쓰는 관계다. 파일을 고치기 전에 어디에 닿는지 볼 때 연다.':'For developers: which files use which. Open it before changing a file to see what it touches.','README 설명과 패키지 정보다. 이 코드가 무엇을 하는지 글로 확인할 때 연다.':'README text and package details. Open it to read what this code does.','Git이 관리하는 모든 파일이다. 폴더별 파일 수를 보거나 파일을 열 때 연다.':'Every file Git tracks. Open it to count files per folder or open a file.','화면 동작과 서버 주소를 이어서 찾은 기능이다. 기능을 누르면 요청이 어디서 시작해 어디로 가는지 보인다.':'Features found by joining screen actions to server addresses. Choose one to see where its request starts and ends.','한 코드가 다른 코드의 서버 주소로 보내는 요청이다.':'Requests one code sends to another code’s server addresses.','맨 위 폴더':'top folder','연결 설정에서 지정':'Set when connecting','코드에서 찾은 연결':'Found in code','가져다 씀':'Uses','연결한 코드마다 상자 하나다. 선은 한 코드가 다른 코드에 요청을 보내는 곳이다. 「분석하기」를 누르면 AI가 이름과 설명을 붙인다.':'Each box is one connected code. A line means one code sends requests to another. 「Analyze」 adds names and explanations.','이 코드의 파일을 종류별로 나눈 그림이다. 「분석하기」를 누르면 AI가 부분마다 이름과 설명을 붙인다.':'This picture sorts the files of this code by kind. 「Analyze」 adds a name and an explanation to each part.','화면 수':'Screens','서버 기능 수':'Server functions','자세한 목록':'Detailed lists','분석하기':'Analyze','「분석하기」가 서비스 구성을 만든다.':'「Analyze」 builds the architecture.','코드가 부름':'Code calls','같은 파일을 다른 버전으로 씀':'Uses another version of the same file','읽기 규칙':'reading rules','읽은 언어 없음':'No language read','JS/TS 상대 경로 import·재내보내기':'JS/TS relative imports and re-exports','이 코드에서 화면(페이지 주소)을 찾지 못했다.':'No screens (page addresses) were found in this code.','화면을 기능 묶음으로 나누지 않았다. 「분석하기」가 묶음을 만든다.':'Screens are not grouped into features yet. 「Analyze」 makes the groups.','이 코드에서 화면을 찾지 못해 묶을 화면이 없다.':'No screens were found in this code, so there is nothing to group.','이 코드에서 데이터 모델이나 테이블을 찾지 못했다.':'No data models or tables were found in this code.'});
+Object.assign(UI_EN,{'코드마다 칸 하나다. 칸 안의 상자는 AI가 나눈 부분이고, 실선은 코드에서 찾은 연결, 점선은 연결 설정에서 지정한 연결이다.':'One column per code. Boxes inside are the parts the AI found; a solid line is a link found in code, a dotted line is one set in the connection settings.'});
 const UI_PATTERN = new RegExp(Object.keys(UI_EN).sort((a, b) => b.length - a.length).map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'g');
 function tr(text) { return S.lang === 'en' ? String(text).replace(UI_PATTERN, match => UI_EN[match]) : String(text); }
 function ui(parts, ...values) { return parts.reduce((out, part, i) => out + tr(part) + (i < values.length ? values[i] : ''), ''); }
@@ -475,7 +476,7 @@ const displayIds = (text) => String(text ?? '').replace(/\[([a-z][a-z0-9-]*)\]/g
 // 수집기가 만든 고정 영어 문구만 언어에 맞춘다. 같은 글자라도 AI·사용자가 적은 값(다른 종류·근거 있음)은 그대로 둔다.
 // 연결 설정(api_targets)에서 그은 선: 코드에서 찾은 선이 아니라 사용자가 연결할 때 정한 것이다.
 const setLink = (l) => l.label === 'Configured API destination' && l.sure === 'doc' && !l.ev?.length;
-const linkLabel = (l) => setLink(l) || l.label === 'Requests matched across codes' && l.sure === true ? tr('요청을 보냄') : l.label;
+const linkLabel = (l) => setLink(l) || ['Requests matched across codes', 'Screen requests matched'].includes(l.label) && l.sure === true ? tr('요청을 보냄') : l.label;
 const nodeWhat = (n) => { const hit = n.kind === 'repository' && n.origin === 'repo' && String(n.what).match(/^Repository · (\d+) screens$/); return hit ? ui`코드 · 화면 ${hit[1]}개` : n.what; };
 const PR_PLACES = { '지도와 연결하지 못한 변경':'Changes without a map match', '여러 화면에 똑같이 들어 있는 부품':'Parts shared by several screens', '앱 전체에 걸친 화면 부품':'App-wide screen parts', '문서':'Docs', '배포·CI':'Deployment · CI' };
 const tableName = (t) => { const i = String(t).indexOf('::'); return i < 0 ? t : t.slice(i + 2) + (S.repository === t.slice(0, i) ? '' : ' · ' + (t.startsWith('shared::') ? tr('함께 쓰는 데이터') : connectionDisplayName(t.slice(0, i)))); };
@@ -1907,6 +1908,21 @@ function bindStructureIndex() {
   });
   graph.querySelectorAll('[data-url]').forEach(a=>{if(a.tagName==='A')a.href=a.dataset.url;a.onclick=e=>{e.preventDefault();e.stopPropagation();invoke('open_url',{url:a.dataset.url});};});
 }
+// 칸 제목이 코드 이름이므로 상자 이름 앞의 [코드 이름]은 뗀다.
+const plainName = (n) => String(n.name).replace(/^\[[^\]]+\]\s*/, '');
+// AI 구성 그림: 코드마다 칸 하나, 칸 안에 짧은 상자. 바깥 서비스는 마지막 칸에 따로 둔다. 긴 설명은 옆 칸(sysInspector)에 있다.
+function lanesView(y, near) {
+  const order = [...new Set([...(S.projectInfo?.repositories || []).map(r => r.id), ...y.nodes.map(n => n.repository || '')])];
+  const card = (n) => { const o = ORIGIN[n.origin], lock = (n.unknown || []).some(u => u.needs === 'ops');
+    return `<div class="card node ${n.kind} ${n.id === S.node ? 'sel' : ''} ${S.node && !near.has(n.id) && n.id !== S.node ? 'dim' : ''}" data-node="${esc(n.id)}" data-w="${esc(n.id)}" title="${esc(n.what)}"><div class="nm">${esc(plainName(n))}${lock ? ' 🔒' : ''}</div><div class="s one">${esc(n.what)}</div>${o && n.origin !== 'repo' && n.kind !== 'store' ? `<div class="meta"><span class="pill ${o[1]}">${tr(o[0])}</span></div>` : ''}</div>`; };
+  const count = order.filter(id => y.nodes.some(n => (n.repository || '') === id)).length + (y.externals.length ? 1 : 0);
+  let h = `<div class="sysrow"><div class="lanes" id="sys" style="grid-template-columns:repeat(${count}, minmax(0, 1fr))">${WIRES}`;
+  for (const id of order) { const ns = y.nodes.filter(n => (n.repository || '') === id); if (!ns.length) continue;
+    h += `<section class="lane"><h4 class="zone">${esc(id ? connectionDisplayName(id) : S.project || '')}</h4>${ns.map(card).join('')}</section>`; }
+  if (y.externals.length) h += `<section class="lane ext"><h4 class="zone">${tr('바깥 서비스')} ${y.externals.length}</h4>${y.externals.map(x => { const users = y.nodes.filter(n => (n.uses || []).includes(x.id));
+    return `<div class="card node external ${S.node && !users.some(n => n.id === S.node) ? 'dim' : ''}" title="${esc(x.what)}"><div class="nm">${esc(x.name)}</div><div class="s one">${ui`쓰는 곳: `}${users.map(n => esc(plainName(n))).join(', ') || tr('없음')}</div></div>`; }).join('')}</section>`;
+  return h + '</div></div>';
+}
 function sysView(m) {
   let y = S.system; const local = shownSystem(m) !== y;
   if (local) y = shownSystem(m);
@@ -1918,21 +1934,19 @@ function sysView(m) {
   // 범례에는 이 그림에 실제로 나온 표시만 둔다.
   const locked = y.nodes.some(n => (n.unknown || []).some(u => u.needs === 'ops'));
   const samples = [LINKS.some(l => l.style !== 'copy' && !setLink(l)) ? ['calls', local ? '코드에서 찾은 연결' : '코드가 부름'] : null, LINKS.some(setLink) ? ['set', '연결 설정에서 지정'] : null, LINKS.some(l => l.style === 'copy') ? ['shared', '같은 파일을 다른 버전으로 씀'] : null].filter(Boolean);
-  const lead = local ? `<p class="lead" data-local-system>${tr(y.nodes[0]?.id.startsWith('kind:') ? '이 코드의 파일을 종류별로 나눈 그림이다. 「분석하기」를 누르면 AI가 부분마다 이름과 설명을 붙인다.' : '연결한 코드마다 상자 하나다. 선은 한 코드가 다른 코드에 요청을 보내는 곳이다. 「분석하기」를 누르면 AI가 이름과 설명을 붙인다.')}</p>` : '';
+  const lead = local ? `<p class="lead" data-local-system>${tr(y.nodes[0]?.id.startsWith('kind:') ? '이 코드의 파일을 종류별로 나눈 그림이다. 「분석하기」를 누르면 AI가 부분마다 이름과 설명을 붙인다.' : '연결한 코드마다 상자 하나다. 선은 한 코드가 다른 코드에 요청을 보내는 곳이다. 「분석하기」를 누르면 AI가 이름과 설명을 붙인다.')}</p>`
+    : `<p class="lead" data-ai-system>${tr('코드마다 칸 하나다. 칸 안의 상자는 AI가 나눈 부분이고, 실선은 코드에서 찾은 연결, 점선은 연결 설정에서 지정한 연결이다.')}</p>`;
   let h = lead + `<div class="legend"><span>${tr('구성 요소')} <b class="strong">${y.nodes.filter(n => n.kind !== 'user').length}</b>${y.externals.length ? ` · ${tr('바깥 서비스')} <b class="strong">${y.externals.length}</b>` : ''}</span>
     ${samples.length ? lineLegend(samples) : ''}${locked ? `<span class="s">🔒 ${tr(NEED.ops)}</span>` : ''}
     ${proposalSwitch()}<span class="spacer"></span>${stale ? tr('<span class="pill warn">지도와 기준 커밋이 다름</span>') : ''}</div>`;
   // 선이 없는 로컬 그림은 상자를 창 폭에 맞춰 줄지어 놓는다.
-  h += local && !LINKS.length ? '<div class="sysrow"><div class="flat" id="sys">' : `<div class="sysrow"><div class="graph" id="sys">${WIRES}`;
-  for (const n of y.nodes) {
-    const o = ORIGIN[n.origin]; const lock = (n.unknown || []).some(u => u.needs === 'ops');
-    h += `<div class="card node ${n.kind} ${n.id === S.node ? 'sel' : ''} ${S.node && !near.has(n.id) && n.id !== S.node ? 'dim' : ''}" data-node="${esc(n.id)}" data-w="${esc(n.id)}"><div class="nm">${esc(n.name)}${lock ? ' 🔒' : ''}</div>
-      <div class="s">${esc(n.what)}</div>${n.members ? `<div class="s" data-kind-members>${esc(n.members)}</div>` : ''}<div class="meta">${o && n.kind !== 'store' ? `<span class="pill ${o[1]}">${tr(o[0])}</span>` : ''}${(n.uses || []).map(u => `<span class="pill">${esc(y.externals.find(x => x.id === u).name)}</span>`).join('')}</div></div>`;
+  if (!local) h += lanesView(y, near);
+  else {
+    h += !LINKS.length ? '<div class="sysrow"><div class="flat" id="sys">' : `<div class="sysrow"><div class="graph" id="sys">${WIRES}`;
+    for (const n of y.nodes) h += `<div class="card node ${n.kind} ${n.id === S.node ? 'sel' : ''} ${S.node && !near.has(n.id) && n.id !== S.node ? 'dim' : ''}" data-node="${esc(n.id)}" data-w="${esc(n.id)}"><div class="nm">${esc(n.name)}</div>
+      <div class="s">${esc(n.what)}</div>${n.members ? `<div class="s" data-kind-members>${esc(n.members)}</div>` : ''}</div>`;
+    h += '</div></div>'; if (!LINKS.length) return h;
   }
-  h += '</div>' + (y.externals.length ? ui`<div class="fcol extcol"><div class="zone">바깥 서비스 ${y.externals.length}</div>` : '<div>');
-  y.externals.forEach((x, i) => { const users = y.nodes.filter(n => (n.uses || []).includes(x.id));
-    h += ui`<div class="card node external ${S.node && !users.some(n => n.id === S.node) ? 'dim' : ''}"><div class="nm">${esc(x.name)}</div><div class="s">${esc(x.what)}</div><div class="s">쓰는 곳: ${users.map(n => esc(n.name)).join(', ') || tr('없음')}</div></div>`; });
-  h += '</div></div>'; if (local && !LINKS.length) return h;
   h += ui`<div class="sect"><h4>선 ${LINKS.length}개</h4><div class="group">` + LINKS.map((l, i) => { const a = y.nodes.find(n => n.id === l.from), b = y.nodes.find(n => n.id === l.to);
     return `<div class="row ${S.node && l.from !== S.node && l.to !== S.node ? 'dim' : ''}"><span class="wn inline">${i + 1}</span><div class="grow"><div class="tw"><b class="strong">${esc(a.name)} → ${esc(b.name)}</b> ${esc(linkLabel(l))}</div></div>${setLink(l) ? `<span class="pill">${tr('연결 설정에서 지정')}</span>` : l.sure === 'doc' ? tr('<span class="pill">문서로만 확인</span>') : l.sure === 'calc' ? tr('<span class="pill">사본 비교로 계산</span>') : ''}${l.ev?.[0]?.origin === 'cited' ? `<span class="pill">${tr('관련 코드')}</span>` : ''}${evHtml(m, l.ev)}</div>`; }).join('') + '</div></div>';
   if (local) return h;
@@ -2018,15 +2032,38 @@ function sysInspector(m) {
 // 상자 위치를 재서 선과 번호를 얹는다. 위치는 화면 크기에 따라 달라져 여기서만 계산한다.
 function drawWires() {
   const box = $('sys'); const links = S._wires; if (!box || !links || !box.getBoundingClientRect) return; const o = box.getBoundingClientRect(); const svg = $('wires'); if (!svg) return;
-  const rect = (id) => { const r = box.querySelector(`[data-w="${id}"]`).getBoundingClientRect(); return { x: r.left - o.left, y: r.top - o.top, w: r.width, h: r.height }; };
+  const rect = (id) => { const r = box.querySelector(`[data-w="${id}"]`).getBoundingClientRect(); return { x: r.left - o.left + box.scrollLeft, y: r.top - o.top + box.scrollTop, w: r.width, h: r.height }; };
   const edge = (r, tx, ty) => { const cx = r.x + r.w / 2, cy = r.y + r.h / 2, dx = tx - cx, dy = ty - cy; const k = Math.min(dx ? Math.abs(r.w / 2 / dx) : Infinity, dy ? Math.abs(r.h / 2 / dy) : Infinity); return [cx + dx * k, cy + dy * k]; };
   box.querySelectorAll('.wn, .wn-label').forEach(e => e.remove()); svg.querySelectorAll('line, path.wire').forEach(e => e.remove());
   if (box.classList.contains('graph') && window.dagre) return drawGraph(box, svg, links);
+  if (box.classList.contains('lanes')) return drawLanes(box, svg, links, rect);
   for (const l of links) { const a = rect(l.from), b = rect(l.to); const [x1, y1] = l.h ? [a.x + a.w, a.y + a.h / 2] : edge(a, b.x + b.w / 2, b.y + b.h / 2), [x2, y2] = l.h ? [b.x, b.y + b.h / 2] : edge(b, a.x + a.w / 2, a.y + a.h / 2); /* h: 옆줄끼리는 오른쪽 변에서 왼쪽 변으로 */
     const ln = document.createElementNS('http://www.w3.org/2000/svg', 'line'); for (const [k, v] of Object.entries({ x1, y1, x2, y2, ...(l.noend ? {} : { 'marker-end': 'url(#ah)' }), ...(l.start ? { 'marker-start': 'url(#ah)' } : {}), class: 'wire ' + (l.style || '') + (l.dim ? ' dim' : '') })) ln.setAttribute(k, v); svg.appendChild(ln);
-    if (l.n) { const t = document.createElement('span'); t.className = 'wn' + (l.dim ? ' dim' : ''); t.textContent = l.n; t.style.left = x1 + (x2 - x1) * 0.35 + 'px'; t.style.top = y1 + (y2 - y1) * 0.35 + 'px'; /* 가운데에 두면 엇갈리는 두 선의 번호가 겹친다 */ box.appendChild(t); } }
+    if (l.n) { const t = document.createElement('span'); t.className = 'wn' + (l.dim ? ' dim' : ''); t.textContent = l.n; t.style.left = x1 + (x2 - x1) * 0.35 + 'px'; t.style.top = y1 + (y2 - y1) * 0.35 + 'px'; /* 가운데에 두면 엇갈리는 두 선의 번호가 겹친다 */
+      box.appendChild(t); } }
 }
 window.onresize = drawWires;
+// 칸 그림의 선: 다른 칸으로 가는 선은 마주 보는 변끼리 잇고 번호(짧은 이름이 있으면 이름도)를 칸 사이 틈에 둔다.
+// 같은 칸 안의 선은 상자 오른쪽 여백으로 돌아 나가 번호를 그 여백에 둔다. 번호가 상자 글자를 덮지 않게 하려는 자리다.
+function drawLanes(box, svg, links, rect) {
+  const gap = parseFloat(getComputedStyle(box).columnGap) || 0, side = {};
+  const lanes = [...box.querySelectorAll('.lane')], lane = lanes[0], laneOf = (id) => box.querySelector(`[data-w="${id}"]`).closest('.lane'); let bus = 0;
+  const bottom = Math.max(...lanes.filter(x => !x.classList.contains('ext')).map(x => x.offsetTop + x.offsetHeight));
+  const add = (d, l) => { const p = document.createElementNS('http://www.w3.org/2000/svg', 'path'); for (const [k, v] of Object.entries({ d, fill: 'none', ...(l.noend ? {} : { 'marker-end': 'url(#ah)' }), class: 'wire ' + (l.style || '') + (l.dim ? ' dim' : '') })) p.setAttribute(k, v); svg.appendChild(p); };
+  const tag = (l, x, y, named) => { const t = document.createElement('span'); t.className = (named ? 'wn-label' : 'wn') + (l.dim ? ' dim' : ''); const name = named && l.label ? linkLabel(l) : '';
+    if (named) t.innerHTML = `<b class="wn inline">${l.n}</b>${name && name.length <= 12 ? `<span>${esc(name)}</span>` : ''}`; else t.textContent = l.n; t.style.left = x + 'px'; t.style.top = y + 'px'; box.appendChild(t); };
+  for (const l of links) { const a = rect(l.from), b = rect(l.to), ay = a.y + a.h / 2, by = b.y + b.h / 2;
+    if (Math.abs(a.x - b.x) < 1) { const k = side[a.x] = (side[a.x] || 0) + 1, x0 = a.x + a.w, xo = x0 + 4 + 8 * k;
+      add(`M${x0} ${ay} H${xo} V${by} H${x0}`, l); if (l.n) tag(l, xo, (ay + by) / 2, false); continue; }
+    const dir = b.x > a.x ? 1 : -1, x1 = dir > 0 ? a.x + a.w : a.x, x2 = dir > 0 ? b.x : b.x + b.w, pad = gap / 2 + (lane.offsetWidth - a.w) / 2;
+    const span = Math.abs(lanes.indexOf(laneOf(l.from)) - lanes.indexOf(laneOf(l.to)));
+    if (span > 1) { // 사이 칸을 가로지르지 않고 칸 아래로 돌아간다
+      const g1 = x1 + dir * pad, g2 = x2 - dir * pad, y = bottom + gap / 2 + 28 * (bus++);
+      add(`M${x1} ${ay} H${g1} V${y} H${g2} V${by} H${x2}`, l); if (l.n) tag(l, (g1 + g2) / 2, y, true); continue; }
+    add(`M${x1} ${ay} L${x2} ${by}`, l);
+    if (l.n) { const tx = x1 + dir * pad; tag(l, tx, ay + (by - ay) * (tx - x1) / (x2 - x1), true); } }
+  box.style.paddingBottom = bus ? `calc(${gap}px + ${28 * bus}px)` : '';
+}
 // 상자 자리를 dagre 로 잡는다(왼쪽에서 오른쪽, 선이 상자를 피해 꺾인다). 상자 크기는 그린 뒤에 잰다.
 function drawGraph(box, svg, links) {
   const gap = parseFloat(getComputedStyle(box).getPropertyValue('--space-8'));
@@ -2341,11 +2378,8 @@ function render() {
   }
   let components=sys?sysView(m):'';
   // 결과가 먼저다: 서비스 구성 그림과 선 목록, 그다음 모듈 연결, 맨 아래에 접힌 파일 목록.
-  // 기능 흐름이 있는 코드 하나를 볼 때는 구성 그림을 펼친 채 기능 흐름 위에 두고 목록을 펼쳐 보인다. 모든 코드에서는 코드 사이 그림이 결과다.
+  // 기능 흐름이 있는 코드 하나를 볼 때는 구성 그림을 기능 흐름 위에 두고 목록을 펼쳐 보인다. 모든 코드에서는 코드 사이 그림이 결과다.
   const featureFlow=sys && shownSystem(m)===S.system && !(m.structure_indexes?.length>1) && (m.structure_indexes || [m.structure_index]).some(index=>index?.service_flow?.feature_groups?.length);
-  if(featureFlow){
-    components=`<details class="sect" id="serviceComponents" ${S.componentsClosed?'':'open'}><summary>${tr('구성 요소')}</summary>${components}</details>`;
-  }
   // 개발자용 목록은 그림과 선 목록 아래 「자세한 목록」 하나에 접어 둔다.
   const lists=structure+inventoryView(m),listsOpen=S.listsOpen || S.moduleGraph?.routesOpen || S.inventoryOpen;
   const sysBody=sys?(featureFlow?components+structure+inventoryView(m):components+(lists?`<details class="sect" id="detailLists" ${listsOpen?'open':''}><summary>${tr('자세한 목록')}</summary><div class="list-grid">${lists}</div></details>`:'')):'';
@@ -2400,10 +2434,6 @@ function render() {
     };
   });
   if($('detailLists'))$('detailLists').ontoggle=e=>{S.listsOpen=e.target.open;};
-  if($('serviceComponents'))$('serviceComponents').ontoggle=e=>{
-    S.componentsClosed=!e.target.open;
-    if(e.target.open)drawWires();
-  };
   if (sys && shownSystem(m)) { S._wires = sysLinks(shownSystem(m)).map((l, i) => ({ ...l, n: i + 1, dim: !!S.node && l.from !== S.node && l.to !== S.node })); drawWires(); document.querySelectorAll('.card[data-node], .row[data-node]').forEach(el => el.onclick = () => { selectProgram(el.dataset.node); });
     if ($('toMap')) $('toMap').onclick = () => { S.view = 'map'; render(); } }
   const pick=p=>selectScreen(p,view==='focus');
