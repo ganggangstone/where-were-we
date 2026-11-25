@@ -168,6 +168,16 @@ def _template_url(node, constants):
     return path, declaration
 
 
+def _walk(root, prune=()):
+    """Tree-sitter nodes in source order; children of a pruned type (other than root) are skipped."""
+    stack = [root]
+    while stack:
+        node = stack.pop()
+        yield node
+        if node == root or node.type not in prune:
+            stack.extend(reversed(node.named_children))
+
+
 def javascript_requests(root, file):
     """Read bare fetch calls, ignoring files where fetch may be rebound."""
     if root.has_error:
@@ -181,10 +191,8 @@ def javascript_requests(root, file):
             path = _js_string(decl.child_by_field_name('value'))
             if name and name.type == 'identifier' and _path(path):
                 constants[name.text] = (path, name)
-    stack = [root]
     calls = []
-    while stack:
-        node = stack.pop()
+    for node in _walk(root):
         if node.type in ('identifier','shorthand_property_identifier_pattern') and node.text in constants:
             _, declared = constants[node.text]
             # Accept only simple reads. Any additional binding or write makes the name ambiguous.
@@ -195,7 +203,6 @@ def javascript_requests(root, file):
             if parent is None or parent.type != 'call_expression' or parent.child_by_field_name('function') != node:
                 return []
             calls.append(parent)
-        stack.extend(reversed(node.named_children))
     requests = []
     for call in calls:
         args = [n for n in call.child_by_field_name('arguments').named_children if n.type != 'comment']

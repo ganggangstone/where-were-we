@@ -1,16 +1,9 @@
 """JSX events connected through a lexical handler and a verified imported fetch wrapper."""
 from collections import Counter, defaultdict
 
+from service_flow import _walk
+
 FUNCTIONS = {'function_declaration','function_expression','arrow_function','method_definition','generator_function_declaration'}
-
-
-def _walk(root, prune=()):
-    stack = [root]
-    while stack:
-        node = stack.pop()
-        yield node
-        if node == root or node.type not in prune:
-            stack.extend(reversed(node.named_children))
 
 
 def _name(node):
