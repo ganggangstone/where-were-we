@@ -181,4 +181,5 @@ async function pollAppControl() {
   }catch{/* A reload or missing older bridge must not disrupt ordinary UI controls. */}
   finally{controlApplying=false;}
 }
-setInterval(pollAppControl,300);
+const POLL_MS=300;
+setInterval(pollAppControl,POLL_MS);
