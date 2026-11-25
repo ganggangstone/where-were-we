@@ -380,11 +380,6 @@ const AnalysisRun = (() => {
         ${open ? `<div>${overviewTree(group)}${local}</div>` : ''}</section>`;
     }).join('');
   }
-  function savedBatchGroups() {
-    const {area}=intent(),repository=scope().repository;
-    return (run?.saved_scope_overviews || []).filter(group=>(!repository || group.repository===repository)
-      && (!area || group.repository===area.repository && area.resources.includes(group.resource)));
-  }
   function localResourceCount() {
     const map=S.maps?.[S.branch],repo=scope().repository;
     const indexes=map?.structure_indexes || (map?.structure_index?[map.structure_index]:[]);

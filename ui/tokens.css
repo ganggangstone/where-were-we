@@ -13,7 +13,6 @@
   /* 글자 */
   --color-text:var(--colors-ink);
   --color-text-secondary:var(--colors-ink-muted-48);
-  --color-text-tertiary:var(--colors-surface-chip-translucent);
   --color-text-on-fill:var(--colors-on-primary);
   /* 누를 수 있는 것은 이 색 하나 */
   --color-accent:var(--colors-primary);
@@ -42,7 +41,6 @@
   --color-separator:var(--app-hairline-on-dark);
   --color-text:var(--colors-body-on-dark);
   --color-text-secondary:var(--colors-body-muted);
-  --color-text-tertiary:var(--colors-ink-muted-48);
   --color-accent:var(--colors-primary-on-dark);
   --color-ok:var(--app-signal-ok-on-dark);
   --color-warn:var(--app-signal-warn-on-dark);
@@ -88,7 +86,6 @@
   --space-4:var(--spacing-sm);
   --space-5:var(--spacing-md);
   --space-6:var(--spacing-lg);
-  --space-7:var(--spacing-xl);
   --space-8:var(--spacing-xxl);
   /* 모서리 */
   --radius-bar:var(--rounded-xs);
@@ -106,8 +103,8 @@
   --press:scale(var(--app-press-scale));
   /* 크기 */
   --size-inspector-share:var(--app-inspector-share);
-  --size-inspector:var(--app-inspector-width); --size-column:var(--app-column-width); --size-node:var(--app-node-width); --size-search:var(--app-search-width); --size-status-max:var(--app-status-max);
-  --size-dot:var(--app-dot); --size-badge:var(--app-badge); --size-bar:var(--app-bar); --size-bar-min:var(--app-bar-min); --size-bar-inline:var(--app-bar-inline); --size-desc-min:var(--app-desc-min);
+  --size-inspector:var(--app-inspector-width); --size-column:var(--app-column-width); --size-node:var(--app-node-width); --size-search:var(--app-search-width);
+  --size-dot:var(--app-dot); --size-badge:var(--app-badge); --size-bar:var(--app-bar); --size-bar-min:var(--app-bar-min); --size-bar-inline:var(--app-bar-inline);
   --size-wire:var(--app-focus-width);
   --size-hairline:var(--app-hairline-width); --size-flow:var(--app-flow-width);
   --lane-indent-1:var(--app-lane-indent-1); --lane-indent-2:var(--app-lane-indent-2); --lane-indent-3:var(--app-lane-indent-3);

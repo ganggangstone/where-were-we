@@ -239,7 +239,6 @@ details.list-panel > summary { margin:var(--space-0); color:var(--color-text); f
 .lane { min-width:var(--space-0); display:flex; flex-direction:column; gap:var(--space-3); padding:var(--space-3); border:var(--border-hairline); border-radius:var(--radius-card); background:var(--color-bg-group) } .lane .zone { margin:var(--space-0) }
 .lane .card { min-width:var(--space-0); padding:var(--space-3) } .lane .card .s.one { margin-top:var(--space-1); white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
 .graph { position:relative; flex:none } .graph .card { position:absolute; width:var(--size-node); margin:var(--space-0); z-index:1 }
-.extcol { display:grid; grid-template-columns:repeat(auto-fill, minmax(var(--size-column), 1fr)); gap:var(--space-3); margin-top:var(--space-6) } .extcol .zone { grid-column:1 / -1 }
 .prompt { white-space:pre-wrap; word-break:break-all; background:var(--color-bg-group); border:var(--border-hairline); border-radius:var(--radius-card); padding:var(--space-4); margin-top:var(--space-4); user-select:text }
 
 /* Project and repository controls reuse the shared design tokens. */
@@ -339,10 +338,6 @@ h3 > .chip { margin-left:var(--space-2) }
 .unit-head-line { display:flex; flex-wrap:wrap; align-items:center; gap:var(--space-2) var(--space-0) }
 .unit-count { margin-left:auto; white-space:nowrap; font:var(--font-secondary); font-weight:var(--weight-strong); color:var(--color-text-secondary) }
 .unit-start, .unit-run { display:flex; flex-wrap:wrap; align-items:center; gap:var(--space-3); margin:var(--space-3) var(--space-0) }
-.unit-coverage { display:grid; gap:var(--space-2); margin:var(--space-3) var(--space-0) }
-.unit-coverage [role="radiogroup"] { display:flex; flex-wrap:wrap; gap:var(--space-2) var(--space-4) }
-.unit-mode { display:inline-flex; align-items:baseline; gap:var(--space-2); font:var(--font-secondary); color:var(--color-text-secondary) }
-.unit-mode b { color:var(--color-text) }
 .unit-bar { display:flex; height:var(--size-bar); overflow:hidden; border-radius:var(--radius-bar); background:var(--color-bg-control); margin:var(--space-3) var(--space-0) }
 .unit-bar > i { display:block; height:100%; background:currentColor }
 .unit-bar > i[data-state="pending"] { background:transparent }
