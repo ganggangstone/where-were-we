@@ -14,6 +14,15 @@ ROOT = os.environ.get("WHERE_WERE_WE_ROOT") or os.path.expanduser("~/.where-were
 
 SETTINGS_DEFAULT = {'open_refresh':False, 'since':'last_refresh', 'since_time':''}
 
+# The rule ui/index.html's uiText applies on screen: text with a letter or digit and no code expression
+# (a quote next to : or ?, =>, &&, ||). Names are checked with it when they are saved.
+_CODE_TEXT = re.compile(r"""['"`]\s*[:?]|[:?]\s*['"`]|=>|&&|\|\|""")
+
+
+def ui_text(text):
+    return bool(text) and any(c.isalnum() for c in text) and not _CODE_TEXT.search(text)
+
+
 def settings_path():
     return os.environ.get('WHERE_WERE_WE_SETTINGS') or os.path.join(ROOT,'settings.json')
 

@@ -262,6 +262,11 @@ def _text(value):
     return value.strip()[:TEXT] if isinstance(value, str) else ''
 
 
+def _name(value):
+    """A name as _text, or '' when it reads as code (mapcore.ui_text), so the row is dropped and the unit keeps its local name."""
+    return _text(value) if mapcore.ui_text(_text(value)) else ''
+
+
 def check(answer, allowed, spots=None):
     """(labels, dropped) of one answer: only refs in `allowed` ({ref: unit id}) survive, saved by unit id.
     spots: the evidence and request refs this input listed ({'evidence': {ref: [file, line]}, 'requests': {ref: key}}).
@@ -290,21 +295,21 @@ def check(answer, allowed, spots=None):
         return [spots['evidence'][v] for v in dict.fromkeys(good)]
     units = {}
     for row in rows('units'):
-        if type(row.get('ref')) is int and row['ref'] in allowed and _text(row.get('name')):
+        if type(row.get('ref')) is int and row['ref'] in allowed and _name(row.get('name')):
             units[allowed[row['ref']]] = {'name': _text(row['name']), 'what': _text(row.get('what'))}
         else:
             dropped += 1
     groups = []
     for row in rows('groups'):
         members = refs(row.get('units'))
-        if members and _text(row.get('name')):
+        if members and _name(row.get('name')):
             groups.append({'name': _text(row['name']), 'description': _text(row.get('description')), 'units': members})
         else:
             dropped += 1
     programs, at = [], {}
     for i, row in enumerate(rows('programs')):
         members = refs(row.get('units'))
-        if members and _text(row.get('name')):
+        if members and _name(row.get('name')):
             at[i] = len(programs)
             programs.append({'name': _text(row['name']), 'kind': row.get('kind') if row.get('kind') in ('program', 'store', 'user') else 'program',
                              'what': _text(row.get('what')), 'units': members, 'ev': evidence(row.get('ev'))})
@@ -326,7 +331,7 @@ def check(answer, allowed, spots=None):
             dropped += 1
     requests = {}
     for row in rows('requests'):
-        if type(row.get('ref')) is int and row['ref'] in spots.get('requests', {}) and _text(row.get('name')):
+        if type(row.get('ref')) is int and row['ref'] in spots.get('requests', {}) and _name(row.get('name')):
             requests[spots['requests'][row['ref']]] = _text(row['name'])
         else:
             dropped += 1

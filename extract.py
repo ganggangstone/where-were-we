@@ -517,7 +517,7 @@ def actions_in(file, fns, screens):
         direct = [{"method": c["method"], "path": c["path"]} for c in calls_in(src + "\n" + body, len(src) + 1) if c["path"]] if body and "<inline>" in apis else []
         line = src[:st].count("\n") + 1
         targets, cond = nav_targets(nav, screens) if nav else ([], None)
-        out.append({"label": label, "dynamic_label": dynamic, "kind": kind, "api_functions": apis, "calls": direct,
+        out.append({"label": label if mapcore.ui_text(label) else "", "dynamic_label": dynamic, "kind": kind, "api_functions": apis, "calls": direct,
                     "to": next((t["to"] for t in targets if t["to"]), None), "targets": targets, "cond": cond,
                     "to_raw": " ".join(nav.split()) if nav else None, "file": file, "line": line})
     for m in re.finditer(r"<(?:Link|NavLink)\b", src):
@@ -536,7 +536,8 @@ def actions_in(file, fns, screens):
             lits = re.findall(rf"\b{field}\s*:\s*(`[^`]*`|'[^']*'|\"[^\"]*\")", src)
             targets = [{"to": route_match(normalize_route(l), screens), "raw": l.strip("`'\"")} for l in lits if normalize_route(l).startswith("/")]
             cond = "메뉴 목록에서 고른 항목" if targets else None
-        out.append({"label": jsx_text(src[gt + 1:end] if end > 0 else ""), "dynamic_label": False, "kind": "nav", "api_functions": [],
+        label = jsx_text(src[gt + 1:end] if end > 0 else "")
+        out.append({"label": label if mapcore.ui_text(label) else "", "dynamic_label": False, "kind": "nav", "api_functions": [],
                     "to": next((t["to"] for t in targets if t["to"]), None), "targets": targets, "cond": cond,
                     "to_raw": " ".join(to.split()), "file": file, "line": src[:st].count("\n") + 1})
     return out
