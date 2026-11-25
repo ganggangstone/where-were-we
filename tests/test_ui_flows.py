@@ -1863,6 +1863,15 @@ class FeatureContext(unittest.TestCase):
  assert(!window.calls.some(c=>['refresh','save_project','analysis_plan'].includes(c.command)),'Highlighting never refreshes, saves or prepares analysis');
 ''')
 
+    def test_feature_picture_draws_one_strongest_line_per_card_and_all_lines_of_a_chosen_card(self):
+        self.check(r'''
+ S.view='feat';S.feat=null;render();const m=M(),f=featureGraph(m),strong=strongFeatureLinks(f);
+ assert(document.querySelectorAll('#sys path.wire, #sys line.wire').length===strong.size && !document.querySelector('#sys .wn'),'Only the strongest line per card, with no number circles over cards');
+ assert(![...document.querySelectorAll('#sys .card .pill')].length,'Cards carry no raw service ids');
+ await openFeature('Items');const i=selectedFeature(m).i;
+ assert(document.querySelectorAll('#sys path.wire, #sys line.wire').length===f.links.filter(l=>l.a===i||l.b===i).length,'A chosen card shows all of its lines');
+''')
+
     def test_member_action_keeps_the_feature_context_with_back_switch_and_clear(self):
         self.check(r'''
  await openFeature('Items');

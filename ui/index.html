@@ -2254,11 +2254,18 @@ function featView(m) {
   if (!f.gs.length) return `<p class="empty" data-empty-reason>${tr(visibleScreens(m).length ? '화면을 기능 묶음으로 나누지 않았다. 「분석하기」가 묶음을 만든다.' : '이 코드에서 화면을 찾지 못해 묶을 화면이 없다.')}</p>`;
   let h = ui`<div class="legend"><span><b class="strong">${f.gs.length}</b> 기능 묶음 · 화면 <b class="strong">${visibleScreens(m).length}</b></span>${lineLegend([['calls','화면 이동'],['shared','데이터 전달']])}${hasAI() ? `<span class="pill ai">${tr('AI가 정리한 이름')}</span>` : `<span class="pill">${tr('화면 주소')}</span>`}</div><div class="sys three" id="sys">${WIRES}`;
   f.gs.forEach((g, i) => { const st = f.stat[i];
-    h += ui`<div class="card node gc${f.pos[i].col} gr${f.pos[i].row} ${i === sel ? 'sel' : ''} ${near(i) ? '' : 'dim'}" data-feat="${i}" data-w="G${i}"><div class="nm"><span class="${g.ai ? 'ai' : ''}">${esc(g.name)}</span></div><div class="s">${esc(g.description || '')}</div>
-      <div class="meta"><span>화면 ${g.list.length} · 서버에 하는 일 ${st.reqs}</span>${st.reqs ? ui`<span class="bar" title="테스트 연결 ${st.tested}/${st.reqs}"><i style="width:${Math.round(st.tested / st.reqs * 100)}%"></i></span>` : ''}</div><div class="meta">${st.ext.map(x => `<span class="pill">${esc(x)}</span>`).join('')}</div></div>`; });
+    h += ui`<div class="card node gc${f.pos[i].col} gr${f.pos[i].row} ${i === sel ? 'sel' : ''} ${near(i) ? '' : 'dim'}" data-feat="${i}" data-w="G${i}"><div class="nm"><span class="${g.ai ? 'ai' : ''}">${esc(g.name)}</span></div><div class="s one">${esc(g.description || '')}</div>
+      <div class="meta"><span>${S.lang === 'en' ? `${g.list.length} screens · ${st.reqs} server actions` : `화면 ${g.list.length}개 · 서버에 하는 일 ${st.reqs}개`}</span></div></div>`; });
   h += ui`</div><div class="sect"><h4>선 ${f.links.length}개</h4><div class="group">` + f.links.map((l, i) => { const data = [...new Set([...l.ab, ...l.ba])];
     return `<div class="row ${on(l) ? '' : 'dim'}"><span class="wn inline">${i + 1}</span><div class="grow"><div class="tw"><b class="strong">${esc(f.gs[l.a].name)} ${l.fwd && l.back ? '↔' : l.back ? '←' : l.fwd ? '→' : '···'} ${esc(f.gs[l.b].name)}</b> ${l.ways.length ? ui`넘어가는 길 ${l.ways.length}` : tr('넘어가는 길은 없고 데이터만')}${data.length ? ui` · 주고받는 데이터 ${data.length}` : ''}</div></div></div>`; }).join('') + `</div></div>`;
-  return local+h;
+  // 개발자용 목록(기능·서버 경로)은 그림 아래 「자세한 목록」에 접어 둔다.
+  return h + (local ? `<details class="sect" id="detailLists" ${S.listsOpen ? 'open' : ''}><summary>${tr('자세한 목록')}</summary><div class="list-grid">${local}</div></details>` : '');
+}
+// 묶음마다 가장 센 선 하나만 긋는다. 묶음을 고르면 그 묶음의 선을 모두 긋는다. 나머지는 아래 선 목록에 있다.
+function strongFeatureLinks(f) {
+  const weight = (l) => l.ways.length * 2 + l.ab.size + l.ba.size, strong = new Set();
+  f.gs.forEach((_, i) => f.links.filter(l => l.a === i || l.b === i).sort((x, y) => weight(y) - weight(x)).slice(0, 2).forEach(l => strong.add(l)));
+  return strong;
 }
 function featInspector(m) {
   const f = featureGraph(m); const sel = selectedFeature(m);
@@ -2386,7 +2393,8 @@ function render() {
   $('map').innerHTML = searchPanel(m) + (view === 'changes' ? changesView(m) : sys ? sysBody : view === 'focus' ? focusView(m) : view === 'feat' ? featView(m) : storyMap(m)); $('insp').innerHTML = view === 'changes' ? changesInspector(m) : sys ? sysInspector(m) : view === 'focus' ? focusFeatureInspector(m) : view === 'feat' ? featInspector(m) : mapInspector(m);
   S._wires = null;
   if (view === 'focus' && S.focus) { const d = focusData(m); S._wires = d ? [...d.left.map((_, i) => ({ from: 'L' + i, to: 'C', h: true })), ...d.right.map((_, i) => ({ from: 'C', to: 'R' + i, h: true }))] : null; drawWires(); }
-  if (view === 'feat') { const f = featureGraph(m); const fi = selectedFeature(m)?.i ?? null; S._wires = f.links.map((l, i) => ({ from: 'G' + (l.back && !l.fwd ? l.b : l.a), to: 'G' + (l.back && !l.fwd ? l.a : l.b), n: i + 1, style: l.ways.length ? '' : 'copy', noend: !l.ways.length, start: !!(l.fwd && l.back), dim: fi != null && l.a !== fi && l.b !== fi })); drawWires();
+  if (view === 'feat') { const f = featureGraph(m); const fi = selectedFeature(m)?.i ?? null; const strong = strongFeatureLinks(f); S._wires = f.links.filter(l => fi == null ? strong.has(l) : l.a === fi || l.b === fi).map(l => ({ from: 'G' + (l.back && !l.fwd ? l.b : l.a), to: 'G' + (l.back && !l.fwd ? l.a : l.b), style: l.ways.length ? '' : 'copy', noend: !l.ways.length, start: !!(l.fwd && l.back) })); drawWires();
+    if ($('detailLists')) $('detailLists').ontoggle = e => { S.listsOpen = e.target.open; };
     document.querySelectorAll('[data-feat]').forEach(el => el.onclick = () => { const id = featureId(f.gs[+el.dataset.feat]); S.agentPrompt = null; S.feat = S.feat === id ? null : id; render(); });
     document.querySelectorAll('[data-goscr]').forEach(el => el.onclick = () => { S.view = 'map'; S.sel = el.dataset.goscr; S.open = null; render(); }); }
   document.querySelectorAll('[data-search-result]').forEach(el => el.onclick = () => openTarget(S._search[+el.dataset.searchResult], false));
