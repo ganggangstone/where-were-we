@@ -146,7 +146,7 @@ window.__TAURI__={core:{invoke:async(command,args)=>{
  // A collector process error after saving is visible and can be retried from Refresh.
  S.projectInfo={repositories:[],shared_data:[]};editProject(false);
  const fresh=document.querySelector('[data-field="path"]');fresh.value='example/again';fresh.dispatchEvent(new Event('change'));refreshFail=true;
- await $('saveProject').onclick();assert($('status').textContent.includes('Choose Refresh to retry'),'Collection failure is not hidden: '+$('status').textContent);
+ await $('saveProject').onclick();assert($('status').textContent.includes('Refresh to retry the missing code.'),'Collection failure is not hidden: '+$('status').textContent);
  S.lang='ko';editProject(true);assert(document.body.textContent.includes('GitHub 주소 또는 코드 폴더'),'Korean labels');
  document.body.dataset.urlTest='passed';
 })().catch(error=>{document.body.dataset.urlTest='failed';const pre=document.createElement('pre');pre.textContent=error.stack;document.body.append(pre);});

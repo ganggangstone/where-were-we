@@ -218,7 +218,7 @@ class Guide(unittest.TestCase):
     def test_project_step_reports_cancel_failure_and_multi_code_success_honestly(self):
         self.check(r"""
  $('guideNext').click();$('guideLater').click();$('guideCreate').click();const d=$('project-dialog');assert(d.open && $('guide').open,'Existing editor opens above the guide');
- d.close();await wait();assert($('guide').open && $('guideProjectState').textContent.includes(tr('아직 연결된 서비스가 없습니다. AI 채팅에서 연결을 마친 뒤 돌아오세요.')),'Cancel leaves no saved project and keeps the guide');
+ d.close();await wait();assert($('guide').open && $('guideProjectState').textContent.includes(tr('연결한 서비스가 없다. AI 채팅에서 연결을 마친 뒤 돌아온다.')),'Cancel leaves no saved project and keeps the guide');
  $('guideCreate').click();$('projectName').value='Lumen';$('addRepository').click();
  const paths=[...d.querySelectorAll('[data-field="path"]')];assert(paths.length===2,'Two code rows');paths[0].value='/fictional/web';paths[1].value='/fictional/api';
  window.failSave=true;$('saveProject').click();await wait(60);
@@ -266,7 +266,7 @@ class Guide(unittest.TestCase):
     def test_first_map_needs_an_explicit_refresh_and_analysis_only_prepares(self):
         self.check(r"""
  window.noMap=true;await loadProject('First');$('guideOpen').click();G.step=3;renderGuide();
- assert($('guideMapState').textContent.includes(tr('아직 지도를 가져오지 않았습니다.')),'Missing map is reported');
+ assert($('guideMapState').textContent.includes(tr('아직 지도가 없다.')),'Missing map is reported');
  assert(!window.calls.some(c=>c.command==='refresh'),'No refresh before the user asks');
  window.noMap=false;$('guideRefresh').click();for(let i=0;i<50 && !$('guideFinish');i++)await wait();
  assert(window.calls.filter(c=>c.command==='refresh').length===1 && !$('guideRefresh') && $('guideAnalysis') && !$('guideFinish'),'One explicit refresh makes the basic map ready, not the first analysis');
@@ -275,12 +275,11 @@ class Guide(unittest.TestCase):
  assert($('insp').textContent.includes(tr('분석하기')),'The existing analysis panel is shown');
 """)
 
-    def test_copy_step_explains_one_request_and_ai_cost_before_copying(self):
+    def test_copy_step_discloses_ai_cost_before_copying(self):
         self.check(r"""
  $('guideNext').click();
  const step=$('guide').querySelector('.guide-step'),text=step.innerText;
- const once=tr('한 번의 요청으로 코드 연결부터 첫 분석까지 진행합니다.'),cost=tr('첫 분석에 AI 요금·한도가 적용됩니다.'),button=tr('AI에게 보낼 요청 복사');
- assert(text.includes(once),'Says one request does everything');
+ const cost=tr('첫 분석은 연결한 AI의 요금과 사용 한도를 따른다.'),button=tr('AI에 보낼 글 복사');
  assert(text.includes(cost),'Says the AI cost before copying');
  assert(text.indexOf(cost)<text.indexOf(button),'Cost is stated before the copy button');
  if(S.lang==='en')assert(!/[가-힣]/.test(text),'English step has no Korean: '+text);
@@ -347,7 +346,7 @@ class Guide(unittest.TestCase):
  release();window.holdRead=null;await wait(60);
  window.failRead=true;window.dispatchEvent(new Event('focus'));await wait(60);
  assert($('guide').querySelector('[role=alert]') && !$('guideFinish') && !analysisRail(),'A failed read is shown, not treated as done');
- assert($('guide').querySelector('[role=alert]').textContent.includes(tr('저장된 결과를 읽지 못했습니다.')),'Says the read failed');
+ assert($('guide').querySelector('[role=alert]').textContent.includes(tr('저장한 결과를 읽지 못했다.')),'Says the read failed');
  window.failRead=false;analyzeAll();$('guideReadNow').click();for(let i=0;i<50 && !$('guideFinish');i++)await wait();
  assert($('guideFinish') && !$('guide').querySelector('[role=alert]'),'Reading again recovers');
 """)
@@ -404,7 +403,7 @@ class Guide(unittest.TestCase):
  window.configuredBundle=fakeBundle('Lumen');window.configuredBundle.project.repositories=configuration.repositories.map(r=>({...r,collected:true,commits:{dev:'aaaaaaaa1111'}}));
  const result=await applyAppCommand({action:'configure',arguments:{project:'Lumen',configuration}});await wait(60);
  assert(result.ok && G.step===3 && $('guideTitle').textContent===tr('첫 분석'),'The service the AI connected moves the guide to the first analysis by itself');
- assert($('guide').innerText.includes(tr('앱으로 돌아오면 결과를 읽습니다.')) && !$('guideFinish'),'It waits for the saved analysis; a connection is not the result');
+ assert($('guideMapState').textContent && !$('guideFinish'),'It waits for the saved analysis; a connection is not the result');
  guideStep(1);await wait();assert(G.step===1,'The user can still go back; it moves only once');
  guideStep(3);const reads0=reads();
  // the AI prepares the whole-project request, runs it, and the saved results arrive while the app is in the background
@@ -678,7 +677,7 @@ class Flows(unittest.TestCase):
  window.mutateBundle=b=>{if(b.project.name==='Local'){b.project.repositories.forEach(r=>{r.collected=false;r.commits={};});b.dev=null;b.main=null;}};
  editProject(true);$('projectName').value='Local';document.querySelector('[data-field="path"]').value='/fictional/local';
  $('saveProject').click();for(let i=0;i<80 && S.project!=='Local';i++)await wait();await wait();
- assert($('status').textContent===tr('연결을 저장했습니다. 새로고침으로 첫 지도를 가져오면 AI에게 보낼 분석 요청이 준비됩니다.'),'Status says how the first map leads to the request: '+$('status').textContent);
+ assert($('status').textContent===tr('연결을 저장했다. 새로고침하면 첫 지도와 AI에 보낼 글이 준비된다.'),'Status says how the first map leads to the request: '+$('status').textContent);
  assert(S.agentPurpose!=='analysis','No request before the first map');
  // The plan now lists the first tasks of the code that was just added, under the id the editor gave it.
  window.planResult={...window.planResult,tasks:[{repository:S.openRequestFor.ids[0],task:'analysis',commit:'aaaaaaaa1111'}]};
@@ -698,7 +697,7 @@ class Flows(unittest.TestCase):
  window.planResult={tasks:[],blocked:[],requirements:[],handoff:'',up_to_date:true};
  $('saveProject').click();for(let i=0;i<80 && $('project-dialog').open;i++)await wait();await wait();
  assert(S.projectInfo.repositories.some(r=>r.id==='extra') && S.openRequestFor?.ids?.includes('extra'),'The added code is remembered: '+JSON.stringify(S.openRequestFor));
- assert($('status').textContent===tr('연결을 저장했습니다. 새로고침으로 첫 지도를 가져오면 AI에게 보낼 분석 요청이 준비됩니다.'),'The next step is named: '+$('status').textContent);
+ assert($('status').textContent===tr('연결을 저장했다. 새로고침하면 첫 지도와 AI에 보낼 글이 준비된다.'),'The next step is named: '+$('status').textContent);
  // Refreshing only the already collected web code (up to date) must not use up the handoff.
  $('repository').value='web';$('repository').dispatchEvent(new Event('change'));for(let i=0;i<50 && S.repository!=='web';i++)await wait();await wait();
  S.agentPrompt=null;S.agentPurpose=null;render();await doRefresh();await wait();
@@ -717,9 +716,9 @@ class Flows(unittest.TestCase):
     def test_stale_button_names_are_not_shown(self):
         self.check(r'''
  window.mutateBundle=b=>{b.project.repositories=[];b.dev=null;b.main=null;};await loadProject('Second',false,'');await wait();
- await doRefresh();assert($('status').textContent===tr('연결된 코드가 없습니다. 코드 추가·수정에서 GitHub 주소나 코드 폴더를 추가하세요.'),'No-code status names the real button: '+$('status').textContent);
+ await doRefresh();assert($('status').textContent===tr('연결한 코드가 없다. 「연결한 코드 바꾸기」에서 GitHub 주소나 코드 폴더를 추가한다.'),'No-code status names the real button: '+$('status').textContent);
  window.mutateBundle=null;await loadProject('Second',false,'');await wait();
- assert($('branch').querySelector('[data-b=main]').title===tr('비교할 버전을 코드 추가·수정에서 지정할 수 있습니다.'),'Version fallback names the real button: '+$('branch').querySelector('[data-b=main]').title);
+ assert(!$('branch').querySelector('[data-b=main]').title && $('manageRepositories'),'An unconfigured version has no redundant tooltip and can still be set');
  const table=[...Object.keys(UI_EN),...Object.values(UI_EN)].join('\n');
  assert(!/코드 연결에서|AI에게 알아보기에서|in Connect code|in Ask your AI/.test(table),'No stale button references remain in the dictionary');
 ''')
@@ -727,18 +726,18 @@ class Flows(unittest.TestCase):
     def test_entry_actions_say_their_purpose_and_the_service_name_defaults_to_the_first_code(self):
         self.check(r'''
  if($('guide').open)closeGuide('skipped');
- // One first entry: explore my code. Both ways are explained, and nothing runs AI by itself.
+ // Both ways are available without starting analysis.
  assert(main().includes(tr('내 코드 살펴보기')) && !main().includes(tr('살펴볼 코드 선택')),'Entry offers the two choices without a duplicate prompt: '+main());
- assert(main().includes(tr('AI 분석은 요청할 때만 실행됩니다.')),'No automatic AI execution is stated');
+ assert(!window.calls.some(c=>c.command==='analysis_run_start'),'Opening the app does not run AI');
  assert($('startWithAI').textContent===tr('작업하던 AI에게 맡기기') && $('startProject').textContent===tr('코드 위치를 직접 입력'),'The two ways name what each one does');
  assert($('newProject').title===tr('다른 서비스 추가'),'The header plus adds another service');
  $('startProject').click();const d=$('project-dialog');assert(d.open && d.querySelector('h2').textContent===tr('살펴볼 코드 추가'),'The editor is about code to explore');
- assert(d.textContent.includes(tr('코드 그룹 이름')) && d.textContent.includes(tr('기본값: 첫 코드 이름')),'Service name is explained as a grouping name with a default');
+ assert($('projectName').closest('label')?.textContent.includes(tr('서비스 이름')),'The service name field has a label');
  assert($('saveProject').textContent===tr('저장'),'Saving is called saving');
  document.querySelector('[data-field="path"]').value='/fictional/lumen-web';
  $('saveProject').click();for(let i=0;i<80 && !S.project;i++)await wait();await wait();
  assert(S.project==='lumen-web' && window.savedProjects.includes('lumen-web'),'An empty service name falls back to the first code name: '+S.project);
- assert($('manageRepositories').textContent===tr('코드 추가·수정'),'The code bar button says add or edit code');
+ assert($('manageRepositories').textContent===tr('연결한 코드 바꾸기'),'The code bar button says add or edit code');
  $('manageRepositories').click();assert(d.querySelector('h2').textContent===tr('살펴보는 코드') && !d.textContent.includes(tr('기본값: 첫 코드 이름')),'Editing names the explored code without the default hint');d.close();
  assert($('analyzeMap').textContent.startsWith(tr('분석하기')),'The AI button says what the AI makes: '+$('analyzeMap').textContent);
  $('analyzeMap').click();assert(pane().includes(tr('분석하기')) && $('insp').querySelector('.request-flow')?.textContent.includes(tr('AI 채팅')),'The panel shows the copy-to-chat flow');
@@ -754,7 +753,7 @@ class Flows(unittest.TestCase):
         import shutil
         source=(ROOT/'ui/index.html').read_text();run=(ROOT/'ui/analysis-run.js').read_text()
         code=source[source.index('const UI_EN = {'):source.index('function ui(parts')]
-        strings=['관련 코드','근거','서비스 구성이 아직 없습니다.','「분석하기」가 서비스 구성을 만든다.','분석하기','코드가 부름','같은 파일을 다른 버전으로 씀','읽기 규칙','읽은 언어 없음','JS/TS 상대 경로 import·재내보내기','이 코드에서 화면(페이지 주소)을 찾지 못했다.','이 코드에서 데이터 모델이나 테이블을 찾지 못했다.','이 코드에서 화면을 찾지 못해 묶을 화면이 없다.','일부 설명의 근거 코드가 바뀌었습니다. 「분석하기」로 다시 만든다.','요청을 보냄','연결 설정에서 지정','코드에서 찾은 연결','가져다 씀','맨 위 폴더','연결한 코드마다 상자 하나다. 선은 한 코드가 다른 코드에 요청을 보내는 곳이다. 「분석하기」를 누르면 AI가 이름과 설명을 붙인다.','이 코드의 파일을 종류별로 나눈 그림이다. 「분석하기」를 누르면 AI가 부분마다 이름과 설명을 붙인다.']
+        strings=['관련 코드','근거','아직 서비스 전체 그림이 없다.','예: 로그인 화면','코드를 읽지 못했다. 새로고침한다.','작업하던 AI가 앱에 연결됐다.','분석하기','코드가 부름','같은 파일을 다른 버전으로 씀','읽기 규칙','읽은 언어 없음','JS/TS 상대 경로 import·재내보내기','이 코드에서 화면을 찾지 못했다.','이 코드에서 서버가 저장하는 데이터를 찾지 못했다.','이 코드에 묶을 화면이 없다.','일부 설명의 근거 코드가 바뀌었습니다. 「분석하기」로 다시 만든다.','요청을 보냄','연결 설정에서 지정','코드에서 찾은 연결','가져다 씀','맨 위 폴더','한 코드가 다른 코드의 서버를 쓰면 선으로 잇는다.','파일을 종류별로 나눈 그림이다.']
         script=code+f";const S={{lang:'en'}};console.log(JSON.stringify({json.dumps(strings,ensure_ascii=False)}.map(tr)))"
         result=subprocess.run([shutil.which('node'),'-e',script],capture_output=True,text=True,timeout=60)
         self.assertEqual(result.returncode,0,result.stderr)
@@ -799,7 +798,7 @@ class Flows(unittest.TestCase):
  document.querySelector('#branch [data-b=main]').click();
  assert(S.branch==='main','Compared version is selected');
  assert(!window.errors.length,'Switching versions must not throw: '+window.errors.join(' | '));
- assert(main().includes(tr('이 버전에는 선택한 화면이 없습니다.')),'Explain that the selection is absent in this version');
+ assert(main().includes(tr('이 버전에 선택한 화면이 없다.')),'Explain that the selection is absent in this version');
  document.querySelector('#branch [data-b=dev]').click();assert(S.branch==='dev' && !window.errors.length,'Switch back');
 ''')
 
@@ -916,7 +915,7 @@ class Flows(unittest.TestCase):
  document.querySelector('[data-analysis-task="analysis_request"]').click();await new Promise(r=>setTimeout(r,20));
  assert(calls.some(c=>c.command==='analysis_request' && c.args.repository==='web'),'Request goes to the chosen code');
  assert(pane().includes(tr('요청 복사')),'The prepared request is shown');
- S.view='sys';S.system=null;S.branchDetails=null;render();assert(!$('remakeSys') && document.body.textContent.includes(tr('「분석하기」가 서비스 구성을 만든다.')),'The structure points to 분석하기 instead of its own button');$('analyzeMap').click();await new Promise(r=>setTimeout(r,20));
+ S.view='sys';S.system=null;S.branchDetails=null;render();assert(!$('remakeSys') && $('analyzeMap').textContent.startsWith(tr('분석하기')),'The structure points to 분석하기 instead of its own button');$('analyzeMap').click();await new Promise(r=>setTimeout(r,20));
  assert(!$('status').textContent && !calls.some(c=>c.command==='analysis_plan'),'Contextual buttons open the panel without preparing a request');
  document.querySelector('[data-analysis-task="analysis_plan"]').click();await new Promise(r=>setTimeout(r,20));
  assert(!$('status').textContent && calls.some(c=>c.command==='analysis_plan' && c.args.repository===''),'Contextual buttons request all connected code without forcing a code choice');
@@ -936,7 +935,7 @@ class Flows(unittest.TestCase):
  document.querySelector('[data-analysis-task="analysis_plan"]').click();await wait();
  assert(calls.filter(c=>c.command==='analysis_plan').length===1 && !calls.some(c=>c.command==='suggest_groups'),'Grouping uses the unified request');
  assert(pane().includes(tr('요청 복사')) && S.analysisRequest.handoff==='Unified handoff','One handoff is shown');
- assert(pane().includes(tr('요청할 분석: ')) && pane().includes(tr('요청하지 못한 분석: ')) && pane().includes(tr('설정이 바뀌었거나 코드가 바뀌었습니다. 먼저 새로고침하세요.')),'Queued, blocked and refresh-needed work is listed');
+ assert(pane().includes(tr('요청할 분석: ')) && pane().includes(tr('AI에 맡기지 못한 분석: ')) && pane().includes(tr('설정이 바뀌었거나 코드가 바뀌었습니다. 먼저 새로고침하세요.')),'Queued, blocked and refresh-needed work is listed');
  assert($('insp').textContent.includes('Refresh after configuration changes first'),'The raw reason stays available');
  await $('cpAgent').onclick();assert(window.copied==='Unified handoff','Only an explicit copy writes the clipboard');
  window.planResult={tasks:[{repository:'web',task:'steps',target:'@routes:["app/items.py::save_item"]',commit:'aaaaaaaa1111'}],blocked,requirements:[],handoff:'x',up_to_date:false};
@@ -1167,7 +1166,7 @@ class Flows(unittest.TestCase):
         self.check(r'''
  const r=S.projectInfo.repositories;r[0].analysis={dev:{stale:true,unknown:['auth flow unread']}};render();
  const chips=$('repository-bar').querySelector('.chips');
- assert(chips.innerText.includes(tr('AI 재분석 필요')),'Stale analysis is named on the chip: '+chips.innerText);
+ assert(chips.innerText.includes(tr('코드가 바뀌어 다시 분석해야 한다.')),'Stale analysis is named on the chip: '+chips.innerText);
  assert(chips.innerText.includes(tr('모르는 것 ')+'1') && chips.innerHTML.includes('auth flow unread'),'Unknowns are counted on the chip and listed in its tooltip');
  const again=document.querySelector('[data-reanalyze="web"]');
  assert(again && outside($('repository-bar')).includes(again.innerText),'The re-analysis action is outside the folded details');
@@ -1181,7 +1180,7 @@ class Flows(unittest.TestCase):
  S.connectionDiagnostic={feature:'detail',challenge:'x',fresh_server:{state:'ready'},registration:{state:'app_moved_or_missing',command:'/old/python',server:'/old/mcp_server.py'},connection:{state:'different_server',missing:['impact']},handoff:'repair'};
  renderConnectionDiagnostic();
  assert(outside($('insp')).includes(connectionMessage('app_moved_or_missing')),'The registered path problem is not folded away');
- assert(outside($('insp')).includes(tr('AI 연결에 필요한 기능이 빠져 있습니다')),'Missing capability is not folded away');
+ assert(outside($('insp')).includes(tr('AI 연결에 필요한 도구가 빠졌다.')),'Missing capability is not folded away');
  assert([...$('insp').querySelectorAll('details')].some(d=>d.textContent.includes('impact')),'Actual tool names stay in details');
  S.connectionDiagnostic={feature:'detail',challenge:'x',fresh_server:{state:'ready'},registration:{state:'different_path',command:'/a',server:'/b/mcp_server.py'},connection:{state:'verified'},handoff:'repair'};
  renderConnectionDiagnostic();
@@ -1385,7 +1384,7 @@ class Flows(unittest.TestCase):
  m.cross_repository_connections=[{method:'GET',path:'/items',client:{repository:'web',commit:'aaaaaaaa1111',file:'ui/app.py',line:4},server:{repository:'api',commit:'aaaaaaaa1111',file:'srv/main.py',line:9}}];
  render();
  const sys=$('sys');assert(sys && sys.querySelectorAll('.card').length===2,'One card per connected code');
- const lead=$('map').querySelector('p.lead[data-local-system]');assert(lead && lead.textContent.includes(tr('「분석하기」')) && !/해요/.test(lead.textContent),'A plain sentence above the picture says what it is and what Analyze adds');
+ const lead=$('map').querySelector('p.lead[data-local-system]');assert(lead && lead.textContent===tr('한 코드가 다른 코드의 서버를 쓰면 선으로 잇는다.') && !/해요/.test(lead.textContent),'A plain sentence above the picture identifies the picture');
  assert(sys.innerText.includes(S.lang==='en'?'Server functions 3':'서버 기능 3개') && sys.innerText.includes(S.lang==='en'?'Files 7':'파일 7개'),'Cards carry plain counts');
  assert(main().includes('GET /items') && main().includes('app.py:4'),'The line is listed with its source line');
  const lists=$('detailLists');assert(lists && !lists.open,'Developer lists are folded under one section');
@@ -1405,7 +1404,7 @@ class Flows(unittest.TestCase):
  assert($('sys').innerText.includes(S.lang==='en'?'Files 3':'파일 3개') && $('sys').innerText.includes('srv') && $('sys').innerText.includes('k8s'),'Cards name their largest folders');
  assert(main().includes(tr('가져다 씀')+' 1'),'An import between kinds is a line in plain words');
  // Inside the folded section each list is a titled panel with one sentence, and a folder shows how many files it holds.
- $('detailLists').open=true;const box=$('map').querySelector('[data-inventory]');assert(box.classList.contains('list-panel') && box.querySelector('summary .panel-note').textContent===tr('Git이 관리하는 모든 파일이다. 폴더별 파일 수를 보거나 파일을 열 때 연다.'),'A file list says what it is and when to open it');
+ $('detailLists').open=true;const box=$('map').querySelector('[data-inventory]');assert(box.classList.contains('list-panel') && !box.querySelector('summary .panel-note'),'The file list opens without a caption');
  box.querySelector('summary').click();await new Promise(r=>setTimeout(r,10));const folder=$('map').querySelector('[data-inventory] [data-inventory-dir="srv"]');assert(folder && folder.parentElement.querySelector('[data-folder-files]').textContent==='2','Folders show their file counts');
  assert(!window.calls.some(c=>c.command==='analysis_run_start'),'The picture needs no model turn');
 ''')
@@ -1694,14 +1693,14 @@ class UxWriting(unittest.TestCase):
  S.agentPurpose='connection';S.agentPrompt='connection';
  S.connectionDiagnostic={feature:'detail',challenge:'x',fresh_server:{state:'ready'},registration:{state:'not_inspected'},connection:{state:'not_verified'},handoff:'repair'};
  renderConnectionDiagnostic();
- assert($('liveConnectionState').textContent===tr('AI 연결을 아직 확인하지 않았습니다.'),'Unchecked is not reported as disconnected');
+ assert($('liveConnectionState').textContent===tr('AI가 연결됐는지 아직 확인하지 않았다.'),'Unchecked is not reported as disconnected');
  assert($('copyConnectionRequest').classList.contains('primary') && !$('checkCurrentConnection').classList.contains('primary'),'Copying the repair request comes first');
  assert(!$('connectionFeature').closest('details') && $('connectionFeature').closest('.section-heading'),'Scope choice stays alongside the diagnostic action');
  await $('copyConnectionRequest').onclick();
  assert(!$('copyConnectionRequest').classList.contains('primary') && $('checkCurrentConnection').classList.contains('primary'),'After copying, checking is the main action');
  assert($('checkCurrentConnection').textContent===tr('연결됐는지 확인'),'Check names what it does');
  S.connectionDiagnostic.connection={state:'missing_tools',missing:['impact']};renderConnectionDiagnostic();
- assert(outside($('insp')).includes(tr('AI 연결에 필요한 기능이 빠져 있습니다')) && !outside($('insp')).includes('impact'),'Missing capability is stated plainly');
+ assert(outside($('insp')).includes(tr('AI 연결에 필요한 도구가 빠졌다.')) && !outside($('insp')).includes('impact'),'Missing capability is stated plainly');
  assert([...$('insp').querySelectorAll('details')].some(d=>d.textContent.includes('impact')),'Actual tool names stay in details');
  $('guideOpen').click();guideStep(1);$('guideDiagnose').click();await wait(60);
  assert(window.calls.some(c=>c.command==='connection_diagnose' && c.args.feature==='onboarding'),'The guide checks the tools onboarding actually needs');
@@ -1722,7 +1721,7 @@ class UxWriting(unittest.TestCase):
  $('project-dialog').close();await wait();guideStep(1);
  assert($('guideCreate').textContent===tr('연결한 코드 수정'),'Same on the AI step');
  repos[0].config_changed=true;guideStep(2);
- assert($('guide').innerText.includes(tr('설정 변경 · 지도 갱신 필요')) && !guideHasMap(),'Changed settings are not reported as a ready map');
+ assert($('guide').innerText.includes(tr('설정을 바꿨다. 새로고침하면 지도에 반영된다.')) && !guideHasMap(),'Changed settings are not reported as a ready map');
  repos[0].config_changed=false;repos[1].collected=true;repos[1].commits={dev:'cccccccc3333'};assert(guideHasMap(),'Refreshed code is ready again');
  S.projectInfo.repositories=[];guideStep(2);
  assert($('guide').innerText.includes('/fictional') && $('guide').innerText.includes(tr('지도 준비됨')),'A legacy single-folder service shows its folder and map');
@@ -1742,12 +1741,12 @@ class UxWriting(unittest.TestCase):
 
     def test_search_explains_why_it_is_unavailable_without_a_map(self):
         self.check(r'''
- assert($('q').disabled && $('q').title===tr('서비스를 연결하고 지도를 가져오면 찾을 수 있습니다.'),'No service: search is disabled with a reason');
+ assert($('q').disabled && $('q').title===tr('코드를 연결해 지도를 만들면 검색할 수 있다.'),'No service: search is disabled with a reason');
 ''',query='&empty=1')
         self.check(r'''
- assert(!$('q').disabled && $('q').placeholder===tr('화면·기능·프로그램·데이터·PR·이슈 찾기'),'With a map search is available');
+ assert(!$('q').disabled && $('q').placeholder===tr('예: 로그인 화면'),'With a map search is available');
  window.noMap=true;await loadProject('First');
- assert($('q').disabled && $('q').title===tr('서비스를 연결하고 지도를 가져오면 찾을 수 있습니다.'),'No map: search is disabled with a reason');
+ assert($('q').disabled && $('q').title===tr('코드를 연결해 지도를 만들면 검색할 수 있다.'),'No map: search is disabled with a reason');
 ''')
 
     def test_errors_are_explained_and_keep_the_original_text_in_details(self):
@@ -1760,7 +1759,7 @@ class UxWriting(unittest.TestCase):
  assert(githubErrorText('GITHUB_ACCESS|github.com|me|unknown_code|web').indexOf(tr('로그인 상태와 인터넷 연결을 확인해 주세요.'))<0,'Unknown failures do not blame login');
  editProject(false);window.failSave=true;$('saveProject').click();await wait(60);
  const box=$('project-dialog');
- assert(box.querySelector('#projectError').innerText.startsWith(tr('연결을 저장하지 못했습니다. 입력과 연결 상태를 확인하세요.')) && [...box.querySelectorAll('details')].some(d=>d.textContent.includes('fictional save failure')),'Save failure keeps its original text in details');
+ assert(box.querySelector('#projectError').innerText.startsWith(tr('연결을 저장하지 못했다. 코드 주소와 인터넷 연결을 확인한다.')) && [...box.querySelectorAll('details')].some(d=>d.textContent.includes('fictional save failure')),'Save failure keeps its original text in details');
  assert(box.querySelector('#projectError details'),'Error details stay inside the alert');
  box.close();window.failSave=false;
  window.githubFail='GITHUB_ACCESS|github.com|me|login|web';window.loginsFail='fictional login listing failure';
@@ -1784,19 +1783,19 @@ class UxWriting(unittest.TestCase):
  const update=$('updateStatus');
  assert(!update.textContent.includes('/private/tmp/recovery-1') && update.textContent && update.textContent!==tr('업데이트가 완료되었습니다.'),'Recovery failure is explained without claiming success');
  assert([...$('release-dialog').querySelectorAll('details')].some(d=>d.textContent.includes('/private/tmp/recovery-1')),'The recovery location stays available');
- assert(!$('release-dialog').textContent.includes(tr('업데이트 뒤 AI 연결을 다시 확인하세요.')),'Reconnect guidance waits for a completed update');
+ assert(!$('release-dialog').textContent.includes(tr('업데이트한 뒤 AI 연결을 다시 확인한다.')),'Reconnect guidance waits for a completed update');
  U.job={stage:'completed',version:'9.9.9',error:null};renderUpdates();
- assert($('release-dialog').textContent.includes(tr('업데이트 뒤 AI 연결을 다시 확인하세요.')) && $('updateConnectionDiagnostic'),'Completed updates ask to check the AI connection');
+ assert($('release-dialog').textContent.includes(tr('업데이트한 뒤 AI 연결을 다시 확인한다.')) && $('updateConnectionDiagnostic'),'Completed updates ask to check the AI connection');
 ''')
 
     def test_settings_read_failure_keeps_the_original_error(self):
         self.check(r'''
- assert($('status').classList.contains('error') && $('status').textContent===tr('설정을 읽지 못했습니다. 오류 내용을 확인하세요.') && $('error-detail').textContent.includes('fictional settings read failure'),'Settings read failure is explained with its original text');
+ assert($('status').classList.contains('error') && $('status').textContent===tr('설정을 읽지 못했다. 오류 내용을 확인한다.') && $('error-detail').textContent.includes('fictional settings read failure'),'Settings read failure is explained with its original text');
 ''',query='&settingsFail=1')
 
     def test_baseline_notice_only_for_since_previous_refresh_and_names_the_next_refresh(self):
         self.check(r'''
- const notice=tr('지난 새로고침 이후를 선택하면 다음 새로고침은 이번 시각 이후부터 비교합니다. 시작점을 고정하려면 날짜·시각을 지정하세요.');
+ const notice=tr('새로고침할 때마다 비교 시작점도 바뀐다. 시작점을 고정하려면 「고른 시각부터」를 선택한다.');
  S.settings={open_refresh:false,since:'last_refresh',since_time:''};renderHeader();
  assert($('refresh').title.includes(notice),'Refresh explains the next comparison start');
  S.settings={open_refresh:false,since:'time',since_time:'2026-09-01T00:00'};renderHeader();
@@ -1891,7 +1890,7 @@ class FeatureContext(unittest.TestCase):
  const featured=[...$('map').querySelectorAll('.col.featured')];
  assert(featured.length===1,'One highlighted feature column');
  assert(JSON.stringify([...featured[0].querySelectorAll('.card[data-scr]')].map(c=>c.dataset.scr).sort())===JSON.stringify([...items].sort()),'Highlighted column holds exactly the member screens');
- assert(featured[0].innerText.includes(tr('선택한 기능')),'The highlight is labelled');
+ assert(featured[0].innerText.includes(tr('고른 기능')),'The highlight is labelled');
  assert($('insp').innerText.includes('Items') && $('featClear'),'Inspector shows the feature overview with a clear path');
  assert(!hangul($('insp').innerText+featured[0].innerText),'English feature context: '+$('insp').innerText);
  assert(S.repository==='' && S.branch==='dev','No implicit code or version change');
@@ -1923,12 +1922,12 @@ class FeatureContext(unittest.TestCase):
  $('featBack').click();await wait();
  assert(!S.sel && !S.open && S.view==='map' && $('insp').querySelector('[data-goact]') && $('map').querySelector('.col.featured'),'Back returns to the feature overview on the full map');
  $('map').querySelector('[data-scr="web::/orders"]').click();await wait();
- assert(S.sel==='web::/orders' && strip().innerText.includes(tr('선택한 기능 밖의 화면입니다.')) && !strip().innerText.includes(tr('이 기능에 속한 화면입니다.')),'An outside screen is never called a member');
+ assert(S.sel==='web::/orders' && strip().innerText.includes(tr('고른 기능 밖의 화면입니다.')) && !strip().innerText.includes(tr('이 기능에 속한 화면입니다.')),'An outside screen is never called a member');
  assert(!$('map').querySelector('.col.featured [data-scr="web::/orders"]'),'Outside card stays outside the highlight');
  $('featSwitch').click();await wait();
  assert(S.feat===targetID('feature',['web::/orders']) && $('map').querySelector('.col.featured [data-scr="web::/orders"]') && strip().innerText.includes(tr('이 기능에 속한 화면입니다.')),'Switch anchors the screen own feature');
  $('map').querySelector('[data-scr="!orphans"]').click();await wait();
- assert(strip().innerText.includes(tr('선택한 기능 밖의 화면입니다.')) && !$('featSwitch'),'Items outside every feature only offer back and clear');
+ assert(strip().innerText.includes(tr('고른 기능 밖의 화면입니다.')) && !$('featSwitch'),'Items outside every feature only offer back and clear');
  $('featClear').click();await wait();
  assert(S.feat===null && !$('map').querySelector('.col.featured') && !strip() && S.sel==='!orphans','Clear removes only the feature context');
 ''')
@@ -1944,9 +1943,9 @@ class FeatureContext(unittest.TestCase):
  $('insp').querySelector('[data-goscr="web::/items"]').click();await wait();
  $('insp').querySelectorAll('details').forEach(d=>d.open=true);const screen=$('insp').innerText;assert(screen.split('#42 ').length-1===1 && screen.split('#7 ').length-1===1,'A member screen keeps its own work list');
  window.mutateBundle=b=>{featureBundle(b);b.status=null;};await loadProject('First',false,'');S.view='feat';render();
- assert(S.feat===itemsId() && $('insp').innerText.includes(tr('작업 정보 미수집')) && !$('insp').innerText.includes(tr('연결된 작업 없음')),'Uncollected work is not reported as none');
+ assert(S.feat===itemsId() && $('insp').innerText.includes(tr('GitHub 작업을 아직 가져오지 않음')) && !$('insp').innerText.includes(tr('관련 작업 없음')),'Uncollected work is not reported as none');
  window.mutateBundle=b=>{featureBundle(b);b.status.open_prs=b.status.open_prs.filter(p=>p.number===100);for(const k of ['merged_prs','branches','worktrees','issues'])b.status[k]=[];};await loadProject('First',false,'');render();
- assert($('insp').innerText.includes(tr('연결된 작업 없음')),'Collected but unlinked work says so');
+ assert($('insp').innerText.includes(tr('관련 작업 없음')),'Collected but unlinked work says so');
 ''')
 
     def test_copy_holds_only_the_feature_context_and_screen_copy_is_unchanged(self):
@@ -1957,7 +1956,7 @@ class FeatureContext(unittest.TestCase):
  assert(c.includes('POST /items') && c.includes('api/app/items.py:3'),'Copy keeps the action and server code pointers');
  assert(c.split('#7 ').length-1===1 && c.includes('web#42') && c.includes('api#42'),'Linked work is deduplicated with its repository');
  assert(!c.includes('web::/orders') && !c.includes('Order fix') && !c.includes('First orders'),'No unrelated feature data');
- assert(c.includes(tr('기준: ')) && c.includes(tr('AI가 붙인 이름')),'Version and the AI-name indicator are kept');
+ assert(c.includes(tr('기준: ')) && c.includes(tr('AI가 지은 이름')),'Version and the AI-name indicator are kept');
  assert(!hangul(c),'English copy');
  $('insp').querySelector('[data-goscr="web::/items"]').click();await wait();$('copyS').click();await wait();
  assert(window.copied.startsWith(tr('화면: ')) && !window.copied.includes('feature:'),'Screen copy stays screen-only');
@@ -2021,14 +2020,14 @@ class FeatureContext(unittest.TestCase):
  await openFeature('Items');$('insp').querySelector('[data-goact]').click();await wait();
  $('insp').querySelector('.detail [data-f^="route|"]').click();await wait();
  let st=await controlState();
- assert(S.view==='focus' && S.focus.t==='route' && strip() && said('선택한 기능의 화면이 쓰는 대상입니다.') && !said('이 기능에 속한 화면입니다.'),'A route used by member screens keeps the feature with neutral wording');
+ assert(S.view==='focus' && S.focus.t==='route' && strip() && said('고른 기능의 화면이 쓰는 대상입니다.') && !said('이 기능에 속한 화면입니다.'),'A route used by member screens keeps the feature with neutral wording');
  assert(st.feature_context?.id===itemsId() && st.feature_context.member===null && st.feature_context.relation==='used','State does not claim a member screen for a route: '+JSON.stringify(st.feature_context));
  $('insp').querySelector('[data-f^="table|"]').click();await wait();st=await controlState();
- assert(S.focus.t==='table' && said('선택한 기능의 화면이 쓰는 대상입니다.') && st.feature_context.relation==='used','Data reached from member screens keeps the anchor');
+ assert(S.focus.t==='table' && said('고른 기능의 화면이 쓰는 대상입니다.') && st.feature_context.relation==='used','Data reached from member screens keeps the anchor');
  setFocus('route|api/app/orders.py::list_orders');st=await controlState();
- assert(said('선택한 기능의 화면에서 이어진 것을 찾지 못했습니다.') && st.feature_context.member===null && st.feature_context.relation==='unlinked','A route no member screen calls is not linked to the feature');
+ assert(said('고른 기능의 화면에서 이어진 것을 찾지 못했습니다.') && st.feature_context.member===null && st.feature_context.relation==='unlinked','A route no member screen calls is not linked to the feature');
  setFocus('screen|web::/orders');st=await controlState();
- assert(said('선택한 기능 밖의 화면입니다.') && $('featSwitch') && st.feature_context.member===false,'An outside screen in Connections is outside');
+ assert(said('고른 기능 밖의 화면입니다.') && $('featSwitch') && st.feature_context.member===false,'An outside screen in Connections is outside');
  assert(!hangul($('insp').innerText),'English focus strip');
  $('featBack').click();await wait();
  assert(S.view==='map' && !S.sel && S.feat===itemsId() && $('copyF') && $('map').querySelectorAll('.col.featured').length===1 && $('map').querySelector('[data-scr="web::/orders"]'),'Back returns to the same feature on the full map');

@@ -57,16 +57,16 @@ function guideReturnFocus(){const back=G.opener?.isConnected&&!G.opener.closest(
 function guideStep(step){G.run++;G.step=Math.max(0,Math.min(GUIDE_STEPS.length-1,step));renderGuide();$('guideTitle').focus();}
 function guideBody(){
   const m=guideHasMap();
-  if(G.step===0)return `<h2 id="guideTitle" tabindex="-1">${tr('코드 구조를 지도로 봅니다')}</h2>
+  if(G.step===0)return `<h2 id="guideTitle" tabindex="-1">${tr('내 코드 지도')}</h2>
     <div class="guide-visual">${['화면','서버','데이터'].map((name,i)=>`${i?'<span class="arrow">→</span>':''}<div class="card" title="${esc(['/items','POST /items','items'][i])}"><div class="nm">${tr(name)}</div><div class="meta"><span class="dot ${['','strong','ok'][i]}"></span>${tr(['목록 화면','항목 저장','저장된 항목'][i])}</div></div>`).join('')}</div>
     <div class="ctl"><button class="btn primary" id="guideNext">${tr('시작하기')}</button></div>`;
   if(G.step===2)return `<h2 id="guideTitle" tabindex="-1">${tr('연결한 코드')}</h2>
-    <p role="status" id="guideProjectState">${S.project?`<span class="dot ok"></span>${tr('연결한 서비스: ')}${esc(S.project)}`:tr('아직 연결된 서비스가 없습니다. AI 채팅에서 연결을 마친 뒤 돌아오세요.')}</p>
+    <p role="status" id="guideProjectState">${S.project?`<span class="dot ok"></span>${tr('연결한 서비스: ')}${esc(S.project)}`:tr('연결한 서비스가 없다. AI 채팅에서 연결을 마친 뒤 돌아온다.')}</p>
     ${S.project?`<ul>${guideCodes().map(guideCodeLine).join('')}</ul>`:''}
     <div class="ctl">${S.project?`<button class="btn primary" id="guideNext">${tr('다음')}</button>`:`<button class="btn primary" id="guideToAgent">${tr('AI에게 맡기기')}</button>`}${guideManual()}</div>`;
-  if(G.step===1)return `<h2 id="guideTitle" tabindex="-1">${tr('작업하던 AI에게 연결을 맡기세요')}</h2><p>${tr('한 번의 요청으로 코드 연결부터 첫 분석까지 진행합니다.')}</p>
-    <p class="s">${tr('첫 분석에 AI 요금·한도가 적용됩니다.')} ${tr('분석 전 승인 필요')}</p>
-    <div class="ctl"><button class="btn ${G.connection?'quiet':'primary'}" id="guideCopySetup">${tr('AI에게 보낼 요청 복사')}</button><span id="guideCopyState" role="status">${G.copied?tr('복사했습니다. 작업하던 AI 채팅에 붙여 넣으세요.'):''}</span></div>
+  if(G.step===1)return `<h2 id="guideTitle" tabindex="-1">${tr('작업하던 AI에 연결 맡기기')}</h2>
+    <p class="s">${tr('첫 분석은 연결한 AI의 요금과 사용 한도를 따른다.')} ${tr('확인한 뒤에 분석 시작')}</p>
+    <div class="ctl"><button class="btn ${G.connection?'quiet':'primary'}" id="guideCopySetup">${tr('AI에 보낼 글 복사')}</button><span id="guideCopyState" role="status">${G.copied?tr('복사했다. 작업하던 AI 채팅에 붙여 넣는다.'):''}</span></div>
     ${G.setup?helpDetails(`<pre class="prompt mono">${esc(G.setup.text)}</pre>`,'연결 안내 보기'):''}
     <div class="ctl">${guideManual()}</div>
     ${G.connection?'':`<div class="ctl"><button class="btn" id="guideDiagnose">${tr('연결 진단')}</button></div>`}<div id="guideConnection"></div>
@@ -75,18 +75,16 @@ function guideBody(){
 }
 function guideAnalysisBody(m){
   const a=guideAnalysisState(),done=a.state==='done';
-  const status=!S.project?tr('먼저 서비스를 연결하세요.'):!m?tr('아직 지도를 가져오지 않았습니다.'):`<span class="dot ${done?'ok':''}"></span>${tr(GUIDE_ANALYSIS_TEXT[a.state])}`;
-  const waiting=guideAwaiting() && !done?`<p class="s">${tr('앱으로 돌아오면 결과를 읽습니다.')}</p>`:'';
+  const status=!S.project?tr('먼저 서비스를 연결하세요.'):!m?tr('아직 지도가 없다.'):`<span class="dot ${done?'ok':''}"></span>${tr(GUIDE_ANALYSIS_TEXT[a.state])}`;
   const codes=m && a.codes.length?`<ul>${a.codes.map(c=>`<li data-guide-code><b>${esc(c.name)}</b> · ${tr(GUIDE_CODE_ANALYSIS[c.state])}</li>`).join('')}</ul>`:'';
   const plan=a.state==='remaining'?planSummary({remaining:a.plan.tasks,tasks:[],blocked:a.plan.blocked}):'';
-  const error=G.readError?`<p role="alert" class="s error">${tr('저장된 결과를 읽지 못했습니다.')}</p>`:!m && S.project && $('status').classList.contains('error')?`<p role="alert" class="s error">${esc($('status').textContent)}</p>`:'';
+  const error=G.readError?`<p role="alert" class="s error">${tr('저장한 결과를 읽지 못했다.')}</p>`:!m && S.project && $('status').classList.contains('error')?`<p role="alert" class="s error">${esc($('status').textContent)}</p>`:'';
   const buttons=!S.project?`<button class="btn primary" id="guideToProject">${tr('AI에게 맡기기')}</button>`
-    :!m?`<button class="btn primary" id="guideRefresh" ${$('refresh').disabled?'disabled':''}>${tr('↻ 지금 지도 가져오기')}</button>`
+    :!m?`<button class="btn primary" id="guideRefresh" ${$('refresh').disabled?'disabled':''}>${tr('↻ 지도 만들기')}</button>`
     :done?`<button class="btn primary" id="guideFinish">${tr('분석 결과 보기')}</button>`
-    :`<button class="btn primary" id="guideReadNow" ${G.reading?'disabled':''}>${tr('저장된 결과 읽기')}</button><button class="btn quiet" id="guideAnalysis">${tr(['missing','language','stale'].includes(a.state)?'직접 분석 요청 만들기':'남은 분석 요청 만들기')}</button>`;
+    :`<button class="btn primary" id="guideReadNow" ${G.reading?'disabled':''}>${tr('결과 확인')}</button><button class="btn quiet" id="guideAnalysis">${tr(['missing','language','stale'].includes(a.state)?'AI에 분석 맡기기':'남은 분석을 AI에 맡기기')}</button>`;
   return `<h2 id="guideTitle" tabindex="-1">${tr('첫 분석')}</h2>
-    <p role="status" id="guideMapState">${status}</p>${codes}${plan}${error}${waiting}
-    ${m && !done?`<p class="s">${tr('기본 지도는 AI 미사용 · 분석은 계정 요금 적용')}</p>`:''}
+    <p role="status" id="guideMapState">${status}</p>${codes}${plan}${error}
     <div class="ctl">${buttons}</div>`;
 }
 // A service that is already shown is edited in place; only an empty workspace starts a new one.
@@ -95,7 +93,7 @@ function guideManual(){return `<button class="btn quiet" id="guideCreate">${tr(S
 // A legacy single-folder service has no repository list; its shown map stands for its one code.
 function guideCodes(){const repos=S.projectInfo?.repositories || [],m=S.maps.dev||S.maps.main;return repos.length?repos:m?.repo?[{name:S.project,path:m.repo,collected:!!m.commit,commits:{[S.branch]:M()?.commit}}]:[];}
 function guideCodeLine(r){
-  const where=r.url||r.configured_path||r.path||'',state=r.error?'최신 지도를 가져오지 못했습니다':r.config_changed?'설정 변경 · 지도 갱신 필요':r.collected&&r.commits?.[S.branch]?'지도 준비됨':'아직 지도 없음';
+  const where=r.url||r.configured_path||r.path||'',state=r.error?'최신 지도를 가져오지 못했습니다':r.config_changed?'설정을 바꿨다. 새로고침하면 지도에 반영된다.':r.collected&&r.commits?.[S.branch]?'지도 준비됨':'아직 지도 없음';
   return `<li data-guide-code><b>${esc(r.name || r.id)}</b>${where?` · <span class="mono">${esc(where)}</span>`:''} · <span class="${r.error?'error':''}">${tr(state)}</span></li>`;
 }
 function renderGuide(){

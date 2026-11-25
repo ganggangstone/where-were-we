@@ -33,7 +33,7 @@ function element(id) {
 elements.insp=element('insp');elements.analyzeMap=element('analyzeMap');
 const $ = id => elements[id] || null;
 const esc = value => String(value).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('"','&quot;');
-const PLAN_NAMES = {analysis:'상세 지도',system:'서비스 구성 보기'};
+const PLAN_NAMES = {analysis:'상세 지도',system:'서비스 전체 보기'};
 const connectionDisplayName = id => 'Repository '+id;
 const analysisButtonText = () => AnalysisRun.stateLabel();
 elements.insp.querySelectorAll=selector=>{
@@ -287,7 +287,7 @@ status=null;await open();await AnalysisRun.check();await flush();
 assert(!$('insp').innerHTML.includes('unit-board'),'A response that is not a board renders nothing');
 native=(command,args)=>{if(command==='analysis_run_status'&&args.view==='units')throw Error('Refresh the local structure before analyzing every unit');};
 S.loadToken++;AnalysisRun.syncScope();await open();await AnalysisRun.check();await flush();
-assert($('insp').innerHTML.includes('Units are calculated after one refresh') && $('insp').innerHTML.includes('does not call AI') && !$('startFullAnalysis'),'No start before the structure exists');
+assert($('insp').innerHTML.includes('Refresh to find files that work together.') && $('insp').innerHTML.includes('Refresh') && !$('startFullAnalysis'),'No start before the structure exists');
 assert($('refreshForUnits') && $('insp').innerHTML.includes('Refresh and calculate units'),'A plain refresh action is offered');
 let refreshed=0;elements.refresh={click(){refreshed++;}};
 AnalysisRun.bind();$('refreshForUnits').onclick();assert(refreshed===1,'The action presses the normal refresh');
@@ -337,7 +337,7 @@ const named=()=>({repositories:[{repository:'service',units:[['folder:a','folder
 native=(command,args)=>command==='analysis_run_status'&&args.view==='units'?named():undefined;
 provider={providers:[{provider:'claude',available:false,error_code:'CLI_NOT_INSTALLED'}]};status=null;await open();await flush();
 let html=$('insp').innerHTML;
-assert(!html.includes('startFullAnalysis') && html.includes('checkFullAccount') && html.includes('Install Claude Code'),'An account problem shows its message and the check in place of the start');
+assert(!html.includes('startFullAnalysis') && html.includes('checkFullAccount') && html.includes('Claude Code is missing.'),'An account problem shows its message and the check in place of the start');
 assert(html.includes('Named 1') && !html.includes('Detailed') && html.includes('Folders<b>1/1</b></span>'),'Zero detailed explanations are not shown');
 provider=available;$('checkFullAccount').onclick();await flush();
 html=$('insp').innerHTML;
@@ -451,7 +451,7 @@ assert(!calls.some(c=>['refresh','save_settings'].includes(c.command)),'No refre
         self.check_js(r'''
 provider={providers:[{provider:'claude',available:false,authenticated:false,error_code:'CLI_NOT_INSTALLED'}]};
 await open();assert($('startAppAnalysis').disabled,'Missing CLI cannot start');
-assert($('insp').innerHTML.includes('Install Claude Code'),'Missing CLI has an actionable message');
+assert($('insp').innerHTML.includes('Claude Code is missing.'),'Missing CLI has an actionable message');
 await $('startAppAnalysis').onclick();assert(count('analysis_run_start')===0,'Guard works even if disabled handler called');
 provider={providers:[{provider:'claude',available:true,authenticated:false,error_code:'CLI_NOT_AUTHENTICATED'}]};
 AnalysisRun.checkAccount();await flush();assert($('startAppAnalysis').disabled,'Signed out cannot start');
@@ -481,9 +481,9 @@ assert(!calls.some(c=>c.command==='refresh'),'Result reads never collect');
 await open();
 for(const [code,en,ko] of [
  ['CLI_ACCOUNT_UNIDENTIFIED','identify the Claude Code account','계정을 확인할 수 없습니다'],
- ['CLI_USAGE_LIMIT','usage limit was reached','사용 한도에 도달'],
+ ['CLI_USAGE_LIMIT','reached your Claude usage limit','Claude 사용 한도를 모두 썼다'],
  ['CLI_AUTH','sign-in expired or was rejected','로그인이 만료됐거나 거부'],
- ['CANCELLED','Analysis was cancelled','분석이 취소']
+ ['CANCELLED','Analysis canceled','분석을 취소했다']
 ]){
  provider={providers:[{provider:'claude',available:false,authenticated:false,error_code:code}]};
  S.lang='en';AnalysisRun.checkAccount();await flush();
@@ -525,7 +525,7 @@ status.error={code:'invalid_result'};status.input_stats.calls=1;await AnalysisRu
         self.check_js(r'''
 status=runRecord('failed',{error:{code:'interrupted',message:'stopped'},tasks:[],completed_tasks:[{task:'analysis'}]});
 await flush();await AnalysisRun.check();await open();
-assert($('insp').innerHTML.includes('Analysis was interrupted'),'Interrupted run recovered on status read');
+assert($('insp').innerHTML.includes('Analysis stopped.'),'Interrupted run recovered on status read');
 assert(count('analysis_run_retry')===0,'Recovery cannot automatically retry');
 await $('retryAppAnalysis').onclick();await flush();
 assert(count('analysis_run_retry')===1,'Retry is explicit');

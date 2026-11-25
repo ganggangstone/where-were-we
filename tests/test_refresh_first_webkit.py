@@ -162,7 +162,7 @@ class RefreshFirstWebKit(unittest.TestCase):
  check(!calls.some(c=>c.command==='analysis_run_start'),'Viewing saved evidence starts no AI');
  check(!$('flowFeature') && !$('flowProof').open && $('map').querySelector('[data-flow-operation]'),'Operations precede closed technical evidence');
  check($('flowSources') && !$('flowSources').open && $('map').querySelector('.flow-trace').innerText.includes('client.js'),'Group shows connected code while documentation and module counts stay closed');
- for(const [ko,en] of [['기능 (베타)','Features (beta)'],['AI 설명 (베타)','AI explanation (beta)'],['문서·모듈','Docs and modules'],['워크스페이스 패키지','Workspace packages'],['경로 영역','Path area'],['모든 경로','All paths'],['저장된 페이지','Saved pages'],['미저장 페이지로','Go to unsaved page'],['호출 흐름','Request flow'],['구성 요소','Components']]){
+ for(const [ko,en] of [['기능 (베타)','Features (beta)'],['AI 설명 (베타)','AI explanation (beta)'],['문서·모듈','Docs and modules'],['워크스페이스 패키지','Workspace packages'],['코드 위치','Path area'],['모든 경로','All paths'],['저장된 페이지','Saved pages'],['미저장 페이지로','Go to unsaved page'],['호출 흐름','Request flow'],['코드가 맡은 일','Components']]){
    const old=S.lang;S.lang='en';check(tr(ko)===en,'English '+ko);S.lang=old;
  }
  $('flowProof').querySelector('summary').click();check($('flowProof').open && $('flowProof').innerText.includes('client.js:5'),'Endpoint evidence opens on demand');

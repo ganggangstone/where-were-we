@@ -189,14 +189,14 @@ Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{windo
  assert($('liveConnectionState').textContent.includes('아직'),'Copying is not verification');
  live={state:'running_old_server',registration:{state:'different_path',command:'/old/python3',server:'/old/mcp_server.py'}};
  await checkCurrentConnection();assert($('liveConnectionState').textContent.includes('이전 연결'),'Old live server is distinct');
- assert($('registeredConnectionState').textContent.includes('다른 경로'),'Actual registration is separate');
- live={state:'verified',registration:{state:'matches_app'}};await checkCurrentConnection();assert($('liveConnectionState').textContent.includes('확인했습니다'),'Live MCP confirmation becomes verified');
+ assert($('registeredConnectionState').textContent===tr('설정에 다른 서버가 들어 있다.'),'Actual registration is separate');
+ live={state:'verified',registration:{state:'matches_app'}};await checkCurrentConnection();assert($('liveConnectionState').textContent===tr('작업하던 AI가 앱에 연결됐다.'),'Live MCP confirmation becomes verified');
  live={state:'app_changed'};await checkCurrentConnection();assert($('copyConnectionRequest').disabled,'An app update invalidates the request');
  for(const state of ['expired','app_changed']){live={state};await checkCurrentConnection();assert($('copyConnectionRequest').disabled,'Invalidated requests cannot be reused');}
  S.lang='en';await startConnectionDiagnostic('app');assert($('insp').textContent.includes('Connection diagnostics'),'English heading');
  assert(!/[가-힣]/.test($('insp').textContent),'English pane has no untranslated Korean');
  for(const state of Object.keys(connectionMessages))assert(!/[가-힣]/.test(connectionMessage(state)),'Translated status '+state);
- assert(tr('업데이트 뒤 AI 연결을 다시 확인하세요.').startsWith('Check'),'Translated update guidance');
+ assert(tr('업데이트한 뒤 AI 연결을 다시 확인한다.').startsWith('Check'),'Translated update guidance');
  // Two feature requests resolve in reverse order; stale responses cannot replace the newer one.
  waitNext=true;const first=startConnectionDiagnostic('detail');const oldFinish=finishNext;
  waitNext=false;await startConnectionDiagnostic('maps');oldFinish();await first;

@@ -483,8 +483,8 @@ class Incremental(unittest.TestCase):
 
     def test_provenance_label_and_handoff_mention_the_pinned_base(self):
         html=(Path(__file__).resolve().parents[1]/'ui/index.html').read_text()
-        self.assertIn("mixed:'AI 분석과 기본 수집으로 확인'",html)
-        self.assertLess(html.index('"AI 분석과 기본 수집으로 확인"'),html.index('const UI_PATTERN'))
+        self.assertIn("mixed:'앱과 AI가 코드에서 찾음'",html)
+        self.assertLess(html.index('"앱과 AI가 코드에서 찾음"'),html.index('const UI_PATTERN'))
         request=self.request()
         self.assertIn('base',request['handoff']);self.assertIn('review',request['prompt'])
         self.assertEqual(request['record_arguments']['base'],request['base'])

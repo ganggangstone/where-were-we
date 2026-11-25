@@ -99,7 +99,6 @@ button.pill, .pill.click { font:var(--font-secondary); letter-spacing:var(--trac
 .cols { display:flex; gap:var(--space-5); align-items:flex-start; min-width:min-content }
 .col { width:var(--size-column); flex:none }
 .col h3 { color:var(--color-text); margin:var(--space-0); font:var(--font-heading) }
-.col p { margin:var(--space-2) var(--space-0) var(--space-4); color:var(--color-text-secondary); font:var(--font-secondary); letter-spacing:var(--tracking-secondary); min-height:var(--size-desc-min) }
 .card { position:relative; overflow:hidden; background:var(--color-bg-card); border:var(--border-hairline); border-radius:var(--radius-card); padding:var(--space-4) var(--space-5); margin-bottom:var(--space-3) }
 .card:hover { border:var(--border-hover) }
 .card.sel { outline:var(--outline-selected); border-color:transparent }
@@ -233,7 +232,6 @@ details .kv { margin:var(--space-3) var(--space-0) var(--space-0); word-break:br
 .list-grid details.list-panel:not([open]), .list-grid #moduleGraph > details.list-panel:not([open]) { grid-column:auto }
 details.list-panel { padding:var(--space-3) var(--space-4); border:var(--border-hairline); border-radius:var(--radius-control); background:var(--color-bg-group) }
 details.list-panel > summary { margin:var(--space-0); color:var(--color-text); font:var(--font-body) }
-.panel-note { display:block; color:var(--color-text-secondary); font:var(--font-secondary); margin:var(--space-1) var(--space-0) var(--space-0) }
 .route-table { width:100%; border-collapse:collapse; margin-top:var(--space-2); font:var(--font-secondary) }
 .route-table td { padding:var(--space-1) var(--space-2); border-top:var(--border-hairline); vertical-align:top; overflow-wrap:anywhere }
 .route-table td:first-child { width:var(--space-8); color:var(--color-text-secondary) } .route-table td:last-child { text-align:right; white-space:nowrap }
