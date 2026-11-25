@@ -45,16 +45,16 @@ def since_of(repo,last_refresh,now):
     st=settings();fallback=last_refresh or now-timedelta(days=1)
     if st['since']=='time' and st['since_time']:
         chosen=datetime.fromisoformat(st['since_time'])
-        return (chosen if chosen.tzinfo else chosen.astimezone()),'지정한 시각 이후'
+        return (chosen if chosen.tzinfo else chosen.astimezone()),'고른 시각부터'
     if st['since']=='my_commit':
         def git(*args):
             result=subprocess.run(['git','-C',repo,*args],capture_output=True,text=True)
             return result.stdout.strip() if result.returncode==0 else ''
         email=git('config','user.email')
         stamp=git('log','--all','--fixed-strings','--author=<'+email+'>','-1','--format=%cI') if email else ''
-        if stamp:return datetime.fromisoformat(stamp),'내 마지막 커밋 이후'
-        return fallback,'내 커밋을 찾지 못해 지난 새로고침 이후'
-    return fallback,'지난 새로고침 이후'
+        if stamp:return datetime.fromisoformat(stamp),'내 마지막 코드 기록부터'
+        return fallback,'내 코드 기록을 찾지 못해 마지막 새로고침 뒤'
+    return fallback,'마지막 새로고침 뒤'
 
 def project_home(project):
     return os.path.join(ROOT, project)
