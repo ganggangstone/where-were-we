@@ -56,6 +56,14 @@ class Briefing(unittest.TestCase):
         # The Korean handoff keeps the no-refresh contract in Korean, without an English sentence.
         self.assertIn('결과를 보여 주려고 refresh를 실행하지 마세요.',request_ko:=briefing.request('demo','','dev','ko')['handoff'])
         self.assertNotIn('Do not call refresh',request_ko)
+    def test_prompt_asks_for_the_user_visible_problem_and_a_new_wording_asks_again(self):
+        prompt=self.request()['prompt']
+        self.assertNotIn('State each PR base branch',prompt)
+        self.assertIn('never write sentences about which branch a change was merged into',prompt)
+        self.assertIn('what a user of the service saw or could not do',prompt)
+        self.record(self.request());self.assertEqual(briefing.view('demo','','dev','en')['state'],'saved')
+        with patch.object(briefing,'WORDING',briefing.WORDING+1):
+            self.assertEqual(briefing.view('demo','','dev','en')['state'],'stale')
     def test_freezes_bodies_and_qualifies_equal_pr_numbers_without_mutating_changes(self):
         before=copy.deepcopy(project.read_bundle('demo')['changes'])
         request=self.request();self.assertEqual(len(request['input']['prs']),2)
