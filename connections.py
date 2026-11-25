@@ -82,4 +82,4 @@ def accounts():
     env=dict(os.environ)
     for key in ('GH_TOKEN','GITHUB_TOKEN','GH_DEBUG','DEBUG','GH_HOST','GH_REPO'):env.pop(key,None)
     value=project.github_run(['auth','status','--hostname','github.com','--json','hosts','--jq','[.hosts[][] | .login] | unique'],env,{'host':'github.com'},'login')
-    return {'accounts':[a for a in json.loads(value) if isinstance(a,str) and re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9-]{0,38}',a)]}
+    return {'accounts':[a for a in json.loads(value) if isinstance(a,str) and re.fullmatch(project.LOGIN,a)]}

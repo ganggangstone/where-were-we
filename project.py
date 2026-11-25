@@ -18,6 +18,7 @@ from urllib.parse import urlsplit
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 NAMES = ('dev', 'main', 'dev.prev', 'main.prev', 'status', 'changes', 'groups', 'flows', 'system', 'system.ai', 'jobs', 'tests')
+LOGIN = r'[a-zA-Z0-9][a-zA-Z0-9-]{0,38}'  # a GitHub login
 STATUS_LISTS = ('open_prs','merged_prs','branches','worktrees','issues','overlaps')
 
 def now():return datetime.now(timezone.utc).isoformat()
@@ -96,7 +97,7 @@ def github_environment(repo,check_access=True,origin=None):
         token=github_run(['auth','token','--hostname',host,'--user',account],stored,identity,'login')
         env=stored;env['GH_TOKEN']=token
     actual=github_run(['api','user','--hostname',host,'--jq','.login'],env,identity,'login')
-    if not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9-]{0,38}',actual) or account and actual.lower()!=account.lower():raise github_error(identity,'login')
+    if not re.fullmatch(LOGIN,actual) or account and actual.lower()!=account.lower():raise github_error(identity,'login')
     identity={'host':host,'account':actual}
     if check_access:
         github_run(['repo','view',host+'/'+origin['repository'],'--json','nameWithOwner'],env,identity,'repository')
@@ -182,10 +183,10 @@ def github_accounts(name,rid):
     identity=repo.get('github') or {'host':origin['host']}
     value=github_run(['auth','status','--hostname',origin['host'],'--json','hosts','--jq','[.hosts[][] | .login] | unique'],env,identity,'login')
     accounts=json.loads(value)
-    return {'accounts':[a for a in accounts if isinstance(a,str) and re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9-]{0,38}',a)],'selected':identity.get('account','')}
+    return {'accounts':[a for a in accounts if isinstance(a,str) and re.fullmatch(LOGIN,a)],'selected':identity.get('account','')}
 
 def set_github_account(name,rid,account):
-    if not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9-]{0,38}',account):raise ValueError('Choose a GitHub account')
+    if not re.fullmatch(LOGIN,account):raise ValueError('Choose a GitHub account')
     with locked(name):
         repo=github_repository(name,rid);origin=github_origin(repo['path'])
         if not origin:raise ValueError('This code does not use a github.com origin')
@@ -220,7 +221,7 @@ def validate(data):
             entry.update(url=connections.parse_url(item['url']),managed=bool(item.get('managed')))
         if item.get('github'):
             identity=item['github']
-            if not isinstance(identity,dict) or identity.get('host')!='github.com' or not isinstance(identity.get('account'),str) or not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9-]{0,38}',identity['account']):raise ValueError('Choose a GitHub account')
+            if not isinstance(identity,dict) or identity.get('host')!='github.com' or not isinstance(identity.get('account'),str) or not re.fullmatch(LOGIN,identity['account']):raise ValueError('Choose a GitHub account')
             entry['github']={'host':identity['host'],'account':identity['account']}
         if item.get('legacy'):entry['legacy']=True
         result['repositories'].append(entry);ids.add(rid);paths.add(path)
@@ -755,6 +756,7 @@ def selected_repository(name,rid=''):
     if not hit:raise ValueError('Choose a repository: '+', '.join(r['id'] for r in repos))
     return hit
 
+ACTION_TASKS={'group.py':'groups','system.py':'system','jobs.py':'jobs','steps.py':'steps'}  # terminal scripts → AI task; ai_extract.py is the map analysis
 def action(name,rid,script,args=()):
     with locked(name):
         repo=selected_repository(name,rid)
@@ -764,7 +766,7 @@ def action(name,rid,script,args=()):
     arguments=[name,*args,'--repository',repo['id']]
     if script=='ai_extract.py':result=ai_extract.analysis_cli(arguments)
     else:
-        task={'group.py':'groups','system.py':'system','jobs.py':'jobs','steps.py':'steps'}.get(script)
+        task=ACTION_TASKS.get(script)
         if not task:raise ValueError('Unknown action')
         result=ai_extract.task_cli(task,arguments,emit=False)
     return json.dumps(result,ensure_ascii=False)
@@ -924,7 +926,7 @@ def main():
     else:
         if not args.args:raise ValueError('Choose an action')
         script=args.args[0]
-        if script not in ('group.py','steps.py','system.py','jobs.py','ai_extract.py'):raise ValueError('Unknown action')
+        if script not in (*ACTION_TASKS,'ai_extract.py'):raise ValueError('Unknown action')
         print(action(args.project,args.repository,script,args.args[1:]))
 if __name__=='__main__':
     try:main()
