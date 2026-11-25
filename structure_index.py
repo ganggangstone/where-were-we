@@ -289,8 +289,8 @@ def _plain_description(value):
             and not any(char in value for char in '<>[]`') and any(c.isalpha() for c in value))
 
 
-def _project_description(git, env, candidates):
-    for file, raw in _blobs(git, env, candidates):
+def _project_description(read, candidates):
+    for file, raw in read(candidates):
         try:
             text = raw.decode('utf-8-sig')
             if file == 'package.json':
@@ -339,10 +339,10 @@ def _project_description(git, env, candidates):
     return None
 
 
-def _documented_features(git, env, sources):
+def _documented_features(read, sources):
     """Read top-level Markdown bullets under an explicitly named capabilities heading."""
     labels = {'features', 'key features', 'capabilities', '기능', '주요 기능'}
-    for file, raw in _blobs(git, env, sources):
+    for file, raw in read(sources):
         try:
             lines = raw.decode('utf-8-sig').splitlines()[:240]
         except UnicodeError:
@@ -466,11 +466,11 @@ def _package_workspace_patterns(raw):
     return patterns
 
 
-def _workspace_packages(git,env,config,manifests):
+def _workspace_packages(read,config,manifests):
     if not config:
         return [],0,[]
     workspace_file,entry = config
-    raw = next(_blobs(git,env,[(workspace_file,entry)]))[1]
+    raw = next(read([(workspace_file,entry)]))[1]
     patterns = _pnpm_patterns(raw) if workspace_file=='pnpm-workspace.yaml' else _package_workspace_patterns(raw)
     if not patterns:
         return [],0,[]
@@ -488,7 +488,7 @@ def _workspace_packages(git,env,config,manifests):
     selected = [(file,matched[file][0]) for file in sorted(matched) if matched[file][0][1]<=64*1024][:64]
     packages = []
     declared = []
-    for file,raw in _blobs(git,env,selected):
+    for file,raw in read(selected):
         try:
             text = raw.decode('utf-8-sig')
             manifest = json.loads(text)
@@ -536,13 +536,13 @@ def _workspace_packages(git,env,config,manifests):
     return packages,len(matched),links
 
 
-def _cli_entries(git, env, manifests, tracked, files):
+def _cli_entries(read, manifests, tracked, files):
     """Resolve tracked package commands without running an installer or importing code."""
     declarations = {row['file']: row['declarations'] for row in files}
     eligible = [(f, entry) for f, entry in manifests.items() if entry[1] <= 64 * 1024]
     selected = sorted(eligible, key=lambda item: (item[0].count('/'), item[0]))[:64]
     result = []
-    for file, raw in _blobs(git, env, selected):
+    for file, raw in read(selected):
         folder = posixpath.dirname(file)
         lines_by_value = _manifest_lines(raw)
         if posixpath.basename(file) == 'package.json':
@@ -668,6 +668,18 @@ def build(repo, commit, excluded=None, *, only_file=None, directory=None, page=1
     env = {**os.environ, 'GIT_NO_LAZY_FETCH': '1'}
     git = ['git', '-C', repo]
     tree = subprocess.check_output([*git, 'ls-tree', '-rlz', '--full-tree', commit], env=env)
+    small = {}
+
+    def read(entries):
+        # Manifests and READMEs are read by several helpers: one cat-file process per new batch, each blob once.
+        # Lazy like _blobs: a caller that stops early never opens the later blobs.
+        entries = list(entries)
+        stream = _blobs(git, env, list({e[0]:(f, e) for f, e in entries if e[0] not in small}.values()))
+        for file, entry in entries:
+            if entry[0] not in small:
+                small[entry[0]] = next(stream)[1]
+            yield file, small[entry[0]]
+
     candidates = {}
     languages = {}
     unsupported = 0
@@ -816,7 +828,7 @@ def build(repo, commit, excluded=None, *, only_file=None, directory=None, page=1
     cobra_facts = {}
     go_targets = {folder:paths for folder, paths in go_files.items() if all(path in candidates for path in paths)}
     if any(languages[f] == 'go' for f, _ in selected) and go_config and go_config[0] not in denied and not workspace:
-        config = next(_blobs(git, env, [('go.mod', go_config)]))[1]
+        config = next(read([('go.mod', go_config)]))[1]
         modules = re.findall(rb'^module[ \t]+([\w./~-]+)[ \t]*(?://[^\n]*)?$', config, re.M)
         if len(modules) == 1:
             module = modules[0].decode('ascii')
@@ -825,7 +837,7 @@ def build(repo, commit, excluded=None, *, only_file=None, directory=None, page=1
                 go_modules.add(path.decode('ascii'))
     try:
         next_contexts = next_routes.context(next_files, next_config_names, next_sources, denied,
-                                          lambda entries:_blobs(git, env, entries), _parser) if scope is None else {}
+                                          read, _parser) if scope is None else {}
     except ImportError:
         next_contexts = {}
     unavailable = set()
@@ -1006,7 +1018,7 @@ def build(repo, commit, excluded=None, *, only_file=None, directory=None, page=1
         coverage['selection']='bounded_directory_sample'
         coverage.update(_directory_coverage(candidates, parsed))
     eligible_manifests = {path: entry for path, entry in manifests.items() if entry[0] not in denied}
-    cli_entries, manifests_read = _cli_entries(git, env, eligible_manifests, {f for f, oid in tracked.items() if oid not in denied}, files)
+    cli_entries, manifests_read = _cli_entries(read, eligible_manifests, {f for f, oid in tracked.items() if oid not in denied}, files)
     cli_entries.extend(cobra_commands.connect(cobra_facts, go_targets, 1024))
     workspace_config = None
     if has_pnpm_workspace:
@@ -1014,14 +1026,14 @@ def build(repo, commit, excluded=None, *, only_file=None, directory=None, page=1
             workspace_config = ('pnpm-workspace.yaml',pnpm_workspace)
     elif 'package.json' in eligible_manifests and eligible_manifests['package.json'][1]<=64*1024:
         workspace_config = ('package.json',eligible_manifests['package.json'])
-    workspace_packages,workspace_total,workspace_dependencies = _workspace_packages(git,env,workspace_config,eligible_manifests)
+    workspace_packages,workspace_total,workspace_dependencies = _workspace_packages(read,workspace_config,eligible_manifests)
     coverage['workspace_manifests_matched'] = workspace_total
     coverage['cli_manifests_read'] = manifests_read
     coverage['cli_manifests_total'] = len(eligible_manifests)
     preferred = ['package.json','pyproject.toml','readme.md','readme.rst','readme.txt','readme']
     sources = sorted(((p,e) for p,e in descriptions.items() if e[0] not in denied),
                      key=lambda item:(preferred.index(item[0].lower()),item[0]))
-    description = _project_description(git, env, sources)
-    features = _documented_features(git, env, [item for item in sources if item[0].lower() == 'readme.md'])
+    description = _project_description(read, sources)
+    features = _documented_features(read, [item for item in sources if item[0].lower() == 'readme.md'])
     return {'version':VERSION,'commit': commit,'rules':lang_rules.digest(rules),'project_description':description,'workspace_packages':workspace_packages,'workspace_dependencies':workspace_dependencies,'documented_features':features,'cli_entries':cli_entries, 'files': files, 'imports': resolved, 'package_imports':package_imports, 'coverage': coverage,
             'service_flow':service_flow.connect(routes, requests)}
