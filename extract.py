@@ -584,10 +584,10 @@ EXTERNAL_DIRS = {"byteplus": "BytePlus", "elevenlabs": "ElevenLabs", "topaz": "T
 def models():
     """{클래스 이름: 테이블 이름}"""
     out = {}
-    for f in sorted(ls()):
-        if not (f in _PY and f.startswith(BP)) or "__tablename__" not in (show(f) or ""):
+    for f in sorted(_PY):
+        src = show(f) or ""
+        if not f.startswith(BP) or "__tablename__" not in src:
             continue
-        src = show(f)
         for m in re.finditer(r"^class\s+(\w+)\((?:Base|\w*Base)\):(.*?)(?=^class\s|\Z)", src, re.M | re.S):
             tm = re.search(r"__tablename__\s*=\s*[\"'](\w+)[\"']", m.group(2))
             out[m.group(1)] = tm.group(1) if tm else m.group(1)
