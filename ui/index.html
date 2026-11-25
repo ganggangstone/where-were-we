@@ -2341,8 +2341,8 @@ function render() {
   }
   let components=sys?sysView(m):'';
   // 결과가 먼저다: 서비스 구성 그림과 선 목록, 그다음 모듈 연결, 맨 아래에 접힌 파일 목록.
-  // 기능 흐름이 있는 코드는 그 흐름이 결과라서 앞에 두고 구성 요소를 접는다.
-  const featureFlow=sys && shownSystem(m)===S.system && (m.structure_indexes || [m.structure_index]).some(index=>index?.service_flow?.feature_groups?.length);
+  // 기능 흐름이 있는 코드 하나를 볼 때는 그 흐름이 결과라서 앞에 두고 구성 요소를 접는다. 모든 코드에서는 코드 사이 그림이 결과다.
+  const featureFlow=sys && shownSystem(m)===S.system && !(m.structure_indexes?.length>1) && (m.structure_indexes || [m.structure_index]).some(index=>index?.service_flow?.feature_groups?.length);
   if(featureFlow){
     components=`<details class="sect" id="serviceComponents" ${S.componentsScope===S.moduleGraph?.scope || S.node?'open':''}><summary>${tr('구성 요소')}</summary>${components}</details>`;
   }
