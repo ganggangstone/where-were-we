@@ -24,6 +24,7 @@ import ai_extract
 import analysis_label
 import analysis_units
 import briefing
+import cli_executor
 import lang_rules
 import mapcore
 import project as store
@@ -1846,9 +1847,7 @@ def _pack_envelope(candidate):
         envelope['resources']=[{k:v for k,v in packet.items() if k not in ('prompt','schema')} for packet in candidate]
     return envelope
 
-# The run as a whole cannot go on: the account, the subscription, a cancel, changed code, the time limit or an unreadable repository.
-FATAL_CODES = {'cancelled','CANCELLED','pins_changed','timeout','source_unavailable','CLI_AUTH','CLI_ACCOUNT_CHANGED','CLI_USAGE_LIMIT',
-               'CLI_UNAVAILABLE','executor_failed','task_limit','already_running','preparation_failed'}
+FATAL_CODES = cli_executor.FATAL_CODES
 
 
 def generate(value,task,request,executor,cancelled,deadline,check):

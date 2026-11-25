@@ -14,6 +14,8 @@ from pathlib import Path, PurePosixPath
 import posixpath
 import re
 
+import cli_executor
+
 VERSION = 2
 MAX_PATTERNS = 12      # per list (declarations, imports, routes)
 MAX_PATTERN = 300      # characters
@@ -404,7 +406,7 @@ def obtain(name, files, sizes, read, executor, timeout=600):
             answer = executor(text, timeout=timeout)
             answer = json.loads(answer) if isinstance(answer, str) else answer
         except Exception as error:  # an executor failure or a reply that is not JSON: retried once
-            if getattr(error, 'code', None) in ('cancelled', 'CANCELLED', 'CLI_AUTH', 'CLI_ACCOUNT_CHANGED', 'CLI_USAGE_LIMIT'):
+            if getattr(error, 'code', None) in cli_executor.FATAL_CODES:
                 raise
             continue
         rule = validate(answer, name, lines)

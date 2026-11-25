@@ -141,6 +141,15 @@ class LangRules(unittest.TestCase):
             raise RuntimeError('no reply')
         rule, calls, sent = lang_rules.obtain('java', files, sizes, read, failing)
         self.assertEqual((rule, calls), (None, 2))  # one retry, then the language stays unread
+        import analysis_run, cli_executor
+        self.assertIs(analysis_run.FATAL_CODES, cli_executor.FATAL_CODES)
+        for code in sorted(cli_executor.FATAL_CODES):  # a failure that cannot succeed on retry is asked once
+            asked = []
+            def fatal(prompt, **kwargs):
+                asked.append(prompt); raise analysis_run.RunError(code, 'stop')
+            with self.assertRaises(analysis_run.RunError):
+                lang_rules.obtain('java', files, sizes, read, fatal)
+            self.assertEqual(len(asked), 1, code)
         self.assertEqual(lang_rules.loaded(['java']), {})
         _, catalog = self.catalog(folder, commit, {})
         self.assertTrue(catalog['units'])

@@ -15,6 +15,11 @@ import tempfile
 import time
 import sys
 
+# The run as a whole cannot go on: the account, the subscription, a cancel, changed code, the time limit or an unreadable repository.
+# Every AI call, the reading-rules call included, stops on these instead of asking again.
+FATAL_CODES = {'cancelled','CANCELLED','pins_changed','timeout','source_unavailable','CLI_AUTH','CLI_ACCOUNT_CHANGED','CLI_USAGE_LIMIT',
+               'CLI_UNAVAILABLE','executor_failed','task_limit','already_running','preparation_failed'}
+
 
 MAX_OUTPUT = 8_000_000
 MAX_PROMPT = 16_000_000
