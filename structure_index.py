@@ -29,7 +29,7 @@ MAX_DECLARATIONS = 20_000
 MAX_IMPORTS = 20_000
 
 
-VERSION = 33
+VERSION = 37
 JS_EXTENSIONS = {'.js', '.jsx', '.mjs', '.cjs'}
 LANGUAGES = ('python', 'javascript', 'typescript', 'html', 'go')
 TS_EXTENSIONS = {'.ts', '.tsx', '.mts', '.cts'}
@@ -952,10 +952,12 @@ def build(repo, commit, excluded=None, *, only_file=None, directory=None, page=1
                         root = parents[node.level - 1].as_posix()
                         roots = ('' if root == '.' else root + '/',)
                 for module in modules:
-                    base = module.replace('.', '/')
+                    find = lambda base: (None if getattr(node, 'level', 0) else next((t for r in near_roots(file) if (t := module_file(base, (r,)))), None)) or module_file(base, roots)
                     # An absolute import names its package root (the nearest folder above the file's packages) or one of
-                    # that root's parents first; the repository root is the fallback.
-                    target = (None if getattr(node, 'level', 0) else next((t for r in near_roots(file) if (t := module_file(base, (r,)))), None)) or module_file(base, roots)
+                    # that root's parents first; the repository root is the fallback. 'from pkg import child' with one
+                    # name that is a module file names that child module.
+                    child = isinstance(node, ast.ImportFrom) and len(node.names) == 1 and find(module.replace('.', '/') + '/' + node.names[0].name)
+                    target = child or find(module.replace('.', '/'))
                     if not target:
                         unresolved += 1
                     elif target != file:

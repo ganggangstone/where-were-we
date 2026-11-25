@@ -5,7 +5,7 @@ import posixpath
 from collections import Counter, defaultdict
 from html.parser import HTMLParser
 
-MAX_REGISTERED_ROUTES = 512
+MAX_REGISTERED_ROUTES = 1024
 METHODS = {'GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'}
 
 
@@ -84,7 +84,7 @@ def python_routes(tree, file, external=None):
                 path = _literal(deco, 'path', None)
                 if len(deco.args) == 1 and isinstance(deco.args[0], ast.Constant):
                     path = deco.args[0].value
-                if deco.func.attr != method.lower() or method not in METHODS or not _fastapi_path(path) or (name not in apps and name not in routers):
+                if deco.func.attr != method.lower() or method not in METHODS or not (_fastapi_path(path) or path == '' and routers.get(name)) or (name not in apps and name not in routers):
                     continue
                 route = {'method': method, 'path': path, 'server': {'file': file, 'line': deco.lineno, 'function': node.name}, 'mounts': []}
                 if '{' in path:
@@ -107,6 +107,11 @@ def python_routes(tree, file, external=None):
                     and isinstance(receiver.value, ast.Name) and receiver.value.id in import_modules):
                 external.setdefault('module_mounts',[]).append(
                     (file, *import_modules[receiver.value.id], receiver.attr, prefix, node.lineno))
+                continue
+            # 'from .routers import items' then include_router(items.router): the import line names the child module.
+            if (external is not None and isinstance(receiver, ast.Attribute) and isinstance(receiver.value, ast.Name)
+                    and receiver.value.id in import_lines and receiver.value.id not in import_modules):
+                external['mounts'].append((file, import_lines[receiver.value.id][0], receiver.attr, prefix, node.lineno))
                 continue
             if not isinstance(receiver,ast.Name):
                 continue

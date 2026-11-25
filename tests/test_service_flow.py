@@ -153,3 +153,16 @@ cache.get("/not-an-address")
                          [('GET', '/items', 5, None), ('PUT', '/items/7', 6, None), ('POST', '/items', 7, None),
                           ('POST', '/audio', 8, None), ('GET', '/a/{param}/b', 11, 'path_template')])
 
+    def test_empty_route_path_under_a_router_prefix_is_the_prefix(self):
+        source = "from fastapi import FastAPI, APIRouter\napp = FastAPI()\nrouter = APIRouter(prefix='/jobs')\n@router.post('')\ndef add(): pass\n@app.get('')\ndef bad(): pass\napp.include_router(router)\n"
+        self.assertEqual([(r['method'], r['path']) for r in service_flow.python_routes(ast.parse(source), 'main.py')], [('POST', '/jobs')])
+
+    def test_relative_child_module_router_is_mounted_through_its_import_line(self):
+        main = "from fastapi import FastAPI\nfrom .routers import items as items_router\napp = FastAPI()\napp.include_router(items_router.router, prefix='/v1')\n"
+        child = "from fastapi import APIRouter\nrouter = APIRouter(prefix='/items')\n@router.get('')\ndef all_items(): pass\n"
+        external = {'routers': {}, 'mounts': []}
+        service_flow.python_routes(ast.parse(main), 'app/main.py', external)
+        service_flow.python_routes(ast.parse(child), 'app/routers/items.py', external)
+        rows = service_flow.mounted_routes(external, [{'file': 'app/main.py', 'line': 2, 'target': 'app/routers/items.py'}])
+        self.assertEqual([(r['method'], r['path']) for r in rows], [('GET', '/v1/items')])
+

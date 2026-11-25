@@ -54,14 +54,14 @@ class Structure(unittest.TestCase):
             git('init','-q')
             sources = {'scripts/jobs/run.py':'', 'sub/scripts/__init__.py':'', 'sub/scripts/jobs/__init__.py':'', 'sub/scripts/jobs/run.py':'',
                        'sub/scripts/jobs/main.py':'import scripts.jobs.run\nimport scripts.only\n', 'scripts/only.py':'',
-                       'tool/main.py':'import scripts.jobs.run\n'}
+                       'tool/main.py':'import scripts.jobs.run\nfrom scripts.jobs import run\n'}
             for name,text in sources.items():
                 path=Path(root)/name;path.parent.mkdir(parents=True,exist_ok=True);path.write_text(text)
             git('add','.');git('-c','user.name=Test','-c','user.email=test@example.invalid','commit','-qm','x')
             index=structure_index.build(root,git('rev-parse','HEAD'))
             self.assertEqual(sorted((e['file'],e['target']) for e in index['imports']),
                              [('sub/scripts/jobs/main.py','scripts/only.py'),('sub/scripts/jobs/main.py','sub/scripts/jobs/run.py'),
-                              ('tool/main.py','scripts/jobs/run.py')])
+                              ('tool/main.py','scripts/jobs/run.py'),('tool/main.py','scripts/jobs/run.py')])  # 'from pkg import child' names the child
 
     def test_selected_file_uses_only_its_blob_and_resolves_unsampled_imports(self):
         import json
