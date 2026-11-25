@@ -350,6 +350,9 @@ native=(command,args)=>command==='analysis_run_status'&&args.view==='units'?unit
 status=null;assert(AnalysisRun.shortState()==='','No state before any run');
 await open();await flush();
 assert(AnalysisRun.shortState()==='Reanalysis needed','Outdated units ask for a new analysis');
+native=(command,args)=>command==='analysis_run_status'&&args.view==='units'?unitBoard({totals:{units:5,saved:4,stale:1},calls:{rules:0,labeling:0,structure:0,unit:0,total:0}}):undefined;
+await AnalysisRun.check();await flush();
+assert(AnalysisRun.shortState()==='','An outdated detailed explanation alone is not a reason to run the analysis again');
 """)
 
     def test_korean_board_uses_plain_labels_without_banned_endings(self):

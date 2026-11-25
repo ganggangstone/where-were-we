@@ -1922,8 +1922,10 @@ function lanesView(y, near) {
   let h = `<div class="sysrow"><div class="lanes" id="sys">${WIRES}`;
   for (const id of order) { const ns = y.nodes.filter(n => (n.repository || '') === id); if (!ns.length) continue;
     h += `<section class="lane"><h4 class="zone">${esc(id ? connectionDisplayName(id) : S.project || '')}</h4>${ns.map(card).join('')}</section>`; }
-  if (y.externals.length) h += `<section class="lane ext"><h4 class="zone">${tr('바깥 서비스')} ${y.externals.length}</h4>${y.externals.map(x => { const users = y.nodes.filter(n => (n.uses || []).includes(x.id));
-    return `<div class="card node external ${S.node && !users.some(n => n.id === S.node) ? 'dim' : ''}" title="${esc(x.what)}"><div class="nm">${esc(x.name)}</div><div class="s one">${ui`쓰는 곳: `}${users.map(n => esc(plainName(n))).join(', ') || tr('없음')}</div></div>`; }).join('')}</section>`;
+  // 바깥 서비스 칸은 가장 긴 코드 칸만큼만 상자로 보이고, 나머지는 이름만 한 줄로 적는다(창 아래로 넘치지 않게).
+  const most = Math.max(4, ...order.map(id => y.nodes.filter(n => (n.repository || '') === id).length)), rest = y.externals.slice(most);
+  if (y.externals.length) h += `<section class="lane ext"><h4 class="zone">${tr('바깥 서비스')} ${y.externals.length}</h4>${y.externals.slice(0, most).map(x => { const users = y.nodes.filter(n => (n.uses || []).includes(x.id));
+    return `<div class="card node external ${S.node && !users.some(n => n.id === S.node) ? 'dim' : ''}" title="${esc(x.what)}"><div class="nm">${esc(x.name)}</div><div class="s one">${ui`쓰는 곳: `}${users.map(n => esc(plainName(n))).join(', ') || tr('없음')}</div></div>`; }).join('')}${rest.length ? `<p class="s">${S.lang === 'en' ? `${rest.length} more: ` : `외 ${rest.length}개: `}${rest.map(x => esc(x.name)).join(', ')}</p>` : ''}</section>`;
   return h + '</div></div>';
 }
 function sysView(m) {
@@ -2054,9 +2056,13 @@ function drawLanes(box, svg, links, rect) {
   const bottom = Math.max(...lanes.filter(x => !x.classList.contains('ext')).map(x => x.offsetTop + x.offsetHeight));
   const add = (d, l) => { const p = document.createElementNS('http://www.w3.org/2000/svg', 'path'); for (const [k, v] of Object.entries({ d, fill: 'none', ...(l.noend ? {} : { 'marker-end': 'url(#ah)' }), class: 'wire ' + (l.style || '') + (l.dim ? ' dim' : '') })) p.setAttribute(k, v); svg.appendChild(p); };
   const tag = (l, x, y, named) => { const t = document.createElement('span'); t.className = (named ? 'wn-label' : 'wn') + (l.dim ? ' dim' : ''); const name = named && l.label ? linkLabel(l) : '';
-    if (named) t.innerHTML = `<b class="wn inline">${l.n}</b>${name && name.length <= 12 ? `<span>${esc(name)}</span>` : ''}`; else t.textContent = l.n; t.style.left = x + 'px'; t.style.top = y + 'px'; box.appendChild(t); };
+    if (named) t.innerHTML = `<b class="wn inline">${l.n}</b>${name && name.length <= 12 ? `<span>${esc(name)}</span>` : ''}`; else t.textContent = l.n; t.style.left = x + 'px'; t.style.top = y + 'px'; box.appendChild(t);
+    // 칸 사이 틈보다 긴 이름은 상자 글자를 덮으므로 번호만 남긴다(뜻은 아래 선 목록에 있다).
+    if (named && t.children.length > 1 && t.offsetWidth > gap) t.lastChild.remove(); };
+  // 같은 칸 안의 선: 세로 줄을 칸 오른쪽 여백과 칸 사이 틈 절반에 고르게 벌린다.
+  const inner = {}; for (const l of links) { const a = rect(l.from), b = rect(l.to); if (Math.abs(a.x - b.x) < 1) inner[a.x] = (inner[a.x] || 0) + 1; }
   for (const l of links) { const a = rect(l.from), b = rect(l.to), ay = a.y + a.h / 2, by = b.y + b.h / 2;
-    if (Math.abs(a.x - b.x) < 1) { const k = side[a.x] = (side[a.x] || 0) + 1, x0 = a.x + a.w, xo = x0 + 4 + 8 * k;
+    if (Math.abs(a.x - b.x) < 1) { const k = side[a.x] = (side[a.x] || 0) + 1, x0 = a.x + a.w, room = (lane.offsetWidth - a.w) / 2 + gap / 2, xo = x0 + room * k / (inner[a.x] + 1);
       add(`M${x0} ${ay} H${xo} V${by} H${x0}`, l); if (l.n) tag(l, xo, (ay + by) / 2, false); continue; }
     const dir = b.x > a.x ? 1 : -1, x1 = dir > 0 ? a.x + a.w : a.x, x2 = dir > 0 ? b.x : b.x + b.w, pad = gap / 2 + (lane.offsetWidth - a.w) / 2;
     const span = Math.abs(lanes.indexOf(laneOf(l.from)) - lanes.indexOf(laneOf(l.to)));
@@ -2132,7 +2138,7 @@ function briefingPanel() {
   const merged=result.cards.filter(card=>card.merge==='merged').length,withoutEvidence=result.cards.length-merged;
   const count=S.lang==='en'?`${result.cards.length} changes`:`${result.cards.length}건`;
   detail=`<div class="briefing-status"><span class="pill">${tr('병합')} ${merged}</span>${withoutEvidence?`<span class="pill">${tr('근거 없음')} ${withoutEvidence}</span>`:''}<span class="s">${tr('배포·실행 미확인')}</span></div><div class="briefing-period">${periodRows(result.input.repositories)}</div>`
-    +`<details class="briefing-context"><summary>${tr('범위')} · ${count} · PR ${result.pr_count}</summary>${metaList([['수집 범위',esc(tr('전체 대상 브랜치'))],['구조 기준',result.input.repositories.map(r=>`<span>${esc(connectionDisplayName(r.id))} · <span class="mono">${esc(r.refs?.[result.branch] || '—')}</span></span>`).join('')]])}${metaList(result.input.repositories.map(r=>[connectionDisplayName(r.id),`<span class="mono">${esc(r.commits?.from?.slice(0,8) || '—')} → ${esc(r.commits?.to?.slice(0,8) || '—')}</span>`,false]))}</details>`;
+    +`<div class="briefing-context"><h4>${tr('범위')} · ${count} · PR ${result.pr_count}</h4>${metaList([['수집 범위',esc(tr('전체 대상 브랜치'))],['구조 기준',result.input.repositories.map(r=>`<span>${esc(connectionDisplayName(r.id))} · <span class="mono">${esc(r.refs?.[result.branch] || '—')}</span></span>`).join('')]])}${metaList(result.input.repositories.map(r=>[connectionDisplayName(r.id),`<span class="mono">${esc(r.commits?.from?.slice(0,8) || '—')} → ${esc(r.commits?.to?.slice(0,8) || '—')}</span>`,false]))}</div>`;
   const fields=[['problem','해결한 문제'],['why','바꾼 이유'],['before','바뀌기 전'],['after','바뀐 점'],['resolution','해결한 방법'],['impact','데이터에 미치는 영향'],['recovery','중단·복구'],['remaining','확인된 남은 문제']];
   const claim=(title,value)=>{const label=title==='문제'?tr('문제:'):title==='변경'?tr('변경:'):tr(title);return `<div class="claim"><h4>${esc(label)}${value.unknown?` <span class="pill warn">${tr('미확인')}</span>`:''}</h4><ul class="claim-points">${String(value.text || '').split(/(?<=[.!?])\s+(?=[^\s])/u).filter(Boolean).map(line=>`<li>${esc(line)}</li>`).join('')}</ul></div>`;};
   let cards='';
@@ -2164,13 +2170,15 @@ function changesView(m) {
   const results=c?.last_results || (c?.last_result ? [c.last_result] : []);
   const e0=c?.entries?.length ? c.entries[Math.min(S.chi, c.entries.length - 1)] : null;
   const top=`<p class="lead">${esc(changesLead(brief,e0))}</p><section class="sect briefing-section">${brief.head}${brief.cards}</section>`;
-  const wrap=body=>top+`<details class="sect" id="changeDetailLists" ${S.listsOpen?'open':''}><summary>${tr('자세한 목록')}</summary>${brief.detail}${body}</details>`;
+  const wrap=(body,history='')=>top+history+`<details class="sect" id="changeDetailLists" ${S.listsOpen?'open':''}><summary>${tr('자세한 목록')}</summary>${brief.detail}${body}</details>`;
   const latest=results.length?`<section class="sect collection-section">${sectionHeading('마지막 새로고침')}${periodRows(results.map(r=>({...r,id:r.repository || ''})))}${metaList([['수집 범위',esc(tr('기본 수집'))]])}${results.filter(r=>!r.changed).map(r=>`<p class="s">${r.repository?esc(connectionDisplayName(r.repository))+' · ':''}${tr('선택한 기준 이후 달라진 것 없음')}</p>`).join('')}</section>`:'';
   if (!c || !c.entries.length) return wrap(latest || ui`<div class="hint">기록 없음</div>`);
   const e = e0; const b = e.branches[S.branch];
   let h = ui`<section class="sect collection-history">${sectionHeading('새로고침 기록 구간')}${metaList([['마지막 새로고침',results.length?results.map(r=>`<span>${r.repository?esc(connectionDisplayName(r.repository))+' · ':''}${when(r.at)}${!r.changed?' · '+tr('선택한 기준 이후 달라진 것 없음'):''}</span>`).join(''):c.last_refresh?when(c.last_refresh):'—']])}
     <div class="flowline">${c.entries.slice(0, 12).map((x, i) => `<span class="pill ${i === S.chi ? 'strong' : ''} click" data-chi="${i}">${x.repository ? esc(connectionDisplayName(x.repository))+' · ' : ''}${when(x.at)}</span>`).join('')}${c.entries.length > 12 ? `<select id="olderChanges" aria-label="${tr('이전 기록')}"><option value="">${tr('이전 기록')} ${c.entries.length - 12}</option>${c.entries.slice(12).map((x, i) => `<option value="${i + 12}" ${i + 12 === S.chi ? 'selected' : ''}>${x.repository ? esc(connectionDisplayName(x.repository))+' · ' : ''}${when(x.at)}</option>`).join('')}</select>` : ''}</div>
     ${periodRows([{...e,id:e.repository || ''}])}${metaList([['병합된 변경(PR)',e.prs.length],['지도에 표시할 버전',esc(versionName(S.branch))],['구조 기준',b?`<span class="mono">${esc(b.from)} → ${esc(b.to)}</span>`:esc(tr('이 사이에 코드 그대로'))]])}`;
+  // 기록 구간은 펼쳐 두고, 구조 변경과 PR 목록부터 「자세한 목록」에 접는다.
+  const history = h + '</section>'; h = '';
   const go = (p, name) => `<span class="pill click" data-goscr="${esc(p)}">${esc(m.screens.some(s => s.path === p) ? label(m, p) : displayIds(name || p))}</span>`;
   const sect = (title, items, row) => items && items.length ? `<div class="sect"><h4>${title} ${items.length}</h4><div class="group">${items.map(row).join('')}</div></div>` : '';
   if (b) { h += ui`<div class="sect"><h4>구조가 달라진 것</h4></div>`;
@@ -2191,7 +2199,7 @@ function changesView(m) {
   for (const [k, ps] of [...by].sort((a, b) => (a[0] === NO_PLACE) - (b[0] === NO_PLACE) || b[1].length - a[1].length))
     h += `<div class="sect"><h4>${esc(PR_PLACES[k] ? (S.lang === 'en' ? PR_PLACES[k] : k) : displayIds(k))} ${ps.length}</h4><div class="group">${ps.map(p => ui`<div class="row"><div class="grow"><div class="tw click" data-url="${esc(p.url)}">#${p.number} ${esc(p.title)} ↗</div>
       <div class="flowline">${p.kinds.map(x => `<span class="pill ${KIND[x]?.[1] || ''}">${tr(KIND[x]?.[0] || x)}</span>`).join('')}${p.base !== 'dev' ? `<span class="pill strong">${esc(p.base)}</span>` : ''}${p.screens.slice(0, 6).map(x => go(x)).join('')}${p.screens.length > 6 ? ui`<span class="s">화면 ${p.screens.length - 6}곳 더</span>` : ''}${p.issues.map(n => ui`<span class="pill">이슈 #${n}</span>`).join('')}<span class="s">${esc(p.author || '')} · ${when(p.merged_at)} · 파일 ${p.files}</span></div></div></div>`).join('')}</div></div>`;
-  return wrap(h+'</section>');
+  return wrap(h, history);
 }
 function changesInspector(m) {
   const c = S.changes; const e = c && c.entries[Math.min(S.chi, c.entries.length - 1)]; if (!e) return '';

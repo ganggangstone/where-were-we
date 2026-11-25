@@ -73,7 +73,8 @@ const AnalysisRun = (() => {
   })[run?.state] || '';
   // 「분석하기」 버튼 뒤에 붙는 짧은 상태: 진행 중이면 저장한 작업 수/전체.
   const shortState = () => {
-    if (!active() && liveBoard()?.totals?.stale > 0) return text('다시 분석 필요','Reanalysis needed');
+    // 오래된 자세한 설명만 있고 「분석하기」가 부를 것이 없으면(calls 0) 다시 분석하라고 하지 않는다.
+    if (!active() && liveBoard()?.totals?.stale > 0 && liveBoard()?.calls?.total > 0) return text('다시 분석 필요','Reanalysis needed');
     if (!run) return '';
     if (active() && !run.cancel_requested) {
       const done = Array.isArray(run.completed_tasks) ? run.completed_tasks.length : Number(run.completed_tasks || 0);

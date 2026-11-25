@@ -1209,7 +1209,7 @@ class Flows(unittest.TestCase):
  S.changes={last_refresh:'2026-10-01T00:00:00Z',entries:[{at:'2026-10-01T00:00:00Z',since:'2026-09-24T00:00:00Z',repository:'web',branches:{},prs:[
   {number:7,title:'Docs',url:'https://example.invalid/7',base:'dev',kinds:[],screens:[],groups:['배포·CI'],programs:[],issues:[],files:1,author:'a',merged_at:'2026-10-01T00:00:00Z'},
   {number:8,title:'Items',url:'https://example.invalid/8',base:'dev',kinds:[],screens:[],groups:[],programs:['[api] Worker'],issues:[],files:1,author:'a',merged_at:'2026-10-01T00:00:00Z'}]}]};
- S.view='changes';render();
+ S.view='changes';S.listsOpen=true;render();
  assert(main().includes('[API server] Worker') && !main().includes('[api]'),'PR group names use code display names');
  if(S.lang==='en')assert(!/[가-힣]/.test(main()),'App-made PR places are translated: '+(main().split('\n').find(l=>/[가-힣]/.test(l))));
 ''')

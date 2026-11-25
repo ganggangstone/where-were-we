@@ -32,7 +32,7 @@ try{
  const input=JSON.stringify(warnings),changes={entries:[]};S.changes=changes;S.chi=3;const settings=JSON.stringify(S.settings);
  for(const lang of ['ko','en']){
   S.lang=lang;S.briefings={dev:{[lang]:{state:'not_analyzed',warnings,result:null}}};
-  const pane=$('insp');pane.innerHTML=(b=>b.head+b.cards+b.detail)(briefingPanel());let text=visibleText(pane);
+  const pane=$('insp');pane.innerHTML=(b=>b.head+b.cards+`<details><summary>${tr('자세한 목록')}</summary>${b.detail}</details>`)(briefingPanel());let text=visibleText(pane);
   assert(!text.includes('legacy'),'Internal legacy label must not be displayed');
   const limit=tr('일부 자료 누락 가능');assert(text.split(limit).length-1===2,'One limit warning per code connection, not per collection part');
   assert(text.includes('Lumen')&&text.includes('Worker'),'Connection display names must remain distinct');
@@ -46,7 +46,7 @@ try{
   for(const key of ['problem','why','before','after','resolution','impact','recovery','remaining'])card[key]=value;
   card.remaining={text:'Fictional unresolved fact',unknown:true,evidence:[]};
   S.briefings.dev[lang]={state:'saved',warnings,result:{cards:[card],pr_count:1,branch:'dev',input:{repositories:[{id:'worker',since:'2026-10-01T00:00:00Z',at:'2026-10-21T00:00:00Z',refs:{dev:'feature/work'},commits:{from:'aaaa1111',to:'bbbb2222'}}]},unknown:[]}};
-  pane.innerHTML=(b=>b.head+b.cards+b.detail)(briefingPanel());text=visibleText(pane);
+  pane.innerHTML=(b=>b.head+b.cards+`<details><summary>${tr('자세한 목록')}</summary>${b.detail}</details>`)(briefingPanel());text=visibleText(pane);
   assert(text.includes(tr('미확인')+' 1'),'Unknown claims retain a visible count');
   const extra=pane.querySelector('.change-details');assert(extra&&!extra.open&&extra.textContent.includes('Fictional unresolved fact'),'Extra claims retained behind one disclosure');
   assert(!pane.querySelector('details details'),'No nested disclosures');assert(pane.textContent.includes('Independent fictional term evidence'),'Term evidence retained in the single detail area');

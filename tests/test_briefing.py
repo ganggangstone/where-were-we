@@ -264,7 +264,7 @@ window.__TAURI__={core:{invoke:async(command,args)=>{
  assert(S.changes===changes && S.settings===settings && S.chi===3,'Preserve changes and the comparison baseline');
  $('viewAnalysisResults').click();
  // The scope summary carries both counts: change cards and related PRs.
- const summary=$('map').querySelector('.briefing-context summary')?.textContent||'';
+ const summary=$('map').querySelector('.briefing-context h4')?.textContent||'';
  const prs=summary.match(/PR (\d+)/)?.[1],cards=summary.match(/(\d+) changes/)?.[1];
  assert(S.view==='changes' && prs==='2' && Number(cards)===$('map').querySelectorAll('.change-card').length,'Cards and PRs are counted independently: '+summary);
  assert($('map').textContent.includes('Before') && $('map').textContent.includes('Data impact'),'Show the before/after and impact fields');
