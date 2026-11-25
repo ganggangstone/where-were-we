@@ -118,6 +118,16 @@ else:
                 cli._run(str(self.root/'claude'), ['--print'], limit=1000)
             self.assertEqual(error.exception.code, 'CLI_OUTPUT_LIMIT')
 
+    def test_help_is_read_once_per_binary_and_the_account_before_every_call(self):
+        spawned = []
+        real = cli._run
+        def counting(executable, args, **kwargs):
+            spawned.append(args[0]); return real(executable, args, **kwargs)
+        with patch.object(cli, '_run', counting):
+            for _ in range(3):
+                cli.execute('{"task":"x"}', timeout=20)
+        self.assertEqual((spawned.count('--help'), spawned.count('auth'), spawned.count('--print')), (1, 3, 3))
+
     def test_selected_account_change_stops_before_inference(self):
         selected = cli.availability()['account']
         with patch.dict(os.environ, FIXTURE_MODE='bob'):

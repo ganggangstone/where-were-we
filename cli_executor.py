@@ -142,13 +142,17 @@ def _safe_label(value):
     return value
 
 
-def availability(*, cancelled=None, timeout=20):
-    """Read local CLI help and auth status; never invoke inference or login."""
+_SUPPORTED = set()  # (resolved path, mtime) of CLI binaries whose --help listed every REQUIRED_FLAG, for this process
+
+
+def availability(*, cancelled=None, timeout=20, executable=None):
+    """Read local CLI help and auth status; never invoke inference or login.
+    The --help check is read once per installed binary (path and mtime); auth status is read on every call."""
     result = {'provider': 'claude', 'id': 'claude', 'available': False,
               'authenticated': False, 'account': {},
               'usage_message': 'Uses your existing Claude Code subscription and its usage limits. Organization policy still applies.',
               'error_code': None, 'message': ''}
-    executable = shutil.which('claude')
+    executable = executable or shutil.which('claude')
     if not executable:
         result.update(error_code='CLI_NOT_INSTALLED', message='Install Claude Code and restart the app, or use the manual MCP workflow.')
         return result
@@ -159,10 +163,17 @@ def availability(*, cancelled=None, timeout=20):
             raise CLIExecutionError('CLI_TIMEOUT', 'Claude Code took too long. Try the analysis again.')
         return _run(executable, args, timeout=min(10, remaining), cancelled=cancelled, limit=limit)
     try:
-        code, help_text = probe(['--help'], 1_000_000)
-        if code or any(flag not in help_text for flag in REQUIRED_FLAGS):
-            result.update(error_code='CLI_UNSUPPORTED', message='Update Claude Code to a version supporting safe mode and isolated print mode, then restart the app.')
-            return result
+        try:
+            binary = os.path.realpath(executable); binary = (binary, os.stat(binary).st_mtime_ns)
+        except OSError:
+            binary = None
+        if binary not in _SUPPORTED:
+            code, help_text = probe(['--help'], 1_000_000)
+            if code or any(flag not in help_text for flag in REQUIRED_FLAGS):
+                result.update(error_code='CLI_UNSUPPORTED', message='Update Claude Code to a version supporting safe mode and isolated print mode, then restart the app.')
+                return result
+            if binary:
+                _SUPPORTED.add(binary)
         result['available'] = True
         code, text = probe(['auth', 'status'], 100_000)
         try:
@@ -222,13 +233,13 @@ def execute(prompt, *, cancelled=None, timeout=600, expected_account=None):
     # every model invocation, including each task in a multi-task run. A CLI
     # cannot atomically pin the external keychain, so a concurrent login change
     # after this check remains outside this adapter's control.
-    status = availability(cancelled=cancelled, timeout=timeout)
+    executable = shutil.which('claude')
+    status = availability(cancelled=cancelled, timeout=timeout, executable=executable)
     if not status['available'] or not status['authenticated']:
         raise CLIExecutionError(status['error_code'] or 'CLI_UNAVAILABLE', status['message'])
     if expected_account is not None and (not isinstance(expected_account, dict)
                                          or expected_account != status['account']):
         raise CLIExecutionError('CLI_ACCOUNT_CHANGED', 'The Claude Code account changed. Check the displayed connection and start a new analysis run.')
-    executable = shutil.which('claude')
     remaining = deadline - time.monotonic()
     if remaining <= 0:
         raise CLIExecutionError('CLI_TIMEOUT', 'Claude Code took too long. Try the analysis again.')
