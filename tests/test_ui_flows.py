@@ -614,6 +614,22 @@ class Flows(unittest.TestCase):
             with self.subTest(lang=lang):
                 ok,error=page(checks,lang,query);self.assertTrue(ok,error)
 
+    def test_one_code_names_drop_repeated_code_tags_and_steps_come_before_data_names(self):
+        self.check(r'''
+ window.mutateBundle=b=>{const groups={names:{},request_names:{},groups:[{name:'[web] Items',description:'',screens:['web::/items']},{name:'[web] More',description:'',screens:['web::/items/new']}]};
+  for(const k of ['dev','main'])b.branch_details[k].groups=groups;b.groups=groups;
+  b.flows={routes:{'api/app/items.py::save_item':{steps:[{lane:'서버',text:'Stores the item.',file:'api/app/items.py',line:4,quote:'x'}]}}};
+  for(const k of ['dev','main'])if(b.branch_details[k].flows!==undefined)b.branch_details[k].flows=b.flows;};
+ await loadProject('First');
+ S.view='feat';render();
+ assert(![...$('map').querySelectorAll('[data-feat] .nm')].some(n=>n.textContent.includes('[')),'Groups of one code drop the shared [code] tag');
+ S.view='map';S.sel='web::/items';render();
+ assert(!$('map').querySelector('[data-scr="web::/items"] .nm').textContent.includes('['),'Screens of one code drop the [code] tag');
+ const row=$('insp').querySelector('[data-req]');assert(row && row.textContent.includes('['),'A request served by another code keeps its code name');
+ S.open=row.dataset.req;render();const d=$('insp').querySelector('.detail');
+ assert(d.querySelector('.step'),'Saved steps are drawn');assert(d.querySelector('.step').compareDocumentPosition(d.querySelector('.flowline')) & Node.DOCUMENT_POSITION_FOLLOWING,'Steps come before the input and data names');
+''')
+
     def test_unified_result_check_keeps_target_and_original_pins(self):
         self.check(r'''
  window.planResult={tasks:[{repository:'web',task:'groups',commit:'old',configuration:'layout-a'}],requirements:[],pins:{web:{commit:'old',configuration:'layout-a'}},blocked:[],handoff:'one request'};

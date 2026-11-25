@@ -221,7 +221,7 @@ const UI_EN = {
   '비교 버전과 다름': 'Differs from the compared version', '코드 버전': 'Code version',
   '비교할 버전을 코드 추가·수정에서 지정할 수 있습니다.': 'You can set a version to compare in Add or edit code.', '이 사이에 코드 그대로': 'code unchanged in this period', '열린 작업 없음': 'No open work', '열린 작업 있음': 'Open work', '열린 작업 ': 'Open work: ',
   '다른 화면에서 여기로 오는 길을 코드에서 찾지 못했습니다. 주소를 코드에서 조립하는 이동은 목적지를 정하지 못해 길이 있어도 이렇게 나올 수 있습니다.': 'No incoming navigation was resolved. Dynamically constructed paths may still lead here.',
-  '진입 ?': 'Entry ?', '조건부 표시': 'Shown conditionally', '모바일 화면 있음': 'Has a mobile screen',
+  '들어오는 길 미확인': 'No way in found', '조건부 표시': 'Shown conditionally', '모바일 화면 있음': 'Has a mobile screen',
   '화면 밖': 'Outside the screen map', '어느 화면에도 이어지지 않은 것': 'Items with no screen connection',
   '화면 없는 서버 기능': 'Endpoints without screens', '받는 곳 없는 요청': 'Unresolved requests',
   '화면 없는 이슈': 'Issues without screens', '지난 지도에서 사라진 것': 'Removed since the previous map',
@@ -852,7 +852,7 @@ const fold = (m, p) => { if (!p || !p.startsWith('/m/')) return p; const t = p.r
 // 화면 이름: 제목(코드 원문) → AI가 붙인 이름(점선) → 주소
 const hasAI = () => !!S.groups?.groups?.length; // 빈 기본값({groups:[]})은 AI 결과가 아니다
 const aiName = (p) => (S.groups && S.groups.names && S.groups.names[p]) || null;
-function label(m, p) { const t = m.screens.find(x => x.path === p); const h = t && t.heading; if (t?.repository && !S.repository) return (h || aiName(p) || t.source_path) + ' ['+connectionDisplayName(t.repository)+']'; if (!h) return aiName(p) || p;
+function label(m, p) { const t = m.screens.find(x => x.path === p); const h = t && t.heading; if (t?.repository && !S.repository && (m._multiScreenRepos ??= new Set(m.screens.map(x => x.repository)).size > 1)) return (h || aiName(p) || t.source_path) + ' ['+connectionDisplayName(t.repository)+']'; if (!h) return aiName(p) || p;
   // 같은 제목을 쓰는 화면이 여럿이면 주소가 가장 짧은 것만 제목 그대로, 나머지는 주소를 붙인다.
   const same = (m._heads ??= m.screens.reduce((o, x) => { if (x.heading && !x.redirect && !x.path.startsWith('/m/')) (o[x.heading] ??= []).push(x.path); return o; }, {}))[h] || [];
   return same.length > 1 && p !== same.slice().sort((a, b) => a.length - b.length)[0] ? h + ' · ' + p : h; }
@@ -885,6 +885,9 @@ function groupsOf(m) {
   const vis = visibleScreens(m); const out = [];
   if (hasAI()) {
     for (const g of S.groups.groups) { const list = g.screens.map(p => vis.find(s => s.path === p)).filter(Boolean); if (list.length) out.push({ name: displayIds(g.name), description: g.description, list, ai: true }); }
+    // 모든 묶음이 같은 코드의 것이면 이름마다 붙은 [코드 이름]은 같은 말의 반복이라 뗀다.
+    const tag = /^\[[^\]]+\]\s*/, first = out[0]?.name.match(tag)?.[0];
+    if (first && out.every(g => g.name.startsWith(first))) out.forEach(g => g.name = g.name.slice(first.length));
     const placed = new Set(S.groups.groups.flatMap(g => g.screens)); const rest = vis.filter(s => !placed.has(s.path)); if (rest.length) out.push({ name: tr('미분류'), description: tr('아직 묶이지 않은 화면'), list: rest });
   } else { const by = {}; for (const s of vis) (by['/' + (s.path.split('/')[1] || '')] ??= []).push(s); for (const [k, list] of Object.entries(by)) out.push({ name: k, description: '', list }); }
   return out;
@@ -908,15 +911,16 @@ function requests(m, path) {
       const r = m.backend_routes.find(x => x.file === b.file && x.line === b.line); if (!r) continue;
       const k = r.file + ':' + r.line; if (seen.has(k)) continue; seen.add(k);
       const btns = (r.method !== 'GET' && labelOf[f.name === '<inline>' ? f.file + ' ' + c.method + ' ' + c.path : f.name]) || [];
-      rows.push({ key: r.file + '::' + r.function, btn: btns[0] || null, btns, /* ponytail: 버튼 처리 코드가 다시 읽기까지 부르면 읽는 요청에도 버튼 글자가 붙어서, 읽는 요청에는 안 붙인다. 버튼으로 읽기만 하는 경우는 이름을 잃는다 */ route: r, fn: f, call: c });
+      rows.push({ home: s.repository, key: r.file + '::' + r.function, btn: btns[0] || null, btns, /* ponytail: 버튼 처리 코드가 다시 읽기까지 부르면 읽는 요청에도 버튼 글자가 붙어서, 읽는 요청에는 안 붙인다. 버튼으로 읽기만 하는 경우는 이름을 잃는다 */ route: r, fn: f, call: c });
     }
   }
+  // 요청 이름의 [코드 이름]은 화면과 다른 코드의 서버 기능일 때만 붙인다(home).
   // 한 버튼이 서버 일을 여러 개 시키면 버튼 글자가 같아진다. 그때는 그 일의 이름을 뒤에 붙여 가른다.
   const cnt = {}; for (const r of rows) if (r.btn) cnt[r.btn] = (cnt[r.btn] || 0) + 1; for (const r of rows) r.dup = !!r.btn && cnt[r.btn] > 1;
   return m._req[path] = rows;
 }
 const reqName = (r) => (S.groups && S.groups.request_names && S.groups.request_names[r.file + '::' + r.function]) || null;
-const reqLabel = (r) => { const value = (r.btn && r.btn + (r.btns.length > 1 ? ui` 외 ${r.btns.length - 1}` : '') + (r.dup ? ' · ' + (flowOf(r.route)?.name || reqName(r.route) || r.route.function) : '')) || flowOf(r.route)?.name || reqName(r.route) || r.route.function; return value + (r.route?.repository && !S.repository ? ' ['+connectionDisplayName(r.route.repository)+']' : ''); };
+const reqLabel = (r) => { const value = (r.btn && r.btn + (r.btns.length > 1 ? ui` 외 ${r.btns.length - 1}` : '') + (r.dup ? ' · ' + (flowOf(r.route)?.name || reqName(r.route) || r.route.function) : '')) || flowOf(r.route)?.name || reqName(r.route) || r.route.function; return value + (r.route?.repository && !S.repository && r.route.repository !== r.home ? ' ['+connectionDisplayName(r.route.repository)+']' : ''); };
 const reqIsAi = (r) => !r.btn && !!(flowOf(r.route)?.name || reqName(r.route));
 const inMain = (r) => S.maps.main ? S.maps.main.backend_routes.some(x => x.method === r.method && x.path === r.path && x.mounted && x.repository === r.repository) : null;
 const openWork = (row) => (S.status ? S.status.open_prs : []).filter(p => p.files.includes(row.route.file) || p.files.includes(row.fn.file));
@@ -1316,7 +1320,7 @@ function storyMap(m) {
       h += ui`<div class="card ${cls}" data-scr="${esc(s.path)}" title="${esc(s.path)}"><div class="nm">${nameHtml(m, s.path)}</div>
         ${inSet.has(s.path) || outSet.has(s.path) ? `<div class="meta">${inSet.has(s.path) ? tr('<span class="pill relation">→ 선택 화면</span>') : ''}${outSet.has(s.path) ? tr('<span class="pill relation">선택 화면 →</span>') : ''}</div>` : ''}
         <div class="meta"><span>요청 ${rs.length}</span>${rs.length ? ui`<span class="bar" title="테스트 연결 ${tested}/${rs.length}"><i style="width:${pct}%"></i></span>` : ''}</div>
-        <div class="meta">${d === 'only' ? `<span class="pill strong">${tr('이 버전에만')}</span>` : d === 'diff' ? tr('<span class="pill warn">비교 버전과 다름</span>') : ''}${open ? ui`<span class="pill warn">열린 작업 ${open}</span>` : ''}${noWay ? tr('<span class="pill" title="다른 화면에서 여기로 오는 길을 코드에서 찾지 못했습니다. 주소를 코드에서 조립하는 이동은 목적지를 정하지 못해 길이 있어도 이렇게 나올 수 있습니다.">진입 ?</span>') : ''}${s.condition ? ui`<span class="pill" title="${esc(s.condition)}">조건부 표시</span>` : ''}${s.mobile ? tr('<span class="pill">모바일 화면 있음</span>') : ''}</div></div>`;
+        <div class="meta">${d === 'only' ? `<span class="pill strong">${tr('이 버전에만')}</span>` : d === 'diff' ? tr('<span class="pill warn">비교 버전과 다름</span>') : ''}${open ? ui`<span class="pill warn">열린 작업 ${open}</span>` : ''}${noWay ? tr('<span class="pill" title="다른 화면에서 여기로 오는 길을 코드에서 찾지 못했습니다. 주소를 코드에서 조립하는 이동은 목적지를 정하지 못해 길이 있어도 이렇게 나올 수 있습니다.">들어오는 길 미확인</span>') : ''}${s.condition ? ui`<span class="pill" title="${esc(s.condition)}">조건부 표시</span>` : ''}${s.mobile ? tr('<span class="pill">모바일 화면 있음</span>') : ''}</div></div>`;
     }
     h += `</div>`;
   }
@@ -1391,6 +1395,8 @@ function detail(m, s, r) {
   if (r.btns.length > 1) h += ui`<div class="empty">이 일을 하는 버튼 ${r.btns.length}개: ${r.btns.map(esc).join(', ')}</div>`;
   const shared = (rt.tables || []).filter(t => progs(t).length); const users = (routeUse(m)[r.key] || []).length;
   if (shared.length) h += ui`<div class="empty">${esc([...new Set(shared.flatMap(t => progs(t).map(n => n.name)))].join(', '))}도 서버를 거치지 않고 이 데이터를 직접 읽고 씁니다: ${shared.map(t => esc(tableName(t))).join(', ')}</div>`;
+  // 단계 그림을 먼저 보이고, 입력·데이터 이름과 다른 프로그램 안내는 그 아래에 둔다.
+  const facts = h.slice('<div class="detail">'.length); h = '<div class="detail">';
   if (f && f.steps.length) {
     const steps = [{ lane: '화면', text: s.path ? (r.btn ? ui`"${r.btn}" 을 누른다` : tr('화면이 요청을 보낸다')) : tr('서버가 요청을 받는다'), start: true }, ...f.steps];
     h += ui`<div class="lanes"><span class="screen">화면</span><span class="server">서버</span><span class="store">데이터</span><span class="external">외부</span></div>` + steps.map((st, i) => {
@@ -1399,6 +1405,7 @@ function detail(m, s, r) {
       ui`<div class="ctl"><button class="btn quiet" id="prev">◀</button><button class="btn quiet" id="next">다음 ▶</button><span>${S.step >= 0 ? `${S.step}/${steps.length - 1}` : tr('한 단계씩 보기')}</span><span class="spacer"></span><span class="ai">AI 설명</span><span>· 인용 코드 일치</span></div>`;
   } else if (f?.unknown) h += `<div class="empty">${tr('코드에서 이 동작의 순서를 확인하지 못했습니다: ')}${esc(f.unknown)}</div>`;
   else h += ui`<div class="empty">누르면 생기는 일의 순서는 아직 분석하지 않았습니다.</div>${r.key ? ui`<div class="ctl"><button class="btn quiet" data-mk="${esc(r.key)}">이 동작의 과정 알아보기</button></div>` : ''}`;
+  h += facts;
   for (const { node, job, exact } of jobsOf(r.key)) h += ui`<div class="sect"><h4>이 요청 뒤에 ${esc(node.name)}이 이어서 하는 일${exact ? '' : tr(' (연결 관계는 추정)')}</h4><div class="tw"><b class="strong">${esc(job.name)}</b> ${esc(job.what)}</div><div class="s">시작: ${esc(job.starts_when)}</div>${job.steps.map((st, i) => `<div class="step l${st.lane === '저장소' ? 2 : st.lane === '외부' ? 3 : 1}"><span class="n">${i + 1}</span><div class="grow"><div class="tx">${esc(st.text)}</div><div class="s">${zed(m, st.file, st.line)}</div></div></div>`).join('')}</div>`;
   h += ui`<details><summary>연결된 코드</summary><div class="kv mono">${esc(rt.method)} ${esc(rt.path)}</div><div class="kv">화면 쪽 ${zed(m, r.fn.file, r.call.line)} · 서버 쪽 ${zed(m, rt.file, rt.line)} <span class="mono">${esc(rt.function)}</span></div>
     <div class="kv">${(rt.tests || []).length ? ui`테스트 연결 ${rt.tests.length}개: <span class="mono">${rt.tests.map(t => esc(t.split('/').pop())).join(', ')}</span>` : ui`<b>테스트 코드가 안 보인다면?</b> 지도는 정해 둔 규칙으로만 테스트를 잇습니다. 요청을 AI에게 보내면 테스트를 찾아 규칙을 고치거나 하나씩 기록하고, 확인하려고 새로고침할 수 있습니다. <button class="btn quiet" data-repository="${esc(rt.repository || '')}" data-tp="${esc(rt.method + ' ' + rt.path + ' (' + rt.file + '::' + rt.function + ')')}">AI에게 테스트 찾기 요청</button><span id="tpDone"></span>`}</div></details>
