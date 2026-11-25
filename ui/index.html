@@ -2341,14 +2341,14 @@ function render() {
   }
   let components=sys?sysView(m):'';
   // 결과가 먼저다: 서비스 구성 그림과 선 목록, 그다음 모듈 연결, 맨 아래에 접힌 파일 목록.
-  // 기능 흐름이 있는 코드 하나를 볼 때는 그 흐름이 결과라서 앞에 두고 구성 요소를 접는다. 모든 코드에서는 코드 사이 그림이 결과다.
+  // 기능 흐름이 있는 코드 하나를 볼 때는 구성 그림을 펼친 채 기능 흐름 위에 두고 목록을 펼쳐 보인다. 모든 코드에서는 코드 사이 그림이 결과다.
   const featureFlow=sys && shownSystem(m)===S.system && !(m.structure_indexes?.length>1) && (m.structure_indexes || [m.structure_index]).some(index=>index?.service_flow?.feature_groups?.length);
   if(featureFlow){
-    components=`<details class="sect" id="serviceComponents" ${S.componentsScope===S.moduleGraph?.scope || S.node?'open':''}><summary>${tr('구성 요소')}</summary>${components}</details>`;
+    components=`<details class="sect" id="serviceComponents" ${S.componentsClosed?'':'open'}><summary>${tr('구성 요소')}</summary>${components}</details>`;
   }
   // 개발자용 목록은 그림과 선 목록 아래 「자세한 목록」 하나에 접어 둔다.
   const lists=structure+inventoryView(m),listsOpen=S.listsOpen || S.moduleGraph?.routesOpen || S.inventoryOpen;
-  const sysBody=sys?(featureFlow?structure+components+inventoryView(m):components+(lists?`<details class="sect" id="detailLists" ${listsOpen?'open':''}><summary>${tr('자세한 목록')}</summary><div class="list-grid">${lists}</div></details>`:'')):'';
+  const sysBody=sys?(featureFlow?components+structure+inventoryView(m):components+(lists?`<details class="sect" id="detailLists" ${listsOpen?'open':''}><summary>${tr('자세한 목록')}</summary><div class="list-grid">${lists}</div></details>`:'')):'';
   $('map').innerHTML = searchPanel(m) + (view === 'changes' ? changesView(m) : sys ? sysBody : view === 'focus' ? focusView(m) : view === 'feat' ? featView(m) : storyMap(m)); $('insp').innerHTML = view === 'changes' ? changesInspector(m) : sys ? sysInspector(m) : view === 'focus' ? focusFeatureInspector(m) : view === 'feat' ? featInspector(m) : mapInspector(m);
   S._wires = null;
   if (view === 'focus' && S.focus) { const d = focusData(m); S._wires = d ? [...d.left.map((_, i) => ({ from: 'L' + i, to: 'C', h: true })), ...d.right.map((_, i) => ({ from: 'C', to: 'R' + i, h: true }))] : null; drawWires(); }
@@ -2401,7 +2401,7 @@ function render() {
   });
   if($('detailLists'))$('detailLists').ontoggle=e=>{S.listsOpen=e.target.open;};
   if($('serviceComponents'))$('serviceComponents').ontoggle=e=>{
-    S.componentsScope=e.target.open?S.moduleGraph?.scope:null;
+    S.componentsClosed=!e.target.open;
     if(e.target.open)drawWires();
   };
   if (sys && shownSystem(m)) { S._wires = sysLinks(shownSystem(m)).map((l, i) => ({ ...l, n: i + 1, dim: !!S.node && l.from !== S.node && l.to !== S.node })); drawWires(); document.querySelectorAll('.card[data-node], .row[data-node]').forEach(el => el.onclick = () => { selectProgram(el.dataset.node); });
