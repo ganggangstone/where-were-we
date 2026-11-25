@@ -1174,7 +1174,7 @@ function editProject(create, focus=null) {
       if(hit){
         const index=repos.findIndex(r=>r.id===hit[1]),box=dialog.querySelector(`[data-registration-account="${index}"]`);
         if(box)try{
-          const value=JSON.parse(await invoke('github_logins',{project:name}));
+          const value=JSON.parse(await invoke('github_logins'));
           if(!box.isConnected)return;
           box.innerHTML=value.accounts.length?`<label>${tr('이 저장소에 사용할 계정')}<select data-registration-login><option value="">${tr('계정 선택')}</option>${value.accounts.map(a=>`<option value="${esc(a)}">${esc(a)}</option>`).join('')}</select></label>`:githubLoginHelp();
           const select=box.querySelector('select');if(select)select.onchange=()=>{if(select.value)repos[index].github={host:'github.com',account:select.value};};

@@ -145,7 +145,7 @@ async function applyAppCommand(command) {
       const ps=await invoke('list_projects');$('project').innerHTML=ps.map(p=>`<option>${esc(p)}</option>`).join('');
       await loadProject(a.project,false,'');break;
     }
-    case 'github_logins':output=JSON.parse(await invoke('github_logins',{project:a.project || S.project || 'Account check'}));break;
+    case 'github_logins':output=JSON.parse(await invoke('github_logins'));break;
     case 'update_settings':if(typeof a.automatic!=='boolean')controlError('invalid_update_settings');setUpdateChecks(a.automatic);output={automatic:U.auto};break;
     case 'github_accounts':output=JSON.parse(await invoke('github_accounts',{project:S.project,repository:S.repository}));break;
     case 'github_account':await invoke('use_github_account',{project:S.project,repository:S.repository,account:a.account});await reloadCurrent();break;

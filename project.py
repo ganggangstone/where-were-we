@@ -903,9 +903,10 @@ def selected_structure(name, repository, branch, commit, **scope):
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command',choices=['read','configure','refresh','action','github-accounts','github-account','github-logins','file-structure','directory-structure']);parser.add_argument('project')
+    parser.add_argument('command',choices=['read','configure','refresh','action','github-accounts','github-account','github-logins','file-structure','directory-structure']);parser.add_argument('project',nargs='?',default='')
     parser.add_argument('--repository',default='');parser.add_argument('args',nargs='*')
     args,remaining=parser.parse_known_args()
+    if not args.project and args.command!='github-logins':parser.error('the following arguments are required: project')
     if remaining and args.command!='action':parser.error('unrecognized arguments: '+' '.join(remaining))
     if args.command=='action':args.args.extend(remaining)
     if args.command=='read':print(json.dumps(read_bundle(args.project,args.repository),ensure_ascii=False))
