@@ -24,6 +24,13 @@ def validate_provider(provider):
     if provider not in ('mcp-agent','claude-cli'):raise ValueError('Choose mcp-agent or claude-cli as analysis provider')
     return provider
 
+# The handoff sentence after an agent saves a result: the app reads it, so refresh is not needed.
+RETURN_TO_APP={'ko':'저장 후 앱으로 돌아가라고 안내하세요. 앱이 저장된 결과를 읽습니다. 결과 확인을 위해 refresh 도구를 실행하지 마세요.','en':'Tell the user to return to the app, which reads the saved result. Do not call refresh to display the result.'}
+def provider_name(provider):return 'Claude Code' if provider=='claude-cli' else 'connected MCP agent'
+def _meta(provider,commit,branch,lang,configuration,generated_at):
+    return {'source':'ai','provider':provider,'commit':commit,'branch':branch,'language':lang,'configuration':configuration,'wording':mapcore.WORDING,'steps_wording':mapcore.STEPS_WORDING,'generated_at':generated_at}
+def _tests_conf(raw):return {**mapcore.TESTS_DEFAULT,'records':[],**(raw.get('tests') or {})}
+
 def git(repo,*args):
     return subprocess.run(['git','-C',repo,*args],capture_output=True,text=True,check=True).stdout
 
@@ -268,19 +275,22 @@ def mode_text(commit,sc):
     return 'Mode full: return the complete schema. '+base
 
 
-def apply_result(raw,repo,refs,branch,lang,response,commit,layout,configuration=None,provider='mcp-agent'):
-    provider=validate_provider(provider)
-    current=raw.get(branch) or {}
-    text=response.strip()
+def parse_response(response):
+    text=response.strip() if isinstance(response,str) else ''
     if len(text)>8_000_000:raise ValueError('AI output was too large')
     if text.startswith('```'):text=re.sub(r'^```(?:json)?\s*|\s*```$','',text)
-    try:data=json.loads(text)
+    try:return json.loads(text)
     except (ValueError,TypeError) as error:raise ValueError('AI output was not valid JSON; previous map was preserved') from error
+
+def apply_result(raw,repo,refs,branch,lang,response,commit,layout,configuration=None,provider='mcp-agent',data=None):
+    provider=validate_provider(provider)
+    current=raw.get(branch) or {}
+    if data is None:data=parse_response(response.strip())
     m,flows=normalize(layout_filter(data,layout),repo,commit,refs[branch]);m['analysis'].update(language=lang,configuration=configuration)
-    meta={'source':'ai','provider':provider,'commit':commit,'branch':branch,'language':lang,'configuration':configuration,'wording':mapcore.WORDING,'steps_wording':mapcore.STEPS_WORDING,'generated_at':m['analysis']['generated_at']}
+    meta=_meta(provider,commit,branch,lang,configuration,m['analysis']['generated_at'])
     for flow in flows['routes'].values():flow.update(meta)
     if flows['routes']:m['task_outputs']={'flows':flows}
-    conf={**mapcore.TESTS_DEFAULT,'records':[],**(raw.get('tests') or {})}
+    conf=_tests_conf(raw)
     refresh_test_links(m,conf)
     updated=copy.deepcopy(raw)
     if current and current.get('commit')!=commit:updated[branch+'.prev']=current
@@ -471,7 +481,7 @@ def files_in(value):
     return set()
 
 def groups_input(m):
-    routes={r['file']+'::'+r['function']:r for r in m['backend_routes'] if r.get('mounted') and r.get('function')}
+    routes={handler(r):r for r in m['backend_routes'] if r.get('mounted') and r.get('function')}
     screens=[s for s in m['screens'] if not s.get('redirect')]
     paths={s['path'] for s in screens}
     screens=[s for s in screens if not s['path'].startswith('/m/') or s['path'][2:] not in paths]
@@ -582,12 +592,12 @@ def merge(raw,repo,branch,lang,data,head,configuration,sc,catalog,provider='mcp-
     models.update({t:t for r in all_routes if r.get('source')=='ai' for t in r.get('tables',[])})
     m=assemble(path,head,repo['refs'].get(branch) or prev.get('ref'),all_screens,kept_functions+got['api_functions']+basic_functions,all_routes,models,analysis)
     m['basic_drop']=sorted((set(prev.get('basic_drop') or []) if (prev.get('analysis') or {}).get('source')=='ai' else set())|(drop&{x['id'] for x in basic['backend_routes']+basic['screens']}))
-    meta={'source':'ai','provider':provider,'commit':head,'branch':branch,'language':lang,'configuration':configuration,'wording':mapcore.WORDING,'steps_wording':mapcore.STEPS_WORDING,'generated_at':analysis['generated_at']}
+    meta=_meta(provider,head,branch,lang,configuration,analysis['generated_at'])
     flows={key:{**flow,**meta,'hash':hashlib.sha1('\n'.join(cache[flow['file']]).encode()).hexdigest()[:12]} for key,flow in got['flows'].items()}
     outputs=carry(raw,branch,prev,m,flows,path,head)
     if outputs:m['task_outputs']=outputs
     analysis['carried']['flows']=sum(1 for f in (outputs.get('flows') or {}).get('routes',{}).values() if f.get('carried_from'))
-    refresh_test_links(m,{**mapcore.TESTS_DEFAULT,'records':[],**(raw.get('tests') or {})})
+    refresh_test_links(m,_tests_conf(raw))
     for route in all_routes:route['flow']=((outputs.get('flows') or {}).get('routes') or {}).get(handler(route))
     updated=copy.deepcopy(raw)
     if prev and prev.get('commit')!=head:updated[branch+'.prev']=prev
@@ -635,7 +645,7 @@ def request(name,branch='dev',lang='ko',repository='',overview=False):
                     f' After saving the map, call request_ai_task with {system_scope} to analyze architecture and the jobs of every program together. '
                     'Include source evidence in each program’s jobs using the returned schema; record unknowns explicitly. '
                     'Submit the result and returned record_arguments to record_ai_task to finish this analysis without another user request.')
-        handoff += (' 저장 후 앱으로 돌아가라고 안내하세요. 앱이 저장된 결과를 읽습니다. 결과 확인을 위해 refresh 도구를 실행하지 마세요.' if lang=='ko' else ' Tell the user to return to the app, which reads the saved result. Do not call refresh to display the result.')
+        handoff += ' '+RETURN_TO_APP[lang]
         handoff += ' '+mapcore.reply_language(lang,saved_results=True)
         results=project.analysis_results(raw,branch)
         return {'commit':commit,'record_arguments':arguments,'repository_path':repo['path'],
@@ -664,11 +674,7 @@ def record(project,repository,branch,lang,commit,configuration,result_json,base=
         repo,raw,rid,head=context(project,repository,branch)
         if configuration!=store.fingerprint(repo):raise ValueError('Repository configuration changed; request a new analysis')
         if commit!=head:raise ValueError('Repository commit changed; request a new analysis')
-        text=result_json.strip() if isinstance(result_json,str) else ''
-        if len(text)>8_000_000:raise ValueError('AI output was too large')
-        if text.startswith('```'):text=re.sub(r'^```(?:json)?\s*|\s*```$','',text)
-        try:data=json.loads(text)
-        except (ValueError,TypeError) as error:raise ValueError('AI output was not valid JSON; previous map was preserved') from error
+        data=parse_response(result_json)
         if not isinstance(data,dict):raise ValueError('AI output must be an object')
         previous=(raw.get(branch) or {}).get('analysis') or {}
         if base and data.get('base',base)!=base:raise ValueError('result_json and record_arguments name different bases; request the analysis again')
@@ -682,7 +688,7 @@ def record(project,repository,branch,lang,commit,configuration,result_json,base=
             # Pre-v2 compatibility: an explicit full JSON may replace a basic or v1 map, never a pinned v2 map.
             if any(k in data for k in SPARSE):raise ValueError('Sparse results need the base returned by analyze; request the analysis again')
             if previous.get('source')=='ai' and previous.get('version',1)>=VERSION:raise ValueError('This map was saved from a pinned request; put the base returned by analyze in result_json')
-            updated,message=apply_result(raw,repo['path'],repo['refs'],branch,lang,text,commit,repo['layout'],configuration,provider)
+            updated,message=apply_result(raw,repo['path'],repo['refs'],branch,lang,result_json,commit,repo['layout'],configuration,provider,data)
         else:
             sc,catalog=scope(repo,raw,branch,lang,head,configuration,review_flag(project,rid,branch,raw.get(branch) or {}))
             if data['base']!=sc['base']:raise ValueError('The saved map, commit or request scope changed; request the analysis again')
@@ -729,7 +735,7 @@ def route_keys(inputs):return [r['file']+'::'+r['function'] for r in inputs['rou
 def task_input(raw,task,branch,target,repo=None,head=None):
     raw=project.branch_bundle(raw,branch)
     m=raw[branch]
-    routes={r['file']+'::'+r['function']:r for r in m['backend_routes'] if r.get('mounted') and r.get('function')}
+    routes={handler(r):r for r in m['backend_routes'] if r.get('mounted') and r.get('function')}
     if task=='groups':
         inputs=groups_input(m);previous=raw.get('groups') or {}
         if previous.get('source')!='ai' or not previous.get('inputs'):return inputs
@@ -808,10 +814,10 @@ def task_request(name,task,branch='dev',lang='ko',repository='',target='',overvi
                 'Return a JSON object using schema. Preserve unknown facts explicitly. '+mapcore.PLAIN+mapcore.reply_language(lang,'en',saved_results=True))
         handoff=(f'where-were-we MCP의 request_ai_task를 {json.dumps(scope,ensure_ascii=False)} 인자로 호출하세요. '
                  '반환된 input·prompt·schema를 기준으로 현재 에이전트의 모델로 작업하세요. 필요한 코드는 source_arguments를 넣어 analysis_source로 읽으세요. '
-                 '다른 AI CLI를 실행하지 마세요. 결과 JSON을 record_arguments와 함께 record_ai_task의 result_json으로 제출하세요. 저장 후 앱으로 돌아가라고 안내하세요. 앱이 저장된 결과를 읽습니다. 결과 확인을 위해 refresh 도구를 실행하지 마세요.') if lang=='ko' else (
+                 '다른 AI CLI를 실행하지 마세요. 결과 JSON을 record_arguments와 함께 record_ai_task의 result_json으로 제출하세요. '+RETURN_TO_APP['ko']) if lang=='ko' else (
                  f'Call where-were-we MCP request_ai_task with {json.dumps(scope)}. Use your current agent/model with the returned input, prompt and schema. '
                  'Read pinned source with analysis_source and source_arguments as needed. Do not launch another AI CLI. '
-                 'Submit result_json to record_ai_task with record_arguments. Tell the user to return to the app, which reads the saved result. Do not call refresh to display the result.')
+                 'Submit result_json to record_ai_task with record_arguments. '+RETURN_TO_APP['en'])
         handoff+=' '+mapcore.reply_language(lang,saved_results=True)
         results=project.analysis_results(raw,branch)
         before=([{'task':task,'key':key,'before':results[task].get(key)} for key in (inputs['routes'] if task=='steps' else [target])]
@@ -840,12 +846,12 @@ def task_result(raw,task,branch,target,data,repo,commit,lang,configuration=None,
                 result.append({'text':item['text'],'needs':item.get('needs') if item.get('needs') in ('ops','read') else 'read'})
             else:raise ValueError('Use text and needs for unknown facts')
         return result
-    meta={'source':'ai','provider':provider,'commit':commit,'branch':branch,'language':lang,'configuration':configuration,'wording':mapcore.WORDING,'steps_wording':mapcore.STEPS_WORDING,'generated_at':project.now()}
+    meta=_meta(provider,commit,branch,lang,configuration,project.now())
     updated=copy.deepcopy(raw)
     def program_jobs(node,payload):
         code=node['code'];jobs=[]
         def within(ev):return any(c in ('','.','/') or ev['file']==c.rstrip('/') or ev['file'].startswith(c.rstrip('/')+'/') for c in code)
-        routes={r['file']+'::'+r['function']:r for r in raw[branch]['backend_routes'] if r.get('function')}
+        routes={handler(r):r for r in raw[branch]['backend_routes'] if r.get('function')}
         for job in rows(payload,'jobs'):
             trigger=evidence(job.get('trigger'))
             if not trigger or not within(trigger):continue
@@ -979,7 +985,7 @@ def task_result(raw,task,branch,target,data,repo,commit,lang,configuration=None,
                   'hash':hashlib.sha1(git(repo,'show',commit+':'+route['file']).encode()).hexdigest()[:12]}
             flows[key]=flow
             for r in updated[branch]['backend_routes']:
-                if r['file']+'::'+str(r.get('function'))==key:r['flow']=flow
+                if handler(r)==key:r['flow']=flow
     else:
         jobs=program_jobs(inputs['node'],data);reason=unknown(data.get('unknown',[]))
         # No jobs is a finished answer only when stated with unknown, never when supplied jobs were rejected.
@@ -1012,7 +1018,7 @@ def task_record(project,repository,task,branch,lang,target,commit,configuration,
         else:
             for key,value in updated.items():
                 if value!=raw.get(key):store.atomic(store.home(project)/(key+'.json'),value)
-        return 'Saved '+task+' from '+('Claude Code' if provider=='claude-cli' else 'connected MCP agent')
+        return 'Saved '+task+' from '+provider_name(provider)
 
 PLAN_TEXT={
  'ko':{'head':'where-were-we MCP로 이 프로젝트에 필요한 분석을 모두 마치세요. 지금 사용하는 에이전트의 모델로 분석하고 다른 AI CLI를 실행하지 마세요. '
@@ -1070,7 +1076,6 @@ def plan(name,branch='dev',lang='ko',repository='',overview=False,light=False):
         if repository and not repos:raise ValueError('Unknown repository')
     else:repos=[None]
     tasks=[];blocked=[];skipped=[];pins={}
-    same=lambda a,b:bool(a and b) and (str(a).startswith(str(b)) or str(b).startswith(str(a)))
     if not light:warm_basic(name,branch,[r for r in repos if r and r['refs'].get(branch)])
     for repo in repos:
         rid=repo['id'] if repo else ''
@@ -1111,7 +1116,7 @@ def plan(name,branch='dev',lang='ko',repository='',overview=False,light=False):
         else:
             for n in rerun:add('jobs',res['jobs'].get(n),n)
         if any(not s.get('redirect') for s in m.get('screens',[])) and not fresh(res['groups']):add('groups',res['groups'])
-        keys=[r['file']+'::'+r['function'] for r in m.get('backend_routes',[]) if r.get('mounted') and r.get('function')]
+        keys=[handler(r) for r in m.get('backend_routes',[]) if r.get('mounted') and r.get('function')]
         keys=[k for k in dict.fromkeys(keys) if not fresh(res['steps'].get(k))]
         if keys:add('steps',{k:res['steps'].get(k) for k in keys},'@routes:'+json.dumps(keys,ensure_ascii=False))
     if not overview:

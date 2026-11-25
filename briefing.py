@@ -183,7 +183,8 @@ def normalize(data,ctx):
 
 def record(project,repository,branch,lang,input_hash,previous,result_json,provider='mcp-agent'):
     name=project
-    if provider not in ('mcp-agent','claude-cli'):raise ValueError('Choose mcp-agent or claude-cli as analysis provider')
+    import ai_extract
+    ai_extract.validate_provider(provider)
     if lang not in ('ko','en') or not isinstance(result_json,str) or len(result_json)>8_000_000:raise ValueError('Invalid briefing result')
     data=json.loads(result_json)
     with store.locked(name):
@@ -194,7 +195,7 @@ def record(project,repository,branch,lang,input_hash,previous,result_json,provid
         result.update(version=digest({'result':result,'at':store.now()}),generated_at=store.now(),input_hash=input_hash,
                       input=ctx['input'],repository=repository,branch=branch,language=lang,provider=provider)
         value['results'][k]=result;store.atomic(store.home(name)/'briefing.json',value)
-    return 'Saved change briefing from '+('Claude Code' if provider=='claude-cli' else 'connected MCP agent')
+    return 'Saved change briefing from '+ai_extract.provider_name(provider)
 
 def view(name,repository='',branch='dev',lang='ko',ctx=None,results=None):
     ctx=ctx or context(name,repository,branch);results=stored(name)['results'] if results is None else results;result=results.get(key(repository,branch,lang))
