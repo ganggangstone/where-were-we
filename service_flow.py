@@ -277,6 +277,74 @@ def html_requests(raw, file, parse):
     return requests
 
 
+_BASE = re.compile(r'(?:https?://)?(?:localhost|127\.0\.0\.1|[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*):\d{2,5}')
+
+
+def python_requests(tree, file):
+    """Python HTTP calls (requests/httpx/aiohttp methods, urllib Request/urlopen, a curl argument list) whose URL is a literal
+    http address with a port, or an f-string starting with a module constant holding one (an env default counts).
+    A path segment built from a value is kept as {param}; the query and the rest after a non-literal part are dropped."""
+    bases = {}
+    counts = Counter(t.id for node in tree.body if isinstance(node, (ast.Assign, ast.AnnAssign))
+                     for t in (node.targets if isinstance(node, ast.Assign) else [node.target]) if isinstance(t, ast.Name))
+    for node in tree.body:
+        if not isinstance(node, ast.Assign) or len(node.targets) != 1 or not isinstance(node.targets[0], ast.Name) or counts[node.targets[0].id] != 1:
+            continue
+        value = node.value
+        if isinstance(value, ast.BoolOp) and isinstance(value.op, ast.Or):value = value.values[-1]
+        if isinstance(value, ast.Call) and len(value.args) == 2 and not value.keywords and ast.unparse(value.func) in ('os.environ.get', 'os.getenv'):
+            value = value.args[1]
+        if isinstance(value, ast.Constant) and isinstance(value.value, str) and _BASE.fullmatch(value.value.rstrip('/')):
+            bases[node.targets[0].id] = value.value.rstrip('/')
+
+    def url(node):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            m = _BASE.match(node.value)
+            return node.value[m.end():].split('?')[0].split('#')[0] if m else None
+        if not isinstance(node, ast.JoinedStr) or not node.values:
+            return None
+        first, *rest = node.values
+        if isinstance(first, ast.FormattedValue) and isinstance(first.value, ast.Name) and first.value.id in bases and first.conversion == -1 and not first.format_spec:
+            text = ''
+        elif isinstance(first, ast.Constant) and (m := _BASE.match(first.value)):
+            text = first.value[m.end():]
+        else:
+            return None
+        for part in rest:
+            if '?' in text or '#' in text:break
+            if isinstance(part, ast.Constant):text += part.value
+            elif text.endswith('/'):text += '{param}'
+            else:return None  # a value glued into a segment ('/a{b}') leaves the path unknown
+        path = text.split('?')[0].split('#')[0]
+        return path if all(seg == '{param}' or '{' not in seg for seg in path.split('/')) else None
+
+    requests = []
+    def add(method, node, path):
+        if path and method in METHODS:
+            shaped = path.replace('{param}', 'param')
+            if _path(shaped) and path != '/':
+                request = {'method': method, 'path': path, 'client': {'file': file, 'line': node.lineno}}
+                if '{param}' in path:request['basis'] = 'path_template'
+                requests.append(request)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and node.args:
+            name = node.func.attr if isinstance(node.func, ast.Attribute) else node.func.id if isinstance(node.func, ast.Name) else ''
+            if name.upper() in METHODS:
+                add(name.upper(), node, url(node.args[0]))
+            elif name in ('Request', 'urlopen'):
+                method = next((k.value.value for k in node.keywords if k.arg == 'method' and isinstance(k.value, ast.Constant)), None)
+                data = len(node.args) > 1 or any(k.arg == 'data' for k in node.keywords)
+                add(str(method or ('POST' if data else 'GET')).upper(), node, url(node.args[0]))
+        elif isinstance(node, ast.List) and node.elts and isinstance(node.elts[0], ast.Constant) and node.elts[0].value == 'curl':
+            words = [e.value if isinstance(e, ast.Constant) and isinstance(e.value, str) else None for e in node.elts]
+            paths = [p for e in node.elts if (p := url(e))]
+            method = next((words[i+1] for i, w in enumerate(words[:-1]) if w in ('-X', '--request')), None)
+            if method is None:
+                method = 'POST' if any(w in ('-d', '--data', '--data-raw', '--data-binary', '-F', '--form', '--json') for w in words) else 'GET'
+            if len(paths) == 1 and method:add(method.upper(), node, paths[0])
+    return sorted(requests, key=lambda r: r['client']['line'])
+
+
 def mounted_routes(external, imports, python_paths=(), parsed=()):
     targets = {(edge['file'],edge['line']):edge['target'] for edge in imports}
     result = []
@@ -370,7 +438,7 @@ def connect(routes, requests):
         if not route_order(route)[0]:
             standalone.setdefault(route['path'],[]).append(i)
     registered_groups=[{'resource':resource,'registered_route_indexes':indexes} for resource,indexes in standalone.items()]
-    literal_requests = [{'method':r['method'], 'path':r['path'], 'client':r['client']} for r in requests
-                        if not r.get('basis') and _path(r['path'])]
+    literal_requests = [{'method':r['method'], 'path':r['path'], 'client':r['client'], **({'basis':r['basis']} if r.get('basis') else {})} for r in requests
+                        if r.get('basis') in (None, 'path_template') and _path(re.sub(r'\{[A-Za-z_]\w*\}', 'param', r['path']))]
     return {'literal_requests':literal_requests[:256],'registered_route_groups':registered_groups,'registered_routes':registered,'connections': connections, 'feature_groups': groups, 'coverage': {'requests': len(requests), 'routes': len(routes),
             'unresolved_requests': len(requests) - len(connections)}}

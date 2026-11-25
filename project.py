@@ -424,6 +424,9 @@ def _configured_connections(repositories, raws, role, selected, state):
                                    or route.get('fastapi_parameters') and a.startswith('{'))
             for a,b in zip(segments, request))
 
+    def shape(path):
+        return [s.startswith((':','{')) for s in path.split('/')]
+
     connections = []
     for repo in repositories:
         source = repo['id']
@@ -441,8 +444,10 @@ def _configured_connections(repositories, raws, role, selected, state):
                 continue
             dest, route = hits[0]
             server = route['server']
-            if (route['path'] != path or route.get('basis') or route.get('express_parameters') or route.get('fastapi_parameters')
-                    or not inside(server['file'],maps[dest][2],'backend')):
+            # A request path template joins only a route whose parameters sit in exactly its value segments.
+            exact = route['path'] == path and not route.get('express_parameters') and not route.get('fastapi_parameters')
+            if (not exact and not (request.get('basis') == 'path_template' and shape(route['path']) == shape(path))
+                    or route.get('basis') or not inside(server['file'],maps[dest][2],'backend')):
                 continue
             connections.append({'method':method,'path':path,'basis':'configured',
                                 'client':{**client,'repository':source,'commit':pin},

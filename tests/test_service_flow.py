@@ -133,3 +133,23 @@ app.include_router(router, prefix=runtime_prefix)
         connection = service_flow.connect(routes, requests)['connections'][0]
         self.assertEqual(connection['mounts'], [{'file':'main.py','line':2},{'file':'main.py','line':4}])
         self.assertEqual(connection['server'], {'file':'api.py','line':3,'function':'todos'})
+
+    def test_python_requests_read_only_literal_addresses_and_constant_bases(self):
+        source = """import os, requests, subprocess, urllib.request
+API = os.getenv("API_URL", "http://127.0.0.1:9000/")
+OTHER = compute()
+requests.post(API + "/skip")
+requests.get(f"{API}/items")
+requests.put("http://localhost:8000/items/7")
+urllib.request.urlopen(urllib.request.Request(f"{API}/items", data=b"x"))
+subprocess.run(["curl", "localhost:8000/audio", "-F", "f=@a"])
+requests.get(f"{OTHER}/nope")
+requests.get(f"{API}/item{n}")
+requests.get(f"{API}/a/{n}/b")
+cache.get("/not-an-address")
+"""
+        rows = service_flow.python_requests(ast.parse(source), 'tool.py')
+        self.assertEqual([(r['method'], r['path'], r['client']['line'], r.get('basis')) for r in rows],
+                         [('GET', '/items', 5, None), ('PUT', '/items/7', 6, None), ('POST', '/items', 7, None),
+                          ('POST', '/audio', 8, None), ('GET', '/a/{param}/b', 11, 'path_template')])
+

@@ -630,6 +630,30 @@ class Connections(TemporaryProject):
         publish()
         self.assertEqual(read(),[])
 
+    def test_python_requests_join_configured_routes_by_literal_path_and_value_segments(self):
+        import subprocess
+        import structure_index
+        repos=[{'id':'tool','api_targets':['api']},{'id':'api'}]
+        pin={};snapshots={}
+        for repo in repos:
+            rid=repo['id'];path=self.root/rid;path.mkdir();repo['path']=str(path)
+            git=lambda *a:subprocess.check_output(['git','-C',path,*a]).decode().strip()
+            git('init','-q')
+            if rid=='tool':
+                (path/'send.py').write_text('import os, subprocess, httpx\nBASE = os.environ.get("API", "http://localhost:8000")\n'
+                                            'def go(i):\n    subprocess.run(["curl", "-s", "-X", "POST", f"{BASE}/jobs", "-d", "{}"])\n'
+                                            '    return httpx.get(f"{BASE}/jobs/{i}?full=1")\n')
+            else:
+                (path/'main.py').write_text("from fastapi import FastAPI\napp=FastAPI()\n@app.post('/jobs')\ndef add(): pass\n@app.get('/jobs/{job_id}')\ndef one(job_id): pass\n")
+            git('add','.');git('-c','user.name=Test','-c','user.email=test@example.invalid','commit','-qm',rid)
+            pin[rid]=git('rev-parse','HEAD')
+            snapshots[rid]={**sample(str(path),pin[rid][:8]),'inventory':{'commit':pin[rid]},'structure_index':structure_index.build(str(path),pin[rid])}
+        project.configure('example',{'repositories':repos})
+        for rid,snapshot in snapshots.items():project.publish('example',rid,{'dev':snapshot},{})
+        rows=project.read_bundle('example','tool')['dev']['cross_repository_connections']
+        self.assertEqual([(r['method'],r['path'],r['client']['line'],r['server']['function']) for r in rows],
+                         [('POST','/jobs',4,'add'),('GET','/jobs/{param}',5,'one')])
+
     def test_configured_target_and_unconfigured_candidates(self):
         self.inputs();m=mapcore.Map('studio')
         row=m.requests('/@web/settings')[0]

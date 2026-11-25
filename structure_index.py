@@ -918,6 +918,7 @@ def build(repo, commit, excluded=None, *, only_file=None, directory=None, page=1
         python_modules[file]=default_flow.python_facts(tree)
         sql_modules[file]=sqlmodel_steps.facts(tree)
         routes.extend(service_flow.python_routes(tree, file, external))
+        if source_signals.kind(file) == 'code':requests.extend(service_flow.python_requests(tree, file))
         rows = []
         stack = [(tree, '')]
         while stack:
