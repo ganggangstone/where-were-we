@@ -256,7 +256,7 @@ window.__TAURI__={core:{invoke:async(command,args)=>{
  const changes=S.changes,settings=S.settings;
  render();
  assert($('requestBriefing') && !$('requestBriefing').disabled,'A collected project can request a briefing for all repositories');
- assert(tr('같은 문제의 PR은 묶고, 다른 문제를 푼 PR은 나눠 설명합니다.').includes('distinct problems'),'New copy must not be overridden by an old translation key');
+ assert(tr('같은 문제를 해결한 변경끼리 설명을 묶는다.')==='Changes that solved the same problem are explained together.','New copy must not be overridden by an old translation key');
  Object.defineProperty(navigator,'clipboard',{value:{writeText:async()=>{}},configurable:true});
  $('requestBriefing').onclick();
  assert(S.agentPurpose==='analysis' && !calls.includes('analysis_plan'),'The briefing button opens the analysis panel without preparing a request');
@@ -273,7 +273,7 @@ window.__TAURI__={core:{invoke:async(command,args)=>{
  $('viewAnalysisResults').click();
  // The scope summary carries both counts: change cards and related PRs.
  const summary=$('map').querySelector('.briefing-context h4')?.textContent||'';
- const prs=summary.match(/PR (\d+)/)?.[1],cards=summary.match(/(\d+) changes/)?.[1];
+ const prs=summary.match(/Changes applied (\d+)/)?.[1],cards=summary.match(/(\d+) changes/)?.[1];
  assert(S.view==='changes' && prs==='2' && Number(cards)===$('map').querySelectorAll('.change-card').length,'Cards and PRs are counted independently: '+summary);
  assert($('map').textContent.includes('Before') && $('map').textContent.includes('Data impact'),'Show the before/after and impact fields');
  assert($('map').textContent.includes('Deployment and runtime unverified'),'Do not turn merged PRs into deployment confirmation');

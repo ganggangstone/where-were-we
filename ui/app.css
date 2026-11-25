@@ -161,9 +161,6 @@ button.pill, .pill.click { font:var(--font-secondary); letter-spacing:var(--trac
 .setting-options label { margin:var(--space-0) }
 .setting-options p { margin:var(--space-2) var(--space-0) var(--space-0) }
 .sub { color:var(--color-text-secondary); font:var(--font-secondary); letter-spacing:var(--tracking-secondary); margin:var(--space-2) var(--space-0) var(--space-0) }
-.request-flow { display:flex; flex-wrap:wrap; align-items:center; gap:var(--space-3); margin:var(--space-4) var(--space-0); color:var(--color-text-secondary); font:var(--font-secondary) }
-.request-flow span { padding:var(--space-2) var(--space-3); background:var(--color-bg-group); border-radius:var(--radius-pill) }
-.request-flow i { color:var(--color-accent); font-style:normal }
 .briefing-period { margin:var(--space-3) var(--space-0) }
 .sect { margin-top:var(--space-6) }
 .sect > h4 { margin:var(--space-0) var(--space-0) var(--space-3); font:var(--font-secondary); font-weight:var(--weight-strong); color:var(--color-text-secondary); display:flex; align-items:center; gap:var(--space-3) }

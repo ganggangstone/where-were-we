@@ -196,7 +196,7 @@ Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{windo
  S.lang='en';await startConnectionDiagnostic('app');assert($('insp').textContent.includes('Connection diagnostics'),'English heading');
  assert(!/[가-힣]/.test($('insp').textContent),'English pane has no untranslated Korean');
  for(const state of Object.keys(connectionMessages))assert(!/[가-힣]/.test(connectionMessage(state)),'Translated status '+state);
- assert(tr('업데이트한 뒤 AI 연결을 다시 확인한다.').startsWith('Check'),'Translated update guidance');
+ assert(tr('업데이트를 마쳤다. AI 연결 다시 확인 필요.').startsWith('Check'),'Translated update guidance');
  // Two feature requests resolve in reverse order; stale responses cannot replace the newer one.
  waitNext=true;const first=startConnectionDiagnostic('detail');const oldFinish=finishNext;
  waitNext=false;await startConnectionDiagnostic('maps');oldFinish();await first;

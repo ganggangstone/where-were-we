@@ -111,7 +111,7 @@ vm.runInThisContext(js.slice(0,js.indexOf("$('q').oninput"))+`
 S.system={nodes:[{id:'service::backend',name:'API server',kind:'program',code:['service/server'],uses:[]}],links:[],externals:[]};
 S.node='service::backend';S.jobs={nodes:{}};S.status={};
 let view=sysInspector({});
-assert.ok(view.includes('아직 하는 일이 분석되지 않았습니다.'));
+assert.ok(view.includes('이 프로그램이 하는 일을 아직 분석하지 않았다.'));
 assert.ok(!view.includes('mkJobs'));assert.ok(!view.includes('요청을 복사'));
 S.jobs.nodes[S.node]={jobs:[{name:'Store item',what:'Save the submitted item',starts_when:'On submit',routes:[]}]};
 view=sysInspector({});assert.ok(view.includes('Store item'));assert.ok(view.includes('Save the submitted item'));
@@ -403,7 +403,7 @@ window.__TAURI__={core:{invoke:async(command,args)=>{
   await requestAgentAction('make_system');
   assert($('insp').textContent.includes('요청 복사') && $('checkAnalysisResults'),'Korean shows the same result-only path');
   S.lang='en';await requestAgentAction('make_system'); // back to an English request for the English checks below
-  assert(tr('AI 채팅에 붙여 넣어 실행합니다.')==='Paste into your AI chat to run.' && tr('분석 화면에서 Claude Code로 바로 분석하거나 AI에게 보낼 요청을 만듭니다.').includes('analysis panel'),'Request wording separates preparing a request from analyzing in the app');
+  assert(tr('AI 채팅에 붙여 넣으면 분석을 맡길 수 있다.')==='Paste into your AI chat to run.' && tr('분석 화면에서 바로 분석하거나 AI에 보낼 글을 만들 수 있다.').includes('analysis panel'),'Request wording separates preparing a request from analyzing in the app');
   analysisBundle.project.repositories[0].results.dev.system={version:'proposal',commit:'abc',stale:false,proposal:true};
   await $('checkAnalysisResults').onclick();
   assert($('analysisResultState').textContent.includes('Proposal saved') && $('viewAnalysisResults').textContent==='View AI proposal','A saved AI proposal is offered as the proposal, not as the old manual map');
