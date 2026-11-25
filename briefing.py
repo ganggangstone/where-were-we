@@ -196,8 +196,8 @@ def record(project,repository,branch,lang,input_hash,previous,result_json,provid
         value['results'][k]=result;store.atomic(store.home(name)/'briefing.json',value)
     return 'Saved change briefing from '+('Claude Code' if provider=='claude-cli' else 'connected MCP agent')
 
-def view(name,repository='',branch='dev',lang='ko'):
-    ctx=context(name,repository,branch);results=stored(name)['results'];result=results.get(key(repository,branch,lang))
+def view(name,repository='',branch='dev',lang='ko',ctx=None,results=None):
+    ctx=ctx or context(name,repository,branch);results=stored(name)['results'] if results is None else results;result=results.get(key(repository,branch,lang))
     state=('stale' if result and result['input_hash']!=ctx['hash'] else 'saved' if result else 'needs_collection' if not ctx['ready'] else 'no_changes' if not ctx['input']['has_changes'] and not ctx['input']['warnings'] else 'not_analyzed')
     value={'state':state,'result':result,'input':ctx['input'],'input_hash':ctx['hash'],'warnings':ctx['input']['warnings']}
     if not result:
@@ -207,7 +207,11 @@ def view(name,repository='',branch='dev',lang='ko'):
     return value
 
 def project_views(name,repository=''):
-    return {branch:{lang:view(name,repository,branch,lang) for lang in ('ko','en')} for branch in ('dev','main')}
+    results=stored(name)['results']
+    def both(branch):
+        ctx=context(name,repository,branch)
+        return {lang:view(name,repository,branch,lang,ctx,results) for lang in ('ko','en')}
+    return {branch:both(branch) for branch in ('dev','main')}
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('command',choices=['request','read']);parser.add_argument('project')

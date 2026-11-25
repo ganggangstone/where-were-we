@@ -72,8 +72,8 @@ def need(project):
     return p
 
 
-def scoped_map(name, repository=""):
-    bundle = project_store.read_bundle(name, repository)
+def scoped_map(name, repository="", bundle=None):
+    bundle = bundle or project_store.read_bundle(name, repository, briefings=False)
     branch='dev' if bundle.get('dev') else 'main'
     data = bundle.get("dev") or bundle.get("main") or {}
     if bundle['project']['repositories'] and not data:data={'repositories':bundle['project']['repositories'],'multi_repo':True}
@@ -114,7 +114,7 @@ def ago(iso):
 def projects() -> str:
     out = []
     for p in mapcore.projects():
-        m = scoped_map(p); ch = project_store.read_bundle(p).get("changes") or {}
+        b = project_store.read_bundle(p, briefings=False); m = scoped_map(p, bundle=b); ch = b.get("changes") or {}
         if m.m.get("multi_repo"):
             out.append(f"- {p}: repositories " + ", ".join(r["id"] for r in m.m.get("repositories", [])))
             out += scope_notes(m)
@@ -141,9 +141,10 @@ def overview(project: str = "", repository: str = "") -> str:
 @app.tool(description="지난 새로고침 뒤에 달라진 것. back=0 이 가장 최근, 1 이 그 전. 들어온 PR 과 그것이 닿는 기능 묶음·화면, 화면·서버 요청·화면 사이 길의 변화.")
 def changes(project: str = "", back: int = 0, repository: str = "") -> str:
     p = need(project)
-    if project_store.config(p) and not repository:
-        return "\n\n".join("# Repository " + r["id"] + "\n" + changes(p, back, repository=r["id"]) for r in project_store.config(p)["repositories"])
-    ch = project_store.read_bundle(p, repository).get("changes") or {}
+    conf = project_store.config(p)
+    if conf and not repository:
+        return "\n\n".join("# Repository " + r["id"] + "\n" + changes(p, back, repository=r["id"]) for r in conf["repositories"])
+    ch = project_store.read_bundle(p, repository, briefings=False).get("changes") or {}
     es = ch.get("entries", [])
     if not es: return "기록이 없다. refresh 를 부르면 생긴다.\n" + "\n".join(scope_notes(scoped_map(p, repository)))
     e = es[min(back, len(es) - 1)]
@@ -171,12 +172,13 @@ def changes(project: str = "", back: int = 0, repository: str = "") -> str:
 @app.tool(description="고치기 전에 영향 보기. target 에 파일 경로(frontend/…, backend/…, scripts/…), 화면 주소나 이름, 저장소(테이블) 이름, 서버 주소(예: POST /projects/{}/start) 중 하나를 넣는다.")
 def impact(target: str, project: str = "", repository: str = "") -> str:
     project_name = need(project); m = scoped_map(project_name, repository); screen_lookup=m; t = target.strip(); L = []
-    if repository and project_store.config(project_name):
+    conf = project_store.config(project_name)
+    if repository and conf:
         m = scoped_map(project_name)
         if "/" in t and "." in os.path.basename(t) and not t.startswith(repository+"/"):t=repository+"/"+t
         elif repository+"::"+t in set(m.m.get('models',{}).values()) | set(m.table_use()):t=repository+"::"+t
-        elif any(member['repository']==repository and member['table']==t for store in project_store.config(project_name).get('shared_data',[]) for member in store['members']):
-            t=next('shared::'+store['id'] for store in project_store.config(project_name)['shared_data'] if any(member['repository']==repository and member['table']==t for member in store['members']))
+        elif any(member['repository']==repository and member['table']==t for store in conf.get('shared_data',[]) for member in store['members']):
+            t=next('shared::'+store['id'] for store in conf['shared_data'] if any(member['repository']==repository and member['table']==t for member in store['members']))
         elif t.startswith('/') and t not in screen_lookup.by_path:
             qualified=project_store.qscreen(repository,t)
             if qualified in m.by_path:t=qualified
@@ -265,7 +267,7 @@ def impact(target: str, project: str = "", repository: str = "") -> str:
         candidates = m.m.get("connection_candidates", [])
         if candidates: L += ["", "Unverified cross-repository candidates: " + json.dumps(candidates,ensure_ascii=False)]
     if untested:
-        if project_store.config(project_name):
+        if conf:
             for rid in sorted(untested_repositories):
                 if rid:L += ["",mapcore.tests_prompt(m.project, [t for t in dict.fromkeys(untested) if '('+rid+'/' in t][:15],repository=rid)]
         else:L += ["", mapcore.tests_prompt(m.project, list(dict.fromkeys(untested))[:15])]

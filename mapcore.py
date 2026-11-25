@@ -75,7 +75,7 @@ def projects():
 def _read(project, name):
     if os.path.isfile(os.path.join(ROOT, project, "project.json")):
         import project as projects_module
-        return projects_module.read_bundle(project).get(name)
+        return projects_module.read_bundle(project,briefings=False).get(name)
     p = os.path.join(ROOT, project, name + ".json")
     return json.load(open(p)) if os.path.exists(p) else None
 
@@ -85,7 +85,7 @@ class Map:
         self.project, self.branch = project, branch
         if bundle is None:
             import project as projects_module
-            bundle = projects_module.read_bundle(project,branch=branch)
+            bundle = projects_module.read_bundle(project,branch=branch,briefings=False)
         if bundle.get('branch_details'):
             bundle={**bundle,**bundle['branch_details'].get(branch,{})}
         read = (lambda p, key: bundle.get(key)) if bundle is not None else _read
