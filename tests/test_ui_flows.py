@@ -1234,7 +1234,7 @@ class Flows(unittest.TestCase):
         self.check(r'''
  S.status.branches=[{name:'feature/items',ahead_of_dev:3,author:'alice',age_days:2,screens:['web::/items']}];
  S.view='map';render();document.querySelector('[data-scr="web::/items"]').click();
- const line=[...$('insp').querySelectorAll('.row')].find(r=>r.innerText.includes('feature/items'))?.innerText || '';
+ $('insp').querySelectorAll('details').forEach(d=>d.open=true);const line=[...$('insp').querySelectorAll('.row')].find(r=>r.innerText.includes('feature/items'))?.innerText || '';
  assert(line && !/개발|[Dd]evelopment/.test(line),'No development wording: '+line);
  assert(line.includes(versionName('dev')) && line.includes('3'),'The analyzed version is named: '+line);
 ''')
@@ -1483,11 +1483,25 @@ class Flows(unittest.TestCase):
  assert(reads()>before && !$('status').textContent,'A failed code read does not block refreshing either: '+$('status').textContent);
 ''')
 
+    def test_request_steps_sit_in_their_lanes_and_lists_fold_under_one_disclosure(self):
+        self.check(r'''
+ S.view='map';render();document.querySelector('[data-scr="web::/items"]').click();
+ const row=document.querySelector('[data-req]'),key=row.dataset.req;
+ const route=M().backend_routes.find(r=>row && requests(M(),'web::/items').some(x=>x.key===key && x.route===r)) || requests(M(),'web::/items')[0].route;
+ route.flow={steps:[{lane:'서버',text:'Check the item',file:'a',line:1,quote:'q'},{lane:'저장소',text:'Save the item',file:'a',line:2,quote:'q'},{lane:'외부',text:'Tell the mailer',file:'a',line:3,quote:'q'}]};
+ row.click();
+ const steps=[...$('insp').querySelectorAll('.step[data-step]')];
+ assert(steps.map(x=>x.className.match(/\bl(\d)\b/)[1]).join('')==='0123','Each step sits in its lane: '+steps.map(x=>x.className).join('|'));
+ assert(steps.slice(1).every(x=>x.querySelector('.from')),'Each later step shows where it came from');
+ const more=$('insp').querySelector('.detail details');assert(more && !more.open && more.querySelector('summary').textContent===tr('자세한 목록'),'Data names and linked code fold under one 「자세한 목록」');
+ assert(!$('insp').querySelector('.detail > .flowline'),'No raw data chips above the fold');
+''')
+
     def test_request_detail_names_shared_data_by_display_name(self):
         self.check(r'''
  S.branchDetails.dev.system.nodes[0].tables=['api::items'];S.view='map';render();
  document.querySelector('[data-scr="web::/items"]').click();document.querySelector('[data-req]').click();
- const line=[...$('insp').querySelectorAll('.empty')].map(e=>e.innerText).find(t=>t.includes('First Worker')) || '';
+ $('insp').querySelectorAll('details').forEach(d=>d.open=true);const line=[...$('insp').querySelectorAll('.empty')].map(e=>e.innerText).find(t=>t.includes('First Worker')) || '';
  assert(line.includes('items · API server') && !line.includes('api::items'),'Directly accessed data uses its display name: '+line);
 ''')
 
@@ -1663,11 +1677,11 @@ class UxWriting(unittest.TestCase):
  S.changes={last_refresh:'2026-10-01T00:00:00Z',entries:[{at:'2026-10-01T00:00:00Z',since:'2026-09-24T00:00:00Z',repository:'web',branches:{},prs:[]}]};
  S.view='changes';render();
  const text=outside($('map')),summaries=[...$('map').querySelectorAll('summary')];
- assert(text.includes('Known problem') && text.includes('Known after'),'Problem and what changed are shown by default');
- assert(!text.includes('Unknown why') && !text.includes('Unknown remaining') && !text.includes('Known before'),'Other fields are folded');
+ assert(text.includes('Fictional change') && text.includes('Known after'),'Each card shows its title and one line of what changed');
+ assert(!text.includes('Known problem') && !text.includes('Unknown why') && !text.includes('Unknown remaining') && !text.includes('Known before') && !text.includes('#42'),'Problem text, other fields and PR links are folded');
  assert(text.includes(tr('미확인')+' 2'),'Unknown fields have a visible count');
  const more=$('map').querySelector('.change-details');
- assert(more && more.textContent.includes('Known before') && more.textContent.includes('Unknown remaining') && more.textContent.includes('Fictional term'),'Details, unknown fields and terms retained together');
+ assert(more && more.textContent.includes('Known problem') && more.textContent.includes('#42') && more.textContent.includes('Known before') && more.textContent.includes('Unknown remaining') && more.textContent.includes('Fictional term'),'Details, unknown fields and terms retained together');
  assert(!$('map').querySelector('details details'),'Details and evidence never require nested disclosures');
  assert(text.includes(when('2026-09-01T00:00:00Z')) && text.includes(when('2026-09-20T00:00:00Z')),'Explanation period is visible: '+text);
  assert(text.includes(tr('새로고침 기록 구간')) && text.includes(when('2026-09-24T00:00:00Z')),'Selected refresh history period is shown separately');
@@ -1928,7 +1942,7 @@ class FeatureContext(unittest.TestCase):
  assert(!text.includes('Order fix'),'Work of screens outside the feature is excluded');
  assert(text.includes(tr('이 기능과 이어진 작업 ')+'6'),'Heading counts open PRs, branches, folders and issues once');
  $('insp').querySelector('[data-goscr="web::/items"]').click();await wait();
- const screen=$('insp').innerText;assert(screen.split('#42 ').length-1===1 && screen.split('#7 ').length-1===1,'A member screen keeps its own work list');
+ $('insp').querySelectorAll('details').forEach(d=>d.open=true);const screen=$('insp').innerText;assert(screen.split('#42 ').length-1===1 && screen.split('#7 ').length-1===1,'A member screen keeps its own work list');
  window.mutateBundle=b=>{featureBundle(b);b.status=null;};await loadProject('First',false,'');S.view='feat';render();
  assert(S.feat===itemsId() && $('insp').innerText.includes(tr('작업 정보 미수집')) && !$('insp').innerText.includes(tr('연결된 작업 없음')),'Uncollected work is not reported as none');
  window.mutateBundle=b=>{featureBundle(b);b.status.open_prs=b.status.open_prs.filter(p=>p.number===100);for(const k of ['merged_prs','branches','worktrees','issues'])b.status[k]=[];};await loadProject('First',false,'');render();

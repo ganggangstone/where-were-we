@@ -255,7 +255,7 @@ const UI_EN = {
   '이 요청 뒤에 ': 'After this request: ', '이 이어서 하는 일': ' — follow-up jobs', ' (연결 관계는 추정)': ' (inferred connection)',
   '시작: ': 'Triggered by: ', '이 일을 하는 버튼 ': 'Buttons for this action: ',
   '도 서버를 거치지 않고 이 데이터를 직접 읽고 씁니다: ': ' also accesses this data directly: ',
-  ' 을 누른다': ' is clicked', '화면이 요청을 보낸다': 'The screen sends a request',
+  ' 을 누른다': ' is clicked', '화면이 「': 'The screen sends the “', '」 요청을 보낸다': '” request', '화면이 요청을 보낸다': 'The screen sends a request',
   ' (코드만으로는 확신 못 함)': ' (uncertain from code alone)', '다음 ▶': 'Next ▶', '한 단계씩 보기': 'Step through',
   '· 인용 코드 일치': '· Quoted code matches', '누르면 생기는 일의 순서는 아직 분석하지 않았습니다.': 'Request steps have not been analyzed yet.',
   '연결된 코드': 'Linked code', '화면 쪽 ': 'Frontend ', ' · 서버 쪽 ': ' · Backend ',
@@ -1382,7 +1382,8 @@ function inspector(m) {
   }
   h += `</div>${rs.length > made ? ui`<div class="ctl"><button class="btn primary" id="mk">이 동작의 과정 알아보기 (${rs.length - made}개 남음)</button><span id="mklog">Claude Code 분석 또는 AI 요청</span></div>` : ''}</div>`;
   h += ways;
-  return h + workSection(workOf(s.path), '이 화면과 이어진 작업 ');
+  const work = workSection(workOf(s.path), '이 화면과 이어진 작업 ');
+  return h + (work ? `<details class="work-more"><summary>${tr('자세한 목록')}</summary>${work}</details>` : '');
 }
 const LANE = { '화면': 0, '서버': 1, '저장소': 2, '외부': 3 };
 function detail(m, s, r) {
@@ -1394,20 +1395,25 @@ function detail(m, s, r) {
   if (other.length) h += ui`<div class="empty">${esc(other[0].node.name)} 안에는 이 요청이 거치는 파일의 다른 판이 있습니다: ${[...new Set(other.map(d => d.path.split('/').pop()))].map(esc).join(', ')} (${new Set(other.map(d => d.branch)).size}개 사본)</div>`;
   if (r.btns.length > 1) h += ui`<div class="empty">이 일을 하는 버튼 ${r.btns.length}개: ${r.btns.map(esc).join(', ')}</div>`;
   const shared = (rt.tables || []).filter(t => progs(t).length); const users = (routeUse(m)[r.key] || []).length;
-  if (shared.length) h += ui`<div class="empty">${esc([...new Set(shared.flatMap(t => progs(t).map(n => n.name)))].join(', '))}도 서버를 거치지 않고 이 데이터를 직접 읽고 씁니다: ${shared.map(t => esc(tableName(t))).join(', ')}</div>`;
+  // 프로그램 이름이 모두 같은 코드의 것이면 이름마다 붙은 [코드 이름]은 반복이라 뗀다.
+  const names = [...new Set(shared.flatMap(t => progs(t).map(n => String(n.name))))], tag = names[0]?.match(/^\[[^\]]+\]\s*/)?.[0];
+  if (shared.length) h += ui`<div class="empty">${esc((tag && names.every(n => n.startsWith(tag)) ? names.map(n => n.slice(tag.length)) : names).join(', '))}도 서버를 거치지 않고 이 데이터를 직접 읽고 씁니다: ${shared.map(t => esc(tableName(t))).join(', ')}</div>`;
   // 단계 그림을 먼저 보이고, 입력·데이터 이름과 다른 프로그램 안내는 그 아래에 둔다.
   const facts = h.slice('<div class="detail">'.length); h = '<div class="detail">';
   if (f && f.steps.length) {
-    const steps = [{ lane: '화면', text: s.path ? (r.btn ? ui`"${r.btn}" 을 누른다` : tr('화면이 요청을 보낸다')) : tr('서버가 요청을 받는다'), start: true }, ...f.steps];
-    h += ui`<div class="lanes"><span class="screen">화면</span><span class="server">서버</span><span class="store">데이터</span><span class="external">외부</span></div>` + steps.map((st, i) => {
-      const cur = S.step === i; const off = S.step >= 0 && !cur;
-      return `<div class="step l${LANE[st.lane] ?? 1} ${cur ? 'cur' : ''} ${off ? 'off' : ''} ${st.uncertain ? 'unsure' : ''}" data-step="${i}"><span class="n">${i || '▶'}</span><div class="grow"><div class="tx">${esc(st.text)}${st.uncertain ? tr(' (코드만으로는 확신 못 함)') : ''}</div>${S.ev === i && !st.start ? `<div class="ev mono">${esc(st.quote)}<br>${zed(m, st.file || rt.file, st.line)}</div>` : ''}</div></div>`; }).join('') +
+    const steps = [{ lane: '화면', text: s.path ? (r.btn ? ui`"${r.btn}" 을 누른다` : ui`화면이 「${esc(reqLabel(r))}」 요청을 보낸다`) : tr('서버가 요청을 받는다'), start: true }, ...f.steps];
+    // 단계는 일어나는 자리(화면·서버·데이터·외부) 칸에 놓고, 앞 단계에서 온 방향을 화살표로 잇는다.
+    const at = (st) => LANE[st.lane] ?? 1;
+    h += ui`<div class="step-lanes"><span class="screen">화면</span><span class="server">서버</span><span class="store">데이터</span><span class="external">외부</span></div>` + steps.map((st, i) => {
+      const cur = S.step === i; const off = S.step >= 0 && !cur, from = i ? at(steps[i - 1]) : at(st);
+      return `<div class="step l${at(st)} ${cur ? 'cur' : ''} ${off ? 'off' : ''} ${st.uncertain ? 'unsure' : ''}" data-step="${i}">${i ? `<span class="from" aria-hidden="true">${from < at(st) ? '↘' : from > at(st) ? '↙' : '↓'}</span>` : ''}<span class="n">${i || '▶'}</span><div class="grow"><div class="tx">${esc(st.text)}${st.uncertain ? tr(' (코드만으로는 확신 못 함)') : ''}</div>${S.ev === i && !st.start ? `<div class="ev mono">${esc(st.quote)}<br>${zed(m, st.file || rt.file, st.line)}</div>` : ''}</div></div>`; }).join('') +
       ui`<div class="ctl"><button class="btn quiet" id="prev">◀</button><button class="btn quiet" id="next">다음 ▶</button><span>${S.step >= 0 ? `${S.step}/${steps.length - 1}` : tr('한 단계씩 보기')}</span><span class="spacer"></span><span class="ai">AI 설명</span><span>· 인용 코드 일치</span></div>`;
   } else if (f?.unknown) h += `<div class="empty">${tr('코드에서 이 동작의 순서를 확인하지 못했습니다: ')}${esc(f.unknown)}</div>`;
   else h += ui`<div class="empty">누르면 생기는 일의 순서는 아직 분석하지 않았습니다.</div>${r.key ? ui`<div class="ctl"><button class="btn quiet" data-mk="${esc(r.key)}">이 동작의 과정 알아보기</button></div>` : ''}`;
-  h += facts;
+  const more = facts;
   for (const { node, job, exact } of jobsOf(r.key)) h += ui`<div class="sect"><h4>이 요청 뒤에 ${esc(node.name)}이 이어서 하는 일${exact ? '' : tr(' (연결 관계는 추정)')}</h4><div class="tw"><b class="strong">${esc(job.name)}</b> ${esc(job.what)}</div><div class="s">시작: ${esc(job.starts_when)}</div>${job.steps.map((st, i) => `<div class="step l${st.lane === '저장소' ? 2 : st.lane === '외부' ? 3 : 1}"><span class="n">${i + 1}</span><div class="grow"><div class="tx">${esc(st.text)}</div><div class="s">${zed(m, st.file, st.line)}</div></div></div>`).join('')}</div>`;
-  h += ui`<details><summary>연결된 코드</summary><div class="kv mono">${esc(rt.method)} ${esc(rt.path)}</div><div class="kv">화면 쪽 ${zed(m, r.fn.file, r.call.line)} · 서버 쪽 ${zed(m, rt.file, rt.line)} <span class="mono">${esc(rt.function)}</span></div>
+  // 입력·데이터 이름, 다른 프로그램 안내와 연결된 코드는 「자세한 목록」 하나에 접는다.
+  h += ui`<details class="detail-more"><summary>자세한 목록</summary>${more}<h4>연결된 코드</h4><div class="kv mono">${esc(rt.method)} ${esc(rt.path)}</div><div class="kv">화면 쪽 ${zed(m, r.fn.file, r.call.line)} · 서버 쪽 ${zed(m, rt.file, rt.line)} <span class="mono">${esc(rt.function)}</span></div>
     <div class="kv">${(rt.tests || []).length ? ui`테스트 연결 ${rt.tests.length}개: <span class="mono">${rt.tests.map(t => esc(t.split('/').pop())).join(', ')}</span>` : ui`<b>테스트 코드가 안 보인다면?</b> 지도는 정해 둔 규칙으로만 테스트를 잇습니다. 요청을 AI에게 보내면 테스트를 찾아 규칙을 고치거나 하나씩 기록하고, 확인하려고 새로고침할 수 있습니다. <button class="btn quiet" data-repository="${esc(rt.repository || '')}" data-tp="${esc(rt.method + ' ' + rt.path + ' (' + rt.file + '::' + rt.function + ')')}">AI에게 테스트 찾기 요청</button><span id="tpDone"></span>`}</div></details>
     <div class="ctl"><button class="btn quiet" data-copy="${esc(r.key)}">이 일 복사</button>${S.focus && S.focus.t === 'route' ? '' : ui`<button class="btn plain" data-f="route|${esc(r.key)}">이 서버 기능을 쓰는 화면 ${users}곳</button>`}<span id="copied"></span></div></div>`;
   return h;
@@ -2056,26 +2062,31 @@ function drawWires() {
       box.appendChild(t); } }
 }
 window.onresize = drawWires;
+// 오른쪽 패널 내용이 바뀌어 지도 폭만 달라져도(창 크기는 그대로) 선을 상자 자리에 다시 긋는다.
+let wireWidth = 0; if (typeof ResizeObserver !== 'undefined') new ResizeObserver(() => { const w = $('map')?.clientWidth || 0; if (w !== wireWidth) { wireWidth = w; drawWires(); } }).observe($('map'));
 // 칸 그림의 선: 다른 칸으로 가는 선은 마주 보는 변끼리 잇고 번호(짧은 이름이 있으면 이름도)를 칸 사이 틈에 둔다.
 // 같은 칸 안의 선은 상자 오른쪽 여백으로 돌아 나가 번호를 그 여백에 둔다. 번호가 상자 글자를 덮지 않게 하려는 자리다.
 function drawLanes(box, svg, links, rect) {
   const gap = parseFloat(getComputedStyle(box).columnGap) || 0, side = {};
   const lanes = [...box.querySelectorAll('.lane')], lane = lanes[0], laneOf = (id) => box.querySelector(`[data-w="${id}"]`).closest('.lane'); let bus = 0;
   const bottom = Math.max(...lanes.filter(x => !x.classList.contains('ext')).map(x => x.offsetTop + x.offsetHeight));
-  const add = (d, l) => { const p = document.createElementNS('http://www.w3.org/2000/svg', 'path'); for (const [k, v] of Object.entries({ d, fill: 'none', ...(l.noend ? {} : { 'marker-end': 'url(#ah)' }), class: 'wire ' + (l.style || '') + (l.dim ? ' dim' : '') })) p.setAttribute(k, v); svg.appendChild(p); };
+  const add = (d, l) => { const p = document.createElementNS('http://www.w3.org/2000/svg', 'path'); for (const [k, v] of Object.entries({ d, fill: 'none', ...(l.noend ? {} : { 'marker-end': 'url(#ah)' }), class: 'wire ' + (l.style || '') + (l.dim ? ' dim' : '') + (l.on ? ' on' : '') })) p.setAttribute(k, v); svg.appendChild(p); };
   const tag = (l, x, y, named) => { const t = document.createElement('span'); t.className = (named ? 'wn-label' : 'wn') + (l.dim ? ' dim' : ''); const name = named && l.label ? linkLabel(l) : '';
     if (named) t.innerHTML = `<b class="wn inline">${l.n}</b>${name && name.length <= 12 ? `<span>${esc(name)}</span>` : ''}`; else t.textContent = l.n; t.style.left = x + 'px'; t.style.top = y + 'px'; box.appendChild(t);
     // 칸 사이 틈보다 긴 이름은 상자 글자를 덮으므로 번호만 남긴다(뜻은 아래 선 목록에 있다).
     if (named && t.children.length > 1 && t.offsetWidth > gap) t.lastChild.remove(); };
-  // 같은 칸 안의 선: 세로 줄을 칸 오른쪽 여백과 칸 사이 틈 절반에 고르게 벌린다.
+  // 같은 칸 안의 선: 세로 줄을 칸 오른쪽 여백과 칸 사이 틈 앞쪽 1/3 에 고르게 벌린다. 나머지 2/3 는 칸을 건너가는 긴 선의 자리다.
   const inner = {}; for (const l of links) { const a = rect(l.from), b = rect(l.to); if (Math.abs(a.x - b.x) < 1) inner[a.x] = (inner[a.x] || 0) + 1; }
+  const far = links.filter(l => Math.abs(lanes.indexOf(laneOf(l.from)) - lanes.indexOf(laneOf(l.to))) > 1).length;
   for (const l of links) { const a = rect(l.from), b = rect(l.to), ay = a.y + a.h / 2, by = b.y + b.h / 2;
-    if (Math.abs(a.x - b.x) < 1) { const k = side[a.x] = (side[a.x] || 0) + 1, x0 = a.x + a.w, room = (lane.offsetWidth - a.w) / 2 + gap / 2, xo = x0 + room * k / (inner[a.x] + 1);
+    if (Math.abs(a.x - b.x) < 1) { const k = side[a.x] = (side[a.x] || 0) + 1, x0 = a.x + a.w, room = (lane.offsetWidth - a.w) / 2 + gap / 3, xo = x0 + room * k / (inner[a.x] + 1);
       add(`M${x0} ${ay} H${xo} V${by} H${x0}`, l); if (l.n) tag(l, xo, (ay + by) / 2, false); continue; }
     const dir = b.x > a.x ? 1 : -1, x1 = dir > 0 ? a.x + a.w : a.x, x2 = dir > 0 ? b.x : b.x + b.w, pad = gap / 2 + (lane.offsetWidth - a.w) / 2;
     const span = Math.abs(lanes.indexOf(laneOf(l.from)) - lanes.indexOf(laneOf(l.to)));
     if (span > 1) { // 사이 칸을 가로지르지 않고 칸 아래로 돌아간다
-      const g1 = x1 + dir * pad, g2 = x2 - dir * pad, y = bottom + gap / 2 + 28 * (bus++);
+      // 긴 선마다 틈 안의 세로 자리를 따로 준다(같은 x 에 겹쳐 한 줄로 읽히지 않게).
+      const edge = (lane.offsetWidth - a.w) / 2, off = edge + gap * (1 / 3 + (2 / 3) * (bus + 1) / (far + 1));
+      const g1 = x1 + dir * off, g2 = x2 - dir * off, y = bottom + gap / 2 + 28 * (bus++);
       add(`M${x1} ${ay} H${g1} V${y} H${g2} V${by} H${x2}`, l); if (l.n) tag(l, (g1 + g2) / 2, y, true); continue; }
     add(`M${x1} ${ay} L${x2} ${by}`, l);
     if (l.n) { const tx = x1 + dir * pad; tag(l, tx, ay + (by - ay) * (tx - x1) / (x2 - x1), true); } }
@@ -2155,9 +2166,10 @@ function briefingPanel() {
     const unknown=extra.filter(([key])=>card[key].unknown).length;
     const evidence=[...fields.map(([key,title])=>({title:tr(title),value:card[key]})),...card.terms.map(term=>({title:term.term,value:term.explanation}))].filter(item=>item.value.evidence?.length);
     const links=card.prs.map(pr=>`<div class="pr-reference"><button class="pill click" data-url="${esc(pr.url)}">${esc(connectionDisplayName(pr.repository))} #${pr.number} ↗</button><span class="s">${esc(pr.branch || '')} → ${esc(pr.base || '')}</span>${(pr.issues || []).filter(issue=>/^https:\/\/github\.com\/[^/]+\/[^/]+\/issues\/[0-9]+$/.test(issue.url || '')).map(issue=>`<button class="pill click" data-url="${esc(issue.url)}">${tr('연결된 이슈')} #${issue.number} ↗</button>`).join('')}</div>`).join('');
-    cards+=`<article class="group change-card"><div class="change-card-heading"><h3>${esc(card.title)}</h3>${unknown?`<span class="pill warn">${tr('미확인')} ${unknown}</span>`:''}</div>`;
-    cards+=`<div class="claim-flow">${claim('문제',card.problem)}${claim('변경',card.after)}</div>`;
-    cards+=`<details class="change-details"><summary>${tr('상세·근거')} · ${card.prs.length} PR</summary><div class="reference-list">${links}</div><div class="claim-grid">${extra.map(([key,title])=>claim(title,card[key])).join('')}</div>`;
+    // 카드는 제목과 바뀐 점 한 줄만 보이고, 문제·변경 전문과 PR 은 「상세·근거」를 열 때 보인다(첫 화면에 여러 문제가 들어오게).
+    const line=String((card.after.unknown?card.problem:card.after).text || '').split(/(?<=[.!?])\s+(?=[^\s])/u)[0] || '';
+    cards+=`<article class="group change-card"><div class="change-card-heading"><h3>${esc(card.title)}</h3><p class="change-line">${esc(line)}</p>${unknown?`<span class="pill warn">${tr('미확인')} ${unknown}</span>`:''}</div>`;
+    cards+=`<details class="change-details"><summary>${tr('상세·근거')} · ${card.prs.length} PR</summary><div class="claim-flow">${claim('문제',card.problem)}${claim('변경',card.after)}</div><div class="reference-list">${links}</div><div class="claim-grid">${extra.map(([key,title])=>claim(title,card[key])).join('')}</div>`;
     if(card.terms.length)cards+=`<h4>${tr('용어 풀이')}</h4>${metaList(card.terms.map(term=>[term.term,`${term.explanation.unknown?`<span class="pill warn">${tr('확인 못 한 것')}</span> `:''}${esc(term.explanation.text)}`,false]))}`;
     cards+=`<div class="evidence-list">${evidence.map(({title,value})=>`<section><h4>${esc(title)} · ${tr('근거 보기')}</h4>${value.evidence.map(ev=>`<blockquote><p>${esc(ev.quote)}</p><span class="s">${esc(ev.source)}</span>${ev.url?` <button class="btn plain" data-url="${esc(ev.url)}" aria-label="${esc(tr('근거 보기'))}">↗</button>`:''}</blockquote>`).join('')}</section>`).join('')}</div></details></article>`;
   }
@@ -2299,10 +2311,13 @@ function featView(m) {
   f.gs.forEach((g, i) => { const st = f.stat[i];
     h += ui`<div class="card node gc${f.pos[i].col} gr${f.pos[i].row} ${i === sel ? 'sel' : ''} ${near(i) ? '' : 'dim'}" data-feat="${i}" data-w="G${i}"><div class="nm"><span class="${g.ai ? 'ai' : ''}">${esc(g.name)}</span></div><div class="s one">${esc(g.description || '')}</div>
       <div class="meta"><span>${S.lang === 'en' ? `${g.list.length} screens · ${st.reqs} server actions` : `화면 ${g.list.length}개 · 서버에 하는 일 ${st.reqs}개`}</span></div></div>`; });
-  h += ui`</div><div class="sect"><h4>선 ${f.links.length}개</h4><div class="group">` + f.links.map((l, i) => { const data = [...new Set([...l.ab, ...l.ba])];
+  // 묶음을 고르면 그 묶음의 선만 그림 아래에 보이고, 전체 선 목록은 「자세한 목록」에 접는다.
+  const lines = (ls) => ui`<div class="sect"><h4>선 ${ls.length}개</h4><div class="group">` + ls.map(({ l, i }) => { const data = [...new Set([...l.ab, ...l.ba])];
     return `<div class="row ${on(l) ? '' : 'dim'}"><span class="wn inline">${i + 1}</span><div class="grow"><div class="tw"><b class="strong">${esc(f.gs[l.a].name)} ${l.fwd && l.back ? '↔' : l.back ? '←' : l.fwd ? '→' : '···'} ${esc(f.gs[l.b].name)}</b> ${l.ways.length ? ui`넘어가는 길 ${l.ways.length}` : tr('넘어가는 길은 없고 데이터만')}${data.length ? ui` · 주고받는 데이터 ${data.length}` : ''}</div></div></div>`; }).join('') + `</div></div>`;
+  const all = f.links.map((l, i) => ({ l, i }));
+  h += '</div>' + (sel == null ? '' : lines(all.filter(({ l }) => on(l))));
   // 개발자용 목록(기능·서버 경로)은 그림 아래 「자세한 목록」에 접어 둔다.
-  return h + (local ? `<details class="sect" id="detailLists" ${S.listsOpen ? 'open' : ''}><summary>${tr('자세한 목록')}</summary><div class="list-grid">${local}</div></details>` : '');
+  return h + `<details class="sect" id="detailLists" ${S.listsOpen ? 'open' : ''}><summary>${tr('자세한 목록')}</summary>${sel == null ? lines(all) : ''}${local ? `<div class="list-grid">${local}</div>` : ''}</details>`;
 }
 // 묶음마다 가장 센 선 하나만 긋는다. 묶음을 고르면 그 묶음의 선을 모두 긋는다. 나머지는 아래 선 목록에 있다.
 function strongFeatureLinks(f) {
@@ -2486,7 +2501,7 @@ function render() {
   });
   if($('detailLists'))$('detailLists').ontoggle=e=>{S.listsOpen=e.target.open;};
   if($('changeDetailLists'))$('changeDetailLists').ontoggle=e=>{S.listsOpen=e.target.open;};
-  if (sys && shownSystem(m)) { S._wires = sysLinks(shownSystem(m)).map((l, i) => ({ ...l, n: i + 1, dim: !!S.node && l.from !== S.node && l.to !== S.node })); drawWires(); document.querySelectorAll('.card[data-node], .row[data-node]').forEach(el => el.onclick = () => { selectProgram(el.dataset.node); });
+  if (sys && shownSystem(m)) { S._wires = sysLinks(shownSystem(m)).map((l, i) => ({ ...l, n: i + 1, dim: !!S.node && l.from !== S.node && l.to !== S.node, on: !!S.node && (l.from === S.node || l.to === S.node) })); drawWires(); document.querySelectorAll('.card[data-node], .row[data-node]').forEach(el => el.onclick = () => { selectProgram(el.dataset.node); });
     if ($('toMap')) $('toMap').onclick = () => { S.view = 'map'; render(); } }
   const pick=p=>selectScreen(p,view==='focus');
   document.querySelectorAll('[data-scr]').forEach(el => el.onclick = () => pick(el.dataset.scr));
