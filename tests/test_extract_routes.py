@@ -43,6 +43,17 @@ class RouteFiles(unittest.TestCase):
         self.assertEqual(next(s for s in m['screens'] if s['path'] == '/')['heading'], 'Home')
         self.assertTrue(m['coverage']['frontend'])
 
+    def test_button_labels_are_screen_text_never_code_expressions(self):
+        m = extract({
+            'web/src/App.tsx': "import { Route, Routes } from 'react-router-dom'\nimport Page from './Page'\nexport default () => <Routes><Route path=\"/\" element={<Page />} /></Routes>\n",
+            'web/src/Page.tsx': "export default function Page(){ return <div>\n"
+                                "<button title={on ? 'Stop' : 'Start'} onClick={() => go()}><Icon /></button>\n"
+                                "<button onClick={() => go()}><b>{n}</b>: <i>{k}</i></button>\n"
+                                "<button title=\"Save draft\" onClick={() => go()}><Icon /></button>\n</div> }\n",
+        })
+        labels = [a['label'] for s in m['screens'] for a in s['actions']]
+        self.assertEqual(labels, ['', '', 'Save draft'])
+
     def test_route_objects_vue_router_and_next_pages(self):
         m = extract({
             'client/src/router.js': "import { createRouter } from 'vue-router'\nimport Cart from '@/views/Cart.vue'\n"

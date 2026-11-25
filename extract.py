@@ -335,7 +335,7 @@ JSX_TEXT_RE = re.compile(r">([^<>{}]+)<")
 def jsx_text(inner):
     """JSX 안쪽에서 사람이 읽는 글자만. {식} 은 뺀다."""
     parts = [" ".join(t.split()) for t in JSX_TEXT_RE.findall(">" + inner + "<")]
-    parts = [t for t in parts if t and not re.fullmatch(r"[\s/+\-·|•]*", t)]
+    parts = [t for t in parts if re.search(r"\w", t)]  # 글자·숫자가 없는 조각(":", "·")은 버튼 글자가 아니다
     return " ".join(parts)
 
 
@@ -477,7 +477,8 @@ def actions_in(file, fns, screens):
             if not v or re.search(r"[`${}]", v) or re.fullmatch(r"[\w.?\[\]'\" ]*\w\.\w[\w.?\[\]'\" ]*", v) or re.fullmatch(r"\w+", v) and v.isascii():
                 return ""
             return v
-        label = jsx_text(inner) or lit(attr(open_tag, "title")) or lit(attr(open_tag, "aria-label")) or ""
+        quoted = lambda name: (lambda m: m and (m.group(1) if m.group(1) is not None else m.group(2)))(re.search(rf"\b{name}=(?:\"([^\"]*)\"|'([^']*)')", open_tag))
+        label = jsx_text(inner) or lit(quoted("title")) or lit(quoted("aria-label")) or ""  # {식} 속성은 글자가 아니다
         dynamic = bool(re.search(r"\{[^}]*\?[^}]*:[^}]*\}", inner))  # 상태에 따라 글자가 바뀜
         onclick = attr(open_tag, "onClick")
         body = expand_local(src, handler_body(src, onclick)) if onclick else None

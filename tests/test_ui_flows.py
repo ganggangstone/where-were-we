@@ -1334,6 +1334,11 @@ class Flows(unittest.TestCase):
  assert(!window.calls.some(c=>c.command==='analysis_run_start'),'Inventory needs no model turn');
 ''')
 
+    def test_code_expressions_are_not_button_text(self):
+        self.check(r'''
+ assert(!uiText(':') && !uiText("on ? 'Stop' : 'Start'") && !uiText('() => go()') && uiText('저장') && uiText('Save draft'),'Only screen text names a request');
+''')
+
     def test_ai_structure_draws_one_lane_per_code_and_outside_services_apart(self):
         self.check(r'''
  S.branchDetails=null;S.proposal=null;S.view='sys';S.node=null;

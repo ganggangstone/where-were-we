@@ -889,13 +889,15 @@ function groupsOf(m) {
 }
 const flowOf = (r) => r.flow || (S.flows && S.flows.routes && S.flows.routes[r.file + '::' + r.function]) || null;
 // 화면이 서버에 하는 요청 전부 (모바일 짝 포함, 헤더 부품 제외). 버튼 글자를 아는 요청은 그 글자로.
+// 버튼 글자로 쓸 수 있는 화면 글자인가. 글자·숫자가 없거나 코드 식(삼항식·따옴표 붙은 식·화살표 함수)이면 쓰지 않고 서버 일 이름으로 부른다.
+const uiText = (t) => !!t && /[\p{L}\p{N}]/u.test(t) && !/['"`]\s*[:?]|[:?]\s*['"`]|=>|&&|\|\|/.test(t);
 function requests(m, path) {
   m._req ??= {}; if (m._req[path]) return m._req[path];
   const s = m.screens.find(x => x.path === path); if (!s) return m._req[path] = []; const cv = commonVia(m); const vs = visibleScreens(m).find(x => x.path === path);
   const parts = vs && vs.mobile ? [s, vs.mobile] : [s]; const labelOf = {};
   // 버튼 글자를 요청에 붙인다. api 함수를 부르는 버튼은 함수 이름으로, 화면 파일에서 직접 요청을 보내는 버튼은 그 요청의 방식과 주소로 맞춘다.
   const tag = (k, l) => { const a = labelOf[k] ??= []; if (!a.includes(l)) a.push(l); };
-  for (const p of parts) for (const a of p.actions) if (a.kind === 'api' && a.label) { for (const n of a.api_functions) if (n !== '<inline>') tag(n, a.label); for (const c of a.calls || []) tag(a.file + ' ' + c.method + ' ' + c.path, a.label); }
+  for (const p of parts) for (const a of p.actions) if (a.kind === 'api' && uiText(a.label)) { for (const n of a.api_functions) if (n !== '<inline>') tag(n, a.label); for (const c of a.calls || []) tag(a.file + ' ' + c.method + ' ' + c.path, a.label); }
   const rows = []; const seen = new Set();
   for (const p of parts) for (const ref of p.api_functions) {
     if (ref.via && ref.via !== p.file && cv.has(ref.via)) continue;
