@@ -35,37 +35,37 @@ const AnalysisRun = (() => {
   }
   function message(value) {
     const code = errorCode(value), messages = {
-      CLI_NOT_INSTALLED:["Claude Code가 없다. 설치한 뒤 터미널에서 로그인하고 다시 확인한다.","Claude Code is missing. Install it, sign in from your terminal, then check again."],
-      CLI_UNSUPPORTED:["Claude Code를 업데이트한 뒤 다시 확인한다.","Update Claude Code, then check again."],
-      CLI_NOT_AUTHENTICATED:["Claude Code에 로그인해야 한다. 터미널에서 Claude 구독 계정에 로그인한 뒤 다시 확인한다.","Sign in to Claude Code with your subscription from your terminal, then check again."],
-      CLI_AUTH_UNSUPPORTED:["앱에서 분석하려면 Claude 구독이 필요하다. Claude Code에서 구독 계정으로 로그인한다.","In-app analysis requires a Claude subscription. Sign in to Claude Code with your subscription account."],
-      CLI_AUTH_STATUS:["Claude Code 로그인을 확인하지 못했다. 터미널에서 로그인한 뒤 다시 확인한다.","Couldn't check your Claude Code sign-in. Sign in from your terminal, then check again."],
-      CLI_ACCOUNT_CHANGED:["Claude Code 계정이 바뀌었다. 앱에 표시된 계정을 확인한 뒤 다시 분석한다.","Your Claude Code account changed. Check the account shown here, then retry."],
-      CLI_ACCOUNT_UNIDENTIFIED:['Claude Code 계정을 확인할 수 없습니다. 터미널에서 구독 계정으로 다시 로그인한 뒤 계정·상태를 확인하세요.','Could not identify the Claude Code account. Sign in again with your subscription in the terminal, then check account and status.'],
-      CLI_USAGE_LIMIT:["Claude 사용 한도를 모두 썼다. Claude Code에서 언제 다시 쓸 수 있는지 확인한다.","You've reached your Claude usage limit. Check when it resets in Claude Code."],
-      CLI_AUTH:['Claude Code 로그인이 만료됐거나 거부됐습니다. 터미널에서 다시 로그인한 뒤 계정·상태를 확인하세요.','Claude Code sign-in expired or was rejected. Sign in again in your terminal, then check account and status.'],
+      CLI_NOT_INSTALLED:["Claude Code가 없다. 설치하고 터미널에서 로그인하면 다시 확인할 수 있다.","Claude Code is missing. Install it, sign in from your terminal, then check again."],
+      CLI_UNSUPPORTED:["Claude Code를 업데이트하면 다시 확인할 수 있다.","Update Claude Code, then check again."],
+      CLI_NOT_AUTHENTICATED:["터미널에서 Claude 구독 계정에 로그인하면 분석할 수 있다.","Sign in to Claude Code with your subscription from your terminal, then check again."],
+      CLI_AUTH_UNSUPPORTED:["앱에서 분석하려면 Claude 구독 계정으로 로그인해야 한다.","In-app analysis requires a Claude subscription. Sign in to Claude Code with your subscription account."],
+      CLI_AUTH_STATUS:["Claude Code 로그인을 확인하지 못했다. 터미널에서 로그인하면 다시 확인할 수 있다.","Couldn't check your Claude Code sign-in. Sign in from your terminal, then check again."],
+      CLI_ACCOUNT_CHANGED:["Claude Code 계정이 바뀌었다. 앱에 표시된 계정으로 다시 분석할 수 있다.","Your Claude Code account changed. Check the account shown here, then retry."],
+      CLI_ACCOUNT_UNIDENTIFIED:['Claude Code 계정을 확인하지 못했다. 터미널에서 구독 계정에 다시 로그인해야 한다.','Could not identify the Claude Code account. Sign in again with your subscription in the terminal, then check account and status.'],
+      CLI_USAGE_LIMIT:["Claude 사용 한도를 모두 썼다. 언제 다시 쓸 수 있는지는 Claude Code에 나온다.","You've reached your Claude usage limit. Check when it resets in Claude Code."],
+      CLI_AUTH:['로그인이 만료됐거나 거부됐다. 터미널에서 Claude Code에 다시 로그인해야 한다.','Claude Code sign-in expired or was rejected. Sign in again in your terminal, then check account and status.'],
       CANCELLED:["분석을 취소했다. 이미 저장한 결과는 볼 수 있다.","Analysis canceled. You can still view saved results."],
-      CLI_TIMEOUT:["Claude Code가 시간 안에 답하지 않았다. 연결과 사용 한도를 확인한 뒤 다시 분석한다.","Claude Code didn't respond in time. Check your connection and usage limit, then retry."],
-      CLI_OUTPUT_LIMIT:["Claude의 답이 너무 길다. 더 적은 코드를 골라 다시 분석한다.","Claude's response was too long. Select less code and try again."],
-      CLI_INVALID_OUTPUT:["Claude의 답을 확인하지 못했다. 다시 분석한다.","Couldn't verify Claude's answer. Try the analysis again."],
-      CLI_INPUT_INVALID:["고른 코드가 비었거나 너무 많다. 연결한 코드와 분석할 곳을 확인한다.","The selection is empty or too large. Check the code connection and your selection."],
-      CLI_UNAVAILABLE:['Claude Code를 실행하지 못했습니다. 설치와 실행 권한을 확인하세요.','Could not start Claude Code. Check its installation and permissions.'],
-      CLI_FAILED:['Claude Code 실행에 실패했습니다. 로그인·연결·구독 한도를 확인한 뒤 다시 시도하세요.','Claude Code failed. Check sign-in, connection, and subscription limits, then retry.'],
+      CLI_TIMEOUT:["Claude Code가 시간 안에 답하지 않았다. 인터넷 연결과 사용 한도 확인 필요.","Claude Code didn't respond in time. Check your connection and usage limit, then retry."],
+      CLI_OUTPUT_LIMIT:["Claude의 답이 너무 길다. 더 적은 코드를 고르면 다시 분석할 수 있다.","Claude's response was too long. Select less code and try again."],
+      CLI_INVALID_OUTPUT:["Claude의 답을 확인하지 못했다. 분석 재시도 필요.","Couldn't verify Claude's answer. Try the analysis again."],
+      CLI_INPUT_INVALID:["고른 코드가 비었거나 너무 많다. 분석할 코드 다시 선택 필요.","The selection is empty or too large. Check the code connection and your selection."],
+      CLI_UNAVAILABLE:['Claude Code를 열지 못했다. 설치와 실행 권한 확인 필요.','Could not start Claude Code. Check its installation and permissions.'],
+      CLI_FAILED:['Claude Code가 분석을 시작하지 못했다. 로그인, 인터넷 연결, 사용 한도 확인 필요.','Claude Code failed. Check sign-in, connection, and subscription limits, then retry.'],
       interrupted:["분석이 멈췄다. 다시 시작하면 지금 코드로 남은 분석을 이어간다.","Analysis stopped. Restart to finish analyzing the current code."],
-      pins_changed:["코드나 설정이 바뀌었다. 새로고침한 뒤 다시 분석한다.","The code or settings changed. Refresh, then start a new analysis."],
-      source_unavailable:["분석할 코드를 읽지 못했다. 연결 설정을 확인한 뒤 다시 분석한다.","Couldn't read the selected code. Check its connection, then retry."],
-      source_too_large:['추가 분석 자료를 한 번의 입력 한도에 맞추지 못했습니다. 저장된 결과는 유지됩니다.','Additional analysis context could not fit one bounded input. Saved results are retained.'],
-      already_running:['이 코드의 분석이 이미 준비되거나 실행 중입니다. 상태를 다시 확인하세요.','Analysis is already prepared or running for this code. Check its status again.'],
-      invalid_output:["AI 답변을 코드와 맞춰 보지 못했다. 다시 분석한다.","Couldn't verify the AI answer against the code. Try the analysis again."],
-      invalid_result:["AI 답변을 확인하지 못했다. 다시 분석한다.","Couldn't verify the AI answer. Try the analysis again."],
-      analysis_failed:["분석을 마치지 못했다. 다시 분석한다.","Couldn't finish analysis. Try again."],
-      analysis_blocked:['먼저 확인할 분석이 있습니다. 기존 AI 요청의 안내에서 수집 상태·코드 설정·AI 제안을 확인하세요.','Some analysis needs attention. Check collection, code settings, and AI proposals in the existing request instructions.'],
+      pins_changed:["코드나 설정이 바뀌었다. 새로고침하면 지금 코드로 분석할 수 있다.","The code or settings changed. Refresh, then start a new analysis."],
+      source_unavailable:["분석할 코드를 읽지 못했다. 연결 설정에서 코드 위치 확인 필요.","Couldn't read the selected code. Check its connection, then retry."],
+      source_too_large:['추가로 읽을 코드가 한 번에 보낼 수 있는 양보다 많다. 저장한 결과는 남아 있다.','Additional analysis context could not fit one bounded input. Saved results are retained.'],
+      already_running:['이 코드의 분석을 준비하고 있거나 이미 시작했다. 분석 상태를 다시 확인할 수 있다.','Analysis is already prepared or running for this code. Check its status again.'],
+      invalid_output:["AI 답변을 코드와 맞춰 보지 못했다. 분석 재시도 필요.","Couldn't verify the AI answer against the code. Try the analysis again."],
+      invalid_result:["AI 답변을 확인하지 못했다. 분석 재시도 필요.","Couldn't verify the AI answer. Try the analysis again."],
+      analysis_failed:["분석을 마치지 못했다. 다시 시작하면 남은 분석을 이어간다.","Couldn't finish analysis. Try again."],
+      analysis_blocked:['아직 시작할 수 없는 분석이 있다. AI에 보낼 글 아래에 막힌 이유가 나온다.','Some analysis needs attention. Check collection, code settings, and AI proposals in the existing request instructions.'],
       timeout:["시간이 지나 분석이 멈췄다. 다시 시작하면 남은 분석을 이어간다.","Analysis ran out of time. Restart to finish the remaining work."],
       task_limit:["한 번에 분석할 수 있는 양을 다 썼다. 다시 시작하면 남은 분석을 이어간다.","This run reached its limit. Restart to finish the remaining work."],
-      result_read_failed:['저장한 결과를 읽지 못했다. 계정·상태 다시 확인을 누르세요.','Could not read saved results. Click Check account and status.'],
-      worker_start_failed:["분석을 시작하지 못했다. 다시 분석한다.","Couldn't start analysis. Try again."]
+      result_read_failed:['저장한 결과를 읽지 못했다. 「계정·상태 다시 확인」에서 다시 읽을 수 있다.','Could not read saved results. Click Check account and status.'],
+      worker_start_failed:["분석을 시작하지 못했다. 분석 재시도 필요.","Couldn't start analysis. Try again."]
     };
-    return messages[code] ? text(...messages[code]) : text("분석을 시작하지 못했다. 다시 확인하거나 글을 복사해 AI 채팅에 붙여 넣는다.","Couldn't start analysis. Check again or copy the message into your AI chat.");
+    return messages[code] ? text(...messages[code]) : text("분석을 시작하지 못했다. 글을 복사하면 AI 채팅에서 분석을 맡길 수 있다.","Couldn't start analysis. Check again or copy the message into your AI chat.");
   }
   const stateLabel = () => run?.cancel_requested && active() ? text('취소 중…','Cancelling…') : ({
     preparing:text('준비 중…','Preparing…'), running:text('분석 중…','Running…'), saving:text('저장 중…','Saving…'),
@@ -224,7 +224,7 @@ const AnalysisRun = (() => {
   }
   function savedScopeHtml() {
     const group=savedOverviews()[0];
-    if(!group)return text('저장된 설명을 읽지 못했습니다.','Saved explanation unavailable.');
+    if(!group)return text('저장한 설명을 읽지 못했다.','Saved explanation unavailable.');
     if(!group.files)return text('불러오는 중…','Loading…');
     return `<code>${esc(group.commit.slice(0,8))}</code>${overviewTree(group)}`;
   }
@@ -360,7 +360,7 @@ const AnalysisRun = (() => {
       return `<details class="sect" data-saved-command><summary><strong class="mono">${esc(entry.command)}</strong>${entry.description && entry.description_evidence?' · '+esc(entry.description):''}</summary>${citations}${target}</details>`;
     }).join('');
     const remaining=edges.filter(edge=>!grouped.has(edge.id));
-    const title=features?text('그 밖의 요청','Other requests'):(remaining.length && remaining.every(edge=>edge.kind==='server_registration')?text('서버 경로','Server routes'):text('코드에서 확인한 요청 연결','Request connections in source'));
+    const title=features?text('그 밖의 요청','Other requests'):(remaining.length && remaining.every(edge=>edge.kind==='server_registration')?text('서버 주소','Server URLs'):text('코드에서 확인한 요청 연결','Request connections in source'));
     const remainingFlow=remaining.length?`<figure class="overview-tree"><figcaption>${title}</figcaption><ul>${remaining.map(edgeHtml).join('')}</ul></figure>`:'';
     const flow=features && remaining.length?`<details><summary>${title} · ${remaining.length}</summary><ul>${remaining.map(edgeHtml).join('')}</ul></details>`:remainingFlow;
     const sources=`<figure class="overview-tree"><figcaption>${text('파일별 기능 구조도','Feature diagram by source file')}</figcaption><ul>${files}</ul></figure>`;
@@ -372,10 +372,10 @@ const AnalysisRun = (() => {
       const key=overviewKey(group);
       const open=openedOverview===key || (openedOverview===null && group.format==='overview-v1');
       const coverage=group.scope_coverage;
-      const scopeChip=coverage?.total ? `<span class="chip warn">${text('경로','Paths')} ${coverage.selected.length}/${coverage.total} · ${text('표본','sample')}</span>` : '';
+      const scopeChip=coverage?.total ? `<span class="chip warn">${text('서버 주소','Server URLs')} ${coverage.selected.length}/${coverage.total} · ${text('표본','sample')}</span>` : '';
       const resources=open?remainingScopes(group):[];
-      const local=resources.length?`<div class="ctl"><label>${text('개요에 포함되지 않은 경로','Paths outside this overview')} <select id="overviewLocalScope${index}">${resources.map(resource=>`<option>${esc(resource)}</option>`).join('')}</select></label><button class="btn quiet" id="overviewOpenScope${index}">${text('지도에서 열기','Open in map')}</button></div>`:'';
-      return `<section class="sect overview-head"><button class="btn plain" type="button" id="savedOverview${index}" aria-expanded="${open}">${group.resource?text('경로 설명','Path explanation'):text('첫 개요','Initial overview')} · ${esc(group.repository ? connectionDisplayName(group.repository) : S.project)}</button>
+      const local=resources.length?`<div class="ctl"><label>${text('개요에 없는 서버 주소','Server URLs outside this overview')} <select id="overviewLocalScope${index}">${resources.map(resource=>`<option>${esc(resource)}</option>`).join('')}</select></label><button class="btn quiet" id="overviewOpenScope${index}">${text('지도에서 열기','Open in map')}</button></div>`:'';
+      return `<section class="sect overview-head"><button class="btn plain" type="button" id="savedOverview${index}" aria-expanded="${open}">${group.resource?text('서버 주소 설명','Server URL explanation'):text('첫 개요','Initial overview')} · ${esc(group.repository ? connectionDisplayName(group.repository) : S.project)}</button>
         <span class="chips"><code>${esc(group.commit.slice(0,8))}</code><span class="chip">${text('표본 파일','Sampled files')} ${group.files.length}</span><span class="chip">${text('항목','Items')} ${group.items.length}</span>${scopeChip}</span>
         ${open ? `<div>${overviewTree(group)}${local}</div>` : ''}</section>`;
     }).join('');
@@ -392,7 +392,7 @@ const AnalysisRun = (() => {
   }
 
   // ---- Full code analysis: units are saved as they finish and read as a map and cards, not as a wall of text ----
-  const KINDS={route:['경로','Paths'],screen:['화면','Screens'],program:['프로그램','Programs'],package:['패키지','Packages'],cli:['CLI','CLI'],folder:['폴더','Folders'],map:['지도','Map'],system:['서비스 구성','Service structure'],groups:['화면 묶음','Screen groups']};
+  const KINDS={route:['서버 주소','Server URLs'],screen:['화면','Screens'],program:['프로그램','Programs'],package:['패키지','Packages'],cli:['CLI','CLI'],folder:['폴더','Folders'],map:['지도','Map'],system:['서비스 구성','Service structure'],groups:['화면 묶음','Screen groups']};
   const MAP_KINDS=['map','system','groups'];
   const UNIT_STATES={saved:['저장됨','Saved'],explained:['자세한 설명 있음','Detailed explanation'],named:['이름·설명 있음','Named and described'],working:['분석 중','Analyzing'],local:['로컬 확인','Checked locally'],pending:['설명 없음','No explanation'],failed:['검증 실패','Failed'],stale:['오래됨','Outdated']};
   // A unit's saved state is its detailed explanation; the map rows (groups, service structure) are simply saved.
@@ -453,7 +453,7 @@ const AnalysisRun = (() => {
     const kinds=Object.entries(group.kinds || {}).map(([k,n])=>`<span class="chip">${text(...(LOCAL_KINDS[k] || [k,k]))} ${n}</span>`).join('');
     const files=(group.files || []).map(f=>`<li><code>${esc(f)}</code></li>`).join('');
     const more=group.file_count>(group.files || []).length?`<p class="s">+${group.file_count-group.files.length}</p>`:'';
-    return `<p class="chips">${kinds}<span class="chip">${text('파일','Files')} ${group.file_count}</span></p><p class="s">${text('로컬에서 읽고 세었습니다. AI는 읽지 않았습니다. 포함하려면 위에서 「모든 텍스트 파일」을 고르세요.','Read and counted locally. The AI did not read it. To include it, choose "every text file" above.')}</p><details><summary>${text('파일 목록','Files')}</summary><ul class="unit-files">${files}</ul>${more}</details>`;
+    return `<p class="chips">${kinds}<span class="chip">${text('파일','Files')} ${group.file_count}</span></p><p class="s">${text('앱이 읽은 파일이다. 「모든 텍스트 파일」을 고르면 AI 분석에 들어간다.','Read and counted locally. The AI did not read it. To include it, choose "every text file" above.')}</p><details><summary>${text('파일 목록','Files')}</summary><ul class="unit-files">${files}</ul>${more}</details>`;
   }
   function linkChips(index) {
     const e=unitEdges.get(index);if(!e || !(e.out.length+e.in.length))return '';
@@ -467,7 +467,7 @@ const AnalysisRun = (() => {
     const group=unitDetails.get(unitKey(row));
     if(group===undefined)return `<p class="s">${text('불러오는 중…','Loading…')}</p>`;
     if(group?.local)return localDetail(group);
-    if(!group || !group.files)return `<p class="s">${text('저장된 설명을 읽지 못했습니다.','Saved explanation unavailable.')}</p>`;
+    if(!group || !group.files)return `<p class="s">${text('저장한 설명을 읽지 못했다.','Saved explanation unavailable.')}</p>`;
     return `${group.stale?`<p class="s">${text('이전 코드 기준','Based on older code')}</p>`:''}<code>${esc(group.commit.slice(0,8))}</code>${overviewTree(group)}`;
   }
   const canExplain=()=>usable() && !providerBusy && !busy && !active();
@@ -514,7 +514,7 @@ const AnalysisRun = (() => {
     const n={...t,explained,saved:t.saved-explained};
     const present=STATE_ORDER.filter(k=>n[k]);
     const bar=`<div class="unit-bar" role="img" aria-label="${t.saved || 0}/${aiTotal}">${present.map(k=>`<i data-state="${k==='explained'?'saved':k}" style="width:${(n[k]*100/total).toFixed(2)}%"></i>`).join('')}</div>`;
-    const filters=`<div class="unit-legend" role="group" aria-label="${text('상태 필터','State filter')}"><button type="button" data-unit-filter="all" aria-pressed="${unitFilter==='all'}">${text('전체','All')} ${total}</button>${present.map(k=>`<button type="button" data-unit-filter="${k}" data-state="${k==='explained'?'saved':k}" aria-pressed="${unitFilter===k}"><i aria-hidden="true"></i>${text(...UNIT_STATES[k])} ${n[k]}</button>`).join('')}</div>${t.retired?`<p class="s unit-retired">${text('현재 구조에 없는 이전 단위 '+t.retired+'개의 설명은 기록에만 남아 있고 위 개수에 넣지 않습니다.',t.retired+' explanations of earlier units that the current structure no longer has stay in history only and are not counted above.')}</p>`:''}`;
+    const filters=`<div class="unit-legend" role="group" aria-label="${text('상태 필터','State filter')}"><button type="button" data-unit-filter="all" aria-pressed="${unitFilter==='all'}">${text('전체','All')} ${total}</button>${present.map(k=>`<button type="button" data-unit-filter="${k}" data-state="${k==='explained'?'saved':k}" aria-pressed="${unitFilter===k}"><i aria-hidden="true"></i>${text(...UNIT_STATES[k])} ${n[k]}</button>`).join('')}</div>${t.retired?`<p class="s unit-retired">${text('현재 구조에 없는 이전 단위 '+t.retired+'개의 설명은 이전 기록에서만 볼 수 있다.',t.retired+' explanations of earlier units that the current structure no longer has stay in history only and are not counted above.')}</p>`:''}`;
     const lanes=Object.keys(KINDS).filter(k=>unitRows.some(r=>r.kind===k)).map(kind=>{
       const set=unitRows.map((row,i)=>[row,i]).filter(([row])=>row.kind===kind);
       const done=set.filter(([row])=>['saved','named'].includes(row.state)).length,detailed=MAP_KINDS.includes(kind)?0:set.filter(([row])=>row.state==='saved').length;
@@ -592,10 +592,10 @@ const AnalysisRun = (() => {
     const completed=new Set((batchRun && Array.isArray(run.completed_tasks)?run.completed_tasks:[]).map(t=>JSON.stringify([t.repository,t.target])));
     const left=Number.isInteger(run?.tasks)?run.tasks:batchRun?(run.tasks || []).filter(t=>!completed.has(JSON.stringify([t.repository,t.target]))).length:run?.tasks?.length || 0;
     const total=done+left;
-    const progress=batchRun?text('경로 묶음 '+done+'개 저장 · '+left+'개 남음','Path groups saved: '+done+' · Remaining: '+left):done+'/'+total+' '+text('작업 저장됨','tasks saved');
+    const progress=batchRun?text('서버 주소 묶음 '+done+'개 저장 · '+left+'개 남음','Server URL groups saved: '+done+' · Remaining: '+left):done+'/'+total+' '+text('작업 저장됨','tasks saved');
     const task = run?.current_task;
     const stats=run?.input_stats;
-    const names={resources:text('경로 묶음 설명','Path group explanations'),overview:text('첫 개요','Initial overview'),full:text('분석하기','Analyze'),steps:text('동작 과정','Action steps'),jobs:text('프로그램이 하는 일','Program jobs'),briefing:text('변경 설명','Change explanation')};
+    const names={resources:text('서버 주소 묶음 설명','Server URL group explanations'),overview:text('첫 개요','Initial overview'),full:text('분석하기','Analyze'),steps:text('동작 과정','Action steps'),jobs:text('프로그램이 하는 일','Program jobs'),briefing:text('변경 설명','Change explanation')};
     const taskName = typeof task === 'string' ? task : batchRun && task?.target ? [task.repository,task.target].filter(Boolean).join(' · ') : task ? [task.repository, text(task.task==='overview'?'첫 개요':PLAN_NAMES[task.task] || task.task, ({overview:'Initial overview',analysis:'Detailed map',system:'Architecture',groups:'Screen groups',jobs:'Program jobs',steps:'Action steps',briefing:'Change explanation'})[task.task] || task.task)].filter(Boolean).join(' · ') : '';
     const retryWarning=sameScope() && run.state==='failed' && errorCode(run.error)==='interrupted' && run.input_stats?.calls>0;
     const issue=error || (!retryWarning && run?.error);
@@ -609,13 +609,13 @@ const AnalysisRun = (() => {
     const targets=choice.targets.map(t=>[t.repository,t.target].filter(Boolean).map(esc).join(' · '));
     const scoped=S.analysisChoice?.task==='scope_overview';
     const fullReady=choice.task==='full' || choice.task==='overview' && !scoped && !!liveBoard()?.repositories;  // the board owns the one main action; this panel keeps only account problems, errors and redelivery warnings
-    const startLabel=batch?text('경로 묶음 설명 생성','Generate path group explanations'):scoped?text('이 경로 설명 생성','Generate path explanation'):choice.task==='overview' ? text('첫 개요 만들기','Create initial overview')
+    const startLabel=batch?text('서버 주소 묶음 설명 생성','Explain groups of server URLs'):scoped?text('이 서버 주소 설명 생성','Explain this server URL'):choice.task==='overview' ? text('첫 개요 만들기','Create initial overview')
       : text(names[choice.task]+' 분석 시작','Analyze '+names[choice.task]);
     if(fullReady){
       // The board shows an account problem in place of its start; without a start it stays here.
       const boardStart=(liveBoard()?.calls?.total ?? 0)>0 && (liveBoard()?.totals?.units ?? 0)>0;
       const parts=[boardStart?'':providerBusy?`<p role="status">${text('계정 확인 중…','Checking the account…')}</p>`:provider && !usable()?`<p role="alert">${esc(message(provider))}</p><button class="btn quiet" id="checkAppAnalysis">${text('계정 확인','Check account')}</button>`:'',
-        retryWarning?`<p role="alert" id="retryDeliveryWarning">${text('분석이 중단됐습니다. 마지막 요청이 Claude에 전달됐을 수 있어, 다시 시도하면 재전송될 수 있습니다.','Analysis was interrupted. Claude may already have received the last request; retrying may send it again.')}</p>`:'',
+        retryWarning?`<p role="alert" id="retryDeliveryWarning">${text('분석이 멈췄다. 다시 시작하면 같은 코드가 Claude로 한 번 더 갈 수 있다.','Analysis was interrupted. Claude may already have received the last request; retrying may send it again.')}</p>`:'',
         issue?`<p role="alert">${esc(message(issue))}</p>`:'',
         retryWarning && sameScope() && ['failed','cancelled'].includes(run?.state)?`<button class="btn" id="retryAppAnalysis" aria-describedby="retryDeliveryWarning" ${canStart?'':'disabled'}>${text('현재 코드로 다시 시도','Retry with current code')}</button>`:''].join('');
       return parts?`<section class="sect" aria-label="${text('자동 분석 (베타)','Automatic analysis (beta)')}">${parts}</section>`:'';
@@ -627,10 +627,10 @@ const AnalysisRun = (() => {
       ${providerBusy ? `<p role="status">${text('Claude Code 계정 확인 중…','Checking the Claude Code account…')}</p>` : provider && !usable() ? `<p role="alert">${esc(message(provider))}</p>` : ''}
       ${run ? `${!sameScope() || (runAccount && runAccount!==identity) ? `<p class="chips"><span class="chip">${text('마지막 실행','Last run')}: ${esc(names[run.intent?.task || 'all'])}</span><span class="chip">${esc(runScope)}</span>${(run.intent?.targets || []).map(t=>`<span class="chip">${esc(t.repository)} · ${esc(t.target)}</span>`).join('')}${runAccount && runAccount!==identity ? `<span class="chip warn">${esc(runAccount)}</span>` : ''}${!sameScope() ? `<span class="chip warn">${text('현재 선택과 다름','Differs from selection')}</span>` : ''}</p>` : ''}<div role="status" aria-live="polite"><strong>${esc(stateLabel())}</strong> · ${esc(progress)}${run.announced && run.intent?.task!=='full'?' · '+text('AI 호출','AI calls')+' '+(stats?.calls || 0)+'/'+run.announced.total:''}${batchRun && cached?' · '+text('재사용 '+cached+'개',cached+' reused'):''}${taskName ? '<div>'+esc(taskName)+'</div>' : ''}</div><progress max="${Math.max(total, 1)}" value="${done}" aria-label="${text('분석 진행률','Analysis progress')}"></progress>${run.blocked?.length ? `<p class="s">${text('먼저 확인할 분석','Analysis requiring attention')}: ${run.blocked.length}</p>` : ''}` : ''}
       ${stats ? `<details><summary>${text('AI 사용량','AI usage')}</summary><p class="s">${text('입력 호출','Input calls')}: ${stats.calls} · ${text('전송한 입력 바이트','Encoded input bytes')}: ${stats.bytes}</p></details>` : ''}
-      ${retryWarning?`<p role="alert" id="retryDeliveryWarning">${text('분석이 중단됐습니다. 마지막 요청이 Claude에 전달됐을 수 있습니다. 다시 시도하면 같은 요청이 재전송될 수 있습니다.','Analysis was interrupted. Claude may already have received the last request. Retrying may send it again.')}</p>`:''}
+      ${retryWarning?`<p role="alert" id="retryDeliveryWarning">${text('분석이 멈췄다. 다시 시작하면 같은 코드가 Claude로 한 번 더 갈 수 있다.','Analysis was interrupted. Claude may already have received the last request. Retrying may send it again.')}</p>`:''}
       ${issue ? `<p role="alert">${esc(message(issue))}</p>` : ''}
       ${!active() && !fullReady && choice.task==='overview' ? `<p class="s" id="overviewLimits">${scoped?text("고른 위치에서 파일 최대 4개 · AI 1회","Selected location: up to 4 files \u00b7 1 AI call"):text("코드마다 파일 최대 4개 · AI 1회","Per repository: up to 4 files \u00b7 1 AI call")}</p>` : ''}
-      ${batch && !active()?`<p class="s" id="resourceLimits">${text('경로 묶음 '+choice.max_calls+'개 · AI 최대 '+choice.max_calls+'회','Path groups: '+choice.max_calls+' · Up to '+choice.max_calls+' AI calls')}</p>`:''}
+      ${batch && !active()?`<p class="s" id="resourceLimits">${text('서버 주소 묶음 '+choice.max_calls+'개 · AI 최대 '+choice.max_calls+'회','Server URL groups: '+choice.max_calls+' · Up to '+choice.max_calls+' AI calls')}</p>`:''}
       <div class="ctl">${active() ? `<button class="btn" id="cancelAppAnalysis" ${busy || run.cancel_requested ? 'disabled' : ''}>${text('분석 취소','Cancel analysis')}</button>` : sameScope() && ['failed','cancelled'].includes(run?.state) ? `<button class="btn primary" id="retryAppAnalysis" ${retryWarning?'aria-describedby="retryDeliveryWarning"':''} ${canStart ? '' : 'disabled'}>${text('현재 코드로 다시 시도','Retry with current code')}</button>` : `${fullReady?'':`<button class="btn primary" id="startAppAnalysis" ${batch?'aria-describedby="resourceLimits"':choice.task==='overview' ? 'aria-describedby="overviewLimits"' : ''} ${canStart ? '' : 'disabled'}>${esc(startLabel)}</button>`}`}
       ${!batchRun && sameScope() && done > 0 && !['overview','full'].includes(run.intent?.task) ? `<button class="btn quiet" id="viewAppAnalysis">${text('저장된 결과 보기','View saved results')}</button>` : ''}
       ${usable()?'':`<button class="btn quiet" id="checkAppAnalysis" ${busy || providerBusy ? 'disabled' : ''}>${text('계정 확인','Check account')}</button>`}</div>
