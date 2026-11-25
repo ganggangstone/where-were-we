@@ -530,14 +530,14 @@ def _compose(name, conf, state, raws, repository='', branch='dev'):
         result['available']=any(raws[rid].get(role) for rid in ids)
         result['commit']=hashlib.sha256(json.dumps({rid:(raws[rid].get(role) or {}).get('commit') for rid in sorted(allids)},sort_keys=True).encode()).hexdigest()[:12]
         result['ref']=role;bundle[role]=result
+    active=bundle['dev'] if bundle['dev']['available'] else bundle['main'];active_paths={s['path'] for s in active['screens']}
     for repo in conf['repositories']:
         rid=repo['id'];raw=raws[rid];file=lambda x:qfile(rid,x);screen=lambda x:qscreen(rid,x)
         # The repository prefix only tells repositories apart, so the one shown code and a one-repository project keep plain names.
         tag=(lambda text,name=repo['name']:'['+name+'] '+text) if len(conf['repositories'])>1 and ids!={rid} else (lambda text:text)
         related_issues={}
-        active_map=bundle['dev'] if bundle['dev']['available'] else bundle['main']
         for pr in [*(raw.get('status') or {}).get('open_prs',[]),*(raw.get('status') or {}).get('merged_prs',[])]:
-            affected={p for f in pr.get('files',[]) for p in active_map['file_screens'].get(file(f),[])}
+            affected={p for f in pr.get('files',[]) for p in active['file_screens'].get(file(f),[])}
             for number in {i['number'] for i in pr.get('issues',[])} | set(pr.get('refs',[])):
                 if number!=pr['number']:related_issues.setdefault(number,set()).update(affected)
         for k in STATUS_LISTS:
@@ -546,10 +546,10 @@ def _compose(name, conf, state, raws, repository='', branch='dev'):
                 if 'title' in x:x['title']=tag(x['title'])
                 if 'files' in x:x['files']=[file(f) for f in x['files']]
                 # Recompute cross-repository file impact from the composed map.
-                x['screens']=sorted(set([screen(p) for p in x.get('screens',[])]+[p for f in [*x.get('files',[]),*[file(f) for f in x.get('uncommitted',[])]] for p in (bundle['dev'] if bundle['dev']['available'] else bundle['main'])['file_screens'].get(f,[])]))
+                x['screens']=sorted(set([screen(p) for p in x.get('screens',[])]+[p for f in [*x.get('files',[]),*[file(f) for f in x.get('uncommitted',[])]] for p in active['file_screens'].get(f,[])]))
                 if k=='issues' and x.get('via')=='pr':
                     x['screens']=sorted(set(x['screens']) | related_issues.get(x['number'],set()))
-                if rid in ids or any(p in {s['path'] for s in (bundle['dev'] if bundle['dev']['available'] else bundle['main'])['screens']} for p in x['screens']):bundle['status'][k].append(x)
+                if rid in ids or any(p in active_paths for p in x['screens']):bundle['status'][k].append(x)
         g=raw.get('groups') or {}
         bundle['groups']['names'].update({screen(k):v for k,v in g.get('names',{}).items()})
         bundle['groups']['request_names'].update({file(k):v for k,v in g.get('request_names',{}).items()})
@@ -580,11 +580,10 @@ def _compose(name, conf, state, raws, repository='', branch='dev'):
             for c in x.get('copies',[]):
                 for f in c.get('files',[]):f['path']=file(f['path'])
             bundle['system']['nodes'].append(x)
-        if True:
-            bundle['system']['others'] += sy.get('others',[])
-            bundle['system']['links'] += [{**l,'from':prefix+l['from'],'to':prefix+l['to']} for l in sy.get('links',[])]
-            bundle['system']['externals'] += [{**e,'id':prefix+e['id']} for e in sy.get('externals',[])]
-            bundle['system']['unknown'] += sy.get('unknown',[])
+        bundle['system']['others'] += sy.get('others',[])
+        bundle['system']['links'] += [{**l,'from':prefix+l['from'],'to':prefix+l['to']} for l in sy.get('links',[])]
+        bundle['system']['externals'] += [{**e,'id':prefix+e['id']} for e in sy.get('externals',[])]
+        bundle['system']['unknown'] += sy.get('unknown',[])
         for nid,value in (raw.get('jobs') or {}).get('nodes',{}).items():
             x=copy.deepcopy(value);evidence(x)
             for j in x.get('jobs',[]):
@@ -613,7 +612,7 @@ def _compose(name, conf, state, raws, repository='', branch='dev'):
         fits=[(len(c),n) for n in own for c in n.get('code',[]) if c==rid+'/.' or path.startswith(c+'/')]
         return max(fits,key=lambda x:x[0])[1] if fits else own[0] if own else None
     proven={}
-    for c in (bundle['dev'] if bundle['dev']['available'] else bundle['main'])['cross_repository_connections']:
+    for c in active['cross_repository_connections']:
         if copy_folder(c['client']['file']):continue
         a,b=holder(c['client']['repository'],qfile(c['client']['repository'],c['client']['file'])),holder(c['server']['repository'],qfile(c['server']['repository'],c['server']['file']))
         if a and b:
@@ -623,7 +622,6 @@ def _compose(name, conf, state, raws, repository='', branch='dev'):
     # how the program connects; a line from a program holding screen requests to one holding server routes is backed by
     # those requests only, never by an import (a frontend entry importing a component does not call the server).
     ai_links=[]
-    active=bundle['dev'] if bundle['dev']['available'] else bundle['main']
     requested={}
     for f in active['api_functions']:
         for c in f.get('calls',[]):
@@ -632,7 +630,7 @@ def _compose(name, conf, state, raws, repository='', branch='dev'):
                 if a and b and a['id']!=b['id'] and a['repository']==b['repository']:
                     row=requested.setdefault((a['id'],b['id']),[])
                     if len(row)<3 and not copy_folder(f['file']):row.append({'file':f['file'],'line':c.get('line') or f['line'],'quote':c['method']+' '+c['path'],'origin':'local_link','repository':f['repository']})
-    servers={holder(r['repository'],r['file'])['id'] for r in active['backend_routes'] if holder(r['repository'],r['file'])}
+    servers={h['id'] for r in active['backend_routes'] if (h:=holder(r['repository'],r['file']))}
     callers={a for a,_ in requested}
     for l in bundle['system']['links']:
         if l['from'] in callers and l['to'] in servers:
