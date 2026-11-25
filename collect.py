@@ -170,6 +170,8 @@ _source_files = set(git("ls-tree", "-r", "--name-only", BASE).splitlines())
 def source_at(file):
     return git("show", BASE + ":" + file) if file in _source_files else ""
 
+MAP_PATH = os.path.join(HOME, "dev.json" if REFS.get("dev") else "main.json")
+dev_map = json.load(open(MAP_PATH)) if os.path.exists(MAP_PATH) else None
 # --- 전체 구조(system.json)의 근거 줄이 지금 코드에 그대로 있는지 대조 ---
 sys_path = os.path.join(HOME, "system.json")
 if os.path.exists(sys_path):
@@ -189,7 +191,7 @@ if os.path.exists(sys_path):
     if jobs: json.dump(jobs, open(jpath, "w"), ensure_ascii=False, indent=1)
     # 서버 말고 DB를 직접 쓰는 프로그램(code 경로가 적힌 상자)이 닿는 테이블. 그 파일들과, 거기서 가져다 쓰는 서버 services 모듈 한 단계에서 모델 이름을 찾는다.
     import re
-    models = json.load(open(os.path.join(HOME, "dev.json" if REFS.get("dev") else "main.json"))).get("models", {})
+    models = (dev_map if dev_map is not None else json.load(open(MAP_PATH))).get("models", {})
     for node in system["nodes"]:
         if not node.get("code"): continue
         files = [f for c in node["code"] for f in git("ls-tree", "-r", "--name-only", BASE, c).splitlines() if f.endswith(".py")]
@@ -223,7 +225,7 @@ if os.path.exists(sys_path):
     print(f"AI가 적은 것(전체 구조·하는 일)의 근거 {n}줄 대조, 달라진 것 {miss}")
 
 # --- 이슈: 열린 이슈를 화면에 잇는다. PR 이 그 이슈 번호를 적었으면 확정, 이슈 글에 화면 주소·서버 주소·파일 이름이 나오면 후보 ---
-dev_map = json.load(open(os.path.join(HOME, "dev.json" if REFS.get("dev") else "main.json"))) if os.path.exists(os.path.join(HOME, "dev.json" if REFS.get("dev") else "main.json")) else {"screens": [], "api_functions": [], "backend_routes": []}
+if dev_map is None: dev_map = {"screens": [], "api_functions": [], "backend_routes": []}
 fn_ix = {(f["file"], f["name"]): f for f in dev_map["api_functions"]}
 route_screens = defaultdict(set)
 for sc in dev_map["screens"]:
