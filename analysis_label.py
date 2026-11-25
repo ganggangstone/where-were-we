@@ -19,6 +19,7 @@ import re
 import mapcore
 
 import source_signals
+import lang_rules
 
 BOUND = 64 * 1024  # bytes of summary JSON in one labeling call
 EXTERNALS = 40
@@ -46,6 +47,22 @@ _EXTERNAL = re.compile(r'\b(redis|postgres(?:ql)?|mysql|mongodb|amqps?|kafka|nat
                        r'|\b(?:subprocess\.(?:run|Popen|call|check_call|check_output)|execFile|spawn|shutil\.which)\(\s*\[?\s*[\'"]([\w.-]+)[\'"]'
                        r'|[\'"]https?://([a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,})[/\'"?:]', re.I)
 _PLAIN_HOSTS = re.compile(r'(^|\.)(localhost|example\.\w+|w3\.org|schema\.org|github\.com|githubusercontent\.com|mozilla\.org|python\.org|npmjs\.\w+)$')
+
+
+PROGRAM_SUFFIXES = (lang_rules.BUILTIN - {'.html', '.htm'}) | set(lang_rules.LANGUAGE_OF) | {'.sh'}
+
+
+def program_file(file):
+    """A program code file: no document, test, fixture, sample, setting, style sheet or page markup (design mock-ups are those)."""
+    return source_signals.kind(file) == 'code' and posixpath.splitext(file)[1].lower() in PROGRAM_SUFFIXES
+
+
+def connected_code(name, codes):
+    """Whether an outside-service name is one of the project's other connected codes (its words all name that code)."""
+    # ponytail: word match on names; an id-based link would need the model to cite the code row.
+    words = lambda text: set(re.findall(r'[a-z0-9]+', text.lower()))
+    mine = words(name)
+    return any(mine and (mine <= words(c) and len(mine) > 1 or ''.join(sorted(mine)) == ''.join(sorted(words(c)))) for c in codes)
 
 
 def hints(texts, limit=EXTERNALS):
@@ -318,10 +335,11 @@ def _local_link(flows, a, b):
     return [(file, min(numbers)) for file, numbers in ordered[:3]]
 
 
-def shapes(catalog, labels, line=lambda file, number: None, flows=()):
+def shapes(catalog, labels, line=lambda file, number: None, flows=(), codes=()):
     """The saved shapes the map screen reads: groups {groups, names, request_names} and system {nodes, links, externals, others}.
     line(file, number) -> the literal text of that line of the pinned commit, or None; evidence without it is left out.
-    flows: edges(index). A link's evidence is the local lines that make it (origin 'local_link'); without any, and for
+    codes: the names of the project's other connected codes; an outside service naming one is left out (it is a cross-code line),
+    and an outside service's evidence is program code only. flows: edges(index). A link's evidence is the local lines that make it (origin 'local_link'); without any, and for
     programs, it is the declarations the model cited (origin 'cited'), which only show related code."""
     def ev(rows, origin='cited'):
         out = []
@@ -352,13 +370,14 @@ def shapes(catalog, labels, line=lambda file, number: None, flows=()):
         screens = [screen_path[r] for r in g['units'] if r in screen_path]
         if screens:
             groups.append({'name': g['name'], 'description': g['description'], 'screens': screens})
-    externals = [{'id': f'x{n+1}', 'name': x['name'], 'what': x['what'], 'ev': ev(x['ev'], 'local_signal')} for n, x in enumerate(labels.get('externals') or [])]
+    rows = [x for x in labels.get('externals') or [] if not connected_code(x['name'], codes)]
+    externals = [{'id': f'x{n+1}', 'name': x['name'], 'what': x['what'], 'ev': ev([r for r in x['ev'] if program_file(r[0])], 'local_signal')} for n, x in enumerate(rows)]
     nodes = []
     for n, i in enumerate(kept):
         p = labels['programs'][i]
         code = sorted(home for home, j in folder_of.items() if j == i)[:8]
         nodes.append({'id': f'p{n+1}', 'name': p['name'], 'kind': p['kind'], 'what': p['what'], 'origin': 'repo', 'origin_text': '',
-                      'code': code, 'uses': [x['id'] for x, row in zip(externals, labels.get('externals') or []) if i in row['users'] and x['ev']],
+                      'code': code, 'uses': [x['id'] for x, row in zip(externals, rows) if i in row['users'] and x['ev']],
                       'unknown': [], 'col': 1 if p['kind'] == 'user' else 2, 'row': n + 1, 'ev': ev(p.get('ev'))})
     # A link is drawn only where local lines show it (an import or a matched request); the model's word alone is not enough.
     links = []

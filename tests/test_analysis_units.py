@@ -282,6 +282,8 @@ class LinkEvidence(unittest.TestCase):
     def test_outside_services_named_in_code_and_connected_codes_are_offered_locally(self):
         texts={'api/mail.py':"import boto3\nstore=boto3.client('s3')\nKEY=os.environ['STRIPE_API_KEY']\n# redis://only-a-comment\nsubprocess.run(['ffmpeg','-i',x])\nDOC='https://www.w3.org/x'\n"}
         hints=analysis_label.hints(texts)
+        self.assertEqual([analysis_label.program_file(f) for f in ('api/mail.py','run.sh','site/x.css','page.html','.env.dev.example','tests/a.py','docs/a.md')],
+                         [True,True,False,False,False,False,False])
         self.assertEqual(hints,[('STRIPE','api/mail.py',3),('ffmpeg','api/mail.py',5),('s3','api/mail.py',2)])  # comments and well-known hosts are not services
         catalog={'units':[{'id':'folder:api','kind':'folder','name':'api','files':['api/mail.py'],'file_count':1},
                           {'id':'folder:skills','kind':'folder','name':'skills','files':['skills/a.md'],'file_count':1,'reading':'local'}]}
@@ -313,6 +315,10 @@ class LinkEvidence(unittest.TestCase):
         self.assertEqual([(n['name'],n['code']) for n in system['nodes']],[('Web',['web']),('API',['.','api']),('Jobs',['jobs'])])  # 'Again' repeats web: dropped
         self.assertEqual(rows(system['nodes'][1]['ev']),[('api/s.py',2,'api/s.py line 2','cited')])  # duplicate evidence once
         self.assertEqual((system['externals'][0]['name'],system['nodes'][1]['uses']),('Mail',['x1']))
+        # A connected code is a cross-code line, not an outside service; style sheets, samples and docs are no service evidence.
+        labels['externals']+=[{'name':'Shop App','what':'x','ev':[['api/s.py',6]],'users':[1]},{'name':'Pay','what':'x','ev':[['mock/x.css',2],['.env.example',3]],'users':[1]}]
+        _,system=analysis_label.shapes(catalog,labels,line,flows,['shop-app-server'])
+        self.assertEqual(([x['name'] for x in system['externals']],system['nodes'][1]['uses']),(['Mail'],['x1']))
         index={'imports':[{'file':'tests/test_web.py','line':1,'target':'api/s.py'},{'file':'web/a.ts','line':3,'target':'api/s.py'}],
                'service_flow':{'connections':[{'client':{'file':'web/b.ts','line':4},'server':{'file':'api/s.py','line':2}}]}}
         self.assertEqual(analysis_label.edges(index),[('web/a.ts',3,'api/s.py'),('web/b.ts',4,'api/s.py')])  # a test file shows no connection

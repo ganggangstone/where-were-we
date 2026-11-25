@@ -586,11 +586,11 @@ def _full_scope(value,defer=False):
     return out
 
 def _external_hints(repo,commit,defer=False):
-    """Outside services the code names (analysis_label.hints), read from the code files whose signal scan found such a line.
+    """Outside services the code names (analysis_label.hints), read from the program code files whose signal scan found such a line.
     A board that does not wait for the scan offers none."""
     try:signals=_signals(repo,commit,wait=not defer)
     except SignalsPending:return []
-    rows=sorted(f for f,r in signals.items() if r['classes'].get('external') and r['kind'] not in ('doc','support'))[:400]
+    rows=sorted(f for f,r in signals.items() if r['classes'].get('external') and analysis_label.program_file(f))[:400]
     entries=[e for e in _eligible(repo,commit,set(rows))]
     return analysis_label.hints({file:text for file,text,_ in source_signals.stream(repo,entries)})
 
@@ -669,7 +669,8 @@ def _publish_shapes(value,rid,commit,labels,catalog,repo,flows=()):
             try:texts[file]=_git(repo,'show',f'{commit}:{file}').decode('utf-8','ignore').splitlines()
             except Exception:texts[file]=[]
         return texts[file][number-1] if 0<number<=len(texts[file]) else None
-    groups,system=analysis_label.shapes(catalog,labels,line,flows)
+    codes=[r.get('name') or r['id'] for r in (store.config(value['project']) or {}).get('repositories',[]) if r['id']!=rid]
+    groups,system=analysis_label.shapes(catalog,labels,line,flows,codes)
     meta={'source':'ai','basis':'structure_summary','provider':'claude-cli','commit':commit,'configuration':value['pins'][rid]['configuration'],'branch':value['branch'],'language':value['lang'],'generated_at':store.now()}
     with store.locked(value['project']):
         _,raw,stored_rid,head=ai_extract.context(value['project'],rid,value['branch'])
