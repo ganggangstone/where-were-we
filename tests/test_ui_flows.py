@@ -517,6 +517,7 @@ class Guide(unittest.TestCase):
  const target=controlTargets().find(t=>t.kind==='screen');
  await applyAppCommand({action:'select',arguments:{project:'First',repository:'',branch:'dev',revision:await controlRevision(),target:target.id}});
  assert(!$('guide').open && S.sel && guideMarker()===null,'Select closes the guide without marking it skipped or done');
+ assert(S.view==='map' && S.sel===target.key,'Choosing a screen stays on the screen map with its requests');
  $('guideOpen').click();await applyAppCommand({action:'select',arguments:{project:'First',repository:'',branch:'dev',revision:'stale',target:target.id}}).catch(()=>{});
  assert($('guide').open,'A rejected select leaves the guide open');closeGuide();
 """)

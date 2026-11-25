@@ -25,7 +25,7 @@ function controlTargets() {
 // Agent selection and the search box open targets the same way.
 function openTarget(target,relations=true) {
   S.q='';$('q').value='';S.agentPrompt=null;S.step=-1;S.ev=-1;
-  if(target.kind==='screen'){if(relations)setFocus('screen|'+target.key);else selectScreen(target.key,false);}
+  if(target.kind==='screen')selectScreen(target.key,false); // 화면을 고르면 화면 지도에서 그 화면의 요청을 보여 준다. 연결은 패널에서 이어 본다.
   else if(target.kind==='request')setFocus('route|'+target.key);
   else if(target.kind==='data')setFocus('table|'+target.key);
   else if(target.kind==='program')selectProgram(target.key,false);
@@ -120,6 +120,8 @@ async function applyAppCommand(command) {
     case 'clear':S.sel=null;S.open=null;S.node=null;S.focus=null;S.feat=null;S.step=-1;S.ev=-1;S.controlTarget=null;render();break;
     case 'search':S.q=String(a.query || '');$('q').value=S.q;render();break;
     case 'step':{
+      // 화면만 골랐으면 그 화면에서 동작 과정이 있는 첫 요청을 연다.
+      if(!S.open && S.sel){const q=requests(M(),S.sel).find(x=>flowOf(x.route));if(q)S.open=q.key;}
       const r=(M()?.backend_routes || []).find(r=>r.file+'::'+r.function===S.open),flow=r && flowOf(r);
       if(!Number.isInteger(a.index) || !flow || a.index<0 || a.index>flow.steps.length)controlError('step_unavailable');
       S.step=a.index;S.ev=a.index;render();break;
