@@ -106,3 +106,19 @@ class RouteFiles(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class Decoding(unittest.TestCase):
+    def test_a_crlf_file_reads_the_same_whether_or_not_it_was_preloaded(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / 'r'; (repo / 'web/src').mkdir(parents=True)
+            (repo / 'web/src/App.tsx').write_bytes(b"export const a = () => api.get('/x')\r\nconst b = 1\rconst c = '\xff'\r\n")
+            git = lambda *a: subprocess.run(['git', '-C', str(repo), *a], check=True, capture_output=True)
+            git('init', '-q'); git('add', '.'); git('-c', 'user.name=t', '-c', 'user.email=t@example.invalid', 'commit', '-qm', 'x')
+            probe = ("import runpy,sys,json;sys.argv=['extract.py',sys.argv[1],'HEAD',sys.argv[2]];g=runpy.run_path(sys.argv[0],run_name='x');"
+                     "f='web/src/App.tsx';g['_cache'].clear();shown=g['show'](f);g['_cache'].clear();g['preload']([f]);print(json.dumps([shown,g['show'](f)]))")
+            done = subprocess.run([sys.executable, '-c', probe, str(repo), str(Path(tmp) / 'out.json')], capture_output=True, text=True, cwd=HERE,
+                                  env={'PATH': '/usr/bin:/bin', 'HOME': tmp})
+            self.assertEqual(done.returncode, 0, done.stderr)
+            shown, preloaded = json.loads(done.stdout.splitlines()[-1])
+            self.assertEqual(shown, preloaded); self.assertNotIn('\r', shown)

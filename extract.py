@@ -55,7 +55,8 @@ def preload(paths):
     pos = 0
     for p, _ in want:
         nl = out.index(b"\n", pos); size = int(out[pos:nl].split()[2])
-        _cache[p] = out[nl + 1:nl + 1 + size].decode("utf-8", "replace"); pos = nl + 2 + size
+        # The same text show() gives: text mode decodes with replacement and turns \r\n and \r into \n.
+        _cache[p] = out[nl + 1:nl + 1 + size].decode("utf-8", "replace").replace("\r\n", "\n").replace("\r", "\n"); pos = nl + 2 + size
 
 
 def commit():
@@ -287,7 +288,9 @@ def calls_in(src, lo=0, hi=None):
 def api_functions():
     """{(file, name): {calls:[...], line}}  +  파일 단위 인라인 호출(함수 밖/다른 파일)."""
     fns = {}
-    for f in sorted(x for x in ls() if x.startswith(SRC) and x.endswith((".ts", ".tsx"))):
+    files = sorted(x for x in ls() if x.startswith(SRC) and x.endswith((".ts", ".tsx")))
+    preload(files)
+    for f in files:
         src = show(f)
         if "api." not in src:
             continue
