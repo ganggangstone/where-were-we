@@ -4,6 +4,7 @@ import socket
 import tempfile
 import threading
 import unittest
+import os;os.environ.pop('WHERE_WERE_WE_SETTINGS',None)  # fixtures isolate settings through mapcore.ROOT; an inherited settings file would bypass that and be shared
 from pathlib import Path
 from unittest.mock import patch
 import sys

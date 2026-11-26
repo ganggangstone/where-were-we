@@ -1,5 +1,6 @@
 """User flows in the real UI with fictional bundles in headless Chrome. Native calls are faked; no AI or backend runs."""
 import json,re,subprocess,tempfile,unittest
+import os;os.environ.pop('WHERE_WERE_WE_SETTINGS',None)  # fixtures isolate settings through mapcore.ROOT; an inherited settings file would bypass that and be shared
 from pathlib import Path
 
 ROOT=Path(__file__).resolve().parents[1]

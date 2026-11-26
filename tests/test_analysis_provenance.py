@@ -4,6 +4,7 @@ import json
 import sys
 from pathlib import Path
 import unittest
+import os;os.environ.pop('WHERE_WERE_WE_SETTINGS',None)  # fixtures isolate settings through mapcore.ROOT; an inherited settings file would bypass that and be shared
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import ai_extract

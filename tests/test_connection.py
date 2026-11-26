@@ -1,5 +1,6 @@
 """Connection diagnostics use temporary registrations and fake server identities."""
 import copy,json,sys,tempfile,unittest
+import os;os.environ.pop('WHERE_WERE_WE_SETTINGS',None)  # fixtures isolate settings through mapcore.ROOT; an inherited settings file would bypass that and be shared
 from pathlib import Path
 from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))

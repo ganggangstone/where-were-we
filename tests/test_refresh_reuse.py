@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import os;os.environ.pop('WHERE_WERE_WE_SETTINGS',None)  # fixtures isolate settings through mapcore.ROOT; an inherited settings file would bypass that and be shared
 
 
 class RefreshReuse(unittest.TestCase):
