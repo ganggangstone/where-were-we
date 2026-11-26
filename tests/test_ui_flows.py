@@ -1375,6 +1375,8 @@ class Flows(unittest.TestCase):
  assert(!document.querySelector('#sys .pill'),'No unexplained chip on the cards');
  assert($('map').querySelector('p.lead[data-ai-system]') && !/해요/.test(main()),'A plain sentence above the picture');
  assert(document.querySelectorAll('#sys path.wire').length===2 && document.querySelector('#sys path.wire.set'),'Both lines are drawn, the configured one dotted');
+ // Lines follow every size change of the lanes from one observer, whatever re-rendered them (headless Chrome does not run resize callbacks reliably; the real window is checked by hand).
+ assert(wireBox===$('sys'),'The drawn lanes box is the one being watched for size changes');
 ''')
 
     def test_structure_shows_a_local_picture_before_analysis(self):
