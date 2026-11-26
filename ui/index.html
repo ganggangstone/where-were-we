@@ -2124,7 +2124,7 @@ function changesView(m) {
 function changesInspector(m) {
   const c = S.changes; const e = c && c.entries[Math.min(S.chi, c.entries.length - 1)]; if (!e) return '';
   const k = (x) => e.prs.filter(p => p.kinds.includes(x)).length; const b = e.branches[S.branch];
-  return ui`<h2>새로고침 기록 구간</h2><p class="sub">${when(e.since)} → ${when(e.at)}</p><div class="sect"><div class="group">
+  return ui`<h2>${when(e.since)} → ${when(e.at)}</h2><div class="sect"><div class="group">
     <div class="row"><div class="grow">병합한 PR</div><b class="strong">${e.prs.length}</b></div>
     ${Object.entries(KIND).map(([key, [name, tone]]) => `<div class="row"><div class="grow"><span class="pill ${tone}">${tr(name)}</span></div>${k(key)}</div>`).join('')}
     <div class="row"><div class="grow">지도와 연결하지 못한 PR</div>${e.prs.filter(p => !p.groups.length && !p.programs.length).length}</div>
