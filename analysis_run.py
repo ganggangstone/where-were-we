@@ -429,7 +429,7 @@ _INDEXES={}
 def _pinned_index(repo,selected,head):
     """The structure index of the pinned commit, without AI and without writing project data.
 
-    A saved index is used when it matches. A legacy project (no saved index) or an older collection
+    A saved index is used when it matches. An older collection without a saved index
     is rebuilt from git and cached under .analysis-cache, so the next read in another process is free."""
     import structure_index
     # Languages outside the built-in readers are read with their cached rules (lang_rules); new rules make a new index.
@@ -707,10 +707,7 @@ def _publish_shapes(value,rid,commit,labels,catalog,repo,flows=()):
         dest='system.ai' if bundle.get('system') and bundle['system'].get('source')!='ai' else 'system'
         updated[dest]={**meta,**system}
         if groups['groups'] or groups['request_names']:updated['groups']={**meta,**groups}
-        if stored_rid:store._publish(value['project'],stored_rid,updated,{},collection=False)
-        else:
-            for name,item in updated.items():
-                if item!=bundle.get(name):store.atomic(store.home(value['project'])/(name+'.json'),item)
+        store._publish(value['project'],stored_rid,updated,{},collection=False)
 
 def _count(run_id,size,kind):
     """Count one call by its kind in the run record before it is sent; a cancel saved before stops it."""
@@ -928,29 +925,21 @@ def status(run_id=None, project=None, repository='', branch='dev', lang='ko',vie
         # A later attempt can fail before it produces its own overview. Keep the
         # latest verified sample per repository accessible across app restarts.
         saved={};scoped={};scope_pins={};contexts={}
-        legacy_pin=None
-        if any(('' in record.get('overviews',{}) or '' in record.get('scope_overviews',{})) and all(record[k]==scope[k] for k in ('project','branch','lang')) for record in values):
-            try:
-                repo,_,rid,commit=ai_extract.context(project,'',branch)
-                if rid=='':legacy_pin={'commit':commit,'configuration':store.fingerprint(repo)}
-            except ai_extract.READ_ERRORS:pass
         for record in sorted(values,key=lambda v:v['created_at']):
             if any(record[k]!=scope[k] for k in ('project','branch','lang')):continue
             for rid,overview in record.get('overviews',{}).items():
-                if repository and repository!='*' and rid!=repository:continue
-                if rid=='' and (not legacy_pin or not all(overview.get(k)==v for k,v in legacy_pin.items())):continue
+                # A record without a repository ID predates project.json; no repository it names exists now.
+                if not rid or repository and repository!='*' and rid!=repository:continue
                 saved[rid]=overview
             for rid,groups in record.get('scope_overviews',{}).items():
-                if scope['repository'] and rid!=scope['repository']:continue
+                if not rid or scope['repository'] and rid!=scope['repository']:continue
                 if rid not in scope_pins:
-                    if rid=='':scope_pins[rid]=legacy_pin
-                    else:
-                        try:
-                            repo=store.selected_repository(project,rid)
-                            ref=(repo or {}).get('refs',{}).get(branch)
-                            commit=ai_extract.git(repo['path'],'rev-parse','--verify',ref+'^{commit}').strip() if ref else None
-                            scope_pins[rid]={'commit':commit,'configuration':store.fingerprint(repo)} if commit else None
-                        except ai_extract.READ_ERRORS:scope_pins[rid]=None
+                    try:
+                        repo=store.selected_repository(project,rid)
+                        ref=(repo or {}).get('refs',{}).get(branch)
+                        commit=ai_extract.git(repo['path'],'rev-parse','--verify',ref+'^{commit}').strip() if ref else None
+                        scope_pins[rid]={'commit':commit,'configuration':store.fingerprint(repo)} if commit else None
+                    except ai_extract.READ_ERRORS:scope_pins[rid]=None
                 pin=scope_pins[rid]
                 entries=([(resource,groups[resource])] if resource in groups else []) if view=='resource' else groups.items()
                 for target,overview in entries:
@@ -962,7 +951,7 @@ def status(run_id=None, project=None, repository='', branch='dev', lang='ko',vie
         if view=='catalog':
             selected={**_progress(selected),**({'program_observations':selected['program_observations']} if selected.get('program_observations') else {})}
             scoped={key:{k:v[k] for k in ('repository','resource','commit','configuration','format','version') if k in v} for key,v in scoped.items()}
-        return {**selected,'saved_overviews':list(saved.values()),'saved_scope_overviews':list(scoped.values()),'current_legacy_pin':legacy_pin}
+        return {**selected,'saved_overviews':list(saved.values()),'saved_scope_overviews':list(scoped.values())}
 
 def active():
     with locked():

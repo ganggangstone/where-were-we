@@ -82,10 +82,10 @@ def projects():
 
 
 def _read(project, name):
-    if os.path.isfile(os.path.join(ROOT, project, "project.json")):
-        import project as projects_module
+    import project as projects_module
+    if projects_module.config(project):
         return projects_module.read_bundle(project,briefings=False).get(name)
-    p = os.path.join(ROOT, project, name + ".json")
+    p = os.path.join(ROOT, project, name + ".json")  # a collection stage reads its own folder
     return json.load(open(p)) if os.path.exists(p) else None
 
 
@@ -97,7 +97,7 @@ class Map:
             bundle = projects_module.read_bundle(project,branch=branch,briefings=False)
         if bundle.get('branch_details'):
             bundle={**bundle,**bundle['branch_details'].get(branch,{})}
-        read = (lambda p, key: bundle.get(key)) if bundle is not None else _read
+        read = lambda p, key: bundle.get(key)
         self.m = data if data is not None else read(project, branch) or {}
         self.groups = read(project, "groups") or {}
         self.flows = (read(project, "flows") or {}).get("routes", {})
@@ -508,15 +508,12 @@ def reply_language(lang, written=None, *, saved_results=False):
 
 def tests_prompt(project, routes=(), lang="ko", repository=""):
     """테스트가 안 이어진 서버 기능에 붙는 안내. MCP impact 답과 앱의 "프롬프트 복사"가 이것 하나를 쓴다."""
-    rules_home = os.path.join(ROOT, project)
-    tool_scope = ""
-    if os.path.isfile(os.path.join(rules_home, "project.json")):
-        import project as projects_module
-        repo = projects_module.selected_repository(project, repository)
-        rules_home = projects_module.repository_folder(project, repo, projects_module.states(project))
-        if not rules_home: raise ValueError("Refresh this repository first")
-        tool_scope = f"Tool arguments: project={project!r}, repository={repo['id']!r}. Preserve both arguments when recording tests or updating rules.\n"
-        project = project + " / " + repo["id"]
+    import project as projects_module
+    repo = projects_module.selected_repository(project, repository)
+    rules_home = repo and projects_module.repository_folder(project, repo, projects_module.states(project))
+    if not rules_home: raise ValueError("Refresh this repository first")
+    tool_scope = f"Tool arguments: project={project!r}, repository={repo['id']!r}. Preserve both arguments when recording tests or updating rules.\n"
+    project = project + " / " + repo["id"]
     c = tests_conf(rules_home)
     lines = "\n".join(f"   - {r}" for r in routes) or "   - (impact 답에서 테스트가 0 인 서버 기능)"
     if lang == "en":

@@ -5,7 +5,7 @@
   Claude Code:  claude mcp add --scope user where-were-we -- <이 저장소>/.venv/bin/python <이 저장소>/mcp_server.py
   Codex:        ~/.codex/config.toml 에 [mcp_servers.where-were-we] command = "<…>/.venv/bin/python", args = ["<…>/mcp_server.py"]
 """
-import json, os, subprocess, sys
+import json, os, sys
 from datetime import datetime
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
 import mapcore
@@ -267,45 +267,25 @@ def impact(target: str, project: str = "", repository: str = "") -> str:
         candidates = m.m.get("connection_candidates", [])
         if candidates: L += ["", "Unverified cross-repository candidates: " + json.dumps(candidates,ensure_ascii=False)]
     if untested:
-        if conf:
-            for rid in sorted(untested_repositories):
-                if rid:L += ["",mapcore.tests_prompt(m.project, [t for t in dict.fromkeys(untested) if '('+rid+'/' in t][:15],repository=rid)]
-        else:L += ["", mapcore.tests_prompt(m.project, list(dict.fromkeys(untested))[:15])]
+        for rid in sorted(untested_repositories):
+            L += ["",mapcore.tests_prompt(m.project, [t for t in dict.fromkeys(untested) if '('+rid+'/' in t][:15],repository=rid)]
     return "\n".join(L)
 
 
 @app.tool(description="테스트 찾는 규칙 고치기. files 는 테스트 파일 이름 모양(예: test_*.py), calls 는 테스트가 서버 기능을 부르는 모양(자리 <method> <path> <function> <module>). 지금 규칙을 모두 다시 넘긴다. 저장한 뒤 refresh 로 결과를 본다.")
 def set_test_rules(files: list[str], calls: list[str], project: str = "", repository: str = "") -> str:
-    p = need(project); home = os.path.join(mapcore.ROOT, p)
+    p = need(project)
     for t in calls: mapcore.call_regex(t)  # 틀린 모양이면 여기서 ValueError 로 돌려보낸다
     if not files or not calls: raise ValueError("files 와 calls 가 비어 있으면 안 된다")
-    if project_store.config(p):
-        def update(raw, repo):
-            value = raw.get("tests") or {}; value.update(files=files, calls=calls); raw["tests"] = value
-        project_store.mutate_tests(p, repository, update)
-        return "Saved test rules for the selected repository; refresh to apply."
-    path = os.path.join(home, "tests.json"); c = json.load(open(path)) if os.path.exists(path) else {}
-    c.update(files=files, calls=calls); json.dump(c, open(path, "w"), ensure_ascii=False, indent=1)
-    return f"저장했다. 테스트 파일 {files}, 부르는 모양 {calls}. refresh 를 부르면 이 규칙으로 다시 뽑는다."
+    def update(raw, repo):
+        value = raw.get("tests") or {}; value.update(files=files, calls=calls); raw["tests"] = value
+    project_store.mutate_tests(p, repository, update)
+    return "Saved test rules for the selected repository; refresh to apply."
 
 
 @app.tool(description="규칙으로 안 잡히는 테스트 하나를 지도에 남기기. route 는 서버 기능(예: DELETE /generations/{}), file 은 테스트 파일, line 은 그 테스트에서 서버 기능을 부르는 줄 번호, quote 는 그 줄의 글자를 그대로(6자 이상). 그 줄에 그 글자가 없으면 저장하지 않는다.")
 def record_test(route: str, file: str, line: int, quote: str, project: str = "", repository: str = "") -> str:
-    p = need(project)
-    if project_store.config(p):
-        return project_store.record_test(p, repository, route, file, line, quote)
-    m = mapcore.Map(p); home = os.path.join(mapcore.ROOT, p)
-    meth, _, path = route.strip().partition(" ")
-    rs = [r for r in m.m.get("backend_routes", []) if r["method"] == meth.upper() and r["path"] == path.strip() and r.get("function")]
-    if len(rs) != 1: return f"'{route}' 에 맞는 서버 기능이 {len(rs)}개다. find 로 주소를 확인한다."
-    src = subprocess.run(["git", "-C", m.m["repo"], "show", f"{m.m['commit']}:{file}"], capture_output=True, text=True).stdout.splitlines()
-    if not mapcore.quote_near(src, line, quote):
-        return f"{file}:{line} 근처에 그 글자가 없다(지도 기준 커밋 {m.m['commit']}). 저장하지 않았다."
-    pth = os.path.join(home, "tests.json"); c = json.load(open(pth)) if os.path.exists(pth) else {}
-    rec = {"route": f"{rs[0]['file']}::{rs[0]['function']}", "file": file, "line": line, "quote": quote}
-    if rec not in c.setdefault("records", []): c["records"].append(rec)
-    json.dump(c, open(pth, "w"), ensure_ascii=False, indent=1)
-    return f"저장했다({len(c['records'])}건). refresh 를 부르면 지도에 반영된다."
+    return project_store.record_test(need(project), repository, route, file, line, quote)
 
 
 @app.tool(description="상세 지도 분석 요청과 JSON schema를 받는다. AI를 실행하지 않는다. mode가 full이면 전체 schema, review면 저장된 목록(known)을 다시 쓰지 않고 keep·drop과 고친 항목만, patch면 바뀐 파일(inspect)과 다시 확인할 항목(recheck)만 낸다. 지금 연결된 MCP 에이전트가 자신의 모델로 analysis_source의 코드를 읽고 record_analysis로 결과를 제출한다. 멀티레포는 repository를 지정한다.")
@@ -409,10 +389,7 @@ def plan_note(project, repository):
 @app.tool(description="새로고침: git fetch 뒤 바뀐 브랜치의 지도를 다시 뽑고 PR·이슈·작업 폴더를 모아 달라진 것을 기록한다. 1~2분 걸린다. 지도 파일만 쓰고 대상 저장소에는 쓰지 않는다.")
 def refresh(project: str = "", repository: str = "") -> str:
     p = need(project)
-    if project_store.config(p):
-        return project_store.refresh_project(p, repository) + plan_note(p, repository) + "\n\n" + changes(p, repository=repository)
-    r = subprocess.run(mapcore.python_command(os.path.join(HERE, "refresh.py"), p), capture_output=True, text=True, timeout=900)
-    return (r.stdout[-1500:] if r.returncode == 0 else "실패: " + r.stderr[-800:]) + "\n\n" + changes(p)
+    return project_store.refresh_project(p, repository) + plan_note(p, repository) + "\n\n" + changes(p, repository=repository)
 
 
 if __name__ == "__main__":

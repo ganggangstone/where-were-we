@@ -40,21 +40,17 @@ def key(repository,branch,lang):return json.dumps([repository,branch,lang])
 def context(name,repository,branch):
     if branch not in ('dev','main'):raise ValueError('Choose dev or main')
     conf=store.config(name);state=store.states(name)
-    if conf:
-        repos=[r for r in conf['repositories'] if not repository or r['id']==repository]
-        if not repos:raise ValueError('Unknown repository')
-    else:
-        if repository:raise ValueError('This legacy project has no repository selector')
-        raw=store.raw_bundle(store.home(name));m=raw.get(branch) or {}
-        repos=[{'id':'legacy','path':m.get('repo',''),'refs':{branch:m.get('ref') or mapcore.configured_refs().get(branch)},'layout':{},'legacy':True}]
+    if not conf:raise ValueError('Configure a project first')
+    repos=[r for r in conf['repositories'] if not repository or r['id']==repository]
+    if not repos:raise ValueError('Unknown repository')
     sources={};prs=[];scope=[];warnings=[];ready=False;has_changes=False
     policy={k:mapcore.settings()[k] for k in ('since','since_time')}
     def add(sid,text,url,kind,rid):
         text=text if isinstance(text,str) else ''
         sources[sid]={'text':text,'url':url if isinstance(url,str) and re.fullmatch(r'https://github\.com/[^/\s]+/[^/\s]+/(pull|issues)/[0-9]+',url) else None,'kind':kind,'repository':rid}
     for repo in repos:
-        rid=repo['id'];health=state.get(rid,{}) if conf else {}
-        raw=store.raw_bundle(store.repository_folder(name,repo,state)) if conf else store.raw_bundle(store.home(name))
+        rid=repo['id'];health=state.get(rid,{})
+        raw=store.raw_bundle(store.repository_folder(name,repo,state))
         result=(raw.get('changes') or {}).get('last_result') or {}
         evidence=result.get('evidence');window=(evidence or {}).get('commits',{}).get(branch)
         row={'id':rid,'configuration':store.fingerprint(repo),'since':result.get('since'),'at':result.get('at'),

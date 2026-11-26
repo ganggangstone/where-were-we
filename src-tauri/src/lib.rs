@@ -168,14 +168,10 @@ fn task_request(app: &tauri::AppHandle, project: &str, branch: &str, lang: &str,
     run_py(app, "ai_extract.py", &args)
 }
 
-/// 새로고침: refresh.py 가 fetch, 바뀐 브랜치의 지도 다시 뽑기, 수집, 달라진 것 기록을 한다. 로그를 돌려준다.
+/// 새로고침: project.py 가 저장소마다 fetch, 바뀐 브랜치의 지도 다시 뽑기, 수집, 달라진 것 기록을 한다. 로그를 돌려준다.
 #[tauri::command]
-async fn refresh(app: tauri::AppHandle, project: String, repo: String, since: String, repository: Option<String>) -> Result<String, String> {
-    blocking(move || {
-        if root().join(&project).join("project.json").is_file() {
-            run_py(&app, "project.py", &["refresh", &project, "--repository", repo_arg(&repository)])
-        } else { run_py(&app, "refresh.py", &[&project, &repo, &since]) }
-    }).await
+async fn refresh(app: tauri::AppHandle, project: String, repository: Option<String>) -> Result<String, String> {
+    blocking(move || run_py(&app, "project.py", &["refresh", &project, "--repository", repo_arg(&repository)])).await
 }
 
 /// Prepare group naming for the connected MCP agent.

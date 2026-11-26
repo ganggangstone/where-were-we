@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""새로고침 한 번. 앱의 ↻ 버튼과 에이전트 연결(mcp_server.py)이 같이 쓴다.
+"""저장소 하나의 새로고침. project.py refresh 가 수집 단계 폴더에서 저장소마다 부른다.
 
-사용: refresh.py <프로젝트 이름> [저장소 경로] [수집 기준 일수=7]
+사용: refresh.py <저장소 ID> <저장소 경로> [수집 기준 일수=7]
 1. git fetch 뒤 origin/dev·main 커밋이 지도의 기준 커밋과 다르면 지도를 다시 뽑는다(extract.py 가 전 지도를 .prev 로 남긴다).
 2. collect.py 로 PR·브랜치·이슈를 모으고 AI 가 적은 것의 근거 줄을 대조한다.
 3. 설정에서 고른 기준 시각 뒤에 달라진 것을 changes.json 에 한 건으로 남긴다.
@@ -14,19 +14,12 @@ import mapcore
 import project as project_store
 
 PROJECT = sys.argv[1]
-if os.path.exists(os.path.join(mapcore.ROOT, PROJECT, "project.json")):
-    print(project_store.refresh_project(PROJECT, since=sys.argv[3] if len(sys.argv) > 3 else "7"))
-    sys.exit(0)
 HOME = os.path.join(mapcore.ROOT, PROJECT)
-REPO = sys.argv[2] if len(sys.argv) > 2 else (project_store.read(Path(HOME)/'dev.json') or project_store.read(Path(HOME)/'main.json'))['repo']
+REPO = sys.argv[2]
 SINCE = sys.argv[3] if len(sys.argv) > 3 else "7"
 NOW = datetime.now(timezone.utc)
 
 GITHUB_ORIGIN = project_store.github_origin(REPO)
-if not os.environ.get('WHERE_WERE_WE_COLLECTION_STAGE') and GITHUB_ORIGIN:
-    try:print(project_store.refresh_legacy(PROJECT,REPO,SINCE))
-    except ValueError as error:sys.exit(str(error))
-    sys.exit(0)
 
 
 def run(*a):

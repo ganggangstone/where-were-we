@@ -179,44 +179,15 @@ def github_repository(name,rid):
         repo=next((r for r in conf['repositories'] if r['id']==rid),None)
         if not repo:raise ValueError('Unknown repository')
         return repo
-    raw=read(home(name)/'dev.json') or read(home(name)/'main.json')
-    if not raw:raise ValueError('Refresh or connect code first')
-    repo={'id':'','path':raw['repo'],'refs':{},'layout':{}}
-    remembered=states(name).get('@github',{})
-    if remembered.get('path')==repo['path']:repo['github']=remembered.get('github')
-    return repo
+    raise ValueError('Refresh or connect code first')
 
 def remember_github(name,repo):
     capture_github(repo)
     if not repo.get('github'):return
     conf=config(name)
-    if conf:
-        for item in conf['repositories']:
-            if item['id']==repo['id']:item['github']=repo['github']
-        atomic(home(name)/'project.json',conf)
-    else:
-        state=states(name);state['@github']={'path':repo['path'],'github':repo['github']}
-        atomic(home(name)/'repository-state.json',state)
-
-def refresh_legacy(name,path,since):
-    import mapcore
-    with locked(name):
-        repo=github_repository(name,'')
-        if os.path.realpath(repo['path'])!=os.path.realpath(path):raise ValueError('Repository path does not match this project')
-        remember_github(name,repo)
-        env=refresh_environment(repo)
-        with tempfile.TemporaryDirectory(prefix='.collect-',dir=home(name)) as temp:
-            stage=Path(temp)/name;stage.mkdir()
-            for key in NAMES:
-                source=home(name)/(key+'.json')
-                if source.exists():shutil.copyfile(source,stage/source.name)
-            env.update(WHERE_WERE_WE_ROOT=temp,WHERE_WERE_WE_COLLECTION_STAGE='1',WHERE_WERE_WE_SETTINGS=mapcore.settings_path())
-            result=subprocess.run(mapcore.python_command(Path(__file__).with_name('refresh.py'),name,path,since),env=env,capture_output=True,text=True,timeout=1800)
-            if result.returncode:raise ValueError((result.stderr or result.stdout)[-1600:] or 'Collection failed')
-            for key in NAMES:
-                target=stage/(key+'.json')
-                if target.exists():atomic(home(name)/target.name,read(target))
-        return result.stdout
+    for item in conf['repositories']:
+        if item['id']==repo['id']:item['github']=repo['github']
+    atomic(home(name)/'project.json',conf)
 
 def github_accounts(name,rid):
     repo=github_repository(name,rid);origin=github_origin(repo['path'])
@@ -266,7 +237,6 @@ def validate(data):
             identity=item['github']
             if not isinstance(identity,dict) or identity.get('host')!='github.com' or not isinstance(identity.get('account'),str) or not re.fullmatch(LOGIN,identity['account']):raise ValueError('Choose a GitHub account')
             entry['github']={'host':identity['host'],'account':identity['account']}
-        if item.get('legacy'):entry['legacy']=True
         result['repositories'].append(entry);ids.add(rid);paths.add(path)
     for item in result['repositories']:
         targets=item['api_targets']
@@ -286,24 +256,16 @@ def validate(data):
 def configure(name, data):
     import connections
     proposed=connections.prepare(name,data)
+    config(name)  # an older folder becomes a project first, so its repository is kept as configured
     with locked(name):
         existing=read(home(name)/'project.json')
         for repo in proposed['repositories']:
             previous=next((r for r in (existing or {}).get('repositories',[]) if r['id']==repo['id'] and r['path']==repo['path']),{})
             if previous.get('github') and not repo.get('github'):repo['github']=previous['github']
-            legacy=states(name).get('@github',{})
-            if repo.get('legacy') and legacy.get('path')==repo['path'] and not repo.get('github'):repo['github']=legacy.get('github')
             if repo.get('managed'):
                 try:connections.ensure(name,repo)
                 except ValueError as error:raise ValueError(str(error)+'|'+repo['id']) from None
             else:capture_github(repo)
-        # IDs remain stable. A legacy association must describe the actual old map.
-        for repo in proposed['repositories']:
-            if repo.get('legacy'):
-                old=read(home(name)/'dev.json') or read(home(name)/'main.json')
-                if not old or os.path.realpath(old.get('repo',''))!=repo['path']:raise ValueError('Legacy repository does not match the existing map')
-        if not existing and not any(r.get('legacy') for r in proposed['repositories']) and any((home(name)/(role+'.json')).exists() for role in ('dev','main')):
-            raise ValueError('Keep the existing repository as a legacy entry when adopting this project')
         atomic(home(name)/'project.json',proposed)
     return proposed
 
@@ -336,7 +298,7 @@ def repository_folder(name,repo,state):
     if generation:
         if not re.fullmatch(r'[a-f0-9]{32}',generation):raise ValueError('Invalid snapshot generation')
         return home(name)/'repositories'/repo['id']/'snapshots'/generation
-    return home(name) if repo.get('legacy') else None
+    return None
 
 def raw_bundle(folder):
     bundle={key:read(folder/(key+'.json')) for key in NAMES} if folder else {key:None for key in NAMES}
@@ -430,7 +392,7 @@ def qualify_map(source,repo,table_ids):
 DETAILS=('groups','flows','system','system.ai','jobs')
 
 def branch_bundle(raw,branch):
-    """Select task results stored with a branch map; retain legacy shared files."""
+    """Select task results stored with a branch map; otherwise the repository's shared files."""
     outputs=(raw.get(branch) or {}).get('task_outputs',{})
     return {**raw,**{key:outputs.get(key,raw.get(key)) for key in DETAILS}}
 
@@ -727,7 +689,8 @@ def collection_running(name):
 def read_bundle(name, repository='', branch='dev', briefings=True):
     conf=config(name)
     if not conf:
-        if repository:raise ValueError('This legacy project has no repository selector')
+        # A folder without project.json: a collection stage or code not connected yet.
+        if repository:raise ValueError('Unknown repository')
         raw=raw_bundle(home(name));result=branch_bundle(raw,branch)
         result['project']={'name':name,'repositories':[],'selected':'',
                            'results':{role:analysis_results(raw,role) for role in ('dev','main')},
@@ -803,7 +766,7 @@ ACTION_TASKS={'group.py':'groups','system.py':'system','jobs.py':'jobs','steps.p
 def action(name,rid,script,args=()):
     with locked(name):
         repo=selected_repository(name,rid)
-        if not repo:raise ValueError('Use the legacy command for this project')
+        if not repo:raise ValueError('Configure a project first')
         if states(name).get(repo['id'],{}).get('fingerprint')!=fingerprint(repo):raise ValueError('Refresh this repository after configuration changes before running AI actions')
     import ai_extract
     arguments=[name,*args,'--repository',repo['id']]
@@ -817,6 +780,7 @@ def action(name,rid,script,args=()):
 def mutate_tests(name,rid,callback):
     with locked(name):
         repo=selected_repository(name,rid)
+        if not repo:raise ValueError('Configure a project first')
         state=states(name).get(repo['id'],{})
         if state.get('fingerprint') and state['fingerprint']!=fingerprint(repo):raise ValueError('Refresh this repository after configuration changes before editing test rules')
         raw=raw_bundle(repository_folder(name,repo,states(name)))

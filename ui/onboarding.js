@@ -90,8 +90,7 @@ function guideAnalysisBody(m){
 // A service that is already shown is edited in place; only an empty workspace starts a new one.
 function guideManual(){return `<button class="btn quiet" id="guideCreate">${tr(S.project?'연결한 저장소 수정':'직접 연결하기')}</button>`;}
 // Each connected code names where it comes from and whether its own map is ready, so a wrong folder is visible here.
-// A legacy single-folder service has no repository list; its shown map stands for its one code.
-function guideCodes(){const repos=S.projectInfo?.repositories || [],m=S.maps.dev||S.maps.main;return repos.length?repos:m?.repo?[{name:S.project,path:m.repo,collected:!!m.commit,commits:{[S.branch]:M()?.commit}}]:[];}
+function guideCodes(){return S.projectInfo?.repositories || [];}
 function guideCodeLine(r){
   const where=r.url||r.configured_path||r.path||'',state=r.error?'새 지도를 가져오지 못했다':r.config_changed?'설정을 바꿨다. 새로고침하면 지도에 반영된다.':r.collected&&r.commits?.[S.branch]?'지도 준비됨':'아직 지도 없음';
   return `<li data-guide-code><b>${esc(r.name || r.id)}</b>${where?` · <span class="mono">${esc(where)}</span>`:''} · <span class="${r.error?'error':''}">${tr(state)}</span></li>`;

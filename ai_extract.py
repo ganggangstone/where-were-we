@@ -301,17 +301,10 @@ def apply_result(raw,repo,refs,branch,lang,response,commit,layout,configuration=
 
 def context(name,repository,branch):
     if branch not in ('dev','main'):raise ValueError('Choose dev or main')
-    conf=project.config(name)
-    if conf:
-        repo=project.selected_repository(name,repository);state=project.states(name)
-        raw=project.raw_bundle(project.repository_folder(name,repo,state))
-        selected=repo['id']
-    else:
-        if repository:raise ValueError('This legacy project has no repository selector')
-        raw=project.raw_bundle(project.home(name));current=raw.get(branch)
-        if not current:raise ValueError('Refresh this repository first')
-        repo={'path':current['repo'],'refs':{branch:current.get('ref') or mapcore.configured_refs().get(branch)},'layout':{}}
-        selected=''
+    repo=project.selected_repository(name,repository)
+    if not repo:raise ValueError('Configure a project first')
+    raw=project.raw_bundle(project.repository_folder(name,repo,project.states(name)))
+    selected=repo['id']
     if not raw.get(branch) or not repo['refs'].get(branch):raise ValueError('Refresh an available branch role first')
     commit=git(repo['path'],'rev-parse','--verify',repo['refs'][branch]+'^{commit}').strip()
     return repo,raw,selected,commit
@@ -627,7 +620,7 @@ def request(name,branch='dev',lang='ko',repository='',overview=False):
     with project.locked(name):
         repo,raw,rid,commit=context(name,repository,branch)
         fingerprint=project.fingerprint(repo)
-        if rid and project.states(name).get(rid,{}).get('fingerprint')!=fingerprint:raise ValueError('Refresh after configuration changes first')
+        if project.states(name).get(rid,{}).get('fingerprint')!=fingerprint:raise ValueError('Refresh after configuration changes first')
         sc,_=scope(repo,raw,branch,lang,commit,fingerprint,review_flag(name,rid,branch,raw.get(branch) or {}))
         arguments={'project':name,'repository':rid,'branch':branch,'lang':lang,'commit':commit,'configuration':fingerprint,'base':sc['base']}
         scope_text=json.dumps({'project':name,'repository':rid,'branch':branch,'lang':lang},ensure_ascii=False)
@@ -679,11 +672,7 @@ def record(project,repository,branch,lang,commit,configuration,result_json,base=
         previous=(raw.get(branch) or {}).get('analysis') or {}
         if base and data.get('base',base)!=base:raise ValueError('result_json and record_arguments name different bases; request the analysis again')
         if base:data['base']=base
-        def save(updated):
-            if rid:store._publish(project,rid,updated,{},collection=False)
-            else:
-                for key,value in updated.items():
-                    if value is not None:store.atomic(store.home(project)/(key+'.json'),value)
+        def save(updated):store._publish(project,rid,updated,{},collection=False)
         if 'base' not in data:
             # Pre-v2 compatibility: an explicit full JSON may replace a basic or v1 map, never a pinned v2 map.
             if any(k in data for k in SPARSE):raise ValueError('Sparse results need the base returned by analyze; request the analysis again')
@@ -778,7 +767,7 @@ def task_snapshot(raw,task,branch):
 def task_context(name,task,branch,repository):
     if task not in TASK_SCHEMAS:raise ValueError('Choose groups, system, jobs or steps')
     repo,raw,rid,commit=context(name,repository,branch)
-    if rid and project.states(name).get(rid,{}).get('fingerprint')!=project.fingerprint(repo):
+    if project.states(name).get(rid,{}).get('fingerprint')!=project.fingerprint(repo):
         raise ValueError('Configuration changed; refresh first')
     if git(repo['path'],'rev-parse',raw[branch]['commit']+'^{commit}').strip()!=commit:
         raise ValueError('Map commit changed; refresh or analyze the map first')
@@ -994,7 +983,7 @@ def task_result(raw,task,branch,target,data,repo,commit,lang,configuration=None,
         updated['jobs']=updated.get('jobs') or {'nodes':{}}
         updated['jobs']['nodes'][target]=jobs
     # Task results travel with their exact branch map, rather than overwriting
-    # the shared legacy auxiliary files used by the other branch.
+    # the repository's shared files used by the other branch.
     result=copy.deepcopy(original)
     result[branch]=updated[branch]
     outputs=result[branch].setdefault('task_outputs',{})
@@ -1014,10 +1003,7 @@ def task_record(project,repository,task,branch,lang,target,commit,configuration,
         if configuration!=store.fingerprint(repo) or commit!=head or snapshot!=task_snapshot(raw,task,branch):
             raise ValueError('Task source or stored input changed; request it again')
         updated=task_result(raw,task,branch,target,data,repo['path'],commit,lang,configuration,provider)
-        if rid:store._publish(project,rid,updated,{},collection=False)
-        else:
-            for key,value in updated.items():
-                if value!=raw.get(key):store.atomic(store.home(project)/(key+'.json'),value)
+        store._publish(project,rid,updated,{},collection=False)
         return 'Saved '+task+' from '+provider_name(provider)
 
 PLAN_TEXT={
@@ -1052,7 +1038,7 @@ def pin_request(name,branch='dev',repository=''):
     with project.locked(name):
         repo,raw,rid,commit=context(name,repository,branch)
         fingerprint=project.fingerprint(repo)
-        if rid and project.states(name).get(rid,{}).get('fingerprint')!=fingerprint:raise ValueError('Refresh after configuration changes first')
+        if project.states(name).get(rid,{}).get('fingerprint')!=fingerprint:raise ValueError('Refresh after configuration changes first')
     return {'commit':commit,'record_arguments':{'configuration':fingerprint},'mode':None,'reason':None,'recheck':[],'inspect':[]}
 
 def warm_basic(name,branch,repos):
@@ -1071,15 +1057,14 @@ def plan(name,branch='dev',lang='ko',repository='',overview=False,light=False):
     if lang not in ('ko','en'):raise ValueError('Choose ko or en')
     repository='' if repository=='*' else repository
     conf=project.config(name)
-    if conf:
-        repos=[r for r in conf['repositories'] if not repository or r['id']==repository]
-        if repository and not repos:raise ValueError('Unknown repository')
-    else:repos=[None]
+    if not conf:raise ValueError('Configure a project first')
+    repos=[r for r in conf['repositories'] if not repository or r['id']==repository]
+    if repository and not repos:raise ValueError('Unknown repository')
     tasks=[];blocked=[];skipped=[];pins={}
-    if not light:warm_basic(name,branch,[r for r in repos if r and r['refs'].get(branch)])
+    if not light:warm_basic(name,branch,[r for r in repos if r['refs'].get(branch)])
     for repo in repos:
-        rid=repo['id'] if repo else ''
-        if repo and not repo['refs'].get(branch):skipped.append({'repository':rid,'reason':'no_branch'});continue
+        rid=repo['id']
+        if not repo['refs'].get(branch):skipped.append({'repository':rid,'reason':'no_branch'});continue
         try:
             req=pin_request(name,branch,rid) if light else request(name,branch,lang,rid)
             with project.locked(name):_,raw,_,head=context(name,rid,branch)
@@ -1149,10 +1134,9 @@ def task_cli(task,argv=None,emit=True):
     args=parser.parse_args(argv)
     branch=args.branch
     if branch is None:
-        conf=project.config(args.project)
-        if conf:
-            repo=project.selected_repository(args.project,args.repository);branch='dev' if repo['refs'].get('dev') else 'main'
-        else:branch='dev' if project.raw_bundle(project.home(args.project)).get('dev') else 'main'
+        repo=project.selected_repository(args.project,args.repository)
+        if not repo:raise ValueError('Configure a project first')
+        branch='dev' if repo['refs'].get('dev') else 'main'
     result=task_request(args.project,task,branch,args.lang,args.repository,getattr(args,'target',''))
     if emit:print(json.dumps(result,ensure_ascii=False))
     return result

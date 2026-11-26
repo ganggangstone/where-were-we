@@ -177,7 +177,7 @@ const AnalysisRun = (() => {
   }
   function rememberScopes(cache,value) {
     if(!value || cache!==mapResults)return;
-    const pin=cache.pin,configuration=pin.configuration || value.current_legacy_pin?.configuration;
+    const pin=cache.pin,configuration=pin.configuration;
     const resource=S.analysisChoice?.task==='saved_scope'?S.analysisChoice.detailTarget:null;
     const opened=cache.groups.get(resource);
     cache.groups.clear();
@@ -237,10 +237,6 @@ const AnalysisRun = (() => {
     const groups=scoped?(run?.saved_scope_overviews || []):(run?.saved_overviews || (run?.branch===S.branch && run?.lang===S.lang ? Object.values(run.overviews || {}) : []));
     return groups.filter(group=>{
       if(scoped && (group.resource!==S.analysisChoice.detailTarget || group.repository!==scope().repository))return false;
-      if(group.repository===''){
-        const pin=run.current_legacy_pin;
-        return !scope().repository && !!pin && group.commit===pin.commit && group.configuration===pin.configuration;
-      }
       const repo=S.projectInfo?.repositories?.find(r=>r.id===group.repository);
       const commit=repo?.commits?.[S.branch];
       return (!scope().repository || scope().repository===group.repository) && commit && group.commit.startsWith(commit)
@@ -250,8 +246,7 @@ const AnalysisRun = (() => {
   const overviewKey = group => JSON.stringify([S.project,S.branch,S.lang,group.repository,group.commit,group.configuration,group.resource]);
   function overviewIndex(group) {
     const map=S.maps?.[S.branch];
-    return group.repository ? map?.structure_indexes?.find(i=>i.repository===group.repository && i.commit===group.commit)
-      : map?.structure_index?.commit===group.commit ? map.structure_index : null;
+    return map?.structure_indexes?.find(i=>i.repository===group.repository && i.commit===group.commit);
   }
   function resourcesIn(index) {
     const flow=index?.service_flow || {};
