@@ -185,13 +185,15 @@ details .kv { margin:var(--space-3) var(--space-0) var(--space-0); word-break:br
 /* 블루프린트 계단: 화면·서버·저장소·외부 네 줄을 들여쓰기로 */
 .step-lanes { display:grid; grid-template-columns:var(--lane-indent-1) var(--lane-indent-1) var(--lane-indent-1) 1fr; font:var(--font-micro); margin:var(--space-0) var(--space-0) var(--space-2) }
 .step .from { flex:none; width:var(--space-4); margin-left:calc(var(--space-4) * -1); color:var(--color-text-secondary); text-align:center }
-.step-lanes .screen { color:var(--color-lane-screen) } .step-lanes .server { color:var(--color-lane-server) } .step-lanes .store { color:var(--color-lane-store) } .step-lanes .external { color:var(--color-lane-external) }
+.step-lanes { color:var(--color-text-secondary) }
+.step-lanes span::before { content:""; display:inline-block; width:var(--size-dot); height:var(--size-dot); margin-right:var(--space-1); border-radius:var(--radius-pill); background:var(--lane); vertical-align:middle }
+.step-lanes .screen { --lane:var(--color-lane-screen) } .step-lanes .server { --lane:var(--color-lane-server) } .step-lanes .store { --lane:var(--color-lane-store) } .step-lanes .external { --lane:var(--color-lane-external) }
 .step { display:flex; gap:var(--space-3); align-items:flex-start; padding:var(--space-2) var(--space-3); border-radius:var(--radius-step); margin:var(--space-1) var(--space-0) }
 .step.l1 { margin-left:var(--lane-indent-1) } .step.l2 { margin-left:var(--lane-indent-2) } .step.l3 { margin-left:var(--lane-indent-3) }
 .step .n { flex:none; width:var(--size-badge); height:var(--size-badge); border-radius:var(--radius-pill); color:var(--color-bg-content); font:var(--font-secondary); font-weight:var(--weight-strong); text-align:center; line-height:var(--size-badge); background:var(--color-lane-server) }
 .step.l0 .n { background:var(--color-lane-screen) } .step.l2 .n { background:var(--color-lane-store) } .step.l3 .n { background:var(--color-lane-external) }
 .step.cur { background:var(--color-accent-tint) } .step.off { opacity:var(--opacity-off) }
-.step.unsure .tx { color:var(--color-text-secondary); font-style:italic }
+.step.unsure .tx { font-style:italic }
 .step .ev { margin-top:var(--space-2); padding:var(--space-2) var(--space-3); border-radius:var(--radius-control); background:var(--color-bg-group); word-break:break-all }
 
 /* 전체 구조: 상자는 격자에 놓고, 선과 번호는 그 위에 얹는다 */
@@ -329,12 +331,12 @@ h3 > .chip { margin-left:var(--space-2) }
 .route-chip { padding:var(--space-1) var(--space-3); border:var(--border-hairline); border-radius:var(--radius-bar); font:var(--font-secondary); font-family:var(--font-mono) }
 
 /* 전체 코드 분석: 단위 구조도와 카드. 저장된 단위는 바로 읽고, 나머지는 준비 중·대기로 보인다. */
-.unit-board [data-state] { color:var(--color-text-secondary) }
-.unit-board [data-state="saved"] { color:var(--color-ok) }
-.unit-board [data-state="named"] { color:var(--color-ok) }
-.unit-board [data-state="working"] { color:var(--color-accent) }
-.unit-board [data-state="failed"] { color:var(--color-warn) }
-.unit-board [data-state="stale"] { color:var(--color-ai) }
+.unit-board :is([data-state]:not(.unit-card), .unit-card[data-state] .unit-head) { color:var(--color-text-secondary) }
+.unit-board :is([data-state="saved"]:not(.unit-card), .unit-card[data-state="saved"] .unit-head) { color:var(--color-ok) }
+.unit-board :is([data-state="named"]:not(.unit-card), .unit-card[data-state="named"] .unit-head) { color:var(--color-ok) }
+.unit-board :is([data-state="working"]:not(.unit-card), .unit-card[data-state="working"] .unit-head) { color:var(--color-accent) }
+.unit-board :is([data-state="failed"]:not(.unit-card), .unit-card[data-state="failed"] .unit-head) { color:var(--color-warn) }
+.unit-board :is([data-state="stale"]:not(.unit-card), .unit-card[data-state="stale"] .unit-head) { color:var(--color-ai) }
 .unit-card strong { color:var(--color-text) }
 .unit-head-line { display:flex; flex-wrap:wrap; align-items:center; gap:var(--space-2) var(--space-0) }
 .unit-count { margin-left:auto; white-space:nowrap; font:var(--font-secondary); font-weight:var(--weight-strong); color:var(--color-text-secondary) }

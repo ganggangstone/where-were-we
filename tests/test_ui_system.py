@@ -23,13 +23,16 @@ for(const zoom of [1,1.5]){
  for(const sel of ['button.pill','h3']){const e=document.querySelector(sel);check(e.scrollWidth<=e.clientWidth+1,'Clipped long content '+sel+' zoom '+zoom);}
 }
 document.body.style.zoom='';
+check(style('#unitBody').color!==style('.unit-card .unit-state').color,'A saved unit card colours its body, not only its state mark');
+check(new Set([...document.querySelectorAll('.step-lanes span')].map(e=>getComputedStyle(e).color)).size===1,'Lane legend labels differ in colour');
+check(style('.step.unsure .tx').fontStyle==='italic' && style('.step.unsure .tx').color!==style('.s').color,'Uncertain step is not distinct or is faint');
 const disclosure=document.querySelector('.group details');disclosure.querySelector('summary').click();check(disclosure.open,'Disclosure cannot open');
 const input=document.querySelector('input[type=datetime-local]');input.disabled=false;input.value='2026-10-21T09:00';check(input.value==='2026-10-21T09:00','Date control unusable');
 window.uiSystemResult=JSON.stringify(errors);document.body.dataset.result=window.uiSystemResult;
 '''
 def page():
  links=''.join(f'<link rel="stylesheet" href="{(ROOT/"ui"/n).as_uri()}">' for n in ('tokens.css','app.css'))
- return f'''<!doctype html><meta charset="utf-8">{links}<body><header><details id="menu" open><summary class="btn">Menu</summary><div class="menu-panel"><button class="btn quiet" id="agent">Agent</button></div></details></header><div id="repository-bar"><details class="repository-detail"><summary>Code details</summary>Evidence</details></div><main><div id="map">Map</div><div id="insp"><article class="group"><div class="row"><div class="grow"><h3>Title</h3><h4>Problem</h4><p class="s">Metadata</p><p>Body</p><button class="pill click">PR #828</button></div></div><details><summary>More fields</summary><p>Evidence</p></details></article></div></main><dialog><h2>Settings</h2><input type="datetime-local"><input type="checkbox"><button class="btn primary">Save</button></dialog><script>{CHECKS}</script>'''
+ return f'''<!doctype html><meta charset="utf-8">{links}<body><header><details id="menu" open><summary class="btn">Menu</summary><div class="menu-panel"><button class="btn quiet" id="agent">Agent</button></div></details></header><div id="repository-bar"><details class="repository-detail"><summary>Code details</summary>Evidence</details></div><main><div id="map">Map</div><div id="insp"><article class="group"><div class="row"><div class="grow"><h3>Title</h3><h4>Problem</h4><p class="s">Metadata</p><p>Body</p><button class="pill click">PR #828</button></div></div><details><summary>More fields</summary><p>Evidence</p></details></article><section class="unit-board"><ul class="unit-cards"><li class="unit-card" data-state="saved"><button class="unit-head"><span class="unit-state">Saved</span></button><p id="unitBody">Body</p></li></ul></section><div class="step-lanes"><span class="screen">Screens</span><span class="server">Server</span><span class="store">Data</span><span class="external">External services</span></div><div class="step unsure"><div class="tx">Maybe</div></div></div></main><dialog><h2>Settings</h2><input type="datetime-local"><input type="checkbox"><button class="btn primary">Save</button></dialog><script>{CHECKS}</script>'''
 class SharedSystem(unittest.TestCase):
  def test_chrome_shared_styles_and_long_content(self):
   chrome=Path('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome')
