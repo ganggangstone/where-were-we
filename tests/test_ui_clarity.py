@@ -28,13 +28,13 @@ function visibleText(root){
  return text;
 }
 try{
- S.project='Lumen';S.projectInfo={repositories:[{id:'worker',name:'Worker'}]};S.branch='dev';S.maps={};
- const warnings=[{repository:'legacy',code:'collection_limited',part:'merged_prs'},{repository:'legacy',code:'collection_limited',part:'pr_files'},{repository:'worker',code:'collection_limited',part:'issues'},{repository:'legacy',code:'collection_failed'}];
+ S.project='Lumen';S.projectInfo={repositories:[{id:'web-app',name:'Lumen'},{id:'worker',name:'Worker'}]};S.branch='dev';S.maps={};
+ const warnings=[{repository:'web-app',code:'collection_limited',part:'merged_prs'},{repository:'web-app',code:'collection_limited',part:'pr_files'},{repository:'worker',code:'collection_limited',part:'issues'},{repository:'web-app',code:'collection_failed'}];
  const input=JSON.stringify(warnings),changes={entries:[]};S.changes=changes;S.chi=3;const settings=JSON.stringify(S.settings);
  for(const lang of ['ko','en']){
   S.lang=lang;S.briefings={dev:{[lang]:{state:'not_analyzed',warnings,result:null}}};
   const pane=$('insp');pane.innerHTML=(b=>b.head+b.cards+`<details><summary>${tr('자세한 목록')}</summary>${b.detail}</details>`)(briefingPanel());let text=visibleText(pane);
-  assert(!text.includes('legacy'),'Internal legacy label must not be displayed');
+  assert(!text.includes('web-app'),'Internal repository IDs must not be displayed');
   const limit=tr('일부 파일이나 PR이나 이슈가 빠졌을 수 있다.');assert(text.split(limit).length-1===2,'One limit warning per code connection, not per collection part');
   assert(text.includes('Lumen')&&text.includes('Worker'),'Connection display names must remain distinct');
   assert(text.includes(tr('코드를 읽지 못했다. 새로고침하면 다시 읽는다.')),'An actionable collection failure remains visible');

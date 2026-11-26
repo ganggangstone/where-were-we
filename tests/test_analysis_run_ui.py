@@ -578,14 +578,15 @@ assert(!$('savedOverview0'),'Hide a sample from previous settings');
 assert(count('analysis_run_start')===0,'Reopening costs no model call');
 ''')
 
-    def test_legacy_overview_requires_server_validated_live_git_pins(self):
+    def test_saved_overview_requires_live_git_and_configuration_pins(self):
         self.check_js(r'''
-await open();S.maps={dev:{commit:'older-map'}};
-const group={repository:'',commit:'current-head',configuration:'config',files:['app'],items:[{name:'Start',description:'Runs the app',file:'app',line:2,quote:'run_command()'}],format:'overview-v1'};
+await open();S.maps={dev:{commit:'older-map'}};S.repository='';
+const code={id:'web',commits:{dev:'older-head'},fingerprint:'config'};S.projectInfo={...S.projectInfo,repositories:[code]};
+const group={repository:'web',commit:'current-head',configuration:'config',files:['app'],items:[{name:'Start',description:'Runs the app',file:'app',line:2,quote:'run_command()'}],format:'overview-v1'};
 status=runRecord('completed',{intent:{task:'overview',targets:[]},saved_overviews:[group]});
 await AnalysisRun.check();assert(!$('savedOverview0'),'Missing live pin hides results');
-status.current_legacy_pin={commit:group.commit,configuration:group.configuration};
-await AnalysisRun.check();assert($('savedOverview0') && $('insp').innerHTML.includes('Runs the app'),'Verified current legacy result opens despite an old basic map');
+code.commits.dev=group.commit;
+await AnalysisRun.check();assert($('savedOverview0') && $('insp').innerHTML.includes('Runs the app'),'A result pinned to the current code opens despite an old basic map');
 const html=$('insp').innerHTML;
 assert(html.includes('Feature diagram by source file') && /<li><code>app<\/code><ul><li><b>Start<\/b>/.test(html),'Verified feature is a child of its cited file');
 assert(html.includes('app:2') && html.includes('run_command()'),'Diagram node retains the pinned evidence');
@@ -607,10 +608,10 @@ assert(grouped.includes('Fetch the current runs') && grouped.includes('Evidence 
 globalThis.flowActions=()=>'';
 globalThis.flowDataSteps=(steps,evidence)=>steps ? evidence('models.py',9) : '';
 const step={...group.connections[0],data_steps:[{operation:'read',model:'Run'}]};
-S.maps.dev.structure_index={commit:group.commit,service_flow:{connections:[step]}};
+S.maps.dev.structure_indexes=[{repository:'web',commit:group.commit,service_flow:{connections:[step]}}];
 await AnalysisRun.check();assert($('insp').innerHTML.includes('models.py:9'),'Matching pinned endpoints add storage evidence to saved features');
-S.maps.dev.structure_index.commit='moved';await AnalysisRun.check();assert(!$('insp').innerHTML.includes('models.py:9'),'Never join data stages from a different snapshot');
-status.current_legacy_pin.configuration='changed';await AnalysisRun.check();
+S.maps.dev.structure_indexes[0].commit='moved';await AnalysisRun.check();assert(!$('insp').innerHTML.includes('models.py:9'),'Never join data stages from a different snapshot');
+code.fingerprint='changed';await AnalysisRun.check();
 assert(!$('savedOverview0'),'Configuration mismatch hides the sample');
 ''')
 

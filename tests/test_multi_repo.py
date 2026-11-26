@@ -84,17 +84,6 @@ class GitHubAccounts(TemporaryProject):
         self.assertEqual(project.config('demo')['repositories'][0]['github']['account'],'alice')
         self.assertEqual(project.states('demo')['web']['generation'],generation)
 
-    def test_legacy_refresh_context_remembers_account_for_same_folder(self):
-        folder=self.root/'legacy';folder.mkdir()
-        project.atomic(folder/'dev.json',sample('/demo/web'))
-        repo=project.github_repository('legacy','')
-        project.remember_github('legacy',repo)
-        remembered=project.github_repository('legacy','')
-        self.assertEqual(remembered['github']['account'],'bob')
-        project.set_github_account('legacy','','alice')
-        adopted=project.configure('legacy',{'repositories':[{'id':'web','path':'/demo/web','legacy':True}]})
-        self.assertEqual(adopted['repositories'][0]['github']['account'],'alice')
-
 class RefreshSettings(TemporaryProject):
     def test_program_details_show_saved_jobs_and_empty_state_without_request_button(self):
         import shutil,subprocess
@@ -169,7 +158,7 @@ S.jobs.nodes={};view=sysInspector({});assert.ok(view.includes('Program jobs have
 
     def run_refresh_case(self, ai):
         import runpy, subprocess
-        folder=self.root/'legacy';folder.mkdir()
+        folder=self.root/'stage';folder.mkdir()
         current=sample('/demo/repo','bbbbbbbb')
         current['extractor']=mapcore.extractor_id(str(folder))
         if ai:
@@ -193,8 +182,8 @@ S.jobs.nodes={};view=sysInspector({});assert.ok(view.includes('Program jobs have
                     previous=sample('/demo/repo','aaaaaaaa');previous['screens']=[]
                     Path(args[-1]).write_text(json.dumps(previous))
             return subprocess.CompletedProcess(args,0,output,'')
-        with patch.object(sys,'argv',['refresh.py','legacy','/demo/repo','7']), \
-             patch.dict(os.environ,{'WHERE_WERE_WE_REFS':'{"dev":"origin/dev"}'}), \
+        with patch.object(sys,'argv',['refresh.py','stage','/demo/repo','7']), \
+             patch.dict(os.environ,{'WHERE_WERE_WE_COLLECTION_STAGE':'1','WHERE_WERE_WE_REFS':'{"dev":"origin/dev"}'}), \
              patch('subprocess.run',side_effect=run):
             runpy.run_path(str(Path(project.__file__).with_name('refresh.py')),run_name='__main__')
             first=json.loads((folder/'changes.json').read_text())
@@ -324,23 +313,19 @@ window.__TAURI__={core:{invoke:async(command,args)=>{
   assert(created.repositories[0].api_targets[0]===apiId,'Server identity must survive the UI selection');
   assert(created.shared_data[0].id && created.shared_data[0].members.length===2,'Shared-data IDs are automatic and members survive');
   const existing={repositories:[{id:'custom-id',name:'Web',path:'/demo/old',refs:{dev:'origin/release',main:'v1.0'},
-    layout:{frontend:null,backend:'app'},api_targets:['server-key'],legacy:true},
+    layout:{frontend:null,backend:'app'},api_targets:['server-key']},
     {id:'server-key',name:'Server',path:'/demo/server',refs:{dev:'HEAD',main:null},layout:{},api_targets:[]}],
     shared_data:[{id:'existing-data',members:[{repository:'custom-id',table:'users'},{repository:'server-key',table:'users'}]}]};
   S.projectInfo=structuredClone(existing);editProject(false);change(0,'name','Renamed Web');
   await $('saveProject').onclick();
   const updated=saved.at(-1);
-  assert(updated.repositories[0].id==='custom-id' && updated.repositories[0].legacy,'Existing identity and legacy flag must stay');
+  assert(updated.repositories[0].id==='custom-id','Existing identity must stay');
   assert(updated.repositories[0].refs.dev==='origin/release' && updated.repositories[0].refs.main==='v1.0','Existing branch/tag refs must stay');
   assert(updated.repositories[0].layout.frontend===null && updated.repositories[0].layout.backend==='app','Existing source-root settings must stay');
   assert(updated.shared_data[0].id==='existing-data','Existing shared-data identity must stay');
   assert(updated.repositories[0].api_targets[0]==='server-key','Existing server connection must stay');
   assert(updated.shared_data[0].members.length===2,'Existing shared members must stay');
   assert(S.projectInfo.repositories[0].name==='Web','Editing must not mutate the loaded project before saving');
-  S.projectInfo={repositories:[],shared_data:[]};S.maps={main:{repo:'/demo/legacy'}};
-  editProject(false);await $('saveProject').onclick();
-  const legacy=saved.at(-1).repositories[0];
-  assert(legacy.legacy && legacy.id==='original' && legacy.refs.dev===null && legacy.refs.main==='origin/main','Main-only legacy maps must remain main-only');
   S.lang='en';S.maps={};editProject(true);
   assert(!/[가-힣]/.test($('project-dialog').innerText),'English form must not show untranslated interface text');
   const shownError=registrationError('ValueError: Use an absolute repository folder path');assert(shownError.startsWith('Enter the full path to the folder containing the code.') && shownError.includes('Use an absolute repository folder path</pre>'),'Use plain English errors and keep the original in details');
@@ -481,9 +466,6 @@ class Projects(TemporaryProject):
         self.assertEqual(scope['frontend'],'needs_analysis')
         self.assertEqual(scope['backend'],'disabled')
         self.assertEqual(scope['source'],'basic')
-        folder=self.root/'legacy';folder.mkdir()
-        (folder/'dev.json').write_text(json.dumps(raw))
-        self.assertEqual(project.read_bundle('legacy')['project']['analysis_scope']['dev']['frontend'],'needs_analysis')
 
     def test_ai_empty_results_and_legacy_missing_coverage_stay_unverified(self):
         snapshot=sample('/demo/web');snapshot['screens']=[]
@@ -523,19 +505,20 @@ class Projects(TemporaryProject):
         self.assertEqual({p['title'] for p in data['status']['open_prs']}, {'[web] Settings','[admin] Settings'})
         self.assertEqual(scoped['status']['open_prs'][0]['title'], 'Settings')
 
-    def test_legacy_session_fields_are_not_returned_or_migrated_into_project_views(self):
-        folder=self.root/'legacy';folder.mkdir()
+    def test_session_fields_are_not_returned_or_rewritten_when_an_older_folder_moves(self):
+        folder=self.root/'older';folder.mkdir()
         (folder/'dev.json').write_text(json.dumps(sample('/demo/old')))
         old=json.dumps({'worktrees':[{'path':'/demo/feature','branch':'feature','uncommitted':['src/Settings.tsx'],
              'screens':['/settings'],'session_count':1,'sessions':[{'id':'old-session','last':'2026-10-01'}]}]})
         (folder/'status.json').write_text(old)
-        for adopted in (False,True):
-            if adopted:project.configure('legacy',{'repositories':[{'id':'old','path':'/demo/old','legacy':True}]})
-            work=project.read_bundle('legacy')['status']['worktrees'][0]
+        for _ in range(2):
+            work=project.read_bundle('older')['status']['worktrees'][0]
             self.assertNotIn('sessions',work);self.assertNotIn('session_count',work)
             self.assertEqual(work['branch'],'feature')
             self.assertEqual(work['uncommitted'],['src/Settings.tsx'])
-        self.assertEqual((folder/'status.json').read_text(),old)
+        self.assertEqual((folder/project.OLD_FILES/'status.json').read_text(),old)
+        repo=project.config('older')['repositories'][0]
+        self.assertEqual(json.loads((project.repository_folder('older',repo,project.states('older'))/'status.json').read_text()),json.loads(old))
 
     def test_config_rejects_path_traversal_and_duplicate_ids(self):
         for repositories in ([{'id':'../escape','path':'/demo/a'}],
@@ -553,23 +536,12 @@ class Projects(TemporaryProject):
         self.assertIn('GitHub unavailable',bundle['project']['repositories'][0]['error'])
         self.assertTrue(bundle['project']['repositories'][0]['last_success'])
 
-    def test_legacy_adoption_preserves_source_files(self):
-        home=self.root/'legacy';home.mkdir()
-        text=json.dumps(sample('/demo/old'));(home/'dev.json').write_text(text)
-        project.configure('legacy', {'repositories':[{'id':'old','path':'/demo/old','legacy':True}]})
-        self.assertEqual((home/'dev.json').read_text(),text)
-        self.assertEqual(project.read_bundle('legacy')['dev']['screens'][0]['repository'],'old')
-
-    def test_main_only_legacy_requires_explicit_adoption(self):
-        home=self.root/'legacy';home.mkdir()
-        original=json.dumps(sample('/demo/old'));(home/'main.json').write_text(original)
-        with self.assertRaisesRegex(ValueError,'legacy'):
-            project.configure('legacy',{'repositories':[{'id':'new','path':'/demo/new'}]})
-        self.assertFalse((home/'project.json').exists())
-        self.assertEqual((home/'main.json').read_text(),original)
-        project.configure('legacy',{'repositories':[{'id':'old','path':'/demo/old','legacy':True,
-                                                   'refs':{'dev':None,'main':'origin/main'}}]})
-        self.assertEqual(project.read_bundle('legacy')['main']['screens'][0]['repository'],'old')
+    def test_main_only_older_folder_keeps_only_its_collected_role(self):
+        home=self.root/'older';home.mkdir()
+        (home/'main.json').write_text(json.dumps({**sample('/demo/old'),'ref':'origin/main'}))
+        repo=project.config('older')['repositories'][0]
+        self.assertEqual((repo['id'],repo['refs']),(project.MIGRATED,{'dev':None,'main':'origin/main'}))
+        self.assertEqual(project.read_bundle('older')['main']['screens'][0]['repository'],project.MIGRATED)
 
 class Connections(TemporaryProject):
     def inputs(self):
@@ -914,36 +886,6 @@ class Collection(TemporaryProject):
         self.assertNotIn('test-token',json.dumps(after))
         self.assertEqual(active.read_text(),'bob')
         self.assertEqual(json.loads(self.run_cli(env,'github-accounts','studio','--repository','web').stdout)['accounts'],['alice','bob'])
-
-    def test_legacy_account_switch_and_failure_preserve_successful_files(self):
-        import subprocess
-        env=self.environment();active=self.root/'active-account';active.write_text('alice')
-        env.update(FAKE_GITHUB='1',FAKE_ACTIVE=str(active))
-        folder=Path(env['WHERE_WERE_WE_ROOT'])/'legacy';folder.mkdir(parents=True)
-        (folder/'dev.json').write_text(json.dumps(sample(str(self.root/'web'))))
-        def refresh(extra=None):
-            return subprocess.run([sys.executable,'-I','-B',str(Path(project.__file__).with_name('refresh.py')),'legacy',str(self.root/'web')],env={**env,**(extra or {})},capture_output=True,text=True)
-        first=refresh();self.assertEqual(first.returncode,0,first.stderr)
-        active.write_text('bob')
-        second=refresh();self.assertEqual(second.returncode,0,second.stderr)
-        previous={n:(folder/n).read_bytes() for n in ('dev.json','main.json','status.json','changes.json')}
-        denied=refresh({'FAKE_GH_DENY':'1'})
-        self.assertEqual(denied.returncode,0,denied.stderr)
-        def check_cached():
-            status=json.loads((folder/'status.json').read_text())
-            old=json.loads(previous['status.json'])
-            for field in ('merged_prs','open_prs','issues','linked_issues'):
-                self.assertEqual(status[field],old[field])
-            self.assertEqual(status['collection']['github'],{'state':'unavailable','last_success_at':old['generated_at'],'repository':'example/studio'})
-        check_cached()
-        sources=Path(env['FAKE_SOURCES']);changed=json.loads(sources.read_text())
-        changed[str(self.root/'web')]['src/Settings.tsx']+='\n// changed after successful collection\n'
-        sources.write_text(json.dumps(changed))
-        late_failure=refresh({'FAKE_GH_FAIL':'1'})
-        self.assertEqual(late_failure.returncode,0,late_failure.stderr)
-        check_cached()
-        self.assertNotEqual(json.loads(previous['dev.json'])['commit'],json.loads((folder/'dev.json').read_text())['commit'])
-        self.assertEqual(active.read_text(),'bob')
 
     def environment(self):
         sources={}

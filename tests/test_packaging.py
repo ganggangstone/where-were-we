@@ -28,6 +28,16 @@ builder = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(builder)
 
 
+def repository():
+    import project
+    selected = patch.object(project, 'selected_repository', return_value={'id': 'api'})
+    folder = patch.object(project, 'repository_folder', return_value='/demo/snapshot')
+    states = patch.object(project, 'states', return_value={})
+    from contextlib import ExitStack
+    stack = ExitStack()
+    for item in (selected, folder, states): stack.enter_context(item)
+    return stack
+
 class PromptPaths(unittest.TestCase):
     def test_every_local_module_a_packaged_file_imports_is_packaged(self):
         """A module missing from BACKEND_FILES imports fine from the checkout and breaks only in the installed app."""
@@ -53,7 +63,7 @@ class PromptPaths(unittest.TestCase):
             # The global-instructions section is copied into the agent's settings, so it must carry the rule itself.
             section = prompt[prompt.index('## where-were-we'):prompt.index('\n\n4.')]
             assert_reply_language(self, section, lang)
-            with patch.object(mapcore, 'tests_conf', return_value={'files':['test_*.py'], 'calls':['<function>(']}):
+            with patch.object(mapcore, 'tests_conf', return_value={'files':['test_*.py'], 'calls':['<function>(']}), repository():
                 assert_reply_language(self, mapcore.tests_prompt('demo', ['api/x.py::run'], lang=lang), lang)
     def test_prompt_languages_keep_commands_and_project_text(self):
         with patch.object(mapcore, 'projects', return_value=[]):
@@ -63,7 +73,7 @@ class PromptPaths(unittest.TestCase):
         self.assertIn('Before changing configuration', english)
         self.assertIn('claude mcp add --scope user where-were-we --', english)
         self.assertIn('[mcp_servers.where-were-we]', english)
-        with patch.object(mapcore, 'tests_conf', return_value={'files':['test_*.py'], 'calls':['client.<method>("<path>")']}):
+        with patch.object(mapcore, 'tests_conf', return_value={'files':['test_*.py'], 'calls':['client.<method>("<path>")']}), repository():
             prompt = mapcore.tests_prompt('원문-project', ['backend/render.py::cancel'], lang='en')
         self.assertIn('원문-project', prompt)
         self.assertIn('backend/render.py::cancel', prompt)
@@ -78,18 +88,12 @@ class PromptPaths(unittest.TestCase):
         calls = []
         process = SimpleNamespace(run=lambda args, **kwargs: (calls.append(args) or
                                  SimpleNamespace(returncode=0, stdout='', stderr='')))
-        for filename in ('refresh.py', 'mcp_server.py'):
-            tree = ast.parse((ROOT / filename).read_text())
-            name = 'run' if filename == 'refresh.py' else 'refresh'
-            function = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == name)
-            function.decorator_list = []
-            scope = dict(subprocess=process, sys=sys, mapcore=mapcore, os=os, HERE='/bundled backend',
-                         need=lambda project: project, changes=lambda project: '',
-                         project_store=SimpleNamespace(config=lambda project: None))
-            exec(compile(ast.Module(body=[function], type_ignores=[]), filename, 'exec'), scope)
-            if name == 'run': scope[name]('/bundled backend/extract.py', 'fake')
-            else: scope[name]('fake')
-            self.assertEqual(calls[-1][:3], [sys.executable, '-I', '-B'])
+        tree = ast.parse((ROOT / 'refresh.py').read_text())
+        function = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == 'run')
+        scope = dict(subprocess=process, sys=sys, mapcore=mapcore)
+        exec(compile(ast.Module(body=[function], type_ignores=[]), 'refresh.py', 'exec'), scope)
+        scope['run']('/bundled backend/extract.py', 'fake')
+        self.assertEqual(calls[-1][:3], [sys.executable, '-I', '-B'])
 
     def test_installed_interpreter_and_paths_with_spaces(self):
         base = Path('/Applications/where were we.app/Contents/Resources/runtime')

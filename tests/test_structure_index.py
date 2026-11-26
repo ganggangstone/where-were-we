@@ -8,6 +8,15 @@ from unittest.mock import patch
 import structure_index
 
 
+def publish(folder,path,refs,snapshot):
+    """A configured one-repository project 'demo' whose 'web' snapshot is the given maps."""
+    import project
+    with patch('mapcore.ROOT',str(folder.parent)):
+        current=project.configure('demo',{'repositories':[{'id':'web','path':str(path),'refs':refs}]})['repositories'][0]
+        project.publish('demo','web',snapshot,{'fingerprint':project.fingerprint(current)})
+    return current
+
+
 class Structure(unittest.TestCase):
     def test_pinned_declarations_and_exact_imports_without_reading_private_or_untracked_files(self):
         with tempfile.TemporaryDirectory() as root:
@@ -98,12 +107,12 @@ class Structure(unittest.TestCase):
             with self.assertRaises(ValueError):
                 structure_index.build(root,pin,only_file='../target.py')
             folder=repo/'maps'/'demo'
-            folder.mkdir(parents=True)
-            (folder/'dev.json').write_text(json.dumps({'repo':root,'ref':'HEAD','commit':pin,'structure_index':{'commit':pin}}))
-            cmd=[sys.executable,str(Path(structure_index.__file__).with_name('project.py')),'file-structure','demo','--','','dev']
+            dev={'repo':root,'ref':'HEAD','commit':pin,'structure_index':{'commit':pin}}
+            current=publish(folder,root,{'dev':'HEAD','main':pin},{'dev':dev})
+            cmd=[sys.executable,str(Path(structure_index.__file__).with_name('project.py')),'file-structure','demo','--','web','dev']
             env={**os.environ,'WHERE_WERE_WE_ROOT':str(folder.parent)}
             self.assertEqual(json.loads(subprocess.check_output(cmd+[pin,'target.py'],env=env)),result)
-            (folder/'main.json').write_text(json.dumps({'repo':root,'ref':pin,'commit':pin,'inventory':{'commit':pin}}))
+            publish(folder,root,current['refs'],{'dev':dev,'main':{'repo':root,'ref':pin,'commit':pin,'inventory':{'commit':pin}}})
             main_cmd=cmd[:-1]+['main']
             self.assertEqual(json.loads(subprocess.check_output(main_cmd+[pin,'target.py'],env=env)),result)
             git('-c','user.name=Test','-c','user.email=test@example.invalid','commit','--allow-empty','-qm','Advance dev')
@@ -349,35 +358,34 @@ func Ignored() *c.Command {
             with self.assertRaises(ValueError):
                 structure_index.build(root,pin,directory='pkg/../pkg2')
             folder=repo/'maps/demo'
-            folder.mkdir(parents=True)
-            saved=json.dumps({'repo':root,'ref':'HEAD','commit':pin,'inventory':{'commit':pin}})
-            (folder/'dev.json').write_text(saved)
-            cmd=[sys.executable,str(Path(structure_index.__file__).with_name('project.py')),'directory-structure','demo','--','','dev']
+            saved={'repo':root,'ref':'HEAD','commit':pin,'inventory':{'commit':pin}}
+            current=publish(folder,root,{'dev':'HEAD','main':None},{'dev':saved})
+            cmd=[sys.executable,str(Path(structure_index.__file__).with_name('project.py')),'directory-structure','demo','--','web','dev']
             env={**os.environ,'WHERE_WERE_WE_ROOT':str(folder.parent)}
             response=json.loads(subprocess.check_output(cmd+[pin,'pkg'],env=env))
             self.assertEqual(response.pop('cache_progress'),{'pages':[1],'total_pages':1,'indexed_files':2,'selected_files':2,'unparsed_files':0,'first_missing_page':None})
             self.assertEqual(response,result)
             import project
             with patch('mapcore.ROOT',folder.parent),patch.object(structure_index,'build',side_effect=AssertionError('cache miss')):
-                reopened=project.selected_structure('demo','','dev',pin,directory='pkg')
+                reopened=project.selected_structure('demo','web','dev',pin,directory='pkg')
                 self.assertEqual(reopened.pop('cache_progress')['pages'],[1])
                 self.assertEqual(reopened,result)
             with patch('mapcore.ROOT',folder.parent),patch.object(structure_index,'MAX_DIRECTORY_FILES',1),patch.object(structure_index,'_blobs',wraps=structure_index._blobs) as blobs:
-                second=project.selected_structure('demo','','dev',pin,directory='pkg',page=2)
+                second=project.selected_structure('demo','web','dev',pin,directory='pkg',page=2)
                 self.assertEqual(second['pagination']['page'],2)
                 self.assertEqual(second['pagination']['selected_files'],1)
                 self.assertEqual([p for call in blobs.call_args_list for p,_ in call.args[2]],
                                  [f['file'] for f in second['files']])
                 with patch.object(structure_index,'build',side_effect=AssertionError('cache miss')):
-                    self.assertEqual(project.selected_structure('demo','','dev',pin,directory='pkg',page=2),second)
+                    self.assertEqual(project.selected_structure('demo','web','dev',pin,directory='pkg',page=2),second)
                 self.assertEqual(second['cache_progress']['pages'],[2])
                 self.assertEqual(second['cache_progress']['first_missing_page'],1)
-                first=project.selected_structure('demo','','dev',pin,directory='pkg')
+                first=project.selected_structure('demo','web','dev',pin,directory='pkg')
                 self.assertEqual(first['cache_progress']['pages'],[1,2])
-                slot1,_=project._directory_cache('demo',{'path':root,'refs':{'dev':'HEAD'},'layout':{}},'','dev',pin,'pkg',1)
+                slot1,_=project._directory_cache('demo',current,'web','dev',pin,'pkg',1)
                 project.atomic(slot1,{'key':'unrelated:17','result':{}})
                 with patch.object(structure_index,'build',side_effect=AssertionError('cache miss')):
-                    reopened=project.selected_structure('demo','','dev',pin,directory='pkg',page=2)
+                    reopened=project.selected_structure('demo','web','dev',pin,directory='pkg',page=2)
                 self.assertEqual(reopened['cache_progress']['pages'],[2])
                 self.assertEqual(reopened['cache_progress']['indexed_files'],1)
                 self.assertEqual(reopened['cache_progress']['first_missing_page'],1)
@@ -390,10 +398,10 @@ func Ignored() *c.Command {
             import analysis_run
             policy=analysis_run._secret
             with patch('mapcore.ROOT',folder.parent),patch.object(analysis_run,'_secret',side_effect=lambda f:policy(f) or f=='pkg/main.py'):
-                filtered=project.selected_structure('demo','','dev',pin,directory='pkg')
+                filtered=project.selected_structure('demo','web','dev',pin,directory='pkg')
                 self.assertEqual([f['file'] for f in filtered['files']],['pkg/nested/work.py'])
             with patch('mapcore.ROOT',folder.parent),patch.object(structure_index,'VERSION',structure_index.VERSION+1),patch.object(structure_index,'build',wraps=structure_index.build) as updated:
-                project.selected_structure('demo','','dev',pin,directory='pkg')
+                project.selected_structure('demo','web','dev',pin,directory='pkg')
                 updated.assert_called_once()
             build=structure_index.build
             def advance_during_read(*args,**kwargs):
@@ -402,10 +410,11 @@ func Ignored() *c.Command {
                 return result
             with patch('mapcore.ROOT',folder.parent),patch.object(structure_index,'build',side_effect=advance_during_read):
                 with self.assertRaisesRegex(ValueError,'Code changed'):
-                    project.selected_structure('demo','','dev',pin,directory='pkg/nested')
+                    project.selected_structure('demo','web','dev',pin,directory='pkg/nested')
             stale=subprocess.run(cmd+['0'*40,'pkg'],env=env,capture_output=True)
             self.assertNotEqual(stale.returncode,0)
-            self.assertEqual((folder/'dev.json').read_text(),saved)
+            with patch('mapcore.ROOT',folder.parent):
+                self.assertEqual(json.loads((project.repository_folder('demo',current,project.states('demo'))/'dev.json').read_text()),saved)
 
     def test_next_routes_require_project_ownership_static_config_and_named_exports(self):
         with tempfile.TemporaryDirectory() as root:

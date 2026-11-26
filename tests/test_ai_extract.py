@@ -153,7 +153,7 @@ class Analysis(unittest.TestCase):
             commands.append(command)
             if any(str(x).endswith('/collect.py') for x in command):return subprocess.CompletedProcess(command,0,'','')
             return real_run(command,**kwargs)
-        with patch.object(sys,'argv',['refresh.py','stage',str(self.repo)]),patch.dict(os.environ,{'WHERE_WERE_WE_REFS':json.dumps({'dev':'HEAD','main':None})}),patch('subprocess.run',side_effect=run):
+        with patch.object(sys,'argv',['refresh.py','stage',str(self.repo)]),patch.dict(os.environ,{'WHERE_WERE_WE_COLLECTION_STAGE':'1','WHERE_WERE_WE_REFS':json.dumps({'dev':'HEAD','main':None})}),patch('subprocess.run',side_effect=run):
             runpy.run_path(str(Path(__file__).resolve().parents[1]/'refresh.py'),run_name='__main__')
         refreshed=json.loads((folder/'dev.json').read_text())
         self.assertEqual(refreshed['commit'],self.commit)

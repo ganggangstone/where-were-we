@@ -109,7 +109,7 @@ class Briefing(unittest.TestCase):
         self.record(self.request())
         view=briefing.view('demo','','dev','en')
         self.assertEqual(view['state'],'saved');self.assertTrue(view['warnings'])
-    def test_missing_legacy_evidence_needs_collection_not_no_changes(self):
+    def test_missing_evidence_needs_collection_not_no_changes(self):
         repo=project.config('demo')['repositories'][0]
         project.publish('demo','web',{'dev':sample('/demo/web')},{'fingerprint':project.fingerprint(repo)})
         view=briefing.view('demo','web','dev','en')
@@ -129,18 +129,19 @@ class Briefing(unittest.TestCase):
         self.assertIsNone(whole['result']);self.assertEqual(whole['earlier']['repository'],'web')
         self.assertNotIn('earlier',briefing.view('demo','api','dev','en'))
 
-    def test_legacy_project_keeps_comparison_files_unchanged(self):
+    def test_folder_before_project_json_keeps_its_comparison_history(self):
         repo=project.config('demo')['repositories'][0]
         raw=project.raw_bundle(project.repository_folder('demo',repo,project.states('demo')))
         for field,value in raw.items():
-            if value is not None:project.atomic(self.root/'legacy'/(field+'.json'),value)
-        changes=(self.root/'legacy/changes.json').read_bytes()
-        request=briefing.request('legacy',lang='en')
+            if value is not None:project.atomic(self.root/'older'/(field+'.json'),value)
+        changes=json.loads((self.root/'older/changes.json').read_text())
+        request=briefing.request('older',lang='en')
         self.record(request)
-        view=briefing.view('legacy',lang='en')
+        view=briefing.view('older',lang='en')
         self.assertEqual(view['state'],'saved')
-        self.assertEqual(view['result']['cards'][0]['prs'][0]['repository'],'legacy')
-        self.assertEqual((self.root/'legacy/changes.json').read_bytes(),changes)
+        self.assertEqual(view['result']['cards'][0]['prs'][0]['repository'],project.MIGRATED)
+        moved=project.config('older')['repositories'][0]
+        self.assertEqual(project.raw_bundle(project.repository_folder('older',moved,project.states('older')))['changes'],changes)
 
     def test_linked_issue_failure_is_visible_per_source(self):
         repo=project.config('demo')['repositories'][0]

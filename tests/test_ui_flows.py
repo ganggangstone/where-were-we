@@ -1728,8 +1728,6 @@ class UxWriting(unittest.TestCase):
  repos[0].config_changed=true;guideStep(2);
  assert($('guide').innerText.includes(tr('설정을 바꿨다. 새로고침하면 지도에 반영된다.')) && !guideHasMap(),'Changed settings are not reported as a ready map');
  repos[0].config_changed=false;repos[1].collected=true;repos[1].commits={dev:'cccccccc3333'};assert(guideHasMap(),'Refreshed code is ready again');
- S.projectInfo.repositories=[];guideStep(2);
- assert($('guide').innerText.includes('/fictional') && $('guide').innerText.includes(tr('지도 준비됨')),'A legacy single-folder service shows its folder and map');
  closeGuide();
 ''')
 

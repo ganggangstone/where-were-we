@@ -243,7 +243,7 @@ class Incremental(unittest.TestCase):
             if any(str(x).endswith('/collect.py') for x in command):return subprocess.CompletedProcess(command,0,'','')
             if Path(str(command[0])).name in ('claude','codex','gemini'):raise AssertionError('Real AI calls are forbidden')
             return real(command,**kwargs)
-        with patch.object(sys,'argv',['refresh.py','stage',str(self.repo)]),patch.dict(os.environ,{'WHERE_WERE_WE_REFS':json.dumps({'dev':'HEAD','main':None})}),patch('subprocess.run',side_effect=run):
+        with patch.object(sys,'argv',['refresh.py','stage',str(self.repo)]),patch.dict(os.environ,{'WHERE_WERE_WE_COLLECTION_STAGE':'1','WHERE_WERE_WE_REFS':json.dumps({'dev':'HEAD','main':None})}),patch('subprocess.run',side_effect=run):
             runpy.run_path(str(Path(__file__).resolve().parents[1]/'refresh.py'),run_name='__main__')
         saved=json.loads((stage/'dev.json').read_text())
         self.assertEqual((saved['commit'],saved['analysis']['stale'],saved['analysis']['carried_from']),(head,False,m['commit']))
