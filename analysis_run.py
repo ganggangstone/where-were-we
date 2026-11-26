@@ -13,7 +13,6 @@ import os
 from pathlib import Path, PurePosixPath
 import re
 import selectors
-import shutil
 import subprocess
 import sys
 import threading
@@ -1259,145 +1258,6 @@ def _strict_jobs(payload,code,raw,evidence,fail):
                 if key=='made_by' and any(k not in routes or item['file'] not in [routes[k]['file'],*routes[k].get('services',[])] for k in item.get('routes',[])):fail()
 
 
-def _spelling(value):
-    """An ID with case, dashes and underscores ignored: independent batches name one program 'image_worker' and 'image-worker'."""
-    return re.sub(r'[^a-z0-9]','',str(value).lower()) or None
-
-def _ev_key(e):return (e.get('file'),e.get('line'),e.get('quote'))
-
-def _evidence_keys(items):
-    return {_ev_key(e) for e in items or [] if isinstance(e,dict)}
-
-def _union_evidence(*lists):
-    out=[];seen=set()
-    for items in lists:
-        for e in items or []:
-            key=_ev_key(e) if isinstance(e,dict) else repr(e)
-            if key not in seen:seen.add(key);out.append(e)
-    return out
-
-def _same_node(a,b):
-    """Two saved structure nodes whose ids differ only by spelling are one thing only when the content says so: same kind, code folders that do not
-    contradict each other, and either the same name or a literally identical evidence item (file, line and quote)."""
-    if a.get('kind')!=b.get('kind'):return False
-    ca,cb=set(a.get('code') or []),set(b.get('code') or [])
-    if ca and cb and not ca&cb:return False
-    name=lambda n:re.sub(r'[^0-9a-z\uac00-\ud7a3]','',str(n.get('name') or '').lower())
-    return name(a)==name(b) or bool(_evidence_keys(a.get('ev')) & _evidence_keys(b.get('ev')))
-
-def _duplicate_groups(system):
-    """{'merge':[(key,[nodes])], 'ambiguous':[(key,[nodes])]} for nodes and externals sharing one spelling."""
-    found={'merge':[],'ambiguous':[]}
-    for key in ('nodes','externals'):
-        by=collections.defaultdict(list)
-        for n in system.get(key,[]):by[_spelling(n.get('id'))].append(n)
-        for members in by.values():
-            if len(members)<2:continue
-            parent=list(range(len(members)))
-            def find(i):
-                while parent[i]!=i:i=parent[i]
-                return i
-            for i in range(len(members)):
-                for j in range(i):
-                    if _same_node(members[i],members[j]):parent[find(i)]=find(j)
-            parts=collections.defaultdict(list)
-            for i,n in enumerate(members):parts[find(i)].append(n)
-            alone=[n for part in parts.values() if len(part)==1 for n in part]
-            for part in parts.values():
-                if len(part)<2:continue
-                # A chain of pairwise matches must not join two nodes that contradict each other.
-                ok=all(_same_node(a,b) for i,a in enumerate(part) for b in part[:i])
-                found['merge' if ok else 'ambiguous'].append((key,part))
-            if len(alone)>1 or (alone and len(parts)>1 and any(len(p)>1 for p in parts.values())):found['ambiguous'].append((key,alone))
-    return found
-
-def merge_duplicate_structure(system):
-    """The structure with identity-checked duplicate nodes merged. The first-listed richest node keeps its id and values; every other value, code folder,
-    use, evidence item and link of the removed ones is kept on it (differing values go into its unknown list). Returns (new system, report); raises if a check fails."""
-    found=_duplicate_groups(system)
-    new=copy.deepcopy(system)
-    remap={};merged=[]
-    ends=collections.Counter(e for l in system.get('links',[]) for e in (l.get('from'),l.get('to')))
-    for key,part in found['merge']:
-        keep=max(part,key=lambda n:(ends[n['id']]+len(n.get('uses') or []),-system[key].index(n)))
-        target=next(n for n in new[key] if n['id']==keep['id'])
-        removed=[n for n in part if n is not keep]
-        notes=[]
-        for other in removed:
-            twin=next(n for n in new[key] if n['id']==other['id'])
-            for field,value in twin.items():
-                if field in ('id','ev','code','uses','unknown','row','col'):continue
-                if field not in target:target[field]=value
-                elif target[field]!=value:notes.append(f"{other['id']}: {field}={str(value)[:300]}")
-            target['ev']=_union_evidence(target.get('ev'),twin.get('ev'))
-            for field in ('code','uses'):
-                if field in target or field in twin:target[field]=list(dict.fromkeys([*(target.get(field) or []),*(twin.get(field) or [])]))
-            if twin.get('unknown'):target['unknown']=[*(target.get('unknown') or []),*(u for u in twin['unknown'] if u not in (target.get('unknown') or []))]
-            remap[other['id']]=keep['id']
-            new[key]=[n for n in new[key] if n is not twin]
-        if notes:
-            lang=system.get('language')=='en'
-            head=('Merged duplicate nodes of the same program; their differing values: ' if lang else '같은 프로그램을 하나로 합쳤다. 서로 달랐던 내용: ')
-            target['unknown']=[*(target.get('unknown') or []),{'text':head+'; '.join(notes),'needs':'read'}]
-        merged.append({'kind':key,'kept':keep['id'],'removed':[n['id'] for n in removed],'names':[n.get('name') for n in part]})
-    external_ids={n['id'] for n in new.get('externals',[])}
-    for n in new.get('nodes',[]):
-        if 'uses' in n:n['uses']=list(dict.fromkeys(remap.get(u,u) for u in n['uses']))
-    links=[];index={};loops=[]
-    for link in new.get('links',[]):
-        link={**link,'from':remap.get(link.get('from'),link.get('from')),'to':remap.get(link.get('to'),link.get('to'))}
-        if link['from']==link['to']:loops.append(link);continue
-        key=(link['from'],link['to'],link.get('label'))
-        if key in index:links[index[key]]['ev']=_union_evidence(links[index[key]].get('ev'),link.get('ev'));continue
-        index[key]=len(links);links.append(link)
-    new['links']=links
-    if loops:
-        lang=system.get('language')=='en'
-        new['unknown']=[*(new.get('unknown') or []),{'text':('Links between duplicate nodes that became one node were dropped: ' if lang else '하나로 합쳐진 중복 노드끼리의 연결은 뺐다: ')+'; '.join(str(l.get('label'))[:200] for l in loops),'needs':'read'}]
-    # Checks: nothing else changed, no link or evidence lost, no new dangling end.
-    problems=[]
-    rest=lambda v:{k:x for k,x in v.items() if k not in ('nodes','externals','links','unknown')}
-    if rest(new)!=rest(system):problems.append('fields outside nodes, externals, links and unknown changed')
-    removed_ids=set(remap)
-    ids=lambda v:{n['id'] for n in v.get('nodes',[])}|{n['id'] for n in v.get('externals',[])}
-    if ids(new)!=ids(system)-removed_ids:problems.append('the node set is not the old set minus the removed ids')
-    before=sum(1 for l in system.get('links',[]) for e in (l.get('from'),l.get('to')) if e not in ids(system))
-    after=sum(1 for l in new['links'] for e in (l['from'],l['to']) if e not in ids(new))
-    if after>before:problems.append('a link end no longer resolves')
-    lost=_evidence_keys([e for l in system.get('links',[]) for e in l.get('ev',[])])-_evidence_keys([e for l in new['links'] for e in l.get('ev',[])])-_evidence_keys([e for l in loops for e in l.get('ev',[])])
-    if lost:problems.append('link evidence lost: '+str(sorted(lost,key=str)[:5]))
-    for key in ('nodes','externals'):
-        kept_ev=_evidence_keys([e for n in new.get(key,[]) for e in n.get('ev',[])])
-        gone=_evidence_keys([e for n in system.get(key,[]) if n['id'] in removed_ids for e in n.get('ev',[])])-kept_ev
-        if gone:problems.append(key+' evidence lost: '+str(sorted(gone,key=str)[:5]))
-    count=lambda v:{k:len(v.get(k,[])) for k in ('nodes','externals','links')}
-    report={'before':count(system),'after':count(new),'merged':merged,'dropped_self_links':len(loops),
-            'ambiguous':[{'kind':k,'ids':[n['id'] for n in part],'names':[n.get('name') for n in part]} for k,part in found['ambiguous']]}
-    if problems:raise RunError('repair_check_failed','Structure repair checks failed: '+'; '.join(problems))
-    return new,report
-
-def repair_structure(project,branch='dev',apply=False):
-    """Merge identity-checked duplicate nodes in the saved AI structure. The hand-written structure is never read or written. With apply, the previous
-    map file is kept beside it and a before/after record is written; nothing else changes. Never calls AI."""
-    root=store.home(project);target=root/(branch+'.json')
-    with store.locked(project):
-        if apply and active()['active']:raise RunError('analysis_active','An analysis is running; repair after it finishes')
-        raw=store.read(target)
-        system=((raw or {}).get('task_outputs') or {}).get('system')
-        if not isinstance(system,dict):raise RunError('no_structure','No saved AI structure for this branch')
-        new,report=merge_duplicate_structure(system)
-        report.update(project=project,branch=branch,applied=False)
-        if not apply or not report['merged']:return report
-        stamp=re.sub(r'\D','',store.now())[:14]
-        shutil.copy2(target,root/f'{branch}.json.before-structure-repair-{stamp}')
-        updated=copy.deepcopy(raw);updated['task_outputs']['system']=new
-        store.atomic(target,updated)
-        again=_duplicate_groups(store.read(target)['task_outputs']['system'])
-        if again['merge']:raise RunError('repair_check_failed','Mergeable duplicates remain after the repair')
-        report.update(applied=True,backup=f'{branch}.json.before-structure-repair-{stamp}')
-        store.atomic(root/f'structure-repair-{stamp}.json',report)
-        return report
-
 def _flow_details(flow):
     for action in flow.get('actions',[])[:2]:
         sites=[{'file':action['file'],'line':action[key]} for key in ('line','call_line') if action.get(key)]
@@ -2206,15 +2066,14 @@ def run(run_id, executor=None):
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command',choices=('prepare','start','status','cancel','retry','worker','providers','active','repair-structure'))
+    parser.add_argument('command',choices=('prepare','start','status','cancel','retry','worker','providers','active'))
     parser.add_argument('value',nargs='?');parser.add_argument('--project');parser.add_argument('--run-id')
     parser.add_argument('--repository',default='');parser.add_argument('--branch',default='dev');parser.add_argument('--lang',default='ko')
     parser.add_argument('--view',choices=('progress','catalog','resource','units','units_quick','unit','signals','latest'));parser.add_argument('--resource')
-    parser.add_argument('--intent',type=json.loads);parser.add_argument('--executor',default='claude');parser.add_argument('--expected-account');parser.add_argument('--apply',action='store_true')
+    parser.add_argument('--intent',type=json.loads);parser.add_argument('--executor',default='claude');parser.add_argument('--expected-account')
     args=parser.parse_args()
     if args.command=='providers': result=providers()
     elif args.command=='active': result=active()
-    elif args.command=='repair-structure': result=repair_structure(args.value or args.project,args.branch,args.apply)
     elif args.command in ('prepare','start'):
         prepared=prepare(args.value or args.project,args.branch,args.lang,args.repository,args.executor,launch_intended=args.command=='start',intent=args.intent)
         result=start(prepared['id'],json.loads(args.expected_account) if args.expected_account else None) if args.command=='start' else prepared

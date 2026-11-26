@@ -1,6 +1,4 @@
 """Full-code analysis by units: AI-free catalog, saved-as-you-go results, resume and stale handling. Fake executors only."""
-import copy
-import hashlib
 import json
 from pathlib import Path
 import sys
@@ -349,69 +347,6 @@ class LinkEvidence(unittest.TestCase):
         index={'imports':[{'file':'tests/test_web.py','line':1,'target':'api/s.py'},{'file':'web/a.ts','line':3,'target':'api/s.py'}],
                'service_flow':{'connections':[{'client':{'file':'web/b.ts','line':4},'server':{'file':'api/s.py','line':2}}]}}
         self.assertEqual(analysis_label.edges(index),[('web/a.ts',3,'api/s.py'),('web/b.ts',4,'api/s.py')])  # a test file shows no connection
-
-
-class StructureRepair(unittest.TestCase):
-    """Duplicate nodes saved before spelling-based merging existed: merged only when the content says they are one thing."""
-    def node(self,id,name,code=(),kind='program',ev=(),uses=()):
-        return {'id':id,'name':name,'kind':kind,'code':list(code),'uses':list(uses),'ev':[{'file':f,'line':l,'quote':q,'ok':True} for f,l,q in ev],'unknown':[]}
-    def link(self,a,b,label,ev=()):return {'from':a,'to':b,'label':label,'style':'','sure':'code','ev':[{'file':f,'line':l,'quote':q,'ok':True} for f,l,q in ev]}
-    def system(self):
-        return {'language':'en','commit':'c','nodes':[
-            self.node('web_api','API server',['api'],ev=[('api/app.py',1,'app=App()')],uses=['pg']),
-            self.node('web-api','API server (v2)',['api','api/db'],ev=[('api/app.py',1,'app=App()'),('api/db.py',3,'conn')],uses=['p_g']),
-            self.node('queue_worker','Queue worker',['api'],ev=[('compose.yml',9,'worker:')]),
-            self.node('queue-worker','Queue worker',['api'],ev=[('compose.yml',9,'worker:')]),
-            self.node('old_job','Old job',['legacy'],ev=[('a.py',1,'x')]),
-            self.node('old-job','New job',['api'],ev=[('b.py',1,'y')]),   # same spelling, different thing: kept apart
-            self.node('database','Database',kind='store',ev=[('compose.yml',3,'db:')])],
-            'externals':[{'id':'pg','name':'Postgres','ev':[{'file':'c.py','line':1,'quote':'pg'}]},{'id':'p_g','name':'Postgres','ev':[{'file':'c.py','line':2,'quote':'pg2'}]}],
-            'links':[self.link('web_api','database','reads',[('api/db.py',3,'conn')]),self.link('web-api','database','reads',[('api/db.py',7,'read')]),
-                     self.link('queue-worker','web_api','calls',[('compose.yml',9,'worker:')]),self.link('web_api','web-api','same',[('z',1,'z')]),
-                     self.link('old-job','database','writes',[('b.py',2,'w')])],
-            'others':[{'text':'x'}],'unknown':[{'text':'old note','needs':'read'}]}
-
-    def test_only_identity_checked_duplicates_merge_and_nothing_is_lost(self):
-        before=self.system();fresh=copy.deepcopy(before)
-        merged,report=analysis_run.merge_duplicate_structure(before)
-        self.assertEqual(before,fresh)  # the input is never changed in place
-        self.assertEqual(report['before'],{'nodes':7,'externals':2,'links':5});self.assertEqual(report['after'],{'nodes':5,'externals':1,'links':3})
-        ids=[n['id'] for n in merged['nodes']]
-        self.assertIn('web_api',ids);self.assertNotIn('web-api',ids);self.assertEqual(len({'queue_worker','queue-worker'}&set(ids)),1)  # the linked copy keeps its id
-        self.assertTrue({'old_job','old-job'}<=set(ids))  # contradicting code folders: ambiguous, kept apart
-        self.assertEqual([a['ids'] for a in report['ambiguous']],[['old_job','old-job']])
-        api=next(n for n in merged['nodes'] if n['id']=='web_api')
-        self.assertEqual(api['code'],['api','api/db']);self.assertEqual(len(api['ev']),2);self.assertEqual(sorted(api['uses']),['pg'])
-        self.assertTrue(any('API server (v2)' in u['text'] for u in api['unknown']))  # the other name is kept in unknown
-        reads=[l for l in merged['links'] if l['label']=='reads'];self.assertEqual(len(reads),1);self.assertEqual(len(reads[0]['ev']),2)
-        self.assertEqual(next(l for l in merged['links'] if l['label']=='calls')['from'],'queue-worker');self.assertEqual(next(l for l in merged['links'] if l['label']=='calls')['to'],'web_api')
-        self.assertEqual(report['dropped_self_links'],1);self.assertTrue(any('same' in u['text'] for u in merged['unknown']))  # a link between the two copies is noted, not silently lost
-        self.assertEqual(merged['others'],before['others'])
-        ids=set(ids)|{x['id'] for x in merged['externals']}
-        self.assertTrue(all(l['from'] in ids and l['to'] in ids for l in merged['links']))
-        again,second=analysis_run.merge_duplicate_structure(merged);self.assertEqual(second['merged'],[]);self.assertEqual(again,merged)  # a second repair changes nothing
-
-    def test_repair_keeps_a_copy_writes_a_record_and_leaves_the_hand_written_structure_and_other_data_alone(self):
-        import tempfile
-        from unittest.mock import patch
-        with tempfile.TemporaryDirectory() as root:
-            home=Path(root)/'demo';home.mkdir()
-            dev={'commit':'c','task_outputs':{'system':self.system(),'groups':{'groups':[]},'jobs':{'nodes':{}}}}
-            (home/'dev.json').write_text(json.dumps(dev));(home/'system.hand.json').write_text('{"nodes":[]}')
-            digest=lambda:{p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in home.iterdir() if p.is_file() and p.name!='.project.lock'}
-            with patch.object(analysis_run.mapcore,'ROOT',root),patch.object(analysis_run,'active',lambda:{'active':False}):
-                before=digest();report=analysis_run.repair_structure('demo')
-                self.assertFalse(report['applied']);self.assertEqual(digest(),before)  # a dry run writes nothing
-                with patch.object(analysis_run,'active',lambda:{'active':True}),self.assertRaisesRegex(analysis_run.RunError,'running'):analysis_run.repair_structure('demo',apply=True)
-                self.assertEqual(digest(),before)
-                report=analysis_run.repair_structure('demo',apply=True)
-                self.assertTrue(report['applied']);self.assertEqual(json.loads((home/report['backup']).read_text()),dev)  # the original is kept as it was
-                saved=json.loads((home/'dev.json').read_text())
-                self.assertEqual(len(saved['task_outputs']['system']['nodes']),5)
-                self.assertEqual({k:v for k,v in saved['task_outputs'].items() if k!='system'},{k:v for k,v in dev['task_outputs'].items() if k!='system'})
-                self.assertEqual(digest()['system.hand.json'],before['system.hand.json'])
-                self.assertEqual(len(list(home.glob('structure-repair-*.json'))),1)
-                self.assertEqual(analysis_run.repair_structure('demo',apply=True)['merged'],[])  # nothing left to repair
 
 
 class RepositoryTypes(unittest.TestCase):
