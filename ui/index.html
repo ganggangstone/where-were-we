@@ -931,7 +931,10 @@ async function doRefresh() {
   try {
     await refreshConnectedCode(project,repository);
     S.githubFailure=null;
-  } catch (e) { if (S.desiredProject === project && S.desiredRepository === repository) {S.githubFailure={project,error:String(e)};renderRepositories();setStatus(String(e).includes('GITHUB_ACCESS|') ? githubErrorText(e) : tr('새 지도를 가져오지 못했다. 자세한 이유는 「오류 내용」에 있다.'),true,String(e));} }
+  } catch (e) { if (S.desiredProject === project && S.desiredRepository === repository) {S.githubFailure={project,error:String(e)};renderRepositories();
+    // A repository row that already shows its own failure and details is the one place for it.
+    if((S.projectInfo?.repositories || []).some(r=>r.error && (!repository || r.id===repository)))setStatus('');
+    else setStatus(String(e).includes('GITHUB_ACCESS|') ? githubErrorText(e) : tr('새 지도를 가져오지 못했다. 자세한 이유는 「오류 내용」에 있다.'),true,String(e));} }
   finally { $('refresh').disabled = false; }
 }
 function githubErrorText(error) {

@@ -656,6 +656,15 @@ class Flows(unittest.TestCase):
  assert($('status').textContent.includes(tr('새 지도를 가져오지 못했다. 자세한 이유는 「오류 내용」에 있다.')),'Keep the collection failure visible');
 ''')
 
+    def test_a_failed_repository_shows_its_failure_once_in_its_own_row(self):
+        self.check(r'''
+ window.refreshOutput='web: FAILED: unavailable';window.mutateBundle=b=>{b.project.repositories[0].error='fictional fetch error';};
+ await doRefresh();await wait();
+ const message=tr('새 지도를 가져오지 못했다');
+ assert(!$('status').textContent.includes(message),'The top banner repeats the repository failure: '+$('status').textContent);
+ assert($('repository-bar').querySelectorAll('.error').length===1 && $('repository-bar').innerText.includes(message),'The repository row keeps the failure and its details');
+''')
+
     def test_the_repository_selector_is_not_repeated_as_text_and_a_missing_branch_shows_no_empty_button(self):
         self.check(r'''
  const bar=()=>$('repository-bar').innerText;
