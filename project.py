@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import re
+import time
 import shutil
 import subprocess
 import sys
@@ -43,12 +44,18 @@ def atomic(path, value):
         if os.path.exists(temp):os.unlink(temp)
 
 _HELD=set()
+LOCK_WAIT=3  # seconds a lock request waits for another holder before it reports the project busy
 @contextmanager
 def locked(name):
     root=home(name);root.mkdir(parents=True,exist_ok=True)
     with (root/'.project.lock').open('a') as stream:
-        try:fcntl.flock(stream,fcntl.LOCK_EX|fcntl.LOCK_NB)
-        except BlockingIOError:raise ValueError('This project is already being updated; try again after it finishes')
+        # A short read elsewhere (the board, a status check) holds the lock for a moment; wait it out instead of failing a pin read.
+        until=time.monotonic()+LOCK_WAIT
+        while True:
+            try:fcntl.flock(stream,fcntl.LOCK_EX|fcntl.LOCK_NB);break
+            except BlockingIOError:
+                if time.monotonic()>=until:raise ValueError('This project is already being updated; try again after it finishes')
+                time.sleep(.05)
         _HELD.add(root)
         try:yield
         finally:_HELD.discard(root);fcntl.flock(stream,fcntl.LOCK_UN)

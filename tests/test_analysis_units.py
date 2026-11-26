@@ -155,6 +155,16 @@ class FullRun(unittest.TestCase):
         self.assertEqual((again,job['announced']['total'],done['state']),([],0,'completed'))
         self.assertEqual(self.board()['repositories'][0]['units'],rows)
 
+    def test_a_short_project_read_by_another_process_does_not_empty_the_pins_of_a_press(self):
+        # The board's own reads take the project lock for a moment; a press made during one must still pin the code and start.
+        import fcntl,threading,time
+        lock=(analysis_run.store.home('demo')/'.project.lock').open('a');fcntl.flock(lock,fcntl.LOCK_EX)
+        threading.Timer(.3,lambda:fcntl.flock(lock,fcntl.LOCK_UN)).start()
+        try:job=analysis_run.prepare('demo',lang='en',repository='service',intent={'task':'full','targets':[]})
+        finally:time.sleep(.4);lock.close()
+        self.assertEqual(list(job['pins']),['service']);self.assertEqual(job['announced']['total'],1)
+        self.assertEqual(analysis_run.run(job['id'],self.executor([]))['state'],'completed')
+
     def test_progress_writes_that_only_count_a_call_reuse_the_board_and_the_saved_board_equals_a_fresh_one(self):
         self.board();built=[];saves=[];real_board,real_save=analysis_run.unit_board,analysis_run._save_progress
         with patch.object(analysis_run,'unit_board',lambda *a,**k:built.append(1) or real_board(*a,**k)),\
