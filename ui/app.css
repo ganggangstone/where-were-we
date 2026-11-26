@@ -186,8 +186,8 @@ details .kv { margin:var(--space-3) var(--space-0) var(--space-0); word-break:br
 .step-lanes { display:grid; grid-template-columns:var(--lane-indent-1) var(--lane-indent-1) var(--lane-indent-1) 1fr; font:var(--font-micro); margin:var(--space-0) var(--space-0) var(--space-2) }
 .step .from { flex:none; width:var(--space-4); margin-left:calc(var(--space-4) * -1); color:var(--color-text-secondary); text-align:center }
 .step-lanes { color:var(--color-text-secondary) }
-.step-lanes span::before { content:""; display:inline-block; width:var(--size-dot); height:var(--size-dot); margin-right:var(--space-1); border-radius:var(--radius-pill); background:var(--lane); vertical-align:middle }
-.step-lanes .screen { --lane:var(--color-lane-screen) } .step-lanes .server { --lane:var(--color-lane-server) } .step-lanes .store { --lane:var(--color-lane-store) } .step-lanes .external { --lane:var(--color-lane-external) }
+.step-lanes span::before { content:""; display:inline-block; width:var(--size-dot); height:var(--size-dot); margin-right:var(--space-1); border-radius:var(--radius-pill); vertical-align:middle }
+.step-lanes .screen::before { background:var(--color-lane-screen) } .step-lanes .server::before { background:var(--color-lane-server) } .step-lanes .store::before { background:var(--color-lane-store) } .step-lanes .external::before { background:var(--color-lane-external) }
 .step { display:flex; gap:var(--space-3); align-items:flex-start; padding:var(--space-2) var(--space-3); border-radius:var(--radius-step); margin:var(--space-1) var(--space-0) }
 .step.l1 { margin-left:var(--lane-indent-1) } .step.l2 { margin-left:var(--lane-indent-2) } .step.l3 { margin-left:var(--lane-indent-3) }
 .step .n { flex:none; width:var(--size-badge); height:var(--size-badge); border-radius:var(--radius-pill); color:var(--color-bg-content); font:var(--font-secondary); font-weight:var(--weight-strong); text-align:center; line-height:var(--size-badge); background:var(--color-lane-server) }
