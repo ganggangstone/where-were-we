@@ -1693,6 +1693,18 @@ class UxWriting(unittest.TestCase):
  S.changes.last_results=[{repository:'web',at:'2026-10-27T01:47:00Z',since:'2026-10-26T00:00:00Z',changed:false,scope:'basic'}];render();assert(outside($('map')).includes(when('2026-10-27T01:47:00Z')) && outside($('map')).includes(tr('선택한 기준 이후 달라진 것 없음')),'Latest no-change refresh remains visible beside historical records');
 ''')
 
+    def test_request_detail_still_opens_after_the_changes_screen_rendered_a_briefing(self):
+        self.check(r'''
+ const value=t=>({text:t,unknown:false,evidence:[]});
+ const card={title:'Fictional change',merge:'merged',prs:[],terms:[]};
+ for(const k of ['problem','why','before','after','resolution','impact','recovery','remaining'])card[k]=value('Known '+k);
+ S.briefings={dev:{[S.lang]:{state:'saved',warnings:[],result:{cards:[card],pr_count:0,branch:'dev',unknown:['Fictional unknown'],input:{repositories:[{id:'web',since:'2026-09-01T00:00:00Z',at:'2026-09-20T00:00:00Z',refs:{dev:'HEAD'},commits:{from:'aaaa1111',to:'bbbb2222'}}]}}}}};
+ S.view='changes';render();assert(main().includes('Fictional change'),'Briefing rendered');
+ S.view='map';S.sel='web::/items';render();
+ $('insp').querySelector('[data-req]').click();await wait();
+ assert(typeof detail==='function' && !window.errors.length,'Request detail opens after the changes screen: '+window.errors.join(' | '));
+''')
+
     def test_connection_repair_copy_leads_until_copied_then_the_check_and_details_hold_tools(self):
         self.check(r'''
  S.agentPurpose='connection';S.agentPrompt='connection';
