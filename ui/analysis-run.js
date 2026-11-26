@@ -108,13 +108,15 @@ const AnalysisRun = (() => {
   }
   async function accept(value, token) {
     if (!current(token)) return;
+    // A full run publishes names, groups and the service structure to the map; one seen running here reloads them when it ends.
+    const fullEnded = !!value && active() && run.id === value.id && value.intent?.task === 'full' && !value.intent.only && value.state === 'completed' && !loaded.has(value.id);
     run = value; error = null;
     if(value && Array.isArray(value.saved_scope_overviews) && mapResults && mapResults.pin.project===scope().project && mapResults.pin.branch===scope().branch && mapResults.pin.lang===scope().lang && (!scope().repository || scope().repository===mapResults.pin.repository)){
       rememberScopes(mapResults,value);showMapBadges();
     }
     paint();
     // Use the existing analysis-only read: never collect or move change history.
-    if (!['overview','full'].includes(run?.intent?.task) && sameScope() && !active() && (run.state === 'completed' || (run.completed_tasks?.length || Number(run.completed_tasks)>0)) && !loaded.has(run.id)) {
+    if (fullEnded || !['overview','full'].includes(run?.intent?.task) && sameScope() && !active() && (run.state === 'completed' || (run.completed_tasks?.length || Number(run.completed_tasks)>0)) && !loaded.has(run.id)) {
       const id = run.id; loaded.add(id);
       try { await reloadAnalysisOnly(() => current(token) && run?.id === id); }
       catch { if (current(token)) { loaded.delete(id); error = {code:'result_read_failed'}; paint(); } }

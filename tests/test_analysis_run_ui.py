@@ -358,6 +358,17 @@ for(let i=0;i<3;i++)await tick();
 assert($('insp').innerHTML.includes('Nothing left to analyze') && !$('insp').innerHTML.includes('Analyze · 3 calls'),'After it finishes, the board shows the saved result');
 """)
 
+    def test_a_full_run_seen_running_reloads_the_map_once_when_it_completes(self):
+        self.check_js(self.BOARD + r"""
+serve();const full=(state,extra)=>({...runRecord(state),intent:{task:'full',targets:[]},repository:'',...extra});
+status=full('completed',{unit_board:unitBoard({calls:{total:0}})});await open();await AnalysisRun.check();await flush();
+assert(reads===0,'A run that ended before this window saw it does not reread the map');
+status=full('running',{id:'run-2',unit_board:unitBoard()});await AnalysisRun.check();await flush();
+status=full('completed',{id:'run-2',unit_board:unitBoard({calls:{total:0}})});
+for(let i=0;i<3;i++)await tick();
+assert(reads===1,'The map names and groups the run published are read once when it completes: '+reads);
+""")
+
     def test_a_board_load_for_an_earlier_scope_does_not_block_the_new_one(self):
         self.check_js(self.BOARD + r"""
 status=null;let hold=true;const pending=[];
