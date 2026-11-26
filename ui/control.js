@@ -127,7 +127,12 @@ async function applyAppCommand(command) {
       S.step=a.index;S.ev=a.index;render();break;
     }
     case 'dialog':{
-      if(a.name==='close')document.querySelectorAll('dialog[open]').forEach(d=>d.close());
+      // close: every open dialog and the right-side AI panel (the setup, analysis or connection panel shown while S.agentPrompt is set).
+      if(a.name==='close'){
+        const open=[...document.querySelectorAll('dialog[open]')],panel=S.agentPrompt!=null;
+        if(!open.length && !panel)controlError('nothing_to_close','No dialog or panel is open.');
+        open.forEach(d=>d.close());if(panel){S.agentPrompt=null;render();}
+      }
       else if(a.name==='code')editProject(false);
       else if(a.name==='create')editProject(true);
       else if(a.name==='settings'){renderSettings();$('settings-dialog').showModal();}

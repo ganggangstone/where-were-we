@@ -1705,6 +1705,15 @@ class UxWriting(unittest.TestCase):
  assert(typeof detail==='function' && !window.errors.length,'Request detail opens after the changes screen: '+window.errors.join(' | '));
 ''')
 
+    def test_close_command_closes_the_ai_panel_and_reports_when_nothing_is_open(self):
+        self.check(r'''
+ await $('agent').onclick();assert(S.agentPrompt!=null && $('insp').innerText.includes(tr('AI 연결')),'AI panel opened');
+ await applyAppCommand({action:'dialog',arguments:{name:'close'}});
+ assert(S.agentPrompt==null && !$('insp').innerText.includes(tr('AI 연결')),'The close command closes the AI panel');
+ let code='';try{await applyAppCommand({action:'dialog',arguments:{name:'close'}});}catch(e){code=e.code;}
+ assert(code==='nothing_to_close','Closing with nothing open is not reported as done');
+''')
+
     def test_connection_repair_copy_leads_until_copied_then_the_check_and_details_hold_tools(self):
         self.check(r'''
  S.agentPurpose='connection';S.agentPrompt='connection';
