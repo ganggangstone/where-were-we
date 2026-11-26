@@ -41,7 +41,7 @@ elements.insp.querySelectorAll=selector=>{
  const unit=/^\[data-(unit-[a-z]+)\]$/.exec(selector);
  if(unit){
   const key=unit[1].replace(/-([a-z])/g,(_,c)=>c.toUpperCase());
-  const found=[...elements.insp.innerHTML.matchAll(new RegExp('data-'+unit[1]+'="([^"]*)"','g'))].map(hit=>({dataset:{[key]:hit[1]},onclick:null}));
+  const found=[...elements.insp.innerHTML.matchAll(new RegExp('data-'+unit[1]+'="([^"]*)"','g'))].map(hit=>({dataset:{[key]:hit[1].replaceAll('&quot;','"')},onclick:null}));
   (globalThis.unitHandles||(globalThis.unitHandles={}))[unit[1]]=found;return found;
  }
  if(selector==='input[name="mapCoverage"]'){
@@ -236,13 +236,13 @@ assert(html.includes('Analyze · 4 calls') && html.includes('Map summary sent to
 const before=calls.length;
 unitHandles['unit-open'].find(b=>b.dataset.unitOpen==='2').onclick();await flush();
 html=$('insp').innerHTML;
-assert(count('analysis_run_start')===0 && html.includes('AI explanation · 1 call') && html.includes('data-unit-explain="2"'),'Opening a card starts nothing and offers one request');
+assert(count('analysis_run_start')===0 && html.includes('AI explanation · 1 call') && html.includes('data-unit-explain="[&quot;service&quot;,&quot;route:/c&quot;]"'),'Opening a card starts nothing and offers one request');
 assert(!calls.slice(before).some(c=>c.command==='analysis_run_start'),'Card open makes no run');
-await unitHandles['unit-explain'].find(b=>b.dataset.unitExplain==='2').onclick();await flush();
+await unitHandles['unit-explain'].find(b=>b.dataset.unitExplain==='["service","route:/c"]').onclick();await flush();
 const intent=calls.find(c=>c.command==='analysis_run_start').args.scope.intent;
 assert(intent.task==='full' && !('max_calls' in intent) && JSON.stringify(intent.only)===JSON.stringify([{repository:'service',target:'route:/c'}]) && !intent.renew,'The card sends the only intent with 2 calls');
 status=runRecord('running',{intent,unit_board:localBoard()});await AnalysisRun.check();await flush();
-assert(!$('startFullAnalysis') && !$('insp').innerHTML.includes('data-unit-explain') || /data-unit-explain="2" disabled/.test($('insp').innerHTML),'Buttons are off while a run is active');
+assert(!$('startFullAnalysis') && !$('insp').innerHTML.includes('data-unit-explain') || /data-unit-explain="[^"]*" disabled/.test($('insp').innerHTML),'Buttons are off while a run is active');
 """)
 
     def test_saved_card_has_no_ask_button_and_a_stale_one_asks_again(self):
@@ -251,14 +251,14 @@ serveLocal();status=null;await open();await AnalysisRun.check();await flush();
 native=(command,args)=>command==='analysis_run_status'&&args.view==='units'?localBoard():command==='analysis_run_status'&&args.view==='unit'?{repository:'service',commit:'abcd1234ef',configuration:'pin',resource:'/a',files:['a.py'],items:[{name:'List',description:'Lists',file:'a.py',line:1,quote:'def a'}],format:'overview-v1'}:undefined;
 unitHandles['unit-open'].find(b=>b.dataset.unitOpen==='0').onclick();await flush();
 let html=$('insp').innerHTML;
-assert(html.includes('List') && !html.includes('data-unit-explain="0"'),'A saved explanation replaces the button');
+assert(html.includes('List') && !html.includes('data-unit-explain='),'A saved explanation replaces the button');
 """)
 
     def test_live_card_run_board_has_no_calls_or_modes_and_keeps_the_static_numbers(self):
         self.check_js(self.LOCAL_BOARD + r"""
 serveLocal();status=null;await open();await AnalysisRun.check();await flush();
 await unitHandles['unit-open'].find(b=>b.dataset.unitOpen==='2').onclick();await flush();
-await unitHandles['unit-explain'].find(b=>b.dataset.unitExplain==='2').onclick();await flush();
+await unitHandles['unit-explain'].find(b=>b.dataset.unitExplain==='["service","route:/c"]').onclick();await flush();
 const intent=calls.find(c=>c.command==='analysis_run_start').args.scope.intent;
 assert(intent.only.length===1 && intent.renew===undefined && !('max_calls' in intent),'No renew and no cap with only');
 const live=localBoard({calls:{rules:0,labeling:0,structure:0,unit:0,total:0},announced:{total:1},used:{unit:1}});live.repositories[0].units[2][4]='working';
@@ -268,6 +268,29 @@ assert($('cancelFullAnalysis') && !$('startFullAnalysis') && html.includes('Anal
 status=runRecord('completed',{intent,unit_board:localBoard()});await AnalysisRun.check();await flush();await flush();
 html=$('insp').innerHTML;
 assert($('startFullAnalysis') && html.includes('Analyze · 4 calls'),'After it ends the main action reads the static board again');
+""")
+
+    def test_card_explain_targets_its_unit_shows_the_run_and_reads_the_saved_detail(self):
+        self.check_js(self.LOCAL_BOARD + r"""
+serveLocal();status=null;await open();await AnalysisRun.check();await flush();
+await unitHandles['unit-open'].find(b=>b.dataset.unitOpen==='2').onclick();await flush();
+const button=unitHandles['unit-explain'][0];
+assert(button.dataset.unitExplain==='["service","route:/c"]','The request is bound to the unit id, not its list position');
+// The list re-renders in another order before the click lands: the click still asks for its own unit.
+const reordered=()=>{const b=localBoard();b.repositories[0].units.reverse();b.repositories[0].links=[];return b;};native=(command,args)=>command==='analysis_run_status'&&args.view==='units'?reordered():undefined;
+await AnalysisRun.check();await flush();
+await button.onclick();await flush();
+const intent=calls.find(c=>c.command==='analysis_run_start').args.scope.intent;
+assert(JSON.stringify(intent.only)===JSON.stringify([{repository:'service',target:'route:/c'}]),'Explain targets the clicked unit '+JSON.stringify(intent.only));
+status=runRecord('running',{intent,unit_board:localBoard()});await AnalysisRun.check();await flush();
+let html=$('insp').innerHTML;
+assert(/data-unit-card="[0-9]+">[^]*?aria-expanded="true"[^]*?role="status">Analyzing</.test(html) && !/data-unit-explain/.test(html),'The open card shows its run state and no button');
+const saved=localBoard();saved.repositories[0].units.find(u=>u[0]==='route:/c')[4]='saved';
+native=(command,args)=>command==='analysis_run_status'&&args.view==='units'?saved:command==='analysis_run_status'&&args.view==='unit'?{repository:'service',commit:'abcd1234ef',configuration:'pin',resource:'/c',files:['c.py'],items:[{name:'Make',description:'Makes',file:'c.py',line:1,quote:'def c'}],format:'overview-v1'}:undefined;
+status=runRecord('completed',{intent,unit_board:saved});await AnalysisRun.check();await flush();await flush();
+html=$('insp').innerHTML;
+assert(html.includes('Makes') && !html.includes('Loading…'),'A card left open reads its saved detail without reopening');
+assert(html.includes('Commit · <code>abcd1234</code>') && html.includes('File · <code>c.py</code>'),'Commit and file carry labels');
 """)
 
     MAP_BOARD = r"""
@@ -589,7 +612,7 @@ await AnalysisRun.check();assert(!$('savedOverview0'),'Missing live pin hides re
 code.commits.dev=group.commit;
 await AnalysisRun.check();assert($('savedOverview0') && $('insp').innerHTML.includes('Runs the app'),'A result pinned to the current code opens despite an old basic map');
 const html=$('insp').innerHTML;
-assert(html.includes('Feature diagram by source file') && /<li><code>app<\/code><ul><li><b>Start<\/b>/.test(html),'Verified feature is a child of its cited file');
+assert(html.includes('Feature diagram by source file') && /<li>File · <code>app<\/code><ul><li><b>Start<\/b>/.test(html),'Verified feature is a child of its cited file');
 assert(html.includes('app:2') && html.includes('run_command()'),'Diagram node retains the pinned evidence');
 
 group.connections=[{method:'GET',path:'/runs',client:{file:'client.ts',line:7,quote:'fetch("/runs")'},server:{file:'app.py',line:21,quote:'@app.get("/runs")'}}];

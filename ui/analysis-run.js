@@ -226,8 +226,9 @@ const AnalysisRun = (() => {
     const group=savedOverviews()[0];
     if(!group)return text('저장한 설명을 읽지 못했다.','Saved explanation unavailable.');
     if(!group.files)return text('불러오는 중…','Loading…');
-    return `<code>${esc(group.commit.slice(0,8))}</code>${overviewTree(group)}`;
+    return `${commitLine(group)}${overviewTree(group)}`;
   }
+  const commitLine=group=>`<p class="s">${text('커밋','Commit')} · <code>${esc(group.commit.slice(0,8))}</code></p>`;
   function savedOverviews() {
     if(S.analysisChoice?.task==='saved_scope'){
       const group=mapResults?.key===JSON.stringify(mapPin()) && mapResults.groups.get(S.analysisChoice.detailTarget);
@@ -302,7 +303,7 @@ const AnalysisRun = (() => {
         ${item.description ? `<p>${esc(item.description)}</p>` : ''}
         ${esc([item.method,item.path,item.function].filter(Boolean).join(' '))}
         ${claimEvidence(item)}</li>`).join('');
-      return `<li><code>${esc(file)}</code>${nodes ? `<ul>${nodes}</ul>` : ''}</li>`;
+      return `<li>${text('파일','File')} · <code>${esc(file)}</code>${nodes ? `<ul>${nodes}</ul>` : ''}</li>`;
     }).join('');
     const index=overviewIndex(group);
     const edgesInSource=index?.service_flow?.connections || [];
@@ -450,25 +451,27 @@ const AnalysisRun = (() => {
     const chips=list=>list.map(i=>`<button class="chip" type="button" data-unit-link="${i}">${esc(unitRows[i].name)}</button>`).join('');
     return `<div class="unit-links">${e.out.length?`<p class="chips"><span class="s">${text('사용 →','Uses →')}</span>${chips(e.out)}</p>`:''}${e.in.length?`<p class="chips"><span class="s">${text('← 사용됨','← Used by')}</span>${chips(e.in)}</p>`:''}</div>`;
   }
+  // The unit a card run is explaining: marked working on the live board, or the requested target before the board says so.
+  const running=row=>row.state==='working' || active() && !!run?.intent?.only?.some(t=>t.repository===row.repo && t.target===row.id);
   function unitDetail(row) {
-    if(row.state==='working')return '';
+    if(running(row))return `<p class="chips"><span class="chip" role="status">${text(...UNIT_STATES.working)}</span></p>`;
     if(['pending','named'].includes(row.state))return `<p class="chips"><span class="chip">${text('파일','Files')} ${row.count}</span></p>`;
     if(row.state==='failed')return `<p class="s">${text("AI 설명이 코드와 달라 저장하지 않았다.","The explanation didn't match the code, so it wasn't saved.")}</p>`;
     const group=unitDetails.get(unitKey(row));
     if(group===undefined)return `<p class="s">${text('불러오는 중…','Loading…')}</p>`;
     if(group?.local)return localDetail(group);
     if(!group || !group.files)return `<p class="s">${text('저장한 설명을 읽지 못했다.','Saved explanation unavailable.')}</p>`;
-    return `${group.stale?`<p class="s">${text('이전 코드 기준','Based on older code')}</p>`:''}<code>${esc(group.commit.slice(0,8))}</code>${overviewTree(group)}`;
+    return `${group.stale?`<p class="s">${text('이전 코드 기준','Based on older code')}</p>`:''}${commitLine(group)}${overviewTree(group)}`;
   }
   const canExplain=()=>usable() && !providerBusy && !busy && !active();
   function explainButton(row,index) {
-    if(MAP_KINDS.includes(row.kind) || !['pending','named','failed','local','stale'].includes(row.state))return '';
+    if(MAP_KINDS.includes(row.kind) || running(row) || !['pending','named','failed','local','stale'].includes(row.state))return '';
     const label=['stale','failed'].includes(row.state)?text('다시 설명 · 호출 1회','Explain again · 1 call'):text('AI 설명 · 호출 1회','AI explanation · 1 call');
-    return `<p class="unit-ask"><button class="btn" type="button" data-unit-explain="${index}" ${canExplain()?'':'disabled'}>${label}</button><span class="chip">${text('코드가 Claude로 전송','Code sent to Claude')}</span>${beta()}</p>`;
+    return `<p class="unit-ask"><button class="btn" type="button" data-unit-explain="${esc(unitKey(row))}" ${canExplain()?'':'disabled'}>${label}</button><span class="chip">${text('코드가 Claude로 전송','Code sent to Claude')}</span>${beta()}</p>`;
   }
   function unitCard(row,index,multi) {
     const mapRow=MAP_KINDS.includes(row.kind),navigates=mapRow && row.state==='saved';
-    const open=openedUnit===unitKey(row),expandable=row.state!=='working' && !mapRow;
+    const open=openedUnit===unitKey(row),expandable=!mapRow;
     const state=stateText(row);
     const title=mapRow?text(...KINDS[row.kind]):esc(row.name);
     const body=open && expandable?(row.what?`<p class="s">${esc(row.what)} <span class="chip">${text('AI 해석','AI interpretation')}</span></p>`:'')+linkChips(index)+unitDetail(row)+explainButton(row,index):'';
@@ -542,9 +545,15 @@ const AnalysisRun = (() => {
     if(MAP_KINDS.includes(row.kind) && row.state==='saved'){S.agentPrompt=null;S.view=row.kind==='groups'?'feat':'sys';render();return;}
     if(row.state==='working' || MAP_KINDS.includes(row.kind)){openedUnit=key;paint();return;}
     openedUnit=openedUnit===key?null:key;paint();
-    if(openedUnit!==key || unitDetails.has(key) || ['pending','named','failed'].includes(row.state))return;
-    const token=epoch;
+  }
+  // Runs after every board paint, so a card left open while its explanation is saved (or the board reloads) reads it again.
+  const unitReading=new Set();
+  async function readOpenedUnit() {
+    const row=unitRows.find(r=>unitKey(r)===openedUnit),key=row && unitKey(row);
+    if(!row || MAP_KINDS.includes(row.kind) || running(row) || ['pending','named','failed'].includes(row.state) || unitDetails.has(key) || unitReading.has(key))return;
+    unitReading.add(key);const token=epoch;
     let group=null;try{group=await readUnit(row);}catch{}
+    unitReading.delete(key);
     if(token!==epoch)return;
     unitDetails.set(key,group);paint();
   }
@@ -564,7 +573,7 @@ const AnalysisRun = (() => {
       return execute('analysis_run_start');
     };
     root?.querySelectorAll?.('[data-unit-explain]').forEach(button=>button.onclick=()=>{
-      const b=liveBoard(),row=unitRows[Number(button.dataset.unitExplain)];if(!b || !row || !canExplain())return;
+      const b=liveBoard(),row=unitRows.find(r=>unitKey(r)===button.dataset.unitExplain);if(!b || !row || !canExplain())return;
       S.analysisChoice={...S.analysisChoice,task:'full_analysis',only:[{repository:row.repo,target:row.id}]};
       unitDetails.delete(unitKey(row));
       return execute('analysis_run_start');
@@ -573,6 +582,7 @@ const AnalysisRun = (() => {
     if($('refreshForUnits'))$('refreshForUnits').onclick=()=>$('refresh')?.click();
     if($('cancelFullAnalysis'))$('cancelFullAnalysis').onclick=()=>execute('analysis_run_cancel');
     if($('checkFullAccount'))$('checkFullAccount').onclick=()=>{void providers();};
+    void readOpenedUnit();
   }
   function html(includeOverview=true) {
     if(S.analysisChoice?.task==='scope_overview' && savedOverviews().length && !active())return overviewHtml();
