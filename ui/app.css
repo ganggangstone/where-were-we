@@ -132,7 +132,7 @@ button.pill, .pill.click { font:var(--font-secondary); letter-spacing:var(--trac
 .legend-sample { display:inline-block; flex:none; width:var(--size-badge); border-top:var(--border-hover) }
 .legend-sample.shared { border-top-style:dashed }
 .legend-sample.selected { border:none; height:var(--size-dot); border-radius:var(--radius-control); background:var(--color-bg-related) }
-.change-card { margin:var(--space-0) }
+.change-grid > .group.change-card { margin:var(--space-0) } /* beats .group + .group so both columns start level */
 .change-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(min(100%,calc(var(--size-node) * 2)),1fr)); gap:var(--space-4); align-items:start; margin:var(--space-4) var(--space-0) }
 .change-grid .claim-flow { grid-template-columns:1fr }
 .change-card-heading { padding:var(--space-5); display:flex; flex-direction:column; gap:var(--space-3) }
