@@ -368,6 +368,17 @@ pending.forEach(r=>r(unitBoard()));await flush();await flush();
 assert($('insp').innerHTML.includes('/orders'),'The new language loads its own board while the old load is still out');
 """)
 
+    def test_a_board_load_discarded_by_a_new_choice_does_not_block_the_same_scope(self):
+        self.check_js(self.BOARD + r"""
+status=null;let hold=true;const pending=[];
+native=(command,args)=>command==='analysis_run_status'&&args.view==='units'?(hold?new Promise(r=>pending.push(r)):unitBoard()):undefined;
+await open();await flush();
+// Same language and code, a new panel choice: the first load is dropped, so it must not stop the second.
+hold=false;S.analysisChoice={task:'full_analysis'};render();AnalysisRun.open();await flush();await flush();
+pending.forEach(r=>r(unitBoard()));await flush();await flush();
+assert($('insp').innerHTML.includes('/orders'),'The board stays empty after a dropped load');
+""")
+
     def test_account_problem_replaces_the_start_and_zero_detailed_is_not_shown(self):
         self.check_js(self.BOARD + r"""
 const named=()=>({repositories:[{repository:'service',units:[['folder:a','folder','a',2,'named',''],['folder:b','folder','b',2,'local','']]}],totals:{units:2,named:1,local:1},calls:{rules:0,labeling:1,structure:0,unit:0,total:1}});

@@ -413,10 +413,10 @@ const AnalysisRun = (() => {
   const liveBoard=()=>fullRun() && run.unit_board && (active() || !run.unit_board.only) ? run.unit_board : boardScope===boardScopeKey() ? board : null;
   const unitKey=row=>JSON.stringify([row.repo,row.id]);
   async function loadBoard(token) {
-    const requested=boardScopeKey();
-    // A load for an earlier scope (language, reload) must not block this one.
-    if(!S.project || loadingBoard===requested)return;
-    loadingBoard=requested;boardQuick=null;
+    const requested=boardScopeKey(),flight=requested+'#'+token;
+    // A load for an earlier scope (language, reload) or one dropped by a newer check (a new panel choice) must not block this one.
+    if(!S.project || loadingBoard===flight)return;
+    loadingBoard=flight;boardQuick=null;
     // The pinned commit and file counts arrive at once; the units follow as soon as they are calculated.
     if(!liveBoard())paint();
     void invoke('analysis_run_status',{scope:scope(),view:'units_quick'}).then(decode).then(value=>{
@@ -435,7 +435,7 @@ const AnalysisRun = (() => {
         if(ready){value=decode(await invoke('analysis_run_status',{scope:scope(),view:'units'}));if(!current(token))return;if(Array.isArray(value?.repositories))board=value;}
       }
     } catch(value) { if(current(token)){boardScope=requested;board=null;boardError=value;} }
-    finally { if(loadingBoard===requested){loadingBoard=false;boardQuick=null;} }
+    finally { if(loadingBoard===flight){loadingBoard=false;boardQuick=null;} }
     if(current(token))paint();
   }
   function unitSummary(b) {
