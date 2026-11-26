@@ -1379,6 +1379,23 @@ class Flows(unittest.TestCase):
  assert(wireBox===$('sys'),'The drawn lanes box is the one being watched for size changes');
 ''')
 
+    def test_one_repository_lane_keeps_a_line_gutter_and_narrow_lanes_scroll_instead_of_squeezing(self):
+        self.check(r'''
+ S.branchDetails=null;S.proposal=null;S.view='sys';S.node=null;
+ S.system={nodes:['a','b','c'].map((k,i)=>({id:'web::'+k,repository:'web',kind:'program',origin:'repo',name:'Program '+k,what:'Does '+k,uses:[]})),
+  links:[{from:'web::a',to:'web::b',label:'calls',sure:true,ev:[]},{from:'web::a',to:'web::c',label:'calls',sure:true,ev:[]}],externals:[],others:[],unknown:[]};
+ S.projectInfo={...(S.projectInfo||{}),repositories:[{id:'web',name:'web'}]};render();
+ const box=$('sys'),lane=box.querySelector('.lane');
+ assert(box.scrollWidth<=box.clientWidth,'No sideways scroll inside a single lane: '+box.scrollWidth+'>'+box.clientWidth);
+ const right=Math.max(...[...box.querySelectorAll('.wn')].map(n=>n.getBoundingClientRect().right));
+ assert(right<=box.getBoundingClientRect().right && lane.offsetWidth<box.clientWidth/2,'Cards keep a column width and numbers sit in the gutter inside the box');
+ assert(getComputedStyle(box.querySelector('.card .nm')).wordBreak==='keep-all','Card titles wrap between words');
+ S.system.nodes=S.system.nodes.concat(['api','job','ops','doc','cli','etc'].map(r=>({id:r+'::p',repository:r,kind:'program',origin:'repo',name:'Program '+r,what:'x',uses:[]})));
+ S.projectInfo.repositories=S.projectInfo.repositories.concat(['api','job','ops','doc','cli','etc'].map(id=>({id,name:id})));render();
+ const cards=[...$('sys').querySelectorAll('.lane')];
+ assert(cards.every(l=>l.offsetWidth>=parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--app-node-width'))-1) && $('sys').scrollWidth>$('sys').clientWidth,'Many lanes keep a minimum width and scroll inside the lanes box');
+''')
+
     def test_structure_shows_a_local_picture_before_analysis(self):
         self.check(r'''
  const idx=(repository,files,imports=[],routes=0)=>({repository,commit:'aaaaaaaa1111',version:1,coverage:{indexed_files:files.length,candidate_files:files.length,languages:{python:{indexed_files:files.length,candidate_files:files.length}}},
