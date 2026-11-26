@@ -31,8 +31,8 @@ import source_signals
 
 ACTIVE = {'preparing', 'running', 'saving'}
 TERMINAL = {'completed', 'failed', 'cancelled'}
-OVERVIEW_VERSION = 8
-SCOPED_OVERVIEW_VERSION = 6
+OVERVIEW_VERSION = 9
+SCOPED_OVERVIEW_VERSION = 7
 MAX_PROMPT_FILE_BYTES = 300_000  # larger tracked files never reach a unit or a prompt (not structure_index.MAX_PROMPT_FILE_BYTES)
 GENERATED_NAMES = {'package-lock.json','pnpm-lock.yaml','yarn.lock','go.sum','poetry.lock','cargo.lock','composer.lock','gemfile.lock','uv.lock'}
 GENERATED_SUFFIXES = ('.lock','.min.js','.min.css','.map')

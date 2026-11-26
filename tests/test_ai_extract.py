@@ -526,3 +526,12 @@ class Analysis(unittest.TestCase):
         self.assertEqual(project.states('demo')['service']['generation'],before)
 
 if __name__=='__main__':unittest.main()
+
+
+class PlainKoreanEnding(unittest.TestCase):
+    def test_prompts_ask_for_the_plain_da_ending_and_saved_texts_are_asked_again(self):
+        import mapcore, analysis_run
+        self.assertIn('-다 form', mapcore.PLAIN)
+        self.assertIn('never -습니다/-합니다', mapcore.PLAIN)
+        # Results written under the earlier instruction carry older keys, so the next analysis asks again.
+        self.assertEqual((mapcore.WORDING, analysis_run.OVERVIEW_VERSION, analysis_run.SCOPED_OVERVIEW_VERSION), (5, 9, 7))
