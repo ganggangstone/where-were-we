@@ -647,7 +647,7 @@ const AnalysisRun = (() => {
           const route=flow?.registered_routes?.[routeGroup?.registered_route_indexes[0]];
           const position=route?standaloneRoutes(flow).indexOf(route):-1;
           if(position>=0){
-            Object.assign(S.moduleGraph,{routePage:Math.floor(position/ROUTES_PER_PAGE),routesOpen:true});render();
+            Object.assign(S.moduleGraph,{routeArea:'',routesOpen:true});render();
             const row=[...$('moduleGraph').querySelectorAll('[data-registered-route]')].find(el=>el.dataset.registeredRoute===resource);
             if(row){row.open=true;row.scrollIntoView({block:'center'});return;}
           }
