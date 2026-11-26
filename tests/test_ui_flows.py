@@ -1724,6 +1724,20 @@ class UxWriting(unittest.TestCase):
  assert(typeof detail==='function' && !window.errors.length,'Request detail opens after the changes screen: '+window.errors.join(' | '));
 ''')
 
+    def test_changes_say_plainly_when_the_explanation_exists_only_in_the_other_language(self):
+        self.check(r'''
+ const other=S.lang==='en'?'ko':'en',value=t=>({text:t,unknown:false,evidence:[]});
+ const card={title:'Fictional change',merge:'merged',prs:[],terms:[]};for(const k of ['problem','why','before','after','resolution','impact','recovery','remaining'])card[k]=value('Known '+k);
+ const input={repositories:[{id:'web',since:'2026-09-01T00:00:00Z',at:'2026-09-20T00:00:00Z',refs:{dev:'HEAD'},commits:{}}]};
+ S.briefings={dev:{[S.lang]:{state:'not_analyzed',warnings:[],result:null},[other]:{state:'not_analyzed',warnings:[],result:null,earlier:{cards:[card],pr_count:0,branch:'dev',unknown:[],input}}}};
+ S.changes={last_refresh:'2026-10-01T00:00:00Z',entries:[{at:'2026-10-01T00:00:00Z',since:'2026-09-24T00:00:00Z',repository:'web',branches:{},prs:[]}]};
+ S.view='changes';render();
+ const note=$('map').querySelector('[data-other-language]');
+ assert(note && note.textContent===(S.lang==='en'?'Only a Korean explanation exists. Use Explain changes to write one in English.':'영어 설명만 있다. 「변경 설명 만들기」로 한국어 설명을 만든다.'),'The other-language explanation is named plainly: '+main());
+ assert(!$('requestBriefing').disabled && !main().includes(tr('설명 없음')) && !main().includes('No AI explanation yet') && !main().includes('아직 없다'),'The screen does not look as if nothing exists and offers the action');
+ assert(!window.calls.some(c=>c.command==='briefing_request'),'No AI call');
+''')
+
     def test_close_command_closes_the_ai_panel_and_reports_when_nothing_is_open(self):
         self.check(r'''
  await $('agent').onclick();assert(S.agentPrompt!=null && $('insp').innerText.includes(tr('AI 연결')),'AI panel opened');

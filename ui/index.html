@@ -56,8 +56,8 @@ const UI_EN = {
   "변경 설명 만들기":"Explain changes",
   "문제:":"Problem",
   "변경:":"Change",
-  "한국어 설명 있음":"Korean available",
-  "영어 설명 있음":"English available",
+  "한국어 설명만 있다. 「변경 설명 만들기」로 영어 설명을 만든다.":"Only a Korean explanation exists. Use Explain changes to write one in English.",
+  "영어 설명만 있다. 「변경 설명 만들기」로 한국어 설명을 만든다.":"Only an English explanation exists. Use Explain changes to write one in Korean.",
   "범위":"Scope",
   "비교 기간":"Date range",
   "병합":"Merged",
@@ -294,7 +294,6 @@ const UI_EN = {
   "시작하기": "Get started",
   "서버 연결 지정": "Set server connections", "연결 후보 ": "Connection candidates: ", "개 확인": " to review", "저장소 상태 자세히": "Repository status details",
   "지도로 돌아가기": "Back to the map", "이슈": "Issues",
-  "한국어 설명 있음 · 언어 전환":"Korean explanation available · Switch language", "영어 설명 있음 · 언어 전환":"English explanation available · Switch language",
   "테스트 ": "Tests: ",
   "지도에 연결": "Link on map", "연결 후보를 골라 뒀다. 저장하면 지도에 반영된다.": "The candidate is checked. Save to apply it.",
   "연결 범위": "Connection coverage", 
@@ -2041,21 +2040,21 @@ function briefingPanel() {
     const key=JSON.stringify([warning.repository,warning.code]);
     if(!groups.has(key))groups.set(key,[]);groups.get(key).push(warning);
   }
-  const other=S.lang==='en'?'ko':'en',otherSaved=!result && S.briefings?.[S.branch]?.[other]?.state==='saved';
+  const other=S.lang==='en'?'ko':'en',otherView=S.briefings?.[S.branch]?.[other],otherSaved=!result && !!(otherView?.result || otherView?.earlier);
   const action=`<button class="btn quiet" id="requestBriefing" ${!view || ['needs_collection','no_changes'].includes(view.state)?'disabled':''}>${tr('변경 설명 만들기')}</button>`;
   let head=sectionHeading('변경 설명',action,result?`<span class="pill ai">${tr('AI 설명')}</span>`:'');
   if(result && !current){
     const period=periodText(result.input.repositories),scope=result.repository && result.repository!==(S.repository || '')?connectionDisplayName(result.repository):'';
     head+=`<p class="sub" role="status">${S.lang==='en'?`This explains ${period}${scope?` for ${esc(scope)} only`:''}. A later refresh changed the period on screen.`:`${period} 기간${scope?` ${esc(scope)} 코드`:''}의 설명이다. 그 뒤 새로고침으로 화면의 기간이 바뀌었다.`}</p>`;
-  } else if(!result)head+=`<p class="sub" role="status">${tr(labels[view?.state] || labels.needs_collection)}</p>`;
-  if(otherSaved)head+=`<p class="s">${tr(other==='ko' ? "한국어 설명 있음":"영어 설명 있음")}</p>`;
+  } else if(otherSaved)head+=`<p class="sub" role="status" data-other-language>${tr(other==='ko' ? '한국어 설명만 있다. 「변경 설명 만들기」로 영어 설명을 만든다.':'영어 설명만 있다. 「변경 설명 만들기」로 한국어 설명을 만든다.')}</p>`;
+  else if(!result)head+=`<p class="sub" role="status">${tr(labels[view?.state] || labels.needs_collection)}</p>`;
   const parts={merged_prs:'병합한 PR',open_prs:'열린 PR',issues:'이슈',pr_files:'PR의 변경 파일',linked_issues:'연결된 이슈'};
   // 수집 실패 같은 경고는 바로 할 일이 있으므로 접지 않는다.
   if(groups.size)head+=`<ul class="status-list">${[...groups.values()].map(items=>{
     const warning=items[0],sources=[...new Set(items.flatMap(w=>[w.part?tr(parts[w.part] || '기타 자료'):'',w.source || '']).filter(Boolean))];
     return `<li role="status"><span class="pill warn">${esc(connectionDisplayName(warning.repository))}</span><span>${tr(warnings[warning.code] || '가져온 자료 확인 필요.')}${sources.length?` <span class="s">(${esc(sources.join(', '))})</span>`:''}</span></li>`;
   }).join('')}</ul>`;
-  if(!result)return {head,cards:'',detail:'',result:null};
+  if(!result)return {head,cards:'',detail:'',result:null,otherSaved};
   const merged=result.cards.filter(card=>card.merge==='merged').length,withoutEvidence=result.cards.length-merged;
   const count=S.lang==='en'?`${result.cards.length} changes`:`${result.cards.length}건`;
   let detail=`<div class="briefing-status"><span class="pill">${tr('병합')} ${merged}</span>${withoutEvidence?`<span class="pill">${tr('근거 없음')} ${withoutEvidence}</span>`:''}<span class="s">${tr('배포·실행 미확인')}</span></div><div class="briefing-period">${periodRows(result.input.repositories)}</div>`
@@ -2084,7 +2083,7 @@ function changesLead(brief,entry) {
   if(r){const period=periodText(r.input.repositories);
     return S.lang==='en'?`${period}: ${r.cards.length} changes grouped by the problems they solved.`:`${period}에 바뀐 것 ${r.cards.length}가지를 문제별로 모았다.`;}
   if(entry){const period=`${when(entry.since)} ~ ${when(entry.at)}`;
-    return S.lang==='en'?`${period}: ${entry.prs.length} merged PRs. No AI explanation yet.`:`${period}에 병합한 PR ${entry.prs.length}건의 AI 설명은 아직 없다.`;}
+    return S.lang==='en'?`${period}: ${entry.prs.length} merged PRs. ${brief.otherSaved?'The AI explanation exists only in Korean.':'No AI explanation yet.'}`:`${period}에 병합한 PR ${entry.prs.length}건의 AI 설명은 ${brief.otherSaved?'영어로만 있다':'아직 없다'}.`;}
   return tr('아직 새로고침한 적이 없다.');
 }
 function changesView(m) {
