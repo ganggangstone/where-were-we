@@ -753,6 +753,14 @@ class Flows(unittest.TestCase):
         seen=[a or b for a,b in keys];duplicates=sorted({k for k in seen if seen.count(k)>1})
         self.assertGreater(len(seen),300);self.assertEqual(duplicates,[])
 
+    def test_step_opening_sentence_reads_as_one_english_sentence(self):
+        import shutil
+        source=(ROOT/'ui/index.html').read_text()
+        code=source[source.index('const UI_EN = {'):source.index('function ui(parts')]
+        script=code+";const S={lang:'en'};console.log(tr('화면이 「List orders」 서버 요청을 보낸다'))"
+        result=subprocess.run([shutil.which('node'),'-e',script],capture_output=True,text=True,timeout=60)
+        self.assertEqual(result.stdout.strip(),'The screen sends the “List orders” server request',result.stderr)
+
     def test_new_analysis_texts_have_english_before_the_pattern_is_built(self):
         import shutil
         source=(ROOT/'ui/index.html').read_text();run=(ROOT/'ui/analysis-run.js').read_text()
