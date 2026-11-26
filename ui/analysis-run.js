@@ -18,6 +18,17 @@ const AnalysisRun = (() => {
     if(task==='full')return {task,targets:[],...(Array.isArray(choice.only)?{only:choice.only}:{})};
     return {task,targets:command==='scope_overview'?[{repository:scope().repository,target:choice.detailTarget}]:targets};
   }
+  // A steps target is '@routes:' + route keys; the panel shows the request names the map already has and how many there are.
+  function targetName(repository,target) {
+    const value=String(target || '');
+    if(!value.startsWith('@routes:'))return value;
+    let keys=[];try{keys=JSON.parse(value.slice(8));}catch{}
+    const routes=(typeof M==='function' && M()?.backend_routes) || [];
+    const names=keys.map(k=>{const route=routes.find(r=>r.file+'::'+r.function===k || r.file===repository+'/'+k.split('::')[0] && r.function===k.split('::')[1]);
+      return route?(flowOf(route)?.name || reqName(route) || route.function):k.split('::').pop();});
+    const more=names.length>2?text(' 외 '+(names.length-2),' and '+(names.length-2)+' more'):'';
+    return names.slice(0,2).join(', ')+more+' · '+text('서버 요청','Server requests')+' '+keys.length;
+  }
   const key = () => JSON.stringify([scope(), S.analysisChoice, S.loadToken]);
   const decode = value => typeof value === 'string' ? JSON.parse(value) : value;
   const shown = () => S.agentPurpose === 'analysis' && S.agentPrompt != null;
@@ -606,7 +617,7 @@ const AnalysisRun = (() => {
     const runAccount = run?.account?.email || run?.account?.id;
     const choice=intent();
     const cached=run?.resource_estimate?.cached || 0;
-    const targets=choice.targets.map(t=>[t.repository,t.target].filter(Boolean).map(esc).join(' · '));
+    const targets=choice.targets.map(t=>[t.repository && connectionDisplayName(t.repository),targetName(t.repository,t.target)].filter(Boolean).map(esc).join(' · '));
     const scoped=S.analysisChoice?.task==='scope_overview';
     const fullReady=choice.task==='full' || choice.task==='overview' && !scoped && !!liveBoard()?.repositories;  // the board owns the one main action; this panel keeps only account problems, errors and redelivery warnings
     const startLabel=batch?text('서버 경로 묶음 설명 생성','Explain groups of server routes'):scoped?text('이 서버 경로 설명 생성','Explain this server route'):choice.task==='overview' ? text('첫 개요 만들기','Create initial overview')
@@ -625,7 +636,7 @@ const AnalysisRun = (() => {
       <p class="auto-line"><strong title="${esc(identity || '')}">Claude Code</strong>${account?.subscription_type ? ' · '+esc(account.subscription_type) : identity ? '' : ' · '+text('계정 미확인','Account not verified')}</p>
       <p class="chips"><span class="chip">${esc(scope().repository ? connectionDisplayName(scope().repository) : text('연결한 저장소 전체','All connected repositories'))}</span><span class="chip">${esc(S.branch)}</span>${targets.map(target=>`<span class="chip">${target}</span>`).join('')}<span class="chip">${text('코드가 Claude로 전송 · 구독 한도 적용','Code sent to Claude · subscription limit')}</span></p>
       ${providerBusy ? `<p role="status">${text('Claude Code 계정 확인 중…','Checking the Claude Code account…')}</p>` : provider && !usable() ? `<p role="alert">${esc(message(provider))}</p>` : ''}
-      ${run ? `${!sameScope() || (runAccount && runAccount!==identity) ? `<p class="chips"><span class="chip">${text('마지막 실행','Last run')}: ${esc(names[run.intent?.task || 'all'])}</span><span class="chip">${esc(runScope)}</span>${(run.intent?.targets || []).map(t=>`<span class="chip">${esc(t.repository)} · ${esc(t.target)}</span>`).join('')}${runAccount && runAccount!==identity ? `<span class="chip warn">${esc(runAccount)}</span>` : ''}${!sameScope() ? `<span class="chip warn">${text('현재 선택과 다름','Differs from selection')}</span>` : ''}</p>` : ''}<div role="status" aria-live="polite"><strong>${esc(stateLabel())}</strong> · ${esc(progress)}${run.announced && run.intent?.task!=='full'?' · '+text('AI 호출','AI calls')+' '+(stats?.calls || 0)+'/'+run.announced.total:''}${batchRun && cached?' · '+text('재사용 '+cached+'개',cached+' reused'):''}${taskName ? '<div>'+esc(taskName)+'</div>' : ''}</div><progress max="${Math.max(total, 1)}" value="${done}" aria-label="${text('분석 진행률','Analysis progress')}"></progress>${run.blocked?.length ? `<p class="s">${text('먼저 확인할 분석','Analysis requiring attention')}: ${run.blocked.length}</p>` : ''}` : ''}
+      ${run ? `${!sameScope() || (runAccount && runAccount!==identity) ? `<p class="chips"><span class="chip">${text('마지막 실행','Last run')}: ${esc(names[run.intent?.task || 'all'])}</span><span class="chip">${esc(runScope)}</span>${(run.intent?.targets || []).map(t=>`<span class="chip">${[t.repository && connectionDisplayName(t.repository),targetName(t.repository,t.target)].filter(Boolean).map(esc).join(' · ')}</span>`).join('')}${runAccount && runAccount!==identity ? `<span class="chip warn">${esc(runAccount)}</span>` : ''}${!sameScope() ? `<span class="chip warn">${text('현재 선택과 다름','Differs from selection')}</span>` : ''}</p>` : ''}<div role="status" aria-live="polite"><strong>${esc(stateLabel())}</strong> · ${esc(progress)}${run.announced && run.intent?.task!=='full'?' · '+text('AI 호출','AI calls')+' '+(stats?.calls || 0)+'/'+run.announced.total:''}${batchRun && cached?' · '+text('재사용 '+cached+'개',cached+' reused'):''}${taskName ? '<div>'+esc(taskName)+'</div>' : ''}</div><progress max="${Math.max(total, 1)}" value="${done}" aria-label="${text('분석 진행률','Analysis progress')}"></progress>${run.blocked?.length ? `<p class="s">${text('먼저 확인할 분석','Analysis requiring attention')}: ${run.blocked.length}</p>` : ''}` : ''}
       ${stats ? `<details><summary>${text('AI 사용량','AI usage')}</summary><p class="s">${text('입력 호출','Input calls')}: ${stats.calls} · ${text('전송한 입력 바이트','Encoded input bytes')}: ${stats.bytes}</p></details>` : ''}
       ${retryWarning?`<p role="alert" id="retryDeliveryWarning">${text('분석이 멈췄다. 다시 시작하면 같은 코드가 Claude로 한 번 더 갈 수 있다.','Analysis was interrupted. Claude may already have received the last request. Retrying may send it again.')}</p>`:''}
       ${issue ? `<p role="alert">${esc(message(issue))}</p>` : ''}

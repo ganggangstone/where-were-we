@@ -293,6 +293,19 @@ assert(html.includes('Makes') && !html.includes('Loading…'),'A card left open 
 assert(html.includes('Commit · <code>abcd1234</code>') && html.includes('File · <code>c.py</code>'),'Commit and file carry labels');
 """)
 
+    def test_steps_target_and_last_run_show_request_names_not_route_keys(self):
+        self.check_js(r"""
+const target='@routes:'+JSON.stringify(['api/orders.py::list_orders','api/orders.py::cancel_order','api/orders.py::refund']);
+globalThis.M=()=>({backend_routes:[{file:'service/api/orders.py',function:'list_orders'},{file:'service/api/orders.py',function:'cancel_order'}]});
+globalThis.flowOf=r=>r.function==='list_orders'?{name:'List orders'}:null;globalThis.reqName=r=>r.function==='cancel_order'?'Cancel an order':null;
+S.analysisChoice={task:'make_steps',detailTarget:target,targets:[{repository:'service',target}]};
+status=runRecord('completed',{intent:{task:'steps',targets:[{repository:'service',target}]},branch:'other'});
+await open();await AnalysisRun.check();await flush();
+const html=$('insp').innerHTML;
+assert(!html.includes('@routes') && !html.includes('::'),'Raw route keys reach the panel: '+html);
+assert(html.includes('Repository service · List orders, Cancel an order and 1 more · Server requests 3'),'Targets read as request names with a count: '+html);
+""")
+
     MAP_BOARD = r"""
 const mapBoard=(extra={})=>({repositories:[{repository:'service',units:[
  ['route:/orders','route','/orders',3,'saved','new'],
