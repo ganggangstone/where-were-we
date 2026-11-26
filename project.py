@@ -1,5 +1,5 @@
 """Project configuration, repository snapshots, and a shared UI/MCP read model."""
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from datetime import datetime, timezone
 import argparse
 import copy
@@ -42,18 +42,61 @@ def atomic(path, value):
     finally:
         if os.path.exists(temp):os.unlink(temp)
 
+_HELD=set()
 @contextmanager
 def locked(name):
     root=home(name);root.mkdir(parents=True,exist_ok=True)
     with (root/'.project.lock').open('a') as stream:
         try:fcntl.flock(stream,fcntl.LOCK_EX|fcntl.LOCK_NB)
         except BlockingIOError:raise ValueError('This project is already being updated; try again after it finishes')
+        _HELD.add(root)
         try:yield
-        finally:fcntl.flock(stream,fcntl.LOCK_UN)
+        finally:_HELD.discard(root);fcntl.flock(stream,fcntl.LOCK_UN)
 
 def config(name):
+    migrate(name)
     value=read(home(name)/'project.json')
     return validate(value) if value is not None else None
+
+MIGRATED='original'  # the one repository of a project made before project.json
+OLD_FILES='.before-project-json'
+def migrate(name):
+    """A folder from before project.json keeps one code's map files in the folder itself. Make it a current project with one
+    repository: the snapshot is published first and project.json written last, so a crash leaves the old files in charge; the old
+    files move to OLD_FILES only once the snapshot reads them back. Repeats harmlessly. No AI, no network."""
+    root=home(name)
+    # A collection stage folder holds one repository's files by design.
+    if os.environ.get('WHERE_WERE_WE_COLLECTION_STAGE') or not any((root/(key+'.json')).exists() for key in NAMES):return
+    with nullcontext() if root in _HELD else locked(name):  # an update that holds the lock migrates inside it
+        if not (root/'project.json').exists():
+            raw={key:read(root/(key+'.json')) for key in NAMES}
+            m=raw['dev'] or raw['main']
+            if not m:return
+            import mapcore
+            refs={role:raw[role].get('ref') or mapcore.configured_refs().get(role) if raw[role] else None for role in ('dev','main')}  # a role without a map was not collected
+            old_github=states(name).get('@github',{})
+            item={'id':MIGRATED,'name':name,'path':m['repo'],'refs':refs,'layout':{}}
+            if old_github.get('path')==m['repo'] and (old_github.get('github') or {}).get('account'):item['github']=old_github['github']
+            conf=validate({'repositories':[item]});repo=conf['repositories'][0]
+            # Saved AI results name the one-branch configuration the old layout read them with.
+            old={fingerprint({'path':m['repo'],'refs':{role:refs[role]},'layout':{}}) for role in ('dev','main') if raw[role]}
+            def pin(value):
+                if isinstance(value,dict):return {k:fingerprint(repo) if k=='configuration' and v in old else pin(v) for k,v in value.items()}
+                return [pin(v) for v in value] if isinstance(value,list) else value
+            shutil.rmtree(root/'repositories'/MIGRATED,ignore_errors=True)  # a snapshot left by a crash before the switch
+            _publish(name,MIGRATED,pin(raw),{'fingerprint':fingerprint(repo)},collection=False)
+            atomic(root/'project.json',conf)
+        repo=next((r for r in validate(read(root/'project.json'))['repositories'] if r['id']==MIGRATED),None)
+        folder=repository_folder(name,repo,states(name)) if repo else None
+        names=[key+'.json' for key in NAMES if (root/(key+'.json')).exists()]
+        if not folder or any(read(folder/n) is None for n in names):return  # not verified: the old files stay where they are
+        (root/OLD_FILES).mkdir(exist_ok=True)
+        # Kept rather than deleted: the only copy of the user's data before this change. The comparison caches are rebuilt.
+        for path in [*(root/n for n in names),*root.glob('*.base.json'),*root.glob('*.current-basic.json')]:os.replace(path,root/OLD_FILES/path.name)
+        state=states(name);state.pop('@github',None)
+        state['@review']={(MIGRATED+key if key.startswith(':') else key):v for key,v in state.get('@review',{}).items()}
+        if not state['@review']:state.pop('@review')
+        atomic(root/'repository-state.json',state)
 def fingerprint(repo):
     return hashlib.sha256(json.dumps({k:repo.get(k) for k in ('path','refs','layout')},sort_keys=True).encode()).hexdigest()
 
