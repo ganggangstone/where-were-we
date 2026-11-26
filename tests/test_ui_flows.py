@@ -655,14 +655,15 @@ class Flows(unittest.TestCase):
  assert($('status').textContent.includes(tr('새 지도를 가져오지 못했다. 자세한 이유는 「오류 내용」에 있다.')),'Keep the collection failure visible');
 ''')
 
-    def test_all_code_is_explained_and_one_code_keeps_its_configured_server_links(self):
+    def test_the_repository_selector_is_not_repeated_as_text_and_a_missing_branch_shows_no_empty_button(self):
         self.check(r'''
- const note=()=>$('repository-bar').querySelector('[data-code-scope]')?.textContent || '';
- assert(note()===tr('모든 저장소'),'All code is explained beside the selector: '+note());
+ const bar=()=>$('repository-bar').innerText;
+ assert(bar().split(tr('모든 저장소')).length===2,'All repositories appears once, in the selector: '+bar());
  $('repository').value='web';$('repository').dispatchEvent(new Event('change'));for(let i=0;i<50 && S.repository!=='web';i++)await wait();await wait();
- assert(note()===tr('이 저장소만 · 서버 연결 유지'),'One code says what stays linked: '+note());
- window.mutateBundle=b=>{b.project.repositories=b.project.repositories.slice(0,1);};await loadProject('Second',false,'');await wait();
- assert(!$('repository-bar').querySelector('[data-code-scope]'),'One connected code needs no scope note');
+ assert(!bar().includes(tr('서버 연결 유지')),'No caption after choosing one repository');
+ window.mutateBundle=b=>{b.main=null;b.project.repositories.forEach(r=>r.refs.main=null);};await loadProject('Second',false,'');await wait();
+ const mainButton=$('branch').querySelector('[data-b="main"]');
+ assert(mainButton.hidden && !bar().includes(tr('저장소 이름 없음')),'A project without that branch shows no empty branch button');
 ''')
 
     def test_manual_connection_leads_into_the_analysis_request_and_later_refreshes_stay_quiet(self):
@@ -1718,7 +1719,7 @@ class UxWriting(unittest.TestCase):
  const card={title:'Fictional change',merge:'merged',prs:[],terms:[]};
  for(const k of ['problem','why','before','after','resolution','impact','recovery','remaining'])card[k]=value('Known '+k);
  S.briefings={dev:{[S.lang]:{state:'saved',warnings:[],result:{cards:[card],pr_count:0,branch:'dev',unknown:['Fictional unknown'],input:{repositories:[{id:'web',since:'2026-09-01T00:00:00Z',at:'2026-09-20T00:00:00Z',refs:{dev:'HEAD'},commits:{from:'aaaa1111',to:'bbbb2222'}}]}}}}};
- S.view='changes';render();assert(main().includes('Fictional change'),'Briefing rendered');
+ S.view='changes';render();S.briefings.dev[S.lang].result.cards=[card,card,card];render();const tops=[...$('map').querySelectorAll('.change-card')].slice(0,2).map(c=>c.getBoundingClientRect().top);assert(tops[0]===tops[1],'Both card columns start level: '+tops);assert(main().includes('Fictional change'),'Briefing rendered');
  S.view='map';S.sel='web::/items';render();
  $('insp').querySelector('[data-req]').click();await wait();
  assert(typeof detail==='function' && !window.errors.length,'Request detail opens after the changes screen: '+window.errors.join(' | '));
@@ -1736,6 +1737,18 @@ class UxWriting(unittest.TestCase):
  assert(note && note.textContent===(S.lang==='en'?'Only a Korean explanation exists. Use Explain changes to write one in English.':'영어 설명만 있다. 「변경 설명 만들기」로 한국어 설명을 만든다.'),'The other-language explanation is named plainly: '+main());
  assert(!$('requestBriefing').disabled && !main().includes(tr('설명 없음')) && !main().includes('No AI explanation yet') && !main().includes('아직 없다'),'The screen does not look as if nothing exists and offers the action');
  assert(!window.calls.some(c=>c.command==='briefing_request'),'No AI call');
+''')
+
+    def test_wording_has_no_captions_repeated_warnings_or_word_by_word_joins(self):
+        self.check(r'''
+ S.briefings={dev:{[S.lang]:{state:'not_analyzed',warnings:[{repository:'web',code:'configuration_changed'}],result:null}}};
+ S.view='changes';render();assert(!main().includes(tr('설정을 바꿨다. 새로고침하면 지도에 반영된다.')),'The settings warning is shown once, in the repository bar');
+ S.view='map';S.sel='web::/items';render();
+ assert(!pane().includes(tr('분석 요청을 준비하는 중…')) && !$('insp').querySelector('#mklog')?.textContent,'No caption beside the analysis button');
+ const r={btn:'Save',btns:['Save','Keep'],route:{function:'f'}};
+ assert(reqLabel(r)===(S.lang==='en'?'Save and 1 more':'Save 외 1'),'The other-buttons count is one phrase: '+reqLabel(r));
+ S.sel=null;S.view='feat';render();if(S.lang==='en')assert(/\d+ feature groups · \d+ screens?/.test(main()) && !/\b1 screens\b|Screens: |Requests: /.test(main()+pane()),'English counts read naturally: '+main());
+ S.view='map';render();assert($('map').querySelector('p.lead'),'The screen map keeps its lead sentence');
 ''')
 
     def test_close_command_closes_the_ai_panel_and_reports_when_nothing_is_open(self):
