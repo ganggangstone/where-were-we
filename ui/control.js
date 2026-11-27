@@ -50,7 +50,7 @@ function controlSelection() {
 async function controlState() {
   const selected=controlSelection(),targets=controlTargets(),feature=selectedFeature(M());
   return {project:S.project,repository:S.repository,branch:S.branch,view:S.view,revision:await controlRevision(),selection:selected,
-    selected:targets.filter(t=>selected.includes(t.id)),query:S.q,step:S.step,language:S.lang,settings:S.settings,
+    selected:targets.filter(t=>selected.includes(t.id)),query:S.q,step:S.step>=0?S.step+1:null,language:S.lang,settings:S.settings,
     dialogs:[...document.querySelectorAll('dialog[open]')].map(d=>d.id),structure:S.showProposal && S.proposal?'ai_proposal':'written',
     // The chosen feature stays as context; member is true/false only for a screen target, relation also covers requests and data.
     feature_context:feature?(r=>({id:feature.id,name:feature.g.name,member:r==='member'?true:r==='outside'?false:null,relation:r}))(featureRelation(M(),feature)):null,analysis:S.analysisRequest?{state:S.analysisRequest.state,scope:S.analysisRequest.scope,prepared:true}:null};
@@ -123,8 +123,9 @@ async function applyAppCommand(command) {
       // 화면만 골랐으면 그 화면에서 동작 과정이 있는 첫 요청을 연다.
       if(!S.open && S.sel){const q=requests(M(),S.sel).find(x=>flowOf(x.route));if(q)S.open=q.key;}
       const r=(M()?.backend_routes || []).find(r=>r.file+'::'+r.function===S.open),flow=r && flowOf(r);
-      if(!Number.isInteger(a.index) || !flow || a.index<0 || a.index>lastStep(flow))controlError('step_unavailable');
-      S.step=a.index;S.ev=a.index;render();showStep();break;
+      // index는 단계 그림에 보이는 번호(1부터)다.
+      if(!Number.isInteger(a.index) || !flow || a.index<1 || a.index>lastStep(flow)+1)controlError('step_unavailable');
+      S.step=a.index-1;S.ev=a.index-1;render();showStep();break;
     }
     case 'dialog':{
       // close: every open dialog and the right-side AI panel (the setup, analysis or connection panel shown while S.agentPrompt is set).

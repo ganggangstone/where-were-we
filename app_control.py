@@ -15,7 +15,7 @@ ACTIONS={
  'state':{},'targets':{'query':'text','project':'optional project','repository':'optional scope','branch':'dev|main'},
  'focus_app':{},'navigate':{'project':'project','repository':'scope','branch':'dev|main','view':'changes|sys|feat|map|focus'},
  'select':{'project':'project','repository':'scope','branch':'dev|main','target':'ID from app_targets','revision':'revision from app_targets','relations':'optional boolean'},
- 'clear':{},'search':{'query':'text'},'step':{'index':'zero-based request step'},
+ 'clear':{},'search':{'query':'text'},'step':{'index':'request step number as shown, from 1'},
  'dialog':{'name':'code|settings|agent|updates|create|close'},
  'settings':{'value':'comparison/auto-refresh settings object'},'language':{'lang':'ko|en'},
  'configure':{'project':'project','configuration':'repositories/shared_data object'},

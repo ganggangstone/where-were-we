@@ -81,7 +81,7 @@ window.__TAURI__={core:{invoke:async(command,args)=>{
  await select('job');assert(document.querySelector('[data-control-detail]')?.textContent.includes('Retry upload'),'Job details are visible');
  await select('connection');assert(document.querySelector('[data-control-detail]')?.textContent.includes('Queues uploads'),'Connection details are visible');
  await select('data');assert(S.focus.id==='web::uploads','Data relationships');
- await select('request');await applyAppCommand({action:'step',arguments:{index:1}});assert(document.querySelector('.step.cur')?.textContent.includes('Validate upload'),'Request step and source evidence are visible');assert(S.focus.t==='route' && document.getElementById('insp').textContent.includes('/upload'),'Orphan request is visible');
+ await select('request');await applyAppCommand({action:'step',arguments:{index:2}});assert(document.querySelector('.step.cur')?.textContent.includes('Validate upload'),'Request step and source evidence are visible');assert(S.focus.t==='route' && document.getElementById('insp').textContent.includes('/upload'),'Orphan request is visible');
  const before=await controlState();m.commit='changed';
  const oldIDs=controlTargets().map(t=>t.id);system.nodes.reverse();assert(JSON.stringify(controlTargets().map(t=>t.id).sort())===JSON.stringify(oldIDs.sort()),'Reordering nodes preserves target IDs');
  let stale=false;try{await applyAppCommand({action:'select',arguments:{project:'demo',repository:'',branch:'dev',target:before.selection[0],revision:before.revision}});}catch(e){stale=e.code==='stale_revision';}assert(stale,'Stale revision is explicit');
