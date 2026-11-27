@@ -310,7 +310,7 @@ async fn analysis_providers(app: tauri::AppHandle) -> Result<String, String> {
 #[tauri::command]
 async fn analysis_run_start(app: tauri::AppHandle, scope: AnalysisScope, expected_account: serde_json::Value) -> Result<String, String> {
     analysis_command(app, vec!["start".into(), scope.project, "--repository".into(), scope.repository,
-        "--branch".into(), scope.branch, "--lang".into(), scope.lang, "--executor".into(), "claude".into(),
+        "--branch".into(), scope.branch, "--lang".into(), scope.lang,
         "--expected-account".into(), expected_account.to_string(), "--intent".into(),
         scope.intent.unwrap_or_else(|| serde_json::json!({"task":"full","targets":[]})).to_string()]).await
 }

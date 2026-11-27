@@ -252,21 +252,6 @@ def scan_commit(repo, commit, entries, overhead):
     return {f: found[f] for f, _ in entries if f in found}
 
 
-SAMPLE_ROWS = 24     # a unit explanation reads at most this many usable lines of a file
-SAMPLE_TEXT = 160    # ... each cut to this many characters
-SAMPLE_ROW_OVERHEAD = 24  # JSON the unit packet adds around each compact row (ref, line number, separators)
-
-
-def sample_bytes(repo, entries):
-    """{path: bytes a unit sample takes from the file}: its usable lines (six or more characters), evenly spread, at most 24."""
-    cost = {}
-    for file, text, _ in stream(repo, entries):
-        lines = [line.strip() for line in text.splitlines() if len(line.strip()) >= 6]
-        spread = sorted({i * (len(lines) - 1) // (SAMPLE_ROWS - 1) for i in range(SAMPLE_ROWS)}) if len(lines) > SAMPLE_ROWS else range(len(lines))
-        cost[file] = sum(len(lines[i][:SAMPLE_TEXT].encode()) + SAMPLE_ROW_OVERHEAD for i in spread) + len(file) + 40
-    return cost
-
-
 def pack(row):
     """The compact stored form of a scan row (empty parts are left out)."""
     out = {'k': row['kind'], 'n': row['lines'], 'z': row['size']}
@@ -282,22 +267,6 @@ def pack(row):
 def unpack(row):
     return {'kind': row['k'], 'lines': row['n'], 'size': row['z'], 'windows': row.get('w', []), 'classes': row.get('c', {}),
             'sent': row.get('s', 0), 'clips': {n: o for n, o in row.get('l', [])}, 'truncated': bool(row.get('t'))}
-
-
-def window_rows(lines, spans, clips):
-    """The numbered rows of one file that its windows keep; long lines are clipped around the signal they carry.
-    spans: [[first, last], ...] (1-based, inclusive); clips: {line: character offset of the clipped segment}."""
-    keep = window_lines(spans)
-    rows = []
-    for row in lines:
-        if row['line'] not in keep:
-            continue
-        text = row['text']
-        if len(text) > LONG_LINE:
-            offset = clips.get(row['line'], 0)
-            row = {'line': row['line'], 'text': text[offset:offset + LONG_LINE], **({'offset': offset} if offset else {})}
-        rows.append(row)
-    return rows
 
 
 if __name__ == '__main__':

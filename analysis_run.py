@@ -830,10 +830,13 @@ def _explain_unit(run_id,executor,cancelled):
     store_name='unit_overviews' if plain else 'scope_overviews'
     _update(run_id,lambda v:v.setdefault(store_name,{}).setdefault(rid,{}).__setitem__(target['target'],{'repository':rid,**value['pins'][rid],**overview}))
 
+def _new_record(scope,**fields):
+    """A prepared run record; a worker launches it later."""
+    return {'id':uuid.uuid4().hex,**scope,'state':'preparing','created_at':store.now(),'finished_at':None,'launch_epoch':None,'prepare_epoch':time.time(),
+            'tasks':[],'blocked':[],'current_task':None,'completed_tasks':[],'cancel_requested':False,'error':None,'account':None,**fields}
+
 def _prepare_full(scope,history):
-    value={'id':uuid.uuid4().hex,**scope,'executor':'claude','state':'preparing','created_at':store.now(),'started_at':None,'finished_at':None,
-           'launch_epoch':None,'prepare_epoch':time.time(),'tasks':[],'blocked':[],'skipped':[],'current_task':None,'completed_tasks':[],
-           'cancel_requested':False,'error':None,'account':None}
+    value=_new_record(scope)
     only=scope['intent'].get('only')
     if only:
         plan=ai_extract.plan(scope['project'],scope['branch'],scope['lang'],scope['repository'],overview=True,light=True)
@@ -849,8 +852,7 @@ def _prepare_full(scope,history):
     value['announced']['total']=sum(value['announced'][k] for k in CALL_KINDS)
     return value
 
-def prepare(project, branch='dev', lang='ko', repository='', executor='claude', launch_intended=False, intent=None, resume_from=None, expected_pins=None):
-    if executor != 'claude': raise ValueError('Choose the Claude CLI executor')
+def prepare(project, branch='dev', lang='ko', repository='', launch_intended=False, intent=None, resume_from=None, expected_pins=None):
     scope = _scope(project,repository,branch,lang)
     scope['intent']=_intent(intent,scope['repository'])
     with locked():
@@ -865,10 +867,7 @@ def prepare(project, branch='dev', lang='ko', repository='', executor='claude', 
         if expected_pins is not None:scope['expected_pins']=expected_pins
         plan = _plan(scope)
         scope.pop('expected_pins',None)
-        value = {'id':uuid.uuid4().hex,**scope,'executor':executor,'state':'preparing','created_at':store.now(),
-                 'started_at':None,'finished_at':None,'launch_epoch':None,'prepare_epoch':time.time(),'launch_intended':launch_intended,'pins':plan['pins'],'tasks':plan['tasks'],
-                 'blocked':plan['blocked'],'skipped':plan['skipped'],'current_task':None,'completed_tasks':[],
-                 'cancel_requested':False,'error':None,'account':None}
+        value = _new_record(scope,launch_intended=launch_intended,pins=plan['pins'],tasks=plan['tasks'],blocked=plan['blocked'])
         if resume_from is not None:value['resume_from']=resume_from
         if scope['intent']['task']=='briefing':
             calls=sum(len(_briefing_groups(briefing.context(project,t['repository'],branch))[0]) for t in value['tasks'])
@@ -978,7 +977,7 @@ def retry(run_id, launch_intended=False):
     if (previous.get('error') or {}).get('code') in ('invalid_result','analysis_failed'):
         resume=None  # A conflicting final merge may need new findings.
     intent=previous.get('intent')
-    return prepare(previous['project'],previous['branch'],previous['lang'],previous['repository'],previous['executor'],
+    return prepare(previous['project'],previous['branch'],previous['lang'],previous['repository'],
                    launch_intended=launch_intended,intent=intent,resume_from=resume,expected_pins=expected_pins)
 
 def _refuse_start(run_id,code,message):
@@ -1082,7 +1081,7 @@ def _numbered(text):return [{'line':i,'text':line} for i,line in enumerate(text.
 
 PREFETCH_MIN = 16  # files; fewer are read one by one
 
-def _prefetch(repo,entries,blobs,selected,excluded):
+def _prefetch(repo,entries,blobs,selected):
     """Fill blobs with the numbered lines of many eligible files through one git cat-file stream (what _blob_lines gives one file at a time)."""
     wanted={}
     for entry in entries:
@@ -1090,7 +1089,7 @@ def _prefetch(repo,entries,blobs,selected,excluded):
         meta,raw_file=entry.split(b'\t',1);mode,kind,oid=meta.split()
         try:file=raw_file.decode('utf-8')
         except UnicodeError:continue
-        if oid in blobs or file in excluded or selected is not None and file not in selected:continue
+        if oid in blobs or selected is not None and file not in selected:continue
         if mode in (b'100644',b'100755') and kind==b'blob' and not _secret(file) and PurePosixPath(file).suffix.lower() not in BINARY_SUFFIXES:wanted[oid]=file
     if len(wanted)<PREFETCH_MIN:return
     rows=[(file,oid) for oid,file in wanted.items()]
@@ -1099,38 +1098,30 @@ def _prefetch(repo,entries,blobs,selected,excluded):
         blobs[by_file[file]]=_numbered(text)
     for oid in wanted:blobs.setdefault(oid,'binary')  # the stream skips blobs that are not UTF-8 text without NUL
 
-def export_source(repo, commit, commits=None, cancelled=None, deadline=None, selected=None, blobs=None, excluded=None, windows=None):
-    """Export immutable regular text blobs only. Never inspect the checkout or follow symlinks.
-    blobs keeps content by object ID for one run; each commit's tree and path rules still decide what is exported.
-    windows ({file: None | (spans, clips)}) cuts the pinned commit's files down to the numbered lines around their signals;
-    the lines keep their original numbers, so a citation still names a real line of the pinned file."""
-    snapshots=[];blobs={} if blobs is None else blobs
-    for pinned in dict.fromkeys([commit,*(commits or [])]):
+def export_source(repo, commit, cancelled=None, deadline=None, selected=None):
+    """Export immutable regular text blobs only. Never inspect the checkout or follow symlinks."""
+    _checkpoint(cancelled,deadline)
+    entries=_git(repo,'ls-tree','-rz','--full-tree',commit).split(b'\0');blobs={}
+    _prefetch(repo,entries,blobs,selected.get(commit,set()) if selected is not None else None)
+    files=[];omitted=[]
+    for entry in entries:
         _checkpoint(cancelled,deadline)
-        entries=_git(repo,'ls-tree','-rz','--full-tree',pinned).split(b'\0')
-        _prefetch(repo,entries,blobs,selected.get(pinned,set()) if selected is not None else None,(excluded or {}).get(pinned,()))
-        files=[];omitted=[]
-        for entry in entries:
-            _checkpoint(cancelled,deadline)
-            if not entry: continue
-            meta,raw_file=entry.split(b'\t',1)
-            mode,kind,oid=meta.split()
-            try:file=raw_file.decode('utf-8')
-            except UnicodeError:continue  # as _blobs: a path that is not UTF-8 cannot be cited
-            if excluded and file in excluded.get(pinned,()):continue
-            if selected is not None and file not in selected.get(pinned,set()):continue
-            if _secret(file): omitted.append({'file':file,'reason':'credential_file'});continue
-            if mode not in (b'100644',b'100755') or kind!=b'blob':
-                omitted.append({'file':file,'reason':'not_regular_source'});continue
-            if PurePosixPath(file).suffix.lower() in BINARY_SUFFIXES:
-                omitted.append({'file':file,'reason':'binary_asset'});continue
-            lines=blobs.get(oid)
-            if lines is None:lines=blobs[oid]=_blob_lines(repo,oid.decode(),cancelled,deadline)
-            if isinstance(lines,str):omitted.append({'file':file,'reason':lines});continue
-            if windows is not None and pinned==commit and windows.get(file):lines=source_signals.window_rows(lines,*windows[file])
-            files.append({'file':file,'lines':lines})
-        snapshots.append({'commit':pinned,'files':files,'omitted':omitted})
-    return snapshots
+        if not entry: continue
+        meta,raw_file=entry.split(b'\t',1)
+        mode,kind,oid=meta.split()
+        try:file=raw_file.decode('utf-8')
+        except UnicodeError:continue  # as _blobs: a path that is not UTF-8 cannot be cited
+        if selected is not None and file not in selected.get(commit,set()):continue
+        if _secret(file): omitted.append({'file':file,'reason':'credential_file'});continue
+        if mode not in (b'100644',b'100755') or kind!=b'blob':
+            omitted.append({'file':file,'reason':'not_regular_source'});continue
+        if PurePosixPath(file).suffix.lower() in BINARY_SUFFIXES:
+            omitted.append({'file':file,'reason':'binary_asset'});continue
+        lines=blobs.get(oid)
+        if lines is None:lines=blobs[oid]=_blob_lines(repo,oid.decode(),cancelled,deadline)
+        if isinstance(lines,str):omitted.append({'file':file,'reason':lines});continue
+        files.append({'file':file,'lines':lines})
+    return [{'commit':commit,'files':files,'omitted':omitted}]
 
 def _request(value,task):
     args=(value['project'],value['branch'],value['lang'],task['repository'])
@@ -1988,7 +1979,7 @@ def run(run_id, executor=None):
                 if value.get('cancel_requested'):
                     return write(_cancelled(value))
                 return failure(value,'interrupted','Analysis worker stopped. Retry to finish missing tasks; saved results were retained')
-            value.update(state='running',started_at=store.now(),launch_epoch=time.time());write(value)
+            value.update(state='running',launch_epoch=time.time());write(value)
         started=time.monotonic()
         cancelled=_cancellation_probe(run_id)
         try:
@@ -2009,7 +2000,7 @@ def run(run_id, executor=None):
                 plan=_plan(value);_check_pins(value,plan)
                 with locked():
                     value=read(run_id)
-                    value.update(tasks=plan['tasks'],blocked=plan['blocked'],skipped=plan['skipped']);write(value)
+                    value.update(tasks=plan['tasks'],blocked=plan['blocked']);write(value)
                 if not plan['tasks']:
                     if value.get('unavailable_resources'):
                         raise RunError('analysis_blocked','Saved all eligible resource explanations; '+str(len(value['unavailable_resources']))+' resource scopes had no eligible source evidence')
@@ -2093,12 +2084,12 @@ def main():
     parser.add_argument('value',nargs='?');parser.add_argument('--project');parser.add_argument('--run-id')
     parser.add_argument('--repository',default='');parser.add_argument('--branch',default='dev');parser.add_argument('--lang',default='ko')
     parser.add_argument('--view',choices=('progress','catalog','resource','units','units_quick','unit','signals','latest'));parser.add_argument('--resource')
-    parser.add_argument('--intent',type=json.loads);parser.add_argument('--executor',default='claude');parser.add_argument('--expected-account')
+    parser.add_argument('--intent',type=json.loads);parser.add_argument('--expected-account')
     args=parser.parse_args()
     if args.command=='providers': result=providers()
     elif args.command=='active': result=active()
     elif args.command in ('prepare','start'):
-        prepared=prepare(args.value or args.project,args.branch,args.lang,args.repository,args.executor,launch_intended=args.command=='start',intent=args.intent)
+        prepared=prepare(args.value or args.project,args.branch,args.lang,args.repository,launch_intended=args.command=='start',intent=args.intent)
         result=start(prepared['id'],json.loads(args.expected_account) if args.expected_account else None) if args.command=='start' else prepared
     elif args.command=='status':
         result=status(args.run_id or args.value,project=args.project,repository=args.repository,branch=args.branch,lang=args.lang,view=args.view,resource=args.resource)

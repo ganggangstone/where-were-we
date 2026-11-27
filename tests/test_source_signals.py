@@ -74,10 +74,9 @@ class Rules(unittest.TestCase):
         row = ss.scan_text('bundle.js', line + '\n')
         offset = row['clips'][1]
         self.assertTrue(8000 < offset < 9000)
-        rows = ss.window_rows([{'line': 1, 'text': line}], row['windows'], row['clips'])
-        self.assertEqual(len(rows), 1)
-        self.assertIn("/deep", rows[0]['text']);self.assertEqual(rows[0]['offset'], offset);self.assertEqual(len(rows[0]['text']), ss.LONG_LINE)
-        self.assertEqual(line[offset:offset + ss.LONG_LINE], rows[0]['text'])
+        segment = ss.clip(line, offset)
+        self.assertIn("/deep", segment);self.assertEqual(len(segment), ss.LONG_LINE)
+        self.assertEqual(line[offset:offset + ss.LONG_LINE], segment)
 
     def test_a_file_with_very_many_signals_is_cut_and_says_so(self):
         text = ''.join(f"app.get('/r{i}', h)\n\n\n\n\n\n\n\n\n" for i in range(400))
@@ -111,8 +110,6 @@ class Commit(unittest.TestCase):
             self.assertLess(api['sent'], api['size'] / 5)  # a few window lines of a 102-line file
             self.assertEqual(rows['README.md']['kind'], 'doc')
             self.assertEqual(rows['README.md']['sent'], 0)
-            cost = ss.sample_bytes(folder, [e for e in entries if e[0] == 'api.py'])['api.py']
-            self.assertLess(cost, 24 * 100)
 
     def test_a_large_commit_is_split_over_workers_with_the_same_rows_and_falls_back_when_they_cannot_start(self):
         with tempfile.TemporaryDirectory() as folder:
