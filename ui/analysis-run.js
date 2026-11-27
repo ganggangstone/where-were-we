@@ -18,10 +18,12 @@ const AnalysisRun = (() => {
     if(task==='full')return {task,targets:[],...(Array.isArray(choice.only)?{only:choice.only}:{})};
     return {task,targets:command==='scope_overview'?[{repository:scope().repository,target:choice.detailTarget}]:targets};
   }
-  // A steps target is '@routes:' + route keys; the panel shows the request names the map already has and how many there are.
+  // A steps target is '@routes:' + route keys, optionally after the screen path they belong to; the panel shows the screen,
+  // the request names the map already has and how many there are.
   function targetName(repository,target) {
-    const value=String(target || '');
-    if(!value.startsWith('@routes:'))return value;
+    const value=String(target || ''),at=value.indexOf('@routes:');
+    if(at<0)return value;
+    if(at>0)return value.slice(0,at)+' · '+targetName(repository,value.slice(at));
     let keys=[];try{keys=JSON.parse(value.slice(8));}catch{}
     const routes=(typeof M==='function' && M()?.backend_routes) || [];
     const names=keys.map(k=>{const route=routes.find(r=>r.file+'::'+r.function===k || r.file===repository+'/'+k.split('::')[0] && r.function===k.split('::')[1]);

@@ -306,6 +306,18 @@ assert(!html.includes('@routes') && !html.includes('::'),'Raw route keys reach t
 assert(html.includes('Repository service · List orders, Cancel an order and 1 more · Server requests 3'),'Targets read as request names with a count: '+html);
 """)
 
+    def test_steps_target_with_a_screen_names_the_screen_before_its_requests(self):
+        self.check_js(r"""
+const target='/orders@routes:'+JSON.stringify(['api/orders.py::cancel_order']);
+globalThis.M=()=>({backend_routes:[{file:'service/api/orders.py',function:'cancel_order'}]});
+globalThis.flowOf=()=>null;globalThis.reqName=()=>'Cancel an order';
+S.analysisChoice={task:'make_steps',detailTarget:target,targets:[{repository:'service',target}]};
+status=runRecord('completed',{intent:{task:'steps',targets:[{repository:'service',target}]},branch:'other'});
+await open();await AnalysisRun.check();await flush();
+const html=$('insp').innerHTML;
+assert(!html.includes('@routes') && html.includes('/orders · Cancel an order · Server requests 1'),'The screen comes before its request names: '+html);
+""")
+
     MAP_BOARD = r"""
 const mapBoard=(extra={})=>({repositories:[{repository:'service',units:[
  ['route:/orders','route','/orders',3,'saved','new'],
