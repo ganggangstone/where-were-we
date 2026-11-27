@@ -664,6 +664,22 @@ class Flows(unittest.TestCase):
  setFocus('route|api/app/items.py::save_item');
 ''')
 
+    def test_a_steps_task_opens_with_its_start_button_in_view(self):
+        self.check(r'''
+ window.appAnalysisFixture=true;
+ window.unitBoard={repositories:[{repository:'',units:Array.from({length:60},(_,i)=>['route:/r'+i,'route','/r'+i,3,'pending','']),coverage:{tracked:60,in_units:60,indexed:60,excluded:{},truncated:false}}],totals:{units:60,saved:0,pending:60},calls:{rules:0,labeling:1,structure:0,unit:0,total:1}};
+ S.view='map';S.sel='web::/items';render();$('insp').scrollTop=400;
+ $('mk').click();await AnalysisRun.check();await wait();
+ const start=$('startAppAnalysis'),box=$('insp').getBoundingClientRect();
+ assert($('automaticAnalysis').open && start,'The steps task opens the section with its start');
+ const at=start.getBoundingClientRect();assert(at.top>=box.top && at.bottom<=box.bottom,'The start is visible without scrolling: '+at.bottom+'/'+box.bottom);
+ const board=$('insp').querySelector('.unit-board');assert(!board || ($('automaticAnalysis').compareDocumentPosition(board) & Node.DOCUMENT_POSITION_FOLLOWING),'The overview comes after the task');
+ const chips=[...$('automaticAnalysis').querySelectorAll('.chips .chip')].map(c=>c.textContent);
+ assert(chips[0]===connectionDisplayName('api') && chips.filter(c=>c.includes(connectionDisplayName('api'))).length===1,'The repository is named once in the row: '+chips);
+ S.agentPrompt=null;render();$('analyzeMap').click();await AnalysisRun.check();await wait();
+ assert(!$('automaticAnalysis')?.open,'The general open keeps the automatic section folded');
+''')
+
     def test_unified_result_check_keeps_target_and_original_pins(self):
         self.check(r'''
  window.planResult={tasks:[{repository:'web',task:'groups',commit:'old',configuration:'layout-a'}],requirements:[],pins:{web:{commit:'old',configuration:'layout-a'}},blocked:[],handoff:'one request'};

@@ -623,8 +623,10 @@ function analysisButtonText() {
 }
 // 고른 코드가 지금 연결된 저장소가 아니면(연결을 바꿨을 때) 고르지 않은 것으로 본다.
 const analysisTarget = () => { const t=S.analysisChoice?.target || ''; return t==='*' || S.projectInfo?.repositories?.some(r=>r.id===t) ? t : ''; };
+// 한 가지 작업(동작 과정·프로그램이 하는 일·변경 설명)으로 열면 그 작업의 시작 버튼이 있는 자동 분석을 펼쳐 맨 위에 둔다.
+const SINGLE_TASKS=['make_steps','make_jobs','briefing_request'];
 function openAnalysisPanel(task=null,detailTarget='',target=analysisTarget(),area=null) {
-  S.automaticPanelOpen=false;S.agentPurpose='analysis';S.analysisChoice={target,task,detailTarget,resultContext:{view:S.view,sel:S.sel,open:S.open,focus:S.focus,node:S.node}};
+  S.automaticPanelOpen=SINGLE_TASKS.includes(task);S.agentPurpose='analysis';S.analysisChoice={target,task,detailTarget,resultContext:{view:S.view,sel:S.sel,open:S.open,focus:S.focus,node:S.node}};
   if(area)Object.assign(S.analysisChoice,{area,maxCalls:area.resources.length});
   if(['make_steps','make_jobs'].includes(task))S.analysisChoice.targets=analysisCalls(task,{repository:S.repository,...(task==='make_steps'?{screen:detailTarget}:{node:detailTarget})}).map(a=>({repository:a.repository || '',target:a.screen || a.node}));
   S.agentPrompt=activeAnalysis()?.handoff ?? '';renderAgentPrompt();$('insp').scrollTop=0;
@@ -2526,7 +2528,8 @@ function renderAgentPrompt() {
   const board=typeof AnalysisRun!=='undefined' && AnalysisRun.overviewHtml?AnalysisRun.overviewHtml()+AnalysisRun.boardHtml():'';
   // 결과판이 없으면 복사하는 길이 유일한 길이라 펼쳐 둔다.
   const chatOpen=S.chatRequestOpen ?? (!!request?.copied || !board);
-  $('insp').innerHTML=analysis?`<h2>${tr('분석하기')} <span class="beta">${tr('베타')}</span></h2>`+board+(typeof AnalysisRun!=='undefined'?(auto=>auto?`<details class="sect" id="automaticAnalysis" ${S.automaticPanelOpen?'open':''}><summary id="toggleAutomaticAnalysis">${tr('자동 분석')} <span class="beta">${tr('베타')}</span>${AnalysisRun.stateLabel()?' · '+esc(AnalysisRun.stateLabel()):''}</summary>${auto}</details>`:'')(AnalysisRun.html(false)):'')+`<details class="sect" id="chatRequest" ${chatOpen?'open':''}><summary>${tr('AI 채팅에 요청')} <span class="chip">${tr('요금·한도: 연결한 AI')}</span></summary>${steps}</details>${more}`:
+  const single=SINGLE_TASKS.includes(S.analysisChoice?.task);
+  $('insp').innerHTML=analysis?`<h2>${tr('분석하기')} <span class="beta">${tr('베타')}</span></h2>`+(single?'':board)+(typeof AnalysisRun!=='undefined'?(auto=>auto?`<details class="sect" id="automaticAnalysis" ${S.automaticPanelOpen?'open':''}><summary id="toggleAutomaticAnalysis">${tr('자동 분석')} <span class="beta">${tr('베타')}</span>${AnalysisRun.stateLabel()?' · '+esc(AnalysisRun.stateLabel()):''}</summary>${auto}</details>`:'')(AnalysisRun.html(false)):'')+(single?board:'')+`<details class="sect" id="chatRequest" ${chatOpen?'open':''}><summary>${tr('AI 채팅에 요청')} <span class="chip">${tr('요금·한도: 연결한 AI')}</span></summary>${steps}</details>${more}`:
     `<h2>${tr('AI 연결')}</h2>`+(S.agentPromptError?`<div role="alert">${errorHtml(tr('안내를 만들지 못했다. 다시 연결해야 한다.'),S.agentPromptError)}</div>`:helpDetails(`<pre class="prompt mono">${esc(S.agentPrompt)}</pre>`,'연결 안내 보기'))+`<div class="ctl">${S.agentPromptError?'':ui`<button class="btn primary" id="cpAgent">복사</button><span id="cpDone"></span>`}<button class="btn" id="openConnectionDiagnostic">${tr('연결 진단')}</button></div>`;
   if($('cpAgent'))$('cpAgent').onclick=async()=>{
     const prompt=analysis?request.handoff ?? S.agentPrompt:S.agentPrompt,copyRequest=S.analysisRequest;
