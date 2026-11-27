@@ -1,7 +1,8 @@
 """Computed shared UI contracts, using fictional content and both app engines."""
+import support  # blocks real AI CLIs; drops an inherited WHERE_WERE_WE_SETTINGS
+from support import CHROME,compiled_probe,dump_dom
 import json, subprocess, tempfile, unittest, re, sys, shutil
 from pathlib import Path
-from test_ui_flows import compiled_probe
 ROOT=Path(__file__).resolve().parents[1]
 CHECKS=r'''
 const errors=[];const check=(v,m)=>{if(!v)errors.push(m)};
@@ -42,19 +43,18 @@ def page():
  return f'''<!doctype html><meta charset="utf-8">{links}<body><header><details id="menu" open><summary class="btn">Menu</summary><div class="menu-panel"><button class="btn quiet" id="agent">Agent</button></div></details></header><div id="repository-bar"><details class="repository-detail"><summary>Code details</summary>Evidence</details></div><main><div id="map">Map</div><div id="insp"><article class="group"><div class="row"><div class="grow"><h3>Title</h3><h4>Problem</h4><p class="s">Metadata</p><p>Body</p><button class="pill click">PR #828</button></div></div><details><summary>More fields</summary><p>Evidence</p></details></article><section class="unit-board"><ul class="unit-cards"><li class="unit-card" data-state="saved"><button class="unit-head"><span class="unit-state">Saved</span></button><p id="unitBody">Body</p></li></ul></section><div class="step-lanes"><span class="screen">Screens</span><span class="server">Server</span><span class="store">Data</span><span class="external">External services</span></div><div class="step unsure"><div class="tx">Maybe</div></div><div id="laneSteps"><div class="step l0"><span class="from">↓</span><span class="n">0</span><div class="grow"><div class="tx">Step 0</div></div></div><div class="step l1"><span class="from">↓</span><span class="n">1</span><div class="grow"><div class="tx">Step 1</div></div></div><div class="step l2"><span class="from">↓</span><span class="n">2</span><div class="grow"><div class="tx">Step 2</div></div></div><div class="step l1"><span class="from">↓</span><span class="n">3</span><div class="grow"><div class="tx">Step 3</div></div></div><div class="step l0"><span class="from">↓</span><span class="n">4</span><div class="grow"><div class="tx">Step 4</div></div></div></div><section class="overview-tree"><p id="quoteBody">Body</p><pre id="quote">const quoted = true</pre></section><div class="ctl"><label>Server routes outside this overview <select id="longSelect"><option>/admin/fictional-endpoints/item-id/with/an/intentionally/long/fictional/path/segment/that/keeps/going</option></select></label><button class="btn quiet">Open in map</button></div></div></main><dialog><h2>Settings</h2><input type="datetime-local"><input type="checkbox"><button class="btn primary">Save</button></dialog><script>{CHECKS}</script>'''
 class SharedSystem(unittest.TestCase):
  def test_chrome_shared_styles_and_long_content(self):
-  chrome=Path('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome')
-  if not chrome.exists():self.skipTest('Chrome required')
+  if not CHROME.exists():self.skipTest('Chrome required')
   with tempfile.TemporaryDirectory() as tmp:
    path=Path(tmp)/'page.html';path.write_text(page())
    for width in (1446,1280,640):
-    p=subprocess.run([str(chrome),'--headless','--disable-gpu','--no-first-run','--disable-background-networking','--user-data-dir='+tmp+'/chrome',f'--window-size={width},900','--dump-dom',path.as_uri()],capture_output=True,text=True,timeout=30)
+    p=dump_dom(path.as_uri(),tmp+'/chrome',window=f'{width},900')
     import html
     result=re.search(r'data-result="([^"]*)"',p.stdout)
     self.assertIsNotNone(result,p.stderr[-1000:]);self.assertEqual(json.loads(html.unescape(result[1])),[],f'Chrome {width}')
  def test_webkit_shared_styles_and_long_content(self):
   if sys.platform!='darwin' or not shutil.which('swiftc'):self.skipTest('macOS WebKit required')
   with tempfile.TemporaryDirectory() as tmp:
-   path=Path(tmp)/'page.html';path.write_text(page());probe=compiled_probe('webkit_style_probe.swift',tmp)
+   path=Path(tmp)/'page.html';path.write_text(page());probe=compiled_probe('webkit_style_probe.swift')
    for width in (1446,1280,640):
     p=subprocess.run([str(probe),str(path),str(width)],capture_output=True,text=True,timeout=30,check=True)
     self.assertEqual(json.loads(p.stdout.strip()),[],f'WKWebView {width}')
@@ -123,19 +123,16 @@ def actual_page():
 
 class AppSystem(unittest.TestCase):
  def test_actual_renderers_in_chrome_and_webkit_light_and_dark(self):
-  chrome=Path('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome')
-  if not chrome.exists():self.skipTest('Chrome required')
+  if not CHROME.exists():self.skipTest('Chrome required')
   with tempfile.TemporaryDirectory() as tmp:
    tmp=Path(tmp);path=tmp/'actual.html';path.write_text(actual_page());probe=tmp/'probe'
    native=sys.platform=='darwin' and shutil.which('swiftc')
-   if native:probe=compiled_probe('webkit_style_probe.swift',tmp)
+   if native:probe=compiled_probe('webkit_style_probe.swift')
    for mode in ('light','dark'):
     for width in (1446,1280,640):
      with self.subTest(engine='Chrome',mode=mode,width=width):
-      command=[str(chrome),'--headless','--disable-gpu','--no-first-run','--disable-background-networking','--user-data-dir='+str(tmp/'chrome'),f'--window-size={width},900','--virtual-time-budget=3000','--dump-dom',path.as_uri()+'?mode='+mode]
       # Light is requested explicitly: without it Chrome follows the host appearance (a Dark Mac failed the light case).
-      command.insert(1,'--force-dark-mode' if mode=='dark' else '--blink-settings=preferredColorScheme=1')
-      output=subprocess.run(command,capture_output=True,text=True,timeout=30)
+      output=dump_dom(path.as_uri()+'?mode='+mode,tmp/'chrome',budget=3000,window=f'{width},900',flags=('--force-dark-mode' if mode=='dark' else '--blink-settings=preferredColorScheme=1',))
       import html
       result=re.search(r'data-result="([^"]*)"',output.stdout)
       self.assertIsNotNone(result,output.stderr[-1000:]);self.assertEqual(json.loads(html.unescape(result[1])),[])

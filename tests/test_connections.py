@@ -1,4 +1,6 @@
 """URL connections use temporary Git repositories and fake GitHub identity only."""
+import support  # blocks real AI CLIs; drops an inherited WHERE_WERE_WE_SETTINGS
+from support import CHROME,dump_dom
 import json
 import subprocess
 import tempfile
@@ -97,8 +99,7 @@ class Connections(unittest.TestCase):
 
     def test_real_browser_url_retry_first_collection_and_existing_connections_unchanged(self):
         import re
-        chrome=Path('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome')
-        if not chrome.exists():self.skipTest('Chrome is needed for the registration UI check')
+        if not CHROME.exists():self.skipTest('Chrome is needed for the registration UI check')
         source=(Path(project.__file__).parent/'ui/index.html').read_text()
         script=source.split('<script>',1)[1].split('</script>',1)[0].split("$('q').oninput",1)[0]
         bootstrap=r'''
@@ -153,5 +154,5 @@ window.__TAURI__={core:{invoke:async(command,args)=>{
 '''
         page=re.sub(r'<script>.*?</script>',lambda m:'<script>'+bootstrap+script+checks+'</script>',source,count=1,flags=re.S)
         target=self.root/'url-check.html';target.write_text(page)
-        result=self.real_run([str(chrome),'--headless','--disable-gpu','--no-first-run','--disable-background-networking','--disable-component-update','--no-default-browser-check','--user-data-dir='+str(self.root/'chrome'),'--virtual-time-budget=6000','--dump-dom',target.as_uri()],capture_output=True,text=True,timeout=30)
+        result=dump_dom(target.as_uri(),self.root/'chrome',budget=6000,run=self.real_run)
         self.assertTrue('data-url-test="passed"' in result.stdout,result.stdout[-2500:])

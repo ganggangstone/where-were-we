@@ -1,12 +1,12 @@
 """Presentation checks use fictional state in Chrome; native calls are blocked."""
+import support  # blocks real AI CLIs; drops an inherited WHERE_WERE_WE_SETTINGS
+from support import CHROME,compiled_probe,dump_dom
 import json,re,subprocess,tempfile,unittest
 from pathlib import Path
-from test_ui_flows import compiled_probe
 
 class Clarity(unittest.TestCase):
  def test_results_actions_and_warnings_remain_visible_in_flat_layout(self):
-  chrome=Path('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome')
-  if not chrome.exists():self.skipTest('Chrome is required')
+  if not CHROME.exists():self.skipTest('Chrome is required')
   root=Path(__file__).resolve().parents[1];source=(root/'ui/index.html').read_text()
   script=source.split('<script>',1)[1].split('</script>',1)[0].split("$('q').oninput",1)[0]
   script+=source[source.index('function renderSettings() {'):source.index("$('settings').onclick")]
@@ -90,7 +90,7 @@ try{
    page=re.sub(r'<script>.*?</script>',lambda m:'<script>'+bootstrap+script+checks+'</script>',source,count=1,flags=re.S)
    page=re.sub(r'<script src="[^\"]+"></script>','',page);target=Path(tmp)/'clarity.html';target.write_text(page)
    syntax=subprocess.run(['/opt/homebrew/bin/node','--check'],input=bootstrap+script+checks,capture_output=True,text=True);self.assertEqual(syntax.returncode,0,syntax.stderr)
-   result=subprocess.run([str(chrome),'--headless','--disable-gpu','--no-first-run','--disable-background-networking','--disable-component-update','--user-data-dir='+tmp+'/chrome','--virtual-time-budget=3000','--dump-dom',target.as_uri()],capture_output=True,text=True,timeout=30)
+   result=dump_dom(target.as_uri(),tmp+'/chrome',budget=3000)
    self.assertTrue('data-clarity="passed"' in result.stdout,str(re.findall(r'<pre>(.*?)</pre>',result.stdout,re.S))[-1800:])
 
 class NativeLayout(unittest.TestCase):
@@ -103,7 +103,7 @@ class NativeLayout(unittest.TestCase):
    tmp=Path(tmp);page=tmp/'page.html'
    links=''.join(f'<link rel="stylesheet" href="{(root/"ui"/n).as_uri()}">' for n in ('tokens.css','app.css'))
    page.write_text(f'<!doctype html><meta charset="utf-8">{links}<body><main><div id="map"></div><div id="insp"></div></main>')
-   probe=compiled_probe('webkit_layout_probe.swift',tmp)
+   probe=compiled_probe('webkit_layout_probe.swift')
    rows=[json.loads(line) for line in subprocess.run([str(probe),str(page)],check=True,capture_output=True,text=True,timeout=60).stdout.split()]
   empty,content,hint,empty2,content2=rows
   for row in (content,content2):

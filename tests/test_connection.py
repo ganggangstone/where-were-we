@@ -1,15 +1,13 @@
 """Connection diagnostics use temporary registrations and fake server identities."""
 import copy,json,sys,tempfile,unittest
-import os;os.environ.pop('WHERE_WERE_WE_SETTINGS',None)  # fixtures isolate settings through mapcore.ROOT; an inherited settings file would bypass that and be shared
+import support  # blocks real AI CLIs; drops an inherited WHERE_WERE_WE_SETTINGS
+from support import CHROME,dump_dom
 from pathlib import Path
 from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import mapcore
 
-class Connection(unittest.TestCase):
- def setUp(self):
-  self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
-  self.root=Path(self.tmp.name);p=patch.object(mapcore,'ROOT',str(self.root));p.start();self.addCleanup(p.stop)
+class Connection(support.TemporaryProject):
  def test_onboarding_prompt_connects_service_before_any_manual_project_setup(self):
   with patch.object(mapcore,'projects',return_value=[]):
    for lang in ('ko','en'):
@@ -19,7 +17,7 @@ class Connection(unittest.TestCase):
     self.assertNotIn('extract a project first',prompt)
     self.assertNotIn('앱에서 프로젝트를 먼저',prompt)
     self.assertIn('confirm' if lang=='en' else '확인',prompt)
-    from tests.reply_language import assert_reply_language
+    from reply_language import assert_reply_language
     assert_reply_language(self,prompt,lang)
 
  def test_onboarding_prompt_is_one_request_that_ends_at_the_first_analysis_result(self):
@@ -164,8 +162,7 @@ class Connection(unittest.TestCase):
   asyncio.run(exercise())
  def test_browser_guided_repair_keeps_changes_and_requires_live_confirmation(self):
   import re,subprocess
-  chrome=Path('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome')
-  if not chrome.exists():self.skipTest('Chrome is required')
+  if not CHROME.exists():self.skipTest('Chrome is required')
   folder=Path(__file__).resolve().parents[1];source=(folder/'ui/index.html').read_text()
   script=source.split('<script>',1)[1].split('</script>',1)[0].split("$('q').oninput",1)[0]
   script+=source[source.index('function renderAgentPrompt() {'):source.index("$('agent').onclick")]
@@ -216,5 +213,5 @@ Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{windo
   target=self.root/'connection-check.html';target.write_text(page)
   syntax=subprocess.run(['/opt/homebrew/bin/node','--check'],input=bootstrap+script+checks,capture_output=True,text=True)
   self.assertEqual(syntax.returncode,0,syntax.stderr)
-  result=subprocess.run([str(chrome),'--headless','--disable-gpu','--no-first-run','--disable-background-networking','--disable-component-update','--no-default-browser-check','--user-data-dir='+str(self.root/'chrome'),'--virtual-time-budget=5000','--dump-dom',target.as_uri()],capture_output=True,text=True,timeout=30)
+  result=dump_dom(target.as_uri(),self.root/'chrome',budget=5000)
   self.assertIn('data-connection-test="passed"',result.stdout,str(re.findall(r'<pre>(.*?)</pre>',result.stdout,re.S))[-2000:])

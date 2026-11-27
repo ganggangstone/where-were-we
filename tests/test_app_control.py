@@ -4,7 +4,8 @@ import socket
 import tempfile
 import threading
 import unittest
-import os;os.environ.pop('WHERE_WERE_WE_SETTINGS',None)  # fixtures isolate settings through mapcore.ROOT; an inherited settings file would bypass that and be shared
+import support  # blocks real AI CLIs; drops an inherited WHERE_WERE_WE_SETTINGS
+from support import CHROME,dump_dom
 from pathlib import Path
 from unittest.mock import patch
 import sys
@@ -12,10 +13,7 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import mapcore
 import app_control
 
-class Control(unittest.TestCase):
-    def setUp(self):
-        self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup);self.root=Path(self.tmp.name)
-        p=patch.object(mapcore,'ROOT',str(self.root));p.start();self.addCleanup(p.stop)
+class Control(support.TemporaryProject):
     def test_closed_app_is_explicit_and_cannot_report_success(self):
         self.assertEqual(app_control.command('state')['status'],'app_closed')
     def test_real_socket_protocol_returns_applied_state_and_does_not_resubmit_for_outcome(self):
@@ -38,8 +36,7 @@ class Control(unittest.TestCase):
         self.assertEqual([x['op'] for x in calls],['submit','result','result'])
     def test_real_browser_controls_synthetic_map_and_reads_mouse_selection(self):
         import subprocess,re
-        chrome=Path('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome')
-        if not chrome.exists():self.skipTest('Chrome is required')
+        if not CHROME.exists():self.skipTest('Chrome is required')
         folder=Path(__file__).resolve().parents[1];source=(folder/'ui/index.html').read_text()
         script=source.split('<script>',1)[1].split('</script>',1)[0].split("$('q').oninput",1)[0]
         script+=source[source.index('function renderAgentPrompt() {'):source.index("$('agent').onclick")]
@@ -108,7 +105,7 @@ window.__TAURI__={core:{invoke:async(command,args)=>{
         target=self.root/'control-check.html';target.write_text(page)
         syntax=subprocess.run(['/opt/homebrew/bin/node','--check'],input=bootstrap+script+controller+checks,capture_output=True,text=True)
         self.assertEqual(syntax.returncode,0,syntax.stderr)
-        result=subprocess.run([str(chrome),'--headless','--disable-gpu','--no-first-run','--disable-background-networking','--disable-component-update','--no-default-browser-check','--user-data-dir='+str(self.root/'chrome'),'--virtual-time-budget=8000','--dump-dom',target.as_uri()],capture_output=True,text=True,timeout=30)
+        result=dump_dom(target.as_uri(),self.root/'chrome',budget=8000)
         self.assertTrue('data-control-test="passed"' in result.stdout,str(re.findall(r'<pre>(.*?)</pre>',result.stdout,re.S))[-2000:])
 
     def test_standard_mcp_tools_are_vendor_independent_and_closed_app_is_not_completed(self):

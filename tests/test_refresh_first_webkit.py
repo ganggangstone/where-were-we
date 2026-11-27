@@ -1,4 +1,5 @@
 """Exercise stored and fresh maps with a detached WebKit view and fake native calls."""
+import support  # blocks real AI CLIs; drops an inherited WHERE_WERE_WE_SETTINGS
 import json
 import shutil
 import subprocess
@@ -7,7 +8,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from test_ui_flows import BOOTSTRAP, ROOT
+from support import ROOT, compiled_probe, inline_assets
+from test_ui_flows import BOOTSTRAP
 
 
 @unittest.skipUnless(sys.platform == 'darwin' and shutil.which('swiftc'), 'Requires Swift and WebKit')
@@ -253,14 +255,10 @@ window.__TAURI__.core.invoke=async(command,args)=>{
    coverage:{indexed_files:1,unresolved_imports:1,truncated:true}});
 };
 '''
-        source = (ROOT / 'ui/index.html').read_text().replace('<script>', '<script>' + BOOTSTRAP + fake_file, 1)
-        for name in ('tokens.css', 'app.css', 'vendor/dagre.min.js', 'connection.js', 'onboarding.js', 'control.js', 'analysis-run.js'):
-            source = source.replace(f'"{name}"', f'"{(ROOT / "ui" / name).as_uri()}"')
+        source = inline_assets((ROOT / 'ui/index.html').read_text().replace('<script>', '<script>' + BOOTSTRAP + fake_file, 1))
         with tempfile.TemporaryDirectory() as directory:
             folder = Path(directory)
             page = folder / 'flow.html'
             page.write_text(source.replace('</body>', '<script>' + checks + '</script></body>'))
-            probe = folder / 'probe'
-            subprocess.run(['swiftc', str(ROOT / 'tests/webkit_style_probe.swift'), '-o', str(probe)], check=True, capture_output=True)
-            result = subprocess.run([str(probe), str(page), '1280'], check=True, capture_output=True, text=True, timeout=30)
+            result = subprocess.run([str(compiled_probe('webkit_style_probe.swift')), str(page), '1280'], check=True, capture_output=True, text=True, timeout=30)
             self.assertEqual(json.loads(result.stdout), [])

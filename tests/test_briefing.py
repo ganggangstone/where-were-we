@@ -5,7 +5,8 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
-import os;os.environ.pop('WHERE_WERE_WE_SETTINGS',None)  # fixtures isolate settings through mapcore.ROOT; an inherited settings file would bypass that and be shared
+import support  # blocks real AI CLIs; drops an inherited WHERE_WERE_WE_SETTINGS
+from support import CHROME,dump_dom
 from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import mapcore
@@ -14,11 +15,9 @@ import briefing
 import ai_extract
 from test_multi_repo import sample
 
-class Briefing(unittest.TestCase):
+class Briefing(support.TemporaryProject):
     def setUp(self):
-        self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
-        self.root=Path(self.temp.name)
-        self.patch=patch.object(mapcore,'ROOT',str(self.root));self.patch.start();self.addCleanup(self.patch.stop)
+        support.TemporaryProject.setUp(self)  # explicit: test_analysis_provenance borrows this setUp
         project.configure('demo',{'repositories':[{'id':rid,'path':'/demo/'+rid,'refs':{'dev':'HEAD','main':None}} for rid in ('web','api')]})
         self.heads=patch.object(briefing,'check_heads',return_value=None);self.heads.start();self.addCleanup(self.heads.stop)
         for rid in ('web','api'):
@@ -221,8 +220,7 @@ class Briefing(unittest.TestCase):
 
     def test_real_browser_shows_cards_and_confirms_results_without_collection(self):
         import subprocess
-        chrome=Path('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome')
-        if not chrome.is_file():self.skipTest('Chrome is required for the real briefing UI check')
+        if not CHROME.exists():self.skipTest('Chrome is required for the real briefing UI check')
         request=self.request()
         import ai_extract
         plan=ai_extract.plan('demo','dev','en')
@@ -292,8 +290,7 @@ window.__TAURI__={core:{invoke:async(command,args)=>{
         page=source.split('<script>',1)[0]+'<script>'+bootstrap+script+checks+'</script></body></html>'
         for name in ('tokens.css','app.css'):page=page.replace('href="'+name+'"','href="'+(Path(project.__file__).parent/'ui'/name).as_uri()+'"')
         target=self.root/'briefing-check.html';target.write_text(page)
-        result=subprocess.run([str(chrome),'--headless','--disable-gpu','--no-first-run','--disable-background-networking','--disable-component-update',
-            '--user-data-dir='+str(self.root/'chrome'),'--virtual-time-budget=1000','--dump-dom',target.as_uri()],capture_output=True,text=True,timeout=40)
+        result=dump_dom(target.as_uri(),self.root/'chrome',budget=1000,timeout=40)
         self.assertEqual(result.returncode,0,result.stderr[-1000:])
         self.assertTrue('data-briefing-test="passed"' in result.stdout,result.stdout[-2000:])
 
@@ -301,11 +298,7 @@ window.__TAURI__={core:{invoke:async(command,args)=>{
         import asyncio,os,subprocess
         from mcp import ClientSession,StdioServerParameters
         from mcp.client.stdio import stdio_client
-        code=self.root/'code';code.mkdir()
-        def git(*args):return subprocess.run(['git','-C',str(code),*args],check=True,capture_output=True,text=True).stdout.strip()
-        git('init','-q');git('config','user.name','Demo');git('config','user.email','demo@example.invalid')
-        (code/'jobs.py').write_text('def retry():\n    return existing_job\n')
-        git('add','.');git('commit','-qm','Synthetic code');commit=git('rev-parse','HEAD')
+        code=self.root/'code';commit=support.repository(code,{'jobs.py':'def retry():\n    return existing_job\n'})
         conf=project.configure('protocol',{'repositories':[{'id':'code','path':str(code),'refs':{'dev':'HEAD','main':None}}]})
         original=project.config('demo')['repositories'][0]
         raw=project.raw_bundle(project.repository_folder('demo',original,project.states('demo')))

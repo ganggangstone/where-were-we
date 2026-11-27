@@ -1,12 +1,9 @@
 """User flows in the real UI with fictional bundles in headless Chrome. Native calls are faked; no AI or backend runs."""
 import json,re,subprocess,tempfile,unittest
-import os;os.environ.pop('WHERE_WERE_WE_SETTINGS',None)  # fixtures isolate settings through mapcore.ROOT; an inherited settings file would bypass that and be shared
+import support  # blocks real AI CLIs; drops an inherited WHERE_WERE_WE_SETTINGS
 from pathlib import Path
 
-ROOT=Path(__file__).resolve().parents[1]
-CHROME=Path('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome')
-def compiled_probe(name,directory):
-    probe=Path(directory)/'probe';subprocess.run(['swiftc','-O',str(ROOT/'tests'/name),'-o',str(probe)],check=True,capture_output=True);return probe
+from support import CHROME,ROOT,dump_dom,in_parallel,inline_assets
 # Two fictional projects. First has web+api code with an arbitrary compared ref; Second has one code and no compared version.
 BOOTSTRAP=r'''
 window.calls=[];window.errors=[];
@@ -88,17 +85,18 @@ POSTLUDE=r'''
 def page(checks,lang='ko',query=''):
     """Return the passed/failed marker and error text after the real index.html, connection.js and control.js run."""
     source=(ROOT/'ui/index.html').read_text()
-    html=source.replace('<script>','<script>'+BOOTSTRAP,1)
-    for name in ('tokens.css','app.css','vendor/dagre.min.js','connection.js','onboarding.js','control.js','analysis-run.js'):
-        html=html.replace(f'"{name}"','"'+(ROOT/'ui'/name).as_uri()+'"')
+    html=inline_assets(source.replace('<script>','<script>'+BOOTSTRAP,1))
     html=html.replace('</body>','<script>'+PRELUDE+checks+POSTLUDE+'</script></body>')
     with tempfile.TemporaryDirectory() as tmp:
         target=Path(tmp)/'flow.html';target.write_text(html)
-        result=subprocess.run([str(CHROME),'--headless','--disable-gpu','--no-first-run','--disable-background-networking','--disable-component-update',
-            '--no-default-browser-check','--window-size=1280,900','--user-data-dir='+tmp+'/chrome','--virtual-time-budget=6000','--dump-dom',target.as_uri()+'?lang='+lang+query],
-            capture_output=True,text=True,timeout=40)
+        result=dump_dom(target.as_uri()+'?lang='+lang+query,tmp+'/chrome',budget=6000,window='1280,900',timeout=40)
     error=re.findall(r'<pre id="flow-error">(.*?)</pre>',result.stdout,re.S)
     return 'data-flow="passed"' in result.stdout,(error or [result.stdout[-1500:]])[-1][-2000:]
+
+def assert_both_languages(test,checks,query=''):
+    """Run the same checks in the ko and en UI at once, then assert each language as its own subtest."""
+    for lang,(ok,error) in zip(('ko','en'),in_parallel(lambda lang:page(checks,lang,query),('ko','en'))):
+        with test.subTest(lang=lang):test.assertTrue(ok,error)
 
 # Saved AI results as the stored project reports them; analyzeAll() makes the next read_project return them.
 ANALYZED=r"""
@@ -139,10 +137,7 @@ class Guide(unittest.TestCase):
     """The full-window first-run guide driven through its real buttons."""
     def setUp(self):
         if not CHROME.exists():self.skipTest('Chrome is required')
-    def check(self,checks,query=''):
-        for lang in ('ko','en'):
-            with self.subTest(lang=lang):
-                ok,error=page(checks,lang,query);self.assertTrue(ok,error)
+    def check(self,checks,query=''):assert_both_languages(self,checks,query)
 
     def test_agent_registration_keeps_guide_and_shows_each_code_without_claiming_empty_map_ready(self):
         self.check(r"""
@@ -611,10 +606,7 @@ class Guide(unittest.TestCase):
 class Flows(unittest.TestCase):
     def setUp(self):
         if not CHROME.exists():self.skipTest('Chrome is required')
-    def check(self,checks,query=''):
-        for lang in ('ko','en'):
-            with self.subTest(lang=lang):
-                ok,error=page(checks,lang,query);self.assertTrue(ok,error)
+    def check(self,checks,query=''):assert_both_languages(self,checks,query)
 
     def test_one_code_names_drop_repeated_code_tags_and_steps_come_before_data_names(self):
         self.check(r'''
@@ -1648,10 +1640,7 @@ AUTO=r"""
 class AutoRead(unittest.TestCase):
     def setUp(self):
         if not CHROME.exists():self.skipTest('Chrome is required')
-    def check(self,checks):
-        for lang in ('ko','en'):
-            with self.subTest(lang=lang):
-                ok,error=page(AUTO+checks,lang);self.assertTrue(ok,error)
+    def check(self,checks):assert_both_languages(self,AUTO+checks)
 
     def test_returning_to_the_app_reads_the_copied_request_without_clicking(self):
         self.check(r"""
@@ -1784,10 +1773,7 @@ class UxWriting(unittest.TestCase):
     '''Regressions for the 2026-10-21 novice UX writing review: behaviour, not individual labels.'''
     def setUp(self):
         if not CHROME.exists():self.skipTest('Chrome is required')
-    def check(self,checks,query=''):
-        for lang in ('ko','en'):
-            with self.subTest(lang=lang):
-                ok,error=page(checks,lang,query);self.assertTrue(ok,error)
+    def check(self,checks,query=''):assert_both_languages(self,checks,query)
 
     def test_briefing_shows_problem_and_change_and_counts_unknown_fields_separately_from_both_periods(self):
         self.check(r'''
@@ -2024,10 +2010,7 @@ class FeatureContext(unittest.TestCase):
     """A chosen feature stays visible across the full screen map and the existing screen/action detail."""
     def setUp(self):
         if not CHROME.exists():self.skipTest('Chrome is required')
-    def check(self,checks):
-        for lang in ('ko','en'):
-            with self.subTest(lang=lang):
-                ok,error=page(FEATURE+checks,lang);self.assertTrue(ok,error)
+    def check(self,checks):assert_both_languages(self,FEATURE+checks)
 
     def test_an_empty_default_groups_object_is_not_an_ai_result_and_an_outside_project_fills_the_selector(self):
         ok,error=page(r'''

@@ -5,7 +5,8 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
-import os;os.environ.pop('WHERE_WERE_WE_SETTINGS',None)  # fixtures isolate settings through mapcore.ROOT; an inherited settings file would bypass that and be shared
+import support  # blocks real AI CLIs; drops an inherited WHERE_WERE_WE_SETTINGS
+from support import CHROME,dump_dom
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -19,13 +20,7 @@ def sample(path, commit='abc123'):
         'api_functions':[], 'backend_routes':[], 'backend_routes_without_screen':[],
         'unresolved_calls':[], 'file_screens':{'src/Settings.tsx':['/settings']}, 'models':{}}
 
-class TemporaryProject(unittest.TestCase):
-    def setUp(self):
-        self.temp = tempfile.TemporaryDirectory()
-        self.addCleanup(self.temp.cleanup)
-        self.root = Path(self.temp.name)
-        self.patch = patch.object(mapcore, 'ROOT', str(self.root))
-        self.patch.start(); self.addCleanup(self.patch.stop)
+TemporaryProject = support.TemporaryProject
 
 class GitHubAccounts(TemporaryProject):
     def fake_run(self,args,**kwargs):
@@ -260,8 +255,7 @@ vm.runInThisContext(source+'\n'+settings+`\n(async()=>{
 class Registration(TemporaryProject):
     def test_real_browser_connects_code_without_manual_ids_and_preserves_existing_settings(self):
         import html as html_module,subprocess
-        chrome=Path('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome')
-        if not chrome.is_file():self.skipTest('Chrome is required for the real registration-form check')
+        if not CHROME.exists():self.skipTest('Chrome is required for the real registration-form check')
         source=(Path(project.__file__).parent/'ui/index.html').read_text()
         script=source.split('<script>',1)[1].split('</script>',1)[0].split("$('q').oninput",1)[0]
         script+=source[source.index('function renderAgentPrompt() {'):source.index("$('agent').onclick")]
@@ -419,9 +413,7 @@ window.__TAURI__={core:{invoke:async(command,args)=>{
         page=page.replace('href="tokens.css"','href="'+(Path(project.__file__).parent/'ui/tokens.css').as_uri()+'"')
         page=page.replace('href="app.css"','href="'+(Path(project.__file__).parent/'ui/app.css').as_uri()+'"')
         target=self.root/'registration-check.html';target.write_text(page)
-        result=subprocess.run([str(chrome),'--headless','--disable-gpu','--no-first-run','--disable-background-networking',
-            '--disable-component-update','--no-default-browser-check','--user-data-dir='+str(self.root/'chrome'),
-            '--virtual-time-budget=1000','--dump-dom',target.as_uri()],capture_output=True,text=True,timeout=40)
+        result=dump_dom(target.as_uri(),self.root/'chrome',budget=1000,timeout=40)
         self.assertEqual(result.returncode,0,result.stderr[-1200:])
         self.assertTrue('data-registration-test="passed"' in result.stdout,result.stdout[-2000:])
         import re

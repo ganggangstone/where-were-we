@@ -1,9 +1,10 @@
 """Counts visible hint/caption characters per default UI state (fictional data, headless Chrome).
 Usage: measure_ui_copy.py [ui_dir] [--samples]   ui_dir defaults to the working tree ui/ (use `git archive HEAD ui` for the baseline)."""
-import json,re,subprocess,sys,tempfile
+import json,re,sys,tempfile
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).parent))
-from test_ui_flows import BOOTSTRAP,CHROME,ANALYZED
+from support import dump_dom,inline_assets
+from test_ui_flows import BOOTSTRAP,ANALYZED
 
 ROOT=Path(__file__).resolve().parents[1]
 HINT='.s,.hint,.empty,.sub,.meta,.tx,p,.legend,.wn,.module-scope,.note,figcaption,[role=status]'
@@ -46,15 +47,13 @@ def run(ui,name,lang='ko'):
     pre,query,steps=STATES[name]
     if PROSE:pre='window.__PROSE=1;'+pre
     source=(ui/'index.html').read_text()
-    html=source.replace('<script>','<script>'+BOOTSTRAP+pre,1)
-    for f in ('tokens.css','app.css','vendor/dagre.min.js','connection.js','onboarding.js','control.js','analysis-run.js'):
-        html=html.replace(f'"{f}"','"'+(ui/f).as_uri()+'"')
+    html=inline_assets(source.replace('<script>','<script>'+BOOTSTRAP+pre,1),ui)
     check=r"""window.flowCheck=(async()=>{const wait=ms=>new Promise(r=>setTimeout(r,ms));for(let i=0;i<100&&!window.appControlReady;i++)await wait(20);"""+ANALYZED+COLLECT+"""
  try{"""+steps+"""const o=window.__DUMP?[document.body.innerText]:collect();const pre=document.createElement('pre');pre.id='out';pre.textContent=JSON.stringify(o);document.body.append(pre);}catch(e){const pre=document.createElement('pre');pre.id='out';pre.textContent='ERR '+e.stack;document.body.append(pre);}})();"""
     html=html.replace('</body>','<script>'+check+'</script></body>')
     with tempfile.TemporaryDirectory() as tmp:
         t=Path(tmp)/'m.html';t.write_text(html)
-        r=subprocess.run([str(CHROME),'--headless','--disable-gpu','--no-first-run','--window-size=1280,900','--user-data-dir='+tmp+'/c','--virtual-time-budget=8000','--dump-dom',t.as_uri()+'?lang='+lang+(query.replace('?','&'))],capture_output=True,text=True,timeout=60)
+        r=dump_dom(t.as_uri()+'?lang='+lang+(query.replace('?','&')),tmp+'/c',budget=8000,window='1280,900',timeout=60)
     m=re.search(r'<pre id="out">(.*?)</pre>',r.stdout,re.S)
     if not m:return ['ERR no output']
     import html as h;s=h.unescape(m.group(1))
