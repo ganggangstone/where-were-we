@@ -1780,7 +1780,7 @@ ROUTE_BYTES = 16 * 1024        # source of one route in a steps call
 MAX_STEPS_CALLS = 3
 CALLER_LINES = 12             # lines on each side of a screen call site in a steps call
 USE_LINES = 8                 # lines on each side of a place in the screen's files that uses that call site's function
-USE_FILE_BYTES = ROUTE_BYTES // 2  # a use file this small is sent whole; with three per route a call still fits DETAIL_BYTES
+USE_FILE_BYTES = ROUTE_BYTES  # a use file this small is sent whole, once per call; a route's sources plus MAX_USES such files (64 KB) fit DETAIL_BYTES
 USE_FILE_RULE = (f' A use file of at most {USE_FILE_BYTES} bytes is supplied whole, once per call, listing the routes it serves; '
                  'a larger one only lines around each use.')
 MAX_JOB_FILES = 8

@@ -587,6 +587,23 @@ else:
                 project._publish('demo','service',raw,{},collection=False)
         print('\nsteps packet bytes with use windows',sizes[False],'with whole use files',sizes[True],file=sys.stderr)
 
+    def test_an_ordinary_screen_file_of_nine_kilobytes_goes_whole(self):
+        # What fires the request sits far from the use; a screen file of about 9 KB is still sent whole, once.
+        self.two_request_screen(padding=265);sizes=[];rows=[]
+        def executor(prompt,**kwargs):
+            p=self.packet(prompt);sizes.append(len(prompt.encode()))
+            rows.extend(r[1] for s in p['sources'] if s['file']=='pages/list.vue' for r in s['lines'])
+            self.assertIn(f'at most {analysis_run.USE_FILE_BYTES} bytes is supplied whole',p['prompt'])
+            return self.fake(prompt,**kwargs)
+        self.assertGreater((self.repo/'pages/list.vue').stat().st_size,9000)
+        done=analysis_run.run(self.prepare(intent={'task':'steps','targets':[{'repository':'service','target':'/items'}]})['id'],executor)
+        self.assertEqual(done['state'],'completed',done.get('error'));self.assertEqual(len(sizes),1)
+        self.assertEqual(rows,list(range(1,269)))
+        self.assertGreaterEqual(analysis_run.USE_FILE_BYTES,analysis_run.ROUTE_BYTES)
+        # A route's own sources and MAX_USES whole use files still fit one call.
+        self.assertLessEqual(analysis_run.ROUTE_BYTES+ai_extract.MAX_USES*analysis_run.USE_FILE_BYTES,analysis_run.DETAIL_BYTES)
+        print('\nsteps packet bytes with a 9 KB screen file',sizes[0],file=sys.stderr)
+
     def test_jobs_one_bounded_call_with_files_read_note(self):
         for i in range(20):(self.repo/f'server/pad{i:02}.txt').write_text('ordinary padding line\n'*600)
         self.git('add','.');self.git('commit','-qm','Many program files');self.seed_map()
