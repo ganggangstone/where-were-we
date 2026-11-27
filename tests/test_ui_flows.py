@@ -653,7 +653,7 @@ class Flows(unittest.TestCase):
  shown=await view('web::/items');
  assert(shown.length===2 && !shown.includes('New form sends it.') && shown[1]==='Stores the item.','Another screen gets the opening step instead: '+shown);
  $('next').click();$('next').click();assert(S.step===1 && $('insp').querySelector('.step-ctl').textContent.includes('2/2'),'The counter follows the shown steps');
- $('next').click();assert(S.step===-1,'Stepping ends after the shown steps');
+ assert($('next').disabled,'Next cannot move past the shown steps');$('next').click();assert(S.step!==-1,'A disabled next keeps the last step');
  assert(!copyText(M(),M().screens.find(x=>x.path==='web::/items'),requests(M(),'web::/items')[0]).includes('New form sends it.'),'Copy follows the shown steps');
  setFocus('route|api/app/items.py::save_item');
 ''')
@@ -1627,7 +1627,7 @@ class Flows(unittest.TestCase):
  for(const index of [0,6]){let refused=false;try{await applyAppCommand({action:'step',arguments:{index}});}catch(e){refused=true;}
    assert(refused || S.step===4,'The step command stops at the shown numbers: '+index);}
  Element.prototype.scrollIntoView=into;
- $('next').click();assert(S.step===-1,'One more press leaves step mode');
+ assert($('next').disabled,'Next is disabled at the last step');
  S.ev=0;render();assert($('insp').querySelector('.step[data-step="0"] .ev'),'The screen step shows its quoted code');
 ''')
 
