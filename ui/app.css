@@ -175,8 +175,9 @@ button.pill, .pill.click { font:var(--font-secondary); letter-spacing:var(--trac
 .detail { padding:var(--space-4) var(--space-4) var(--space-5); border-top:var(--border-hairline); background:var(--color-bg-content) }
 .flowline { display:flex; flex-wrap:wrap; gap:var(--space-2); align-items:center; margin:var(--space-0) var(--space-0) var(--space-4) }
 .ctl > label { max-width:100%; min-width:var(--space-0) }
-/* 긴 단계 그림에서 마지막 단계로 가도 ◀·다음 ▶·번호가 오른쪽 패널 아래에 남는다(.group 은 overflow:clip 이라 스크롤 상자가 아니다). */
-#insp .step-ctl { position:sticky; bottom:var(--space-0); z-index:1; background:var(--color-bg-content); padding-block:var(--space-3) }
+/* 긴 단계 그림에서 마지막 단계로 가도 ◀·다음 ▶·번호가 오른쪽 패널 아래에 남는다(.group 은 overflow:clip 이라 스크롤 상자가 아니다).
+   sticky 는 #insp 의 아래 여백 위에서 멈추므로 그 여백만큼 내려 패널 바닥에 붙인다. 여백 띠로 뒤 단계가 비치지 않는다. */
+#insp .step-ctl { position:sticky; bottom:calc(var(--space-8) * -1); z-index:1; background:var(--color-bg-content); padding-block:var(--space-3) }
 .ctl { display:flex; flex-wrap:wrap; gap:var(--space-3); align-items:center; margin-top:var(--space-4); color:var(--color-text-secondary); font:var(--font-secondary); letter-spacing:var(--tracking-secondary) }
 details > summary { cursor:pointer; overflow-wrap:anywhere; letter-spacing:var(--tracking-secondary); color:var(--color-text-secondary); font:var(--font-secondary); margin-top:var(--space-4) }
 .group > details { padding:var(--space-3) var(--space-4); border-top:var(--border-hairline) }
