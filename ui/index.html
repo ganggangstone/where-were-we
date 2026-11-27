@@ -2355,8 +2355,8 @@ function render() {
   // 기능 흐름이 있는 저장소 하나를 볼 때는 구성 그림을 기능 흐름 위에 두고 목록을 펼쳐 보인다. 모든 저장소에서는 저장소 사이 그림이 결과다.
   const featureFlow=sys && shownSystem(m)===S.system && !(m.structure_indexes?.length>1) && indexesOf(m).some(index=>index?.service_flow?.feature_groups?.length);
   // 개발자용 목록은 그림과 선 목록 아래 「자세한 목록」 하나에 접어 둔다.
-  const lists=structure+inventoryView(m),listsOpen=S.listsOpen || S.moduleGraph?.routesOpen || S.inventoryOpen;
-  const sysBody=sys?(featureFlow?components+structure+inventoryView(m):components+(lists?`<details class="sect" id="detailLists" ${listsOpen?'open':''}><summary>${tr('자세한 목록')}</summary><div class="list-grid">${lists}</div></details>`:'')):'';
+  const inventory=sys?inventoryView(m):'',lists=structure+inventory,listsOpen=S.listsOpen || S.moduleGraph?.routesOpen || S.inventoryOpen;
+  const sysBody=sys?(featureFlow?components+structure+inventory:components+(lists?`<details class="sect" id="detailLists" ${listsOpen?'open':''}><summary>${tr('자세한 목록')}</summary><div class="list-grid">${lists}</div></details>`:'')):'';
   $('map').innerHTML = searchPanel(m) + (view === 'changes' ? changesView(m) : sys ? sysBody : view === 'focus' ? (S.focus ? '' : `<p class="lead">${tr('서버가 저장하는 데이터와 그 데이터를 쓰는 화면을 모았다.')}</p>`)+focusView(m) : view === 'feat' ? featView(m) : `<p class="lead">${tr('같은 일을 하는 화면끼리 모았다.')}</p>`+storyMap(m)); $('insp').innerHTML = view === 'changes' ? changesInspector(m) : sys ? sysInspector(m) : view === 'focus' ? focusFeatureInspector(m) : view === 'feat' ? featInspector(m) : mapInspector(m);
   S._wires = null;
   if (view === 'focus' && S.focus) { const d = focusData(m); S._wires = d ? [...d.left.map((_, i) => ({ from: 'L' + i, to: 'C', h: true })), ...d.right.map((_, i) => ({ from: 'C', to: 'R' + i, h: true }))] : null; drawWires(); }
