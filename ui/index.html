@@ -272,7 +272,7 @@ const UI_EN = {
   "연결 진단": "Connection diagnostics", "서비스 연결": "Service connection",  "지도 읽기": "Read maps", "코드 자세히 읽기": "Read code in detail", "바뀐 것 설명": "Explain changes", "앱 화면 제어": "Control the app", "다시 진단": "Run diagnostics again", "앱 버전": "App version", "확인할 수 없음": "Unavailable",  "빠진 도구": "Missing tools",  "연결됐는지 확인": "Check the connection",   "AI가 설정을 확인하면 서버 위치가 나온다.": "Registered paths appear after your AI checks its settings.", "설정에 이 앱의 서버가 들어 있다.": "The registered paths match the app server.",
   "자세히": "Details", "AI 설명": "AI explanation", "기타 자료": "Other data", "PR의 변경 파일": "Changed files in PRs", "저장소 보관 위치": "Repository storage location", "연결 안내 보기": "View connection instructions", "진단 상세": "Diagnostic details",
   "시작하기": "Get started",
-  "서버 연결 지정": "Set server connections", "연결 후보 ": "Connection candidates: ", "개 확인": " to review", "저장소 상태 자세히": "Repository status details",
+  "서버 연결 지정": "Set server connections", "연결 후보 ": "Connection candidates: ", "개 확인": " to review", "저장소 상태 자세히": "Repository status details", "개 저장소 확인 필요": " repositories to check", "개 저장소 · 지도 준비됨": " repositories · Map ready",
   "지도로 돌아가기": "Back to the map", "이슈": "Issues",
   "테스트 ": "Tests: ",
   "지도에 연결": "Link on map", "연결 후보를 골라 뒀다. 저장하면 지도에 반영된다.": "The candidate is checked. Save to apply it.",
@@ -970,6 +970,14 @@ function analysisScopeText(scope) {
     needs_analysis:'앱이 코드에서 찾지 못했다. 「분석하기」에서 화면과 서버가 하는 일을 살펴볼 수 있다.',not_established:'AI가 확인하지 못함',unknown:'AI가 어디까지 읽었는지 확인하지 못함'};
   return [['frontend','화면'],['backend','서버']].map(([key,label])=>tr(label)+': '+tr(labels[scope[key]] || labels.unknown)).join(' · ');
 }
+// 저장소 상태가 한 줄(조작 줄 아래 한 줄)을 넘으면 칩을 「N개 저장소 확인 필요」 하나로 접는다. 그 칩은 「저장소 상태 자세히」를 연다.
+function fitRepositoryStatus() {
+  const bar=$('repository-bar');if(bar.hidden)return;bar.classList.remove('folded-status');
+  let rows=0,bottom=-1;
+  for(const r of [...bar.querySelectorAll(':scope > *, .chips > *')].filter(e=>e.offsetWidth).map(e=>e.getBoundingClientRect()).sort((a,b)=>a.top-b.top)){if(r.top>=bottom-1){rows++;bottom=r.bottom;}else bottom=Math.max(bottom,r.bottom);}
+  if(rows>2 && bar.querySelectorAll('.chips > .pill').length>2)bar.classList.add('folded-status');
+}
+window.addEventListener('resize',fitRepositoryStatus);
 function renderRepositories() {
   const repos = S.projectInfo?.repositories || []; const bar = $('repository-bar');
   bar.hidden = !S.project; if (!S.project) return;
@@ -986,15 +994,18 @@ function renderRepositories() {
     ['마지막 성공',r.last_success?esc(when(r.last_success)):'—'],
     ['연결 상태',esc(!r.collected?tr('아직 지도 없음'):r.config_changed?tr('설정을 바꿨다. 새로고침하면 지도에 반영된다.'):r.analysis?.[S.branch]?tr(r.analysis[S.branch].stale?'코드가 바뀌어 다시 분석해야 한다.':'AI 분석 · 원문 대조'):tr('기본 수집'))],
     ...(r.analysis_scope?.[S.branch]?[['분석할 저장소',esc(analysisScopeText(r.analysis_scope[S.branch]))]]:[])
-  ])}${unknown(r).length?`<ul class="status-list">${unknown(r).map(text=>`<li><span class="pill warn">${tr('확인 못 한 것')}</span><span>${esc(text)}</span></li>`).join('')}</ul>`:''}</section>`;
-  const failure=r=>`<div class="s error" role="alert"><b>${esc(r.name)} · ${failed(r)}</b> ${String(r.error).includes('GITHUB_ACCESS|') ? esc(githubErrorText(r.error))+` <button class="btn quiet" data-github-repair="${esc(r.id || '')}">${tr('GitHub 계정 바꾸기')}</button>` : ''}${errorDetails(String(r.error))}</div>`;
+  ])}${unknown(r).length?`<ul class="status-list">${unknown(r).map(text=>`<li><span class="pill warn">${tr('확인 못 한 것')}</span><span>${esc(text)}</span></li>`).join('')}</ul>`:''}${r.error?errorDetails(String(r.error)):''}</section>`;
+  // 실패는 칩 하나로 알리고 원문은 「저장소 상태 자세히」 안에 둔다. 계정 문제만 고칠 버튼과 함께 줄을 하나 더 둔다.
+  const failure=r=>`<div class="s error" role="alert">${esc(r.name)} · ${esc(githubErrorText(r.error))} <button class="btn quiet" data-github-repair="${esc(r.id || '')}">${tr('GitHub 계정 바꾸기')}</button></div>`;
+  const warned=current.filter(r=>tone(r)==='warn').length;
   const unlinked=repos.length>1 && !repos.some(r=>r.api_targets?.length), candidates=M()?.connection_candidates?.length || 0;
   bar.innerHTML = `<select id="repository" aria-label="${tr('연결한 저장소')}"><option value="">${tr('모든 저장소')}</option>${repos.map(r => `<option value="${esc(r.id)}" ${r.id === S.repository ? 'selected' : ''}>${esc(r.name)}</option>`).join('')}</select><span class="s">${tr('표시 브랜치')}</span><div class="seg light" id="branch" role="group" aria-label="${tr('지도에 표시할 브랜치')}"><button data-b="dev"></button><button data-b="main"></button></div><button class="btn quiet" id="manageRepositories">${tr('저장소 추가·수정')}</button><button class="btn quiet" id="analyzeMap">${esc(analysisButtonText())}</button>`+
-    `<span class="chips">${current.map(chip).join('')}</span>`+
+    `<span class="chips">${current.map(chip).join('')}<button class="pill ${warned?'warn':'ok'}" id="statusCount">${current.length>1?warned?warned+tr('개 저장소 확인 필요'):current.length+tr('개 저장소 · 지도 준비됨'):''}</button></span>`+
     current.filter(r=>r.github_collection?.state==='unavailable').map(r=>`<span class="pill warn" role="status">${esc(r.name)} · ${tr('GitHub 작업 정보 미확인')}${r.github_collection.last_success_at?' · '+tr('최근 확인')+' '+esc(when(r.github_collection.last_success_at)):''}</span>`).join('')+
     (unlinked ? `<button class="btn plain" id="linkCode">${tr('서버 연결 지정')}</button>` : '')+
     (candidates ? `<button class="btn plain" id="reviewCandidates">${ui`연결 후보 ${candidates}개 확인`}</button>` : '')+
-    `<details class="repository-detail"><summary>${tr('저장소 상태 자세히')}</summary>${current.map(detail).join('')}</details>`+current.filter(r=>r.error).map(failure).join('');
+    `<details class="repository-detail"><summary>${tr('저장소 상태 자세히')}</summary>${current.map(detail).join('')}</details>`+current.filter(r=>String(r.error || '').includes('GITHUB_ACCESS|')).map(failure).join('');
+  $('statusCount').onclick=()=>{bar.querySelector('.repository-detail').open=true;};fitRepositoryStatus();
   if ($('linkCode')) $('linkCode').onclick = () => editProject(false, 'targets');
   if ($('reviewCandidates')) $('reviewCandidates').onclick = () => selectScreen('!unres');
   $('repository').onchange = () => loadProject(S.project, false, $('repository').value);

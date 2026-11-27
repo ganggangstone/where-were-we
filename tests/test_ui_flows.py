@@ -703,7 +703,25 @@ class Flows(unittest.TestCase):
  await doRefresh();await wait();
  const message=tr('새 지도를 가져오지 못했다');
  assert(!$('status').textContent.includes(message),'The top banner repeats the repository failure: '+$('status').textContent);
- assert($('repository-bar').querySelectorAll('.error').length===1 && $('repository-bar').innerText.includes(message),'The repository row keeps the failure and its details');
+ assert(outside($('repository-bar')).split(message).length===2,'The failure shows once in the repository row: '+outside($('repository-bar')));
+ const fold=$('repository-bar').querySelector('.repository-detail');
+ assert(fold.textContent.includes('fictional fetch error') && !outside($('repository-bar')).includes(tr('오류 내용')),'The error details sit in the repository status fold');
+''')
+
+    def test_a_screen_without_a_heading_shows_its_route_without_the_repository_prefix(self):
+        self.check(r'''
+ const m=M(),screen=(path,heading)=>({path:'/@web'+path,source_path:path,repository:'web',heading,file:'web/src/x.tsx',line:1,actions:[],api_functions:[]});
+ m.screens=[screen('/fictional/log',null),screen('/a',null),screen('/a/b','Same'),screen('/abc','Same')];delete m._multiScreenRepos;delete m._heads;
+ assert(label(m,'/@web/fictional/log')==='/fictional/log','A route name keeps the internal repository prefix: '+label(m,'/@web/fictional/log'));
+ assert(label(m,'/@web/abc')==='Same · /abc','A repeated heading adds the internal route: '+label(m,'/@web/abc'));
+''')
+
+    def test_english_change_counts_and_repository_count_read_as_one_form(self):
+        self.check(r'''
+ if(S.lang==='en'){
+  for(const key of ['새 화면 · 사라진 화면','생긴 서버 요청 · 사라진 서버 요청','새 길 · 끊긴 길'])assert(tr(key).startsWith('Added / removed '),'Change counts use different forms: '+tr(key));
+  assert(3+tr('개 저장소 확인 필요')==='3 repositories to check' && !/[가-힣]/.test(tr('개 저장소 · 지도 준비됨')),'Repository count is not translated');
+ }
 ''')
 
     def test_the_repository_selector_is_not_repeated_as_text_and_a_missing_branch_shows_no_empty_button(self):

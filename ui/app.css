@@ -254,6 +254,7 @@ details.list-panel > summary { margin:var(--space-0); color:var(--color-text); f
 #repository-bar[hidden] { display:none }
 #repository-bar > * { min-width:var(--space-0); max-width:100% }
 #repository-bar .s { overflow-wrap:anywhere }
+#repository-bar:not(.folded-status) #statusCount, .folded-status .chips > :not(#statusCount) { display:none }
 #project-dialog fieldset { margin:var(--space-4) var(--space-0); padding:var(--space-4); border:var(--border-hairline); border-radius:var(--radius-control) }
 .repository-fields > * { min-width:var(--space-0) }
 .repository-fields { display:flex; flex-wrap:wrap; gap:var(--space-3); margin-bottom:var(--space-3) }
