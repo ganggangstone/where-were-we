@@ -1283,6 +1283,10 @@ function inspector(m) {
   return h + (work ? `<details class="work-more"><summary>${tr('자세한 목록')}</summary>${work}</details>` : '');
 }
 const LANE = { '화면': 0, '서버': 1, '저장소': 2, '외부': 3 };
+// 단계 그림의 마지막 번호: 저장된 단계가 화면 단계로 시작하지 않으면 앞에 시작 단계 하나가 붙는다.
+const lastStep = (f) => f && f.steps.length ? f.steps.length - (f.steps[0].lane === '화면' ? 1 : 0) : 0;
+// 오른쪽 패널에서 지금 단계가 보이게 한다.
+const showStep = () => $('insp').querySelector('.step.cur')?.scrollIntoView({ block: 'nearest' });
 function detail(m, s, r) {
   const f = flowOf(r.route); const rt = r.route; const ins = (rt.inputs || []).map(i => i.split(':')[0]);
   let h = `<div class="detail"><div class="flowline">${ins.length ? ins.map(i => `<span class="pill">${esc(i)}</span>`).join('') : tr('<span class="pill">확인된 입력 없음</span>')}<span class="arrow">→</span><span class="pill ai">${esc(reqLabel(r))}</span><span class="arrow">→</span>` +
@@ -1305,7 +1309,7 @@ function detail(m, s, r) {
     h += ui`<div class="step-lanes"><span class="screen">화면</span><span class="server">서버</span><span class="store">데이터</span><span class="external">외부 서비스</span></div>` + steps.map((st, i) => {
       const cur = S.step === i; const off = S.step >= 0 && !cur, from = i ? at(steps[i - 1]) : at(st);
       return `<div class="step l${at(st)} ${cur ? 'cur' : ''} ${off ? 'off' : ''} ${st.uncertain ? 'unsure' : ''}" data-step="${i}">${i ? `<span class="from" aria-hidden="true">${from < at(st) ? '↘' : from > at(st) ? '↙' : '↓'}</span>` : ''}<span class="n">${i || '▶'}</span><div class="grow"><div class="tx">${esc(st.text)}${st.uncertain ? tr(' (코드만으로는 확신 못 함)') : ''}</div>${S.ev === i && !st.start ? `<div class="ev mono">${esc(st.quote)}<br>${zed(m, st.file || rt.file, st.line)}</div>` : ''}</div></div>`; }).join('') +
-      ui`<div class="ctl"><button class="btn quiet" id="prev">◀</button><button class="btn quiet" id="next">다음 ▶</button><span>${S.step >= 0 ? `${S.step}/${steps.length - 1}` : tr('한 단계씩 보기')}</span><span class="spacer"></span><span class="ai">AI 설명</span><span>· 인용 코드 일치</span></div>`;
+      ui`<div class="ctl"><button class="btn quiet" id="prev">◀</button><button class="btn quiet" id="next">다음 ▶</button><span>${S.step >= 0 ? `${S.step + 1}/${steps.length}` : tr('한 단계씩 보기')}</span><span class="spacer"></span><span><span class="ai">AI 설명</span>&nbsp;· 인용 코드 일치</span></div>`;
   } else if (f?.unknown) h += `<div class="empty">${tr('코드에서 이 동작의 순서를 찾지 못했다: ')}${esc(f.unknown)}</div>`;
   else h += ui`<div class="empty">누른 뒤 어떤 순서로 일이 일어나는지 아직 분석하지 않았다.</div>${r.key ? ui`<div class="ctl"><button class="btn quiet" data-mk="${esc(r.key)}">이 동작의 과정 알아보기</button></div>` : ''}`;
   const more = facts;
@@ -2412,9 +2416,9 @@ function render() {
   document.querySelectorAll('.row[data-url]').forEach(el => el.onclick = () => invoke('open_url', { url: el.dataset.url }));
   document.querySelectorAll('a[data-url], button[data-url]').forEach(a => a.onclick = (e) => { e.stopPropagation(); invoke('open_url', { url: a.dataset.url }); });
   const s = m.screens.find(x => x.path === S.sel); const rows = s ? requests(m, s.path) : [];
-  const stepCount = () => { const r = rows.find(x => x.key === S.open); const f = r && flowOf(r.route); return f && f.steps.length ? f.steps.length - (f.steps[0].lane === '화면' ? 1 : 0) : 0; };
-  if ($('next')) $('next').onclick = () => { S.step = S.step >= stepCount() ? -1 : S.step + 1; S.ev = -1; render(); };
-  if ($('prev')) $('prev').onclick = () => { S.step = S.step <= 0 ? -1 : S.step - 1; S.ev = -1; render(); };
+  const stepCount = () => { const r = rows.find(x => x.key === S.open); return lastStep(r && flowOf(r.route)); };
+  if ($('next')) $('next').onclick = () => { S.step = S.step >= stepCount() ? -1 : S.step + 1; S.ev = -1; render(); showStep(); };
+  if ($('prev')) $('prev').onclick = () => { S.step = S.step <= 0 ? -1 : S.step - 1; S.ev = -1; render(); showStep(); };
   const copy = async (text, el) => { await navigator.clipboard.writeText(text); el.textContent = tr('복사됨'); setTimeout(() => render(), 900); };
   if ($('copyS')) $('copyS').onclick = () => copy(copyText(m, s), $('copyS'));
   // 고른 기능: 지도에서 보기·기능 개요로 돌아가기·다른 기능으로 바꾸기·해제. 지도는 늘 전체를 그린다.

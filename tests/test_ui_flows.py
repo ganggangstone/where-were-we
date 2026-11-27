@@ -1537,6 +1537,10 @@ class Flows(unittest.TestCase):
  assert(steps.slice(1).every(x=>x.querySelector('.from')),'Each later step shows where it came from');
  const more=$('insp').querySelector('.detail details');assert(more && !more.open && more.querySelector('summary').textContent===tr('자세한 목록'),'Data names and linked code fold under one 「자세한 목록」');
  assert(!$('insp').querySelector('.detail > .flowline'),'No raw data chips above the fold');
+ $('next').click();assert($('insp').querySelector('.detail .ctl span').textContent==='1/4','The synthetic opening step counts as 1');
+ for(let i=0;i<3;i++)$('next').click();assert($('insp').querySelector('.detail .ctl span').textContent==='4/4','The last step reads N/N');
+ for(const lang of ['ko','en']){S.lang=lang;render();const legend=$('insp').querySelector('.detail .ctl .ai').parentElement;
+   assert(legend.textContent===tr('AI 설명')+' '+tr('· 인용 코드 일치'),'The separator stays with the AI label: '+legend.textContent);}
 ''')
 
     def test_screen_steps_from_code_replace_the_opening_step_and_lanes_go_back_and_forth(self):
@@ -1549,8 +1553,17 @@ class Flows(unittest.TestCase):
  const steps=()=>[...$('insp').querySelectorAll('.step[data-step]')];
  assert(steps().map(x=>x.className.match(/\bl(\d)\b/)[1]).join('')==='01210','No opening step is added before a screen step: '+steps().map(x=>x.textContent).join('|'));
  assert(steps().slice(1).map(x=>x.querySelector('.from').textContent).join('')==='↘↘↙↙','Arrows follow the lane changes');
- for(let i=0;i<5;i++)$('next').click();
- assert(S.step===4 && steps()[4].classList.contains('cur'),'Stepping reaches the last screen step: '+S.step);
+ const seen=[],into=Element.prototype.scrollIntoView;Element.prototype.scrollIntoView=function(o){seen.push([this.dataset.step,o&&o.block]);};
+ const count=()=>$('insp').querySelector('.detail .ctl span').textContent;
+ $('next').click();assert(count()==='1/5','The first shown step counts as 1: '+count());
+ for(let i=0;i<4;i++)$('next').click();
+ assert(S.step===4 && steps()[4].classList.contains('cur') && count()==='5/5','Stepping reaches the last screen step: '+S.step+' '+count());
+ assert(seen.length===5 && seen.every(([n,b],i)=>n===String(i) && b==='nearest'),'Each step scrolls the active step into view: '+JSON.stringify(seen));
+ $('prev').click();assert(seen.at(-1)[0]==='3','Stepping back scrolls too');
+ await applyAppCommand({action:'step',arguments:{index:4}});assert(S.step===4 && seen.at(-1)[0]==='4','The step command scrolls the active step into view');
+ let refused=false;try{await applyAppCommand({action:'step',arguments:{index:5}});}catch(e){refused=true;}
+ assert(refused || S.step===4,'The step command stops at the last shown step');
+ Element.prototype.scrollIntoView=into;
  $('next').click();assert(S.step===-1,'One more press leaves step mode');
  S.ev=0;render();assert($('insp').querySelector('.step[data-step="0"] .ev'),'The screen step shows its quoted code');
 ''')

@@ -123,8 +123,8 @@ async function applyAppCommand(command) {
       // 화면만 골랐으면 그 화면에서 동작 과정이 있는 첫 요청을 연다.
       if(!S.open && S.sel){const q=requests(M(),S.sel).find(x=>flowOf(x.route));if(q)S.open=q.key;}
       const r=(M()?.backend_routes || []).find(r=>r.file+'::'+r.function===S.open),flow=r && flowOf(r);
-      if(!Number.isInteger(a.index) || !flow || a.index<0 || a.index>flow.steps.length)controlError('step_unavailable');
-      S.step=a.index;S.ev=a.index;render();break;
+      if(!Number.isInteger(a.index) || !flow || a.index<0 || a.index>lastStep(flow))controlError('step_unavailable');
+      S.step=a.index;S.ev=a.index;render();showStep();break;
     }
     case 'dialog':{
       // close: every open dialog and the right-side AI panel (the setup, analysis or connection panel shown while S.agentPrompt is set).
