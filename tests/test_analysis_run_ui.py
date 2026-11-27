@@ -408,6 +408,19 @@ for(let i=0;i<3;i++)await tick();
 assert($('insp').innerHTML.includes('Nothing left to analyze') && !$('insp').innerHTML.includes('Analyze · 3 calls'),'After it finishes, the board shows the saved result');
 """)
 
+    def test_a_running_single_task_does_not_also_say_nothing_is_left(self):
+        self.check_js(self.BOARD + r"""
+serve({calls:{rules:0,labeling:0,structure:0,unit:0,total:0}});status=null;
+S.analysisChoice={task:'make_steps',targets:[{repository:'service',target:'/orders'}]};
+await open();await AnalysisRun.check();await flush();
+assert($('insp').innerHTML.includes('Nothing left to analyze'),'Idle board with nothing left');
+status=runRecord('running',{intent:{task:'steps',targets:[{repository:'service',target:'/orders'}]},tasks:[{task:'steps'}],current_task:{task:'steps'}});
+await AnalysisRun.check();await flush();
+const html=$('insp').innerHTML;
+assert(html.includes('0/1 tasks saved'),'The running task shows its progress');
+assert(!html.includes('Nothing left to analyze'),'A running task is shown together with nothing left to analyze');
+""")
+
     def test_a_full_run_seen_running_reloads_the_map_once_when_it_completes(self):
         self.check_js(self.BOARD + r"""
 serve();const full=(state,extra)=>({...runRecord(state),intent:{task:'full',targets:[]},repository:'',...extra});
