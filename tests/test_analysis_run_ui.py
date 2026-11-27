@@ -303,7 +303,9 @@ status=runRecord('completed',{intent:{task:'steps',targets:[{repository:'service
 await open();await AnalysisRun.check();await flush();
 const html=$('insp').innerHTML;
 assert(!html.includes('@routes') && !html.includes('::'),'Raw route keys reach the panel: '+html);
-assert(html.includes('Repository service · List orders, Cancel an order and 1 more · Server requests 3'),'Targets read as request names with a count: '+html);
+assert(html.includes('<span class="chip">List orders, Cancel an order and 1 more · Server requests 3</span>'),'Targets read as request names with a count: '+html);
+// The repository is named once per row: in the scope chip, not again in the target chip.
+assert(html.includes('<span class="chip">Repository service</span>') && !html.includes('Repository service · List'),'The scope chip names the repository once: '+html);
 """)
 
     def test_steps_target_with_a_screen_names_the_screen_before_its_requests(self):
