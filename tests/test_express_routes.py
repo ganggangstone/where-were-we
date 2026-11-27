@@ -1,3 +1,4 @@
+import support  # blocks real AI CLIs; drops an inherited WHERE_WERE_WE_SETTINGS
 import unittest
 
 from express_routes import express_routes

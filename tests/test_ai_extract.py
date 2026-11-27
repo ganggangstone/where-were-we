@@ -7,12 +7,12 @@ import subprocess
 import sys
 import tempfile
 import unittest
-import os;os.environ.pop('WHERE_WERE_WE_SETTINGS',None)  # fixtures isolate settings through mapcore.ROOT; an inherited settings file would bypass that and be shared
+import support  # blocks real AI CLIs; drops an inherited WHERE_WERE_WE_SETTINGS
 from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import mapcore
 
-def repo_git(repo,*args):return subprocess.run(['git','-C',str(repo),*args],check=True,capture_output=True,text=True).stdout
+repo_git=support.git
 import project
 import ai_extract
 
@@ -36,11 +36,6 @@ class Analysis(unittest.TestCase):
         self.repo=Path(self.temp.name)/'code';self.repo.mkdir()
         self.home=Path(self.temp.name)/'maps'
         self.patch=patch.object(mapcore,'ROOT',str(self.home));self.patch.start();self.addCleanup(self.patch.stop)
-        real_run=subprocess.run
-        def guard(command,**kwargs):
-            if Path(str(command[0])).name=='claude':raise AssertionError('Real AI calls are forbidden in tests; supply a fake runner')
-            return real_run(command,**kwargs)
-        block=patch('subprocess.run',side_effect=guard);block.start();self.addCleanup(block.stop)
         self.git('init','-q');self.git('config','user.name','Demo');self.git('config','user.email','demo@example.invalid')
         for name,text in {'pages/items.vue':'<button @click="saveItem">Save item</button>\nfetch("/items", {method:"POST"})\n',
                           'server/items.go':'func SaveItem() {\n db.Table("items").Create(item)\n}\nrouter.POST("/items", SaveItem)\n'}.items():

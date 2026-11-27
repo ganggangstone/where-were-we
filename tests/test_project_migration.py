@@ -6,7 +6,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-import os;os.environ.pop('WHERE_WERE_WE_SETTINGS',None)  # fixtures isolate settings through mapcore.ROOT; an inherited settings file would bypass that and be shared
+import support  # blocks real AI CLIs; drops an inherited WHERE_WERE_WE_SETTINGS
 from unittest.mock import patch
 
 HERE = Path(__file__).resolve().parents[1]

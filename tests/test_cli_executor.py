@@ -10,7 +10,7 @@ import time
 import unittest
 from unittest.mock import patch
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import support
 import cli_executor as cli
 
 
@@ -193,6 +193,23 @@ else:
         with patch.dict(os.environ, FIXTURE_MODE='orphan'):
             self.assertIsInstance(json.loads(cli.execute('private pinned source')), dict)
         self.wait_stopped(int(self.child.read_text()))
+
+
+class RealCLIGuard(unittest.TestCase):
+    """support blocks the product's default launch path before an installed AI CLI starts."""
+    def test_default_executor_path_fails_loudly_instead_of_launching(self):
+        installed = '/opt/fictional/bin/claude'  # outside the temp folder, so treated as a real install
+        with patch.object(cli.shutil, 'which', return_value=installed), patch.object(cli, '_SUPPORTED', set()):
+            for call in (cli.availability, lambda: cli.execute('private prompt')):
+                with self.assertRaisesRegex(AssertionError, 'Real AI calls are forbidden'):
+                    call()
+
+    def test_every_ai_cli_name_is_blocked_however_it_is_started(self):
+        for name in support.AI_CLIS:
+            for start in (lambda: subprocess.run([name, '--version']), lambda: subprocess.Popen(name + ' --version', shell=True),
+                          lambda: subprocess.check_output(['/usr/bin/env', name])):
+                with self.subTest(name=name), self.assertRaisesRegex(AssertionError, 'Real AI calls are forbidden'):
+                    start()
 
 
 if __name__ == '__main__':

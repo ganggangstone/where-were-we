@@ -10,22 +10,17 @@ import argparse
 import json
 import os
 from pathlib import Path
-import subprocess
 import sys
 import time
 
 parser=argparse.ArgumentParser();parser.add_argument('--root',required=True);parser.add_argument('repos',nargs='+')
 args=parser.parse_args()
-os.environ['WHERE_WERE_WE_ROOT']=args.root;os.environ['WHERE_WERE_WE_SETTINGS']=str(Path(args.root)/'settings.json')
-sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
+os.environ['WHERE_WERE_WE_ROOT']=args.root
+sys.path.insert(0,str(Path(__file__).resolve().parent))
+import support  # noqa: E402  blocks real AI CLIs (and drops an inherited settings path, so set ours after it)
+os.environ['WHERE_WERE_WE_SETTINGS']=str(Path(args.root)/'settings.json')
 import analysis_run  # noqa: E402
 import project  # noqa: E402
-
-real_run=subprocess.run
-def guard(command,**kwargs):
-    if Path(str(command[0])).name=='claude':raise AssertionError('Real AI calls are forbidden here')
-    return real_run(command,**kwargs)
-subprocess.run=guard
 
 def fake(prompt,**_):
     if not prompt.startswith('You label') and not prompt.startswith('You build'):return '{}'

@@ -1,4 +1,5 @@
 """Screen action labels keep a readable sentence when an expression sits inside the text."""
+import support  # blocks real AI CLIs; drops an inherited WHERE_WERE_WE_SETTINGS
 import ast
 import html
 from pathlib import Path

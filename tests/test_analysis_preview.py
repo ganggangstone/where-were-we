@@ -1,4 +1,5 @@
 """Exercise the live preview through the worker with a synthetic Git repository."""
+import support  # blocks real AI CLIs; drops an inherited WHERE_WERE_WE_SETTINGS
 import json
 import unittest
 

@@ -1,4 +1,5 @@
 """Full-code analysis by units: AI-free catalog, saved-as-you-go results, resume and stale handling. Fake executors only."""
+import support  # blocks real AI CLIs; drops an inherited WHERE_WERE_WE_SETTINGS
 import json
 from pathlib import Path
 import sys

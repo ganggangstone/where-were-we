@@ -1,5 +1,6 @@
 """ui/check_tokens.py 가 실제로 생길 법한 디자인 값 사본을 잡는지 본다.
 ui 폴더를 임시로 복사해 한 곳씩 깨뜨리고 검사기를 돌린다."""
+import support  # blocks real AI CLIs; drops an inherited WHERE_WERE_WE_SETTINGS
 import os, shutil, subprocess, sys, tempfile, unittest
 
 UI = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "ui")

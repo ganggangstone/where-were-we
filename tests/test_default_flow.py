@@ -2,6 +2,7 @@
 
 The fixture uses small synthetic definitions, with no repository imports or execution.
 """
+import support  # blocks real AI CLIs; drops an inherited WHERE_WERE_WE_SETTINGS
 import ast
 import unittest
 

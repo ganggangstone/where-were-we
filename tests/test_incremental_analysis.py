@@ -8,13 +8,13 @@ import subprocess
 import sys
 import tempfile
 import unittest
-import os;os.environ.pop('WHERE_WERE_WE_SETTINGS',None)  # fixtures isolate settings through mapcore.ROOT; an inherited settings file would bypass that and be shared
+import support  # blocks real AI CLIs; drops an inherited WHERE_WERE_WE_SETTINGS
 from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import mapcore
 import project
 import ai_extract
-from test_ai_extract import repo_git
+repo_git=support.git
 
 FILES=53;PER=9;ROUTES=FILES*PER
 ROUTERS=[f'backend/app/routers/h{n:02d}.py' for n in range(FILES)]
@@ -41,12 +41,6 @@ class Incremental(unittest.TestCase):
         self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
         self.repo=Path(self.temp.name)/'code';self.repo.mkdir();self.home=Path(self.temp.name)/'maps'
         p=patch.object(mapcore,'ROOT',str(self.home));p.start();self.addCleanup(p.stop)
-        real=subprocess.run
-        def guard(command,**kwargs):
-            # Same environment as the code under test: any AI shell is a test failure.
-            if Path(str(command[0])).name in ('claude','codex','gemini'):raise AssertionError('Real AI calls are forbidden; use the fake agent')
-            return real(command,**kwargs)
-        g=patch('subprocess.run',side_effect=guard);g.start();self.addCleanup(g.stop)
         self.git('init','-q');self.git('config','user.name','Demo');self.git('config','user.email','demo@example.invalid')
         self.write({**FRONT,'backend/app/main.py':main_py(),'worker/run.py':'while True:\n    process_queue()\n',**{f:router(n) for n,f in enumerate(ROUTERS)}})
         self.c0=self.commit('Synthetic service')
@@ -242,7 +236,6 @@ class Incremental(unittest.TestCase):
         real=subprocess.run
         def run(command,**kwargs):
             if any(str(x).endswith('/collect.py') for x in command):return subprocess.CompletedProcess(command,0,'','')
-            if Path(str(command[0])).name in ('claude','codex','gemini'):raise AssertionError('Real AI calls are forbidden')
             return real(command,**kwargs)
         with patch.object(sys,'argv',['refresh.py','stage',str(self.repo)]),patch.dict(os.environ,{'WHERE_WERE_WE_COLLECTION_STAGE':'1','WHERE_WERE_WE_REFS':json.dumps({'dev':'HEAD','main':None})}),patch('subprocess.run',side_effect=run):
             runpy.run_path(str(Path(__file__).resolve().parents[1]/'refresh.py'),run_name='__main__')

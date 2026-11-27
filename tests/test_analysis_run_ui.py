@@ -4,7 +4,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import unittest
-import os;os.environ.pop('WHERE_WERE_WE_SETTINGS',None)  # fixtures isolate settings through mapcore.ROOT; an inherited settings file would bypass that and be shared
+import support  # blocks real AI CLIs; drops an inherited WHERE_WERE_WE_SETTINGS
 
 ROOT = Path(__file__).resolve().parents[1]
 NODE = shutil.which('node')
