@@ -474,7 +474,8 @@ else:
         for s in m['screens']:s['api_functions']=[{**f,'name':'saveItemNow','via':'pages/list.vue'} for f in s['api_functions']]
         project._publish('demo','service',raw,{},collection=False)
         sizes={}
-        for lane_file,expected in (('router.POST','failed'),('saveItemNow().then','completed')):
+        # The completed run uses the screen + its route keys, the target the app sends for the screen's own repository.
+        for lane_file,expected,target in (('router.POST','failed','/items'),('saveItemNow().then','completed','/items@routes:'+json.dumps([self.ROUTE]))):
             with self.subTest(screen_step=lane_file):
                 before=self.raw();calls=[]
                 def executor(prompt,**kwargs):
@@ -484,7 +485,7 @@ else:
                     self.assertIn('pages/list.vue',{s['file'] for s in p['sources']});self.assertNotIn('pages/other.vue',{s['file'] for s in p['sources']})
                     return {'routes':{self.ROUTE:{'name':'Save item','steps':[{'ref':self.ref(p,lane_file),'lane':'화면','text':'Saving the form sends the item'},
                         {'ref':self.ref(p,'db.Table'),'lane':'저장소','text':'Store the item'}]}}}
-                done=analysis_run.run(self.prepare(intent={'task':'steps','targets':[{'repository':'service','target':'/items'}]})['id'],executor)
+                done=analysis_run.run(self.prepare(intent={'task':'steps','targets':[{'repository':'service','target':target}]})['id'],executor)
                 self.assertEqual(done['state'],expected,done.get('error'))
                 if expected=='failed':self.assertEqual(len(calls),2);self.assertEqual(self.raw(),before);continue
                 steps=self.raw()['dev']['task_outputs']['flows']['routes'][self.ROUTE]['steps']

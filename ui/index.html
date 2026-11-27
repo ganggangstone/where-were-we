@@ -552,12 +552,15 @@ function analysisCalls(command, args) {
   let calls = [args];
   if (S.projectInfo?.repositories?.length && !['briefing_request','analysis_plan'].includes(command)) {
     if (command === 'make_steps') {
-      const by = new Map();
-      for (const row of (args.screen.startsWith('@routes:') ? M().backend_routes.filter(r=>JSON.parse(args.screen.slice(8)).includes(r.file+'::'+r.function)).map(route=>({route})) : requests(M(),args.screen))) {
+      const by = new Map(), at=args.screen.indexOf('@routes:'), path=at<0?args.screen:args.screen.slice(0,at);
+      const screen=path && M().screens.find(s=>s.path===path);
+      for (const row of (at>=0 ? M().backend_routes.filter(r=>JSON.parse(args.screen.slice(at+8)).includes(r.file+'::'+r.function)).map(route=>({route})) : requests(M(),args.screen))) {
         const rid=row.route.repository; if (!by.has(rid)) by.set(rid,[]);
         by.get(rid).push(row.route.file.slice(rid.length+1)+'::'+row.route.function);
       }
-      calls=[...by].map(([repository, keys])=>({...args,repository,screen:'@routes:'+JSON.stringify(keys)}));
+      // The screen's own repository gets the screen too, so the steps task can read the screen code that uses each request.
+      // ponytail: a request served by another repository gets '@routes:' only; the screen's files are not in that repository's git.
+      calls=[...by].map(([repository, keys])=>({...args,repository,screen:(screen?.repository===repository?screen.source_path:'')+'@routes:'+JSON.stringify(keys)}));
       if (!calls.length) throw Error(tr('이 화면이 보내는 서버 요청을 찾지 못했다.'));
     } else if (args.repository==='*' && !args.node) {
       calls=S.projectInfo.repositories.map(r=>({...args,repository:r.id}));
@@ -2442,7 +2445,7 @@ function render() {
   document.querySelectorAll('[data-copy]').forEach(b => b.onclick = () => copy(copyText(m, s, rows.find(x => x.key === b.dataset.copy)), b));
   document.querySelectorAll('[data-confirm-link]').forEach(b => b.onclick = () => editProject(false, { link: b.dataset.confirmLink.split('|') }));
   if ($('mk')) $('mk').onclick=()=>openAnalysisPanel('make_steps',S.sel);
-  document.querySelectorAll('[data-mk]').forEach(b => b.onclick = () => openAnalysisPanel('make_steps','@routes:'+JSON.stringify([b.dataset.mk])));
+  document.querySelectorAll('[data-mk]').forEach(b => b.onclick = () => openAnalysisPanel('make_steps',(M().screens.some(x=>x.path===S.sel)?S.sel:'')+'@routes:'+JSON.stringify([b.dataset.mk])));
   if ($('makeProgramJobs')) $('makeProgramJobs').onclick=()=>openAnalysisPanel('make_jobs',S.node);
   renderPendingActions();
   if (S.agentPrompt != null) renderAgentPrompt();

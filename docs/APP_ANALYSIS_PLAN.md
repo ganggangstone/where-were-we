@@ -69,7 +69,9 @@ Detail results are saved through the same checks as the MCP path (`ai_extract.ta
   call, with the routes it serves; a larger one goes as `USE_LINES` (8) lines on either side of each use. The prompt
   states this limit. A target is a screen path, route keys (`@routes:[...]`, no selected screen and no uses) or a
   screen path followed by some of its route keys (`/path@routes:[...]`); a screen with only some routes missing is
-  asked the second way, so its callers and uses still know the screen. At most `ROUTE_BYTES` (16 KB) per route and
+  asked the second way, so its callers and uses still know the screen. With several repositories the app asks each
+  repository for the routes it serves: the screen's own repository gets `/path@routes:[...]`, another repository gets
+  `@routes:[...]` only, because the screen's files are not in its Git. At most `ROUTE_BYTES` (16 KB) per route and
   `DETAIL_BYTES` (96 KB) per call, in at most `MAX_STEPS_CALLS` (3) calls. Routes that do not fit, and routes an
   answer leaves out, are saved with `steps: []` and an `unknown` text saying their steps are not established.
   The model writes 「화면」 (screen) steps only from the caller and use lines: what sets off the request and what

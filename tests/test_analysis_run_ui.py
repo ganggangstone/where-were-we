@@ -318,6 +318,29 @@ const html=$('insp').innerHTML;
 assert(!html.includes('@routes') && html.includes('/orders · Cancel an order · Server requests 1'),'The screen comes before its request names: '+html);
 """)
 
+    def test_steps_call_for_the_screen_repository_carries_the_screen(self):
+        # Two repositories: the screen's repository also serves one request, the other repository serves the second.
+        calls = UI[UI.index('function analysisCalls('):UI.index('async function invokeAction(')]
+        script = calls + r"""
+const assert=(ok,message)=>{if(!ok)throw Error(message);};
+const tr=s=>s,route=(repository,file,fn)=>({repository,file:repository+'/'+file,function:fn});
+const save=route('web','server/items.py','save_item'),sync=route('api','app/sync.py','sync_item');
+const map={screens:[{path:'web::/items',repository:'web',source_path:'/items'}],backend_routes:[save,sync]};
+const M=()=>map,requests=(m,path)=>path==='web::/items'?[{route:save},{route:sync}]:[];
+const S={projectInfo:{repositories:[{id:'web'},{id:'api'}]}};
+for(const repository of ['web','*','']){
+  const got=analysisCalls('make_steps',{repository,screen:'web::/items'}).map(c=>[c.repository,c.screen]);
+  assert(JSON.stringify(got)===JSON.stringify([['web','/items@routes:["server/items.py::save_item"]'],['api','@routes:["app/sync.py::sync_item"]']]),repository+': '+JSON.stringify(got));
+}
+// One request chosen under the screen (「이 동작의 과정 알아보기」) keeps the screen only where it lives.
+let got=analysisCalls('make_steps',{repository:'',screen:'web::/items@routes:'+JSON.stringify([save.file+'::save_item'])});
+assert(got.length===1 && got[0].screen==='/items@routes:["server/items.py::save_item"]',JSON.stringify(got));
+got=analysisCalls('make_steps',{repository:'',screen:'web::/items@routes:'+JSON.stringify([sync.file+'::sync_item'])});
+assert(got.length===1 && got[0].repository==='api' && got[0].screen==='@routes:["app/sync.py::sync_item"]',JSON.stringify(got));
+"""
+        result = subprocess.run([NODE, '-e', script], text=True, capture_output=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     MAP_BOARD = r"""
 const mapBoard=(extra={})=>({repositories:[{repository:'service',units:[
  ['route:/orders','route','/orders',3,'saved','new'],
