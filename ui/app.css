@@ -165,7 +165,7 @@ button.pill, .pill.click { font:var(--font-secondary); letter-spacing:var(--trac
 .sect { margin-top:var(--space-6) }
 .sect > h4 { margin:var(--space-0) var(--space-0) var(--space-3); font:var(--font-secondary); font-weight:var(--weight-strong); color:var(--color-text-secondary); display:flex; align-items:center; gap:var(--space-3) }
 .group + .group { margin-top:var(--space-4) }
-.group { background:var(--color-bg-group); border:var(--border-hairline); border-radius:var(--radius-card); overflow:hidden }
+.group { background:var(--color-bg-group); border:var(--border-hairline); border-radius:var(--radius-card); overflow:clip }
 .row > * { min-width:var(--space-0) }
 .row > .grow { flex-basis:calc(var(--size-node) * 3 / 2) } /* an action beside a label wraps below it before the label gets narrower than the action */
 .row { flex-wrap:wrap; padding:var(--space-3) var(--space-4); border-top:var(--border-hairline); display:flex; gap:var(--space-3); align-items:center } .row:first-child { border-top:none }
@@ -175,6 +175,8 @@ button.pill, .pill.click { font:var(--font-secondary); letter-spacing:var(--trac
 .detail { padding:var(--space-4) var(--space-4) var(--space-5); border-top:var(--border-hairline); background:var(--color-bg-content) }
 .flowline { display:flex; flex-wrap:wrap; gap:var(--space-2); align-items:center; margin:var(--space-0) var(--space-0) var(--space-4) }
 .ctl > label { max-width:100%; min-width:var(--space-0) }
+/* 긴 단계 그림에서 마지막 단계로 가도 ◀·다음 ▶·번호가 오른쪽 패널 아래에 남는다(.group 은 overflow:clip 이라 스크롤 상자가 아니다). */
+#insp .step-ctl { position:sticky; bottom:var(--space-0); z-index:1; background:var(--color-bg-content); padding-block:var(--space-3) }
 .ctl { display:flex; flex-wrap:wrap; gap:var(--space-3); align-items:center; margin-top:var(--space-4); color:var(--color-text-secondary); font:var(--font-secondary); letter-spacing:var(--tracking-secondary) }
 details > summary { cursor:pointer; overflow-wrap:anywhere; letter-spacing:var(--tracking-secondary); color:var(--color-text-secondary); font:var(--font-secondary); margin-top:var(--space-4) }
 .group > details { padding:var(--space-3) var(--space-4); border-top:var(--border-hairline) }

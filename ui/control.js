@@ -122,7 +122,7 @@ async function applyAppCommand(command) {
     case 'step':{
       // 화면만 골랐으면 그 화면에서 동작 과정이 있는 첫 요청을 연다.
       if(!S.open && S.sel){const q=requests(M(),S.sel).find(x=>flowOf(x.route));if(q)S.open=q.key;}
-      const r=(M()?.backend_routes || []).find(r=>r.file+'::'+r.function===S.open),flow=r && flowOf(r);
+      const r=(M()?.backend_routes || []).find(r=>r.file+'::'+r.function===S.open),flow=r && flowAt(r,S.sel);
       // index는 단계 그림에 보이는 번호(1부터)다.
       if(!Number.isInteger(a.index) || !flow || a.index<1 || a.index>lastStep(flow)+1)controlError('step_unavailable');
       S.step=a.index-1;S.ev=a.index-1;render();showStep();break;

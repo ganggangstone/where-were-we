@@ -82,6 +82,13 @@ ACTUAL_CHECKS=r'''
     for(const view of ['sys','feat','map','focus','changes']){S.view=view;S.focus=null;S.sel=null;S.agentPrompt=null;render();geometry(lang+view+zoom);}
     S.view='map';S.sel=null;render();const card=document.querySelector('[data-scr="web::/items"]');card.focus();card.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));check(S.sel==='web::/items','Keyboard Enter lost screen');
     const request=document.querySelector('[data-req]');request.focus();request.dispatchEvent(new KeyboardEvent('keydown',{key:' ',bubbles:true}));check(S.open,'Keyboard Space lost request');
+    // A long step picture: at its last step ◀ / 다음 ▶ and the counter stay in the right panel and the current step is not under them.
+    S.maps.dev.backend_routes[0].flow={steps:Array.from({length:30},(_,i)=>({lane:'서버',text:'Step '+i,file:'api/app/items.py',line:4,quote:'x'}))};render();
+    for(let i=0;i<31;i++)$('next').click();
+    {const c=$('insp').querySelector('.step-ctl').getBoundingClientRect(),p=$('insp').getBoundingClientRect(),cur=$('insp').querySelector('.step.cur').getBoundingClientRect();
+     // body zoom skews rects (the stacked 1.5 layout reported the bar above the panel it sits in); geometry is read at zoom 1.
+     if(zoom===1)check(S.step===30 && c.top>=p.top && c.bottom<=p.bottom+1 && cur.bottom<=c.top+1,'Step controls left the panel '+lang+zoom+' '+[S.step,p.top,c.top,c.bottom,p.bottom,cur.bottom].join('/'));}
+    delete S.maps.dev.backend_routes[0].flow;S.step=-1;render();
     S.agentPurpose='analysis';S.agentPrompt='Fictional request';S.analysisRequest=null;renderAgentPrompt();geometry('analysis'+lang+zoom);
     const row=$('insp').querySelector('.row'),name=row.querySelector('.grow'),action=row.querySelector('button');if(name&&action)check(name.getBoundingClientRect().width>=action.getBoundingClientRect().width || action.getBoundingClientRect().top>=name.getBoundingClientRect().bottom,'Action squeezes label into a narrow column');
     $('menu').open=true;geometry('menu'+lang+zoom);check(getComputedStyle($('agent')).borderTopStyle==='none','Actual menu has toolbar border');check(getComputedStyle($('agent')).backgroundColor==='rgba(0, 0, 0, 0)','Menu action is not a plain list item');

@@ -632,6 +632,38 @@ class Flows(unittest.TestCase):
  assert(d.querySelector('.step'),'Saved steps are drawn');assert(d.querySelector('.step').compareDocumentPosition(d.querySelector('.flowline')) & Node.DOCUMENT_POSITION_FOLLOWING,'Steps come before the input and data names');
 ''')
 
+    def test_stale_steps_offer_the_same_steps_actions_again(self):
+        self.check(r'''
+ const api=S.projectInfo.repositories.find(r=>r.id==='api');
+ S.maps.dev.backend_routes[0].flow={steps:[{lane:'서버',text:'Stores the item.',file:'api/app/items.py',line:4,quote:'x'}]};
+ S.view='map';S.sel='web::/items';S.open=null;render();
+ assert(!$('mk'),'Fresh steps leave nothing to press');
+ api.results={dev:{steps:{'app/items.py::save_item':{stale:true}}}};render();
+ assert($('mk') && $('mk').textContent===tr('이 동작의 과정 알아보기 (1개 남음)'),'Stale steps count as left: '+$('mk')?.textContent);
+ document.querySelector('[data-req]').click();await wait();
+ const again=document.querySelector('[data-mk]');
+ assert(again && again.textContent===tr('다시 분석 요청') && $('insp').querySelector('.step'),'The stale request keeps its steps and offers re-analysis');
+ if(S.lang==='en')assert(again.textContent==='Request re-analysis','English wording comes from the dictionary');
+ again.click();await wait();
+ assert(S.analysisChoice.task==='make_steps' && S.analysisChoice.targets[0].target==='@routes:["app/items.py::save_item"]','The existing steps action is reused');
+''')
+
+    def test_a_step_written_for_one_screen_shows_only_on_that_screen(self):
+        self.check(r'''
+ const server={lane:'서버',text:'Stores the item.',file:'api/app/items.py',line:4,quote:'x'};
+ S.maps.dev.backend_routes[0].flow={steps:[{lane:'화면',text:'New form sends it.',file:'web/src/new.tsx',line:3,quote:'y',screen:'web::/items/new'},server]};
+ const view=async path=>{S.agentPrompt=null;S.view='map';S.sel=path;S.open=null;S.step=-1;render();document.querySelector('[data-req]').click();await wait();
+  return [...$('insp').querySelectorAll('.step')].map(x=>x.querySelector('.tx').textContent);};
+ let shown=await view('web::/items/new');
+ assert(shown.length===2 && shown[0]==='New form sends it.','The screen it was written for shows it first: '+shown);
+ shown=await view('web::/items');
+ assert(shown.length===2 && !shown.includes('New form sends it.') && shown[1]==='Stores the item.','Another screen gets the opening step instead: '+shown);
+ $('next').click();$('next').click();assert(S.step===1 && $('insp').querySelector('.step-ctl').textContent.includes('2/2'),'The counter follows the shown steps');
+ $('next').click();assert(S.step===-1,'Stepping ends after the shown steps');
+ assert(!copyText(M(),M().screens.find(x=>x.path==='web::/items'),requests(M(),'web::/items')[0]).includes('New form sends it.'),'Copy follows the shown steps');
+ setFocus('route|api/app/items.py::save_item');
+''')
+
     def test_unified_result_check_keeps_target_and_original_pins(self):
         self.check(r'''
  window.planResult={tasks:[{repository:'web',task:'groups',commit:'old',configuration:'layout-a'}],requirements:[],pins:{web:{commit:'old',configuration:'layout-a'}},blocked:[],handoff:'one request'};

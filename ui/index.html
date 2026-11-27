@@ -796,6 +796,12 @@ function groupsOf(m) {
   return out;
 }
 const flowOf = (r) => r.flow || (S.flows && S.flows.routes && S.flows.routes[r.file + '::' + r.function]) || null;
+// 저장된 동작 과정이 지금 코드·문구 기준과 맞지 않으면(results.steps의 stale) 다시 알아볼 대상이다.
+const flowStale = (r) => { const rid = r.repository, info = S.projectInfo, repo = rid && info?.repositories?.find(x => x.id === rid) || info;
+  const key = (rid && r.file.startsWith(rid + '/') ? r.file.slice(rid.length + 1) : r.file) + '::' + r.function; return !!repo?.results?.[S.branch]?.steps?.[key]?.stale; };
+// 화면의 사용 줄로 쓴 단계(step.screen)는 그 화면에서 볼 때만 보인다. /m 주소는 같은 화면이다.
+const sameScreen = (a, b) => !!a && !!b && a.replace(/^\/m(?=\/)/, '') === b.replace(/^\/m(?=\/)/, '');
+const flowAt = (r, path) => { const f = flowOf(r); return f && f.steps?.some(st => st.screen) ? { ...f, steps: f.steps.filter(st => !st.screen || sameScreen(st.screen, path)) } : f; };
 // 화면이 서버에 하는 요청 전부 (모바일 짝 포함, 헤더 부품 제외). 버튼 글자를 아는 요청은 그 글자로.
 // 버튼 글자로 쓸 수 있는 화면 글자인가. 글자·숫자가 없거나 코드 식(삼항식·따옴표 붙은 식·화살표 함수)이면 쓰지 않고 서버 일 이름으로 부른다.
 const uiText = (t) => !!t && /[\p{L}\p{N}]/u.test(t) && !/['"`]\s*[:?]|[:?]\s*['"`]|=>|&&|\|\|/.test(t);
@@ -1247,7 +1253,7 @@ function copyText(m, s, row) {
   const L = [screenLine(m, s)];
   if (row) { L.push(ui`하는 일: ${reqLabel(row)}`, ui`요청: ${row.route.method} ${row.route.path}`, ui`화면 쪽 코드: ${row.fn.file}:${row.call.line}${row.fn.name !== '<inline>' ? ' ' + row.fn.name : ''}`, ui`서버 쪽 코드: ${row.route.file}:${row.route.line} ${row.route.function}`);
     if ((row.route.tables || []).length) L.push(ui`데이터: ${row.route.tables.join(', ')}`); if ((row.route.externals || []).length) L.push(ui`외부: ${row.route.externals.join(', ')}`);
-    const f = flowOf(row.route); if (f) L.push(tr('단계:'), ...f.steps.map((st, i) => `  ${i + 1}. [${tr(st.lane === '저장소' ? '데이터' : st.lane === '외부' ? '외부 서비스' : st.lane)}] ${st.text} (${st.file || row.route.file}:${st.line})`)); }
+    const f = flowAt(row.route, s.path); if (f) L.push(tr('단계:'), ...f.steps.map((st, i) => `  ${i + 1}. [${tr(st.lane === '저장소' ? '데이터' : st.lane === '외부' ? '외부 서비스' : st.lane)}] ${st.text} (${st.file || row.route.file}:${st.line})`)); }
   L.push(baseLine(m)); return L.join('\n');
 }
 function inspector(m) {
@@ -1265,7 +1271,7 @@ function inspector(m) {
   const es = edges(m); const insAll = es.filter(e => e.to === s.path), outsAll = es.filter(e => e.from === s.path); const unk = (m._unknown || {})[s.path] || 0;
   const ins = insAll.filter(e => !e.common), outs = outsAll.filter(e => !e.common); const menuIn = insAll.length - ins.length, menuOut = outsAll.length - outs.length;
   const rs = requests(m, s.path).slice().sort((a, b) => (!!b.btn - !!a.btn) || reqLabel(a).localeCompare(reqLabel(b)));
-  const tested = rs.filter(r => (r.route.tests || []).length).length; const made = rs.filter(r => flowOf(r.route)).length;
+  const tested = rs.filter(r => (r.route.tests || []).length).length; const made = rs.filter(r => flowOf(r.route) && !flowStale(r.route)).length;
   const way = (e, other, arrow) => `<div class="row click" data-scr="${esc(other)}"><span class="arrow">${arrow}</span><div class="grow"><div class="t">${nameHtml(m, other)}</div><div class="s">${e.common ? tr('메뉴에서') : esc(e.label || tr('아이콘 버튼'))}${e.cond ? tr(' · 조건에 따라') : ''}</div></div></div>`;
   let h = ui`<div class="head"><div class="grow"><h2>${nameHtml(m, s.path)}</h2><p class="sub mono">${esc(s.source_path || s.path)}${s.repository ? ' · '+esc(connectionDisplayName(s.repository)) : ''}</p></div>${S.view === 'focus' ? '' : ui`<button class="btn quiet" data-f="screen|${esc(s.path)}">이어진 것 보기</button>`}<button class="btn" id="copyS">복사</button></div>`;
   const ways = ui`<div class="sect"><h4>여기로 오는 길 ${ins.length} · 여기서 가는 길 ${outs.length}</h4><div class="group">` +
@@ -1289,10 +1295,11 @@ const LANE = { '화면': 0, '서버': 1, '저장소': 2, '외부': 3 };
 // 단계 그림의 마지막 자리(0부터): 저장된 단계가 화면 단계로 시작하지 않으면 앞에 시작 단계 하나가 붙는다.
 // 번호는 보이는 순서대로 1부터 붙고, AI가 적은 단계의 글에만 「AI 설명」 밑줄이 붙는다.
 const lastStep = (f) => f && f.steps.length ? f.steps.length - (f.steps[0].lane === '화면' ? 1 : 0) : 0;
-// 오른쪽 패널에서 지금 단계가 보이게 한다.
-const showStep = () => $('insp').querySelector('.step.cur')?.scrollIntoView({ block: 'nearest' });
+// 오른쪽 패널에서 지금 단계가 보이게 한다. 아래에 붙어 있는 ◀·다음 ▶ 줄에 가리지 않게 그만큼 더 올린다.
+const showStep = () => { const insp = $('insp'), cur = insp.querySelector('.step.cur'), ctl = insp.querySelector('.step-ctl'); if (!cur) return;
+  cur.scrollIntoView({ block: 'nearest' }); const over = ctl ? cur.getBoundingClientRect().bottom - ctl.getBoundingClientRect().top : 0; if (over > 0) insp.scrollTop += over; };
 function detail(m, s, r) {
-  const f = flowOf(r.route); const rt = r.route; const ins = (rt.inputs || []).map(i => i.split(':')[0]);
+  const f = flowAt(r.route, s.path); const rt = r.route; const ins = (rt.inputs || []).map(i => i.split(':')[0]);
   let h = `<div class="detail"><div class="flowline">${ins.length ? ins.map(i => `<span class="pill">${esc(i)}</span>`).join('') : tr('<span class="pill">확인된 입력 없음</span>')}<span class="arrow">→</span><span class="pill ai">${esc(reqLabel(r))}</span><span class="arrow">→</span>` +
     ((rt.tables || []).map(t => ui`<span class="pill click" data-f="table|${esc(t)}" title="이 데이터를 쓰는 곳 보기">${esc(tableName(t))}</span>`).join('') + (rt.externals || []).map(t => ui`<span class="pill warn" title="외부 서비스">${esc(t)}</span>`).join('') || tr('<span class="pill">확인된 데이터·외부 연결 없음</span>')) + `</div>`;
   if (r.call?.connection_basis === 'configured') h += ui`<div class="empty">사용자가 지정한 저장소 사이 연결 · ${esc(connectionDisplayName(rt.repository))}</div>`;
@@ -1313,9 +1320,11 @@ function detail(m, s, r) {
     h += ui`<div class="step-lanes"><span class="screen">화면</span><span class="server">서버</span><span class="store">데이터</span><span class="external">외부 서비스</span></div>` + steps.map((st, i) => {
       const cur = S.step === i; const off = S.step >= 0 && !cur, from = i ? at(steps[i - 1]) : at(st);
       return `<div class="step l${at(st)} ${cur ? 'cur' : ''} ${off ? 'off' : ''} ${st.uncertain ? 'unsure' : ''}" data-step="${i}">${i ? `<span class="from" aria-hidden="true">${from < at(st) ? '↘' : from > at(st) ? '↙' : '↓'}</span>` : ''}<span class="n">${i + 1}</span><div class="grow"><div class="tx">${st.start ? esc(st.text) : `<span class="ai">${esc(st.text)}</span>`}${st.uncertain ? tr(' (코드만으로는 확신 못 함)') : ''}</div>${S.ev === i && !st.start ? `<div class="ev mono">${esc(st.quote)}<br>${zed(m, st.file || rt.file, st.line)}</div>` : ''}</div></div>`; }).join('') +
-      ui`<div class="ctl"><button class="btn quiet" id="prev">◀</button><button class="btn quiet" id="next">다음 ▶</button><span>${S.step >= 0 ? `${S.step + 1}/${steps.length}` : tr('한 단계씩 보기')}</span><span class="spacer"></span><span><span class="ai">AI 설명</span>&nbsp;· 인용 코드 일치</span></div>`;
+      ui`<div class="ctl step-ctl"><button class="btn quiet" id="prev">◀</button><button class="btn quiet" id="next">다음 ▶</button><span>${S.step >= 0 ? `${S.step + 1}/${steps.length}` : tr('한 단계씩 보기')}</span><span class="spacer"></span><span><span class="ai">AI 설명</span>&nbsp;· 인용 코드 일치</span></div>`;
   } else if (f?.unknown) h += `<div class="empty">${tr('코드에서 이 동작의 순서를 찾지 못했다: ')}${esc(f.unknown)}</div>`;
-  else h += ui`<div class="empty">누른 뒤 어떤 순서로 일이 일어나는지 아직 분석하지 않았다.</div>${r.key ? ui`<div class="ctl"><button class="btn quiet" data-mk="${esc(r.key)}">이 동작의 과정 알아보기</button></div>` : ''}`;
+  else h += ui`<div class="empty">누른 뒤 어떤 순서로 일이 일어나는지 아직 분석하지 않았다.</div>`;
+  // 아직 없거나 오래된 동작 과정은 같은 요청 버튼으로 다시 알아본다.
+  if (r.key && (!f || flowStale(rt))) h += ui`<div class="ctl"><button class="btn quiet" data-mk="${esc(r.key)}">${f ? tr('다시 분석 요청') : tr('이 동작의 과정 알아보기')}</button></div>`;
   const more = facts;
   for (const { node, job, exact } of jobsOf(r.key)) h += ui`<div class="sect"><h4>이 서버 요청 뒤에 ${esc(node.name)}이 이어서 하는 일${exact ? '' : tr(' (연결 관계는 추정)')}</h4><div class="tw"><b class="strong">${esc(job.name)}</b> ${esc(job.what)}</div><div class="s">시작: ${esc(job.starts_when)}</div>${job.steps.map((st, i) => `<div class="step l${st.lane === '저장소' ? 2 : st.lane === '외부' ? 3 : 1}"><span class="n">${i + 1}</span><div class="grow"><div class="tx">${esc(st.text)}</div><div class="s">${zed(m, st.file, st.line)}</div></div></div>`).join('')}</div>`;
   // 입력·데이터 이름, 다른 프로그램 안내와 연결된 저장소는 「자세한 목록」 하나에 접는다.
@@ -2420,7 +2429,7 @@ function render() {
   document.querySelectorAll('.row[data-url]').forEach(el => el.onclick = () => invoke('open_url', { url: el.dataset.url }));
   document.querySelectorAll('a[data-url], button[data-url]').forEach(a => a.onclick = (e) => { e.stopPropagation(); invoke('open_url', { url: a.dataset.url }); });
   const s = m.screens.find(x => x.path === S.sel); const rows = s ? requests(m, s.path) : [];
-  const stepCount = () => { const r = rows.find(x => x.key === S.open); return lastStep(r && flowOf(r.route)); };
+  const stepCount = () => { const r = rows.find(x => x.key === S.open); return lastStep(r && flowAt(r.route, S.sel)); };
   if ($('next')) $('next').onclick = () => { S.step = S.step >= stepCount() ? -1 : S.step + 1; S.ev = -1; render(); showStep(); };
   if ($('prev')) $('prev').onclick = () => { S.step = S.step <= 0 ? -1 : S.step - 1; S.ev = -1; render(); showStep(); };
   const copy = async (text, el) => { await navigator.clipboard.writeText(text); el.textContent = tr('복사됨'); setTimeout(() => render(), 900); };
