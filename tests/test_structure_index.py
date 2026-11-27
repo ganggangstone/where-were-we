@@ -1,3 +1,4 @@
+import support  # blocks real AI CLIs; drops an inherited WHERE_WERE_WE_SETTINGS
 import os
 from pathlib import Path
 import subprocess
@@ -59,15 +60,9 @@ class Structure(unittest.TestCase):
 
     def test_absolute_import_names_the_nearest_package_root_before_the_repository_root(self):
         with tempfile.TemporaryDirectory() as root:
-            git = lambda *args: subprocess.check_output(['git','-C',root,*args]).decode().strip()
-            git('init','-q')
-            sources = {'scripts/jobs/run.py':'', 'sub/scripts/__init__.py':'', 'sub/scripts/jobs/__init__.py':'', 'sub/scripts/jobs/run.py':'',
+            index=structure_index.build(root,support.repository(root,{'scripts/jobs/run.py':'', 'sub/scripts/__init__.py':'', 'sub/scripts/jobs/__init__.py':'', 'sub/scripts/jobs/run.py':'',
                        'sub/scripts/jobs/main.py':'import scripts.jobs.run\nimport scripts.only\n', 'scripts/only.py':'',
-                       'tool/main.py':'import scripts.jobs.run\nfrom scripts.jobs import run\n'}
-            for name,text in sources.items():
-                path=Path(root)/name;path.parent.mkdir(parents=True,exist_ok=True);path.write_text(text)
-            git('add','.');git('-c','user.name=Test','-c','user.email=test@example.invalid','commit','-qm','x')
-            index=structure_index.build(root,git('rev-parse','HEAD'))
+                       'tool/main.py':'import scripts.jobs.run\nfrom scripts.jobs import run\n'}))
             self.assertEqual(sorted((e['file'],e['target']) for e in index['imports']),
                              [('sub/scripts/jobs/main.py','scripts/only.py'),('sub/scripts/jobs/main.py','sub/scripts/jobs/run.py'),
                               ('tool/main.py','scripts/jobs/run.py'),('tool/main.py','scripts/jobs/run.py')])  # 'from pkg import child' names the child
@@ -550,15 +545,9 @@ func Ignored() *c.Command {
 
     def test_standalone_commonjs_cli_connects_explicit_local_modules(self):
         with tempfile.TemporaryDirectory() as root:
-            repo=Path(root)
-            git=lambda *args:subprocess.check_output(['git','-C',root,*args]).decode().strip()
-            git('init','-q')
-            (repo/'cli.cjs').write_text("#!/usr/bin/env node\nconst worker=require('./worker.cjs');\nworker.run();")
-            (repo/'worker.cjs').write_text('function run(){};module.exports={run};')
-            (repo/'shadow.cjs').write_text("function other({require}){return require('./worker.cjs')} ")
-            (repo/'missing.cjs').write_text("require('./absent.cjs');require('third-party');")
-            git('add','.');git('-c','user.name=Test','-c','user.email=test@example.invalid','commit','-qm','Add CLI')
-            index=structure_index.build(root,git('rev-parse','HEAD'))
+            index=structure_index.build(root,support.repository(root,{'cli.cjs':"#!/usr/bin/env node\nconst worker=require('./worker.cjs');\nworker.run();",
+                'worker.cjs':'function run(){};module.exports={run};','shadow.cjs':"function other({require}){return require('./worker.cjs')} ",
+                'missing.cjs':"require('./absent.cjs');require('third-party');"}))
             self.assertEqual(index['service_flow']['connections'],[])
             self.assertEqual(index['imports'],[{'file':'cli.cjs','line':2,'target':'worker.cjs'}])
             self.assertEqual(index['coverage']['unresolved_imports'],2)
@@ -567,9 +556,6 @@ func Ignored() *c.Command {
 
     def test_typescript_tsx_and_javascript_static_structure(self):
         with tempfile.TemporaryDirectory() as root:
-            repo=Path(root)
-            git=lambda *args:subprocess.check_output(['git','-C',root,*args]).decode().strip()
-            git('init','-q')
             sources={
                 'src/main.tsx':"""import {run} from './task';
 export {shared} from './shared.js';
@@ -586,10 +572,7 @@ export const persist = async () => run();
                 'src/shared.js':'export class Shared { save() {} }',
                 'src/bad.ts':'const = ;',
             }
-            for name,txt in sources.items():
-                path=repo/name;path.parent.mkdir(parents=True,exist_ok=True);path.write_text(txt)
-            git('add','.');git('-c','user.name=Test','-c','user.email=test@example.invalid','commit','-qm','Pinned modules')
-            pin=git('rev-parse','HEAD')
+            pin=support.repository(root,sources)
             index=structure_index.build(root,pin)
             if index['coverage']['unavailable_languages']:
                 self.skipTest('Install the packaged JavaScript and TypeScript grammars to check parsing')

@@ -1,4 +1,5 @@
 """Reading rules for languages outside the built-in readers; fake executors only, never a real AI call."""
+import support  # blocks real AI CLIs; drops an inherited WHERE_WERE_WE_SETTINGS
 import json
 from pathlib import Path
 import subprocess
@@ -24,16 +25,7 @@ RUBY = {'extensions': ['.rb'],
                     {'regex': r'''^\s*require\s+['"]([^'"]+)['"]''', 'group': 1, 'resolve': {'from': 'root', 'ext': ['.rb'], 'suffix': True}}]}
 
 
-def repository(folder, files):
-    for name, text in files.items():
-        path = Path(folder) / name
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text)
-    run = lambda *a: subprocess.run(['git', '-C', folder, *a], check=True, capture_output=True, text=True).stdout.strip()
-    run('init', '-q')
-    run('add', '-A')
-    run('-c', 'user.name=t', '-c', 'user.email=t@example.invalid', 'commit', '-qm', 'x')
-    return run('rev-parse', 'HEAD')
+repository = support.repository
 
 
 JAVA_FILES = {

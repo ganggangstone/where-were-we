@@ -1,3 +1,4 @@
+import support  # blocks real AI CLIs; drops an inherited WHERE_WERE_WE_SETTINGS
 import json
 import subprocess
 import sys
@@ -11,11 +12,7 @@ HERE = Path(__file__).resolve().parents[1]
 def extract(files, layout=None):
     with tempfile.TemporaryDirectory() as tmp:
         repo = Path(tmp) / 'r'
-        for name, body in files.items():
-            (repo / name).parent.mkdir(parents=True, exist_ok=True)
-            (repo / name).write_text(body)
-        git = lambda *a: subprocess.run(['git', '-C', str(repo), *a], check=True, capture_output=True)
-        git('init', '-q'); git('add', '.'); git('-c', 'user.name=t', '-c', 'user.email=t@example.invalid', 'commit', '-qm', 'x')
+        support.repository(repo, files)
         out = Path(tmp) / 'out' / 'dev.json'
         env = {'PATH': '/usr/bin:/bin', 'HOME': tmp, 'WHERE_WERE_WE_LAYOUT': json.dumps(layout or {})}
         done = subprocess.run([sys.executable, str(HERE / 'extract.py'), str(repo), 'HEAD', str(out)], capture_output=True, text=True, env=env)

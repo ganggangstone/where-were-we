@@ -1,4 +1,5 @@
 """Signal scan of a pinned commit: which lines can hold routes, requests, stores, services, entry points and screens."""
+import support  # blocks real AI CLIs; drops an inherited WHERE_WERE_WE_SETTINGS
 import json
 from pathlib import Path
 import subprocess
@@ -113,15 +114,9 @@ class Commit(unittest.TestCase):
 
     def test_a_large_commit_is_split_over_workers_with_the_same_rows_and_falls_back_when_they_cannot_start(self):
         with tempfile.TemporaryDirectory() as folder:
-            def git(*args):
-                return subprocess.run(['git', '-C', folder, *args], check=True, capture_output=True, text=True).stdout
-            git('init', '-q');git('config', 'user.name', 'T');git('config', 'user.email', 't@example.invalid')
-            for i in range(24):
-                Path(folder, f'm{i}.py').write_text(f"x = {i}\n" * 30 + f"@app.get('/m{i}')\ndef m{i}(): pass\n" + ("é = 1\n" if i % 5 == 0 else ''))
-            Path(folder, 'notes.md').write_text("# n\n")
-            git('add', '.');git('commit', '-qm', 'x')
-            head = git('rev-parse', 'HEAD').strip()
-            entries = [(row.split('\t')[1], row.split('\t')[0].split()[2].encode()) for row in git('ls-tree', '-r', head).splitlines()]
+            head = support.repository(folder, {**{f'm{i}.py': f"x = {i}\n" * 30 + f"@app.get('/m{i}')\ndef m{i}(): pass\n" + ("é = 1\n" if i % 5 == 0 else '') for i in range(24)},
+                                               'notes.md': "# n\n"})
+            entries = [(row.split('\t')[1], row.split('\t')[0].split()[2].encode()) for row in support.git(folder, 'ls-tree', '-r', head).splitlines()]
             serial = ss._scan_serial(folder, entries, 11)
             old = (ss.PARALLEL_MIN, ss.os.cpu_count)
             ss.PARALLEL_MIN = 2;ss.os.cpu_count = lambda: 4
