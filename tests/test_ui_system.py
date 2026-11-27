@@ -116,9 +116,8 @@ ACTUAL_CHECKS=r'''
 
 def actual_page():
  from test_ui_flows import BOOTSTRAP
- source=(ROOT/'ui/index.html').read_text().replace('<script>','<script>'+BOOTSTRAP,1)
- for name in ('tokens.css','app.css','vendor/dagre.min.js','connection.js','onboarding.js','control.js'):
-  source=source.replace('"'+name+'"','"'+(ROOT/'ui'/name).as_uri()+'"')
+ from support import inline_assets
+ source=inline_assets((ROOT/'ui/index.html').read_text().replace('<script>','<script>'+BOOTSTRAP,1))
  return source.replace('</body>','<script>'+ACTUAL_CHECKS+'</script></body>')
 
 class AppSystem(unittest.TestCase):
@@ -139,4 +138,75 @@ class AppSystem(unittest.TestCase):
      if native:
       with self.subTest(engine='WKWebView',mode=mode,width=width):
        output=subprocess.run([str(probe),str(path),str(width),mode],capture_output=True,text=True,timeout=30,check=True)
+       self.assertEqual(json.loads(output.stdout.strip()),[])
+
+
+# The smallest window (960×600) and a wide one: toolbar and repository status stay short, the step picture's
+# ◀ / 다음 ▶ row stays at the panel bottom with no step readable below it, and a start button waiting for the
+# account check looks disabled.
+WINDOW_CHECKS=r'''
+(async()=>{
+ const errors=[],check=(v,m)=>{if(!v)errors.push(m)},wait=(ms=50)=>new Promise(r=>setTimeout(r,ms)),W=innerWidth+'x'+innerHeight;
+ try{
+  for(let i=0;i<100&&!window.appControlReady;i++)await wait(20);
+  S.projectInfo.repositories=[{id:'web',name:'Fictional web screens',collected:true,commits:{dev:'aaaaaaaa1111'},error:'fictional fetch error',refs:{dev:'HEAD'}},
+   ...['api','queue','store'].map(id=>({id,name:'Fictional '+id+' service',collected:true,config_changed:true,commits:{dev:'cccccccc3333'},refs:{dev:'HEAD'}}))];
+  for(const lang of ['ko','en']){
+   S.lang=lang;S.view='map';render();renderHeader();renderRepositories();$('project').selectedOptions[0].text='Fictional studio';await wait();
+   const shown=e=>e.offsetWidth>0&&e.offsetHeight>0,mid=e=>{const r=e.getBoundingClientRect();return r.top+r.height/2;};
+   const head=[...document.querySelector('header').children].filter(e=>shown(e)&&!e.classList.contains('spacer'));
+   check(head.every(e=>Math.abs(mid(e)-mid(head[0]))<2),'Toolbar wraps '+lang+W);
+   let rows=0,bottom=-1;for(const r of [...$('repository-bar').querySelectorAll(':scope > *, .chips > *')].filter(shown).map(e=>e.getBoundingClientRect()).sort((a,b)=>a.top-b.top)){if(r.top>=bottom-1){rows++;bottom=r.bottom;}else bottom=Math.max(bottom,r.bottom);}
+   check(rows<=2,'Repository status takes more than one line '+lang+W+' '+rows);
+   check(document.querySelector('main').getBoundingClientRect().height>=innerHeight*0.6,'The map gets too little room '+lang+W);
+  }
+  S.lang='ko';renderHeader();renderRepositories();
+  S.view='map';S.sel=null;render();
+  const card=document.querySelector('[data-scr="web::/items"]');card.focus();card.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));
+  const request=document.querySelector('[data-req]');request.focus();request.dispatchEvent(new KeyboardEvent('keydown',{key:' ',bubbles:true}));
+  const route=S.maps.dev.backend_routes[0];
+  for(const length of [30,2]){
+   route.flow={steps:Array.from({length},(_,i)=>({lane:'서버',text:'Fictional step '+i+' reads the saved record and answers.',file:'api/app/items.py',line:4,quote:'x'}))};
+   for(const at of [0,Math.floor(length/2),length]){
+    S.step=at;S.ev=-1;render();showStep();await wait();
+    const insp=$('insp'),p=insp.getBoundingClientRect(),floor=p.top+insp.clientTop+insp.clientHeight,c=insp.querySelector('.step-ctl').getBoundingClientRect(),cur=insp.querySelector('.step.cur').getBoundingClientRect(),where=W+' '+length+'/'+at;
+    check(c.bottom<=floor+1 && cur.top>=p.top-1 && cur.bottom<=c.top+1,'The step controls cover the current step or leave the panel '+where+' '+[p.top,cur.top,cur.bottom,c.top,c.bottom,floor].map(Math.round));
+    check([...insp.querySelectorAll('.step')].every(s=>{const r=s.getBoundingClientRect();return Math.min(r.bottom,floor)-Math.max(r.top,c.bottom)<=1;}),'A step shows below the step controls '+where);
+    check($('prev').disabled===(at===0) && $('next').disabled===(at===length),'Only a control that cannot move is disabled '+where);
+    if(at===0||at===length){const [off,on]=at===0?[$('prev'),$('next')]:[$('next'),$('prev')];check(getComputedStyle(off).opacity!==getComputedStyle(on).opacity,'A disabled step control looks pressable '+where);}
+   }
+  }
+  // The account check after opening the panel: the start waits and looks it, in a single-task and the general open.
+  delete route.flow;S.step=-1;render();
+  window.appAnalysisFixture=true;window.unitBoard={repositories:[{repository:'web',units:[['folder:lib','folder','lib',3,'pending','']],coverage:{tracked:3,in_units:3,indexed:3,excluded:{},truncated:false}}],totals:{units:1,pending:1},calls:{rules:0,labeling:1,structure:0,unit:0,total:1}};
+  for(const [name,opening,id] of [['single',()=>document.querySelector('[data-mk]').click(),'startAppAnalysis'],['general',()=>{openAnalysisPanel();AnalysisRun.checkAccount();},'startFullAnalysis']]){
+   let release;window.holdProviders=new Promise(r=>release=r);opening();await wait(300);
+   const start=()=>$(id)||$('startAppAnalysis'),waiting=start();check(waiting&&waiting.disabled,'The start is pressable during the account check '+name+W);
+   const style=waiting&&getComputedStyle(waiting).opacity;release();window.holdProviders=null;await wait(300);
+   const ready=start();check(ready&&!ready.disabled&&getComputedStyle(ready).opacity!==style,'The start looks the same during the account check '+name+W);
+   S.agentPrompt=null;render();
+  }
+  check(!window.errors.length,'Uncaught fixture errors '+window.errors.join(' | '));
+ }catch(e){errors.push(e.stack)}
+ window.uiSystemResult=JSON.stringify(errors);document.body.dataset.result=window.uiSystemResult;
+})();
+'''
+
+class WindowSizes(unittest.TestCase):
+ def test_minimum_and_wide_windows_in_chrome_and_webkit_light_and_dark(self):
+  if not CHROME.exists():self.skipTest('Chrome required')
+  import html
+  with tempfile.TemporaryDirectory() as tmp:
+   tmp=Path(tmp);path=tmp/'window.html';path.write_text(actual_page().replace(ACTUAL_CHECKS,WINDOW_CHECKS))
+   native=sys.platform=='darwin' and shutil.which('swiftc')
+   probe=native and compiled_probe('webkit_style_probe.swift')
+   for mode in ('light','dark'):
+    for width,height in ((960,600),(1800,1000)):
+     with self.subTest(engine='Chrome',mode=mode,size=(width,height)):
+      output=dump_dom(path.as_uri()+'?mode='+mode,tmp/'chrome',budget=6000,window=f'{width},{height}',flags=('--force-dark-mode' if mode=='dark' else '--blink-settings=preferredColorScheme=1',))
+      result=re.search(r'data-result="([^"]*)"',output.stdout)
+      self.assertIsNotNone(result,output.stderr[-1000:]);self.assertEqual(json.loads(html.unescape(result[1])),[])
+     if native:
+      with self.subTest(engine='WKWebView',mode=mode,size=(width,height)):
+       output=subprocess.run([str(probe),str(path),str(width),mode,str(height)],capture_output=True,text=True,timeout=30,check=True)
        self.assertEqual(json.loads(output.stdout.strip()),[])

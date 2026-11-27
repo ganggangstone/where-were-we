@@ -59,6 +59,7 @@ window.__TAURI__={core:{invoke:async(command,args)=>{
  if(command==='control_focus')return null;
  if(command==='analysis_run_status' && args.view==='units' && window.unitBoard)return JSON.stringify(window.unitBoard);
  if(command==='analysis_run_status')return JSON.stringify(window.runningAnalysis || null);
+ if(command==='analysis_providers' && window.holdProviders)await window.holdProviders;
  if(command==='analysis_providers' && window.appAnalysisFixture)return JSON.stringify({providers:[{id:'claude',available:true,authenticated:true,account:{email:'fictional@example.invalid'}}]});
  if(command==='analysis_run_start' && window.appAnalysisFixture)return window.completeAppAnalysis ? JSON.stringify({...args.scope,id:'fixture-'+calls.length,state:'completed',completed_tasks:[{task:args.scope.intent.task}],tasks:[]}) : 'null';
  if(command==='analysis_plan'){if(window.holdPlan)await window.holdPlan;if(window.failPlan)throw Error('fictional plan failure');return JSON.stringify(window.planResult||{tasks:[],blocked:[],requirements:[],handoff:'',up_to_date:true});}

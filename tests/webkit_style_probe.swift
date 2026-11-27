@@ -11,7 +11,7 @@ class Probe: NSObject, WKNavigationDelegate {
    let dark=CommandLine.arguments[3]=="dark" ? "true" : "false"
    configuration.userContentController.addUserScript(WKUserScript(source:"window.uiExpectedDark="+dark,injectionTime:.atDocumentStart,forMainFrameOnly:true))
   }
-  web = WKWebView(frame: NSRect(x:0,y:0,width:Int(CommandLine.arguments[2])!,height:900),configuration:configuration)
+  web = WKWebView(frame: NSRect(x:0,y:0,width:Int(CommandLine.arguments[2])!,height:CommandLine.arguments.count > 4 ? Int(CommandLine.arguments[4])! : 900),configuration:configuration)
   window = NSWindow(contentRect:web.frame,styleMask:[.titled],backing:.buffered,defer:false)
   window.contentView=web
   web.navigationDelegate=self
