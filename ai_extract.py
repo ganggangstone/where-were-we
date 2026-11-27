@@ -764,8 +764,7 @@ def task_input(raw,task,branch,target,repo=None,head=None):
         if not node or not node.get('code'):raise ValueError('Choose a node with repository code')
         return {'node':node,'routes':list(routes.values())}
     if not target:raise ValueError('Choose a screen or route target')
-    # A target is a screen path, '@routes:' + route keys, or a screen path + '@routes:' + some of that screen's route keys.
-    screen,mark,listed=target.partition('@routes:') if '@routes:' in target else (target,'','')
+    screen,listed=parse_target(target)
     refs=set();screens=[]
     if screen:
         screens=[s for s in m['screens'] if s['path'] in (screen,'/m'+screen)]
@@ -774,9 +773,9 @@ def task_input(raw,task,branch,target,repo=None,head=None):
         hits={(b['file'],b['line']) for f in m['api_functions'] if (f['file'],f['name']) in refs
               for c in f.get('calls',[]) for b in c.get('backend',[])}
         keys=[key for key,r in routes.items() if (r['file'],r['line']) in hits]
-    if mark:
+    if listed is not None:
         own=keys if screen else list(routes)
-        keys=json.loads(listed)
+        keys=listed
         if not isinstance(keys,list) or not keys or any(not isinstance(k,str) or k not in own for k in keys):
             raise ValueError('Choose known route targets')
     if not keys:raise ValueError('No server route targets in this snapshot')
@@ -818,6 +817,24 @@ def task_input(raw,task,branch,target,repo=None,head=None):
 def screen_files(route):
     """Files a 화면 step may cite: the screen code that sends the request and the screen code that uses it."""
     return {c['file'] for c in [*route.get('callers',[]),*route.get('uses',[])]}
+
+ROUTES_MARK='@routes:'
+def parse_target(target):
+    """A steps target: a screen path, '@routes:' + JSON route keys, or a screen path + '@routes:' + some of that screen's
+    route keys. Returns (screen path or '', route keys or None)."""
+    screen,mark,listed=target.partition(ROUTES_MARK)
+    return screen,(json.loads(listed) if mark else None)
+def steps_target(screen,keys):return screen+ROUTES_MARK+json.dumps(keys,ensure_ascii=False)
+
+SCREEN_STEP_RULES={'screen':'A step screen must be the selected screen',
+                   'file':'A screen step cited code other than the screen code that sends the request'}
+def screen_step_rule(step,route,own):
+    """The rule of a 화면 step on both save paths: the key of SCREEN_STEP_RULES this step breaks, or None.
+    own is the selected screen of the target; a step that names a screen must name it."""
+    if 'screen' in step and (not own or step['screen']!=own):return 'screen'
+    file=step.get('file',route['file'])
+    if step.get('lane')=='화면' and (not isinstance(file,str) or file not in screen_files(route)):return 'file'
+    return None
 
 def task_snapshot(raw,task,branch):
     raw=project.branch_bundle(raw,branch)
@@ -1026,15 +1043,16 @@ def task_result(raw,task,branch,target,data,repo,commit,lang,configuration=None,
         notes=[n.strip() for n in notes if isinstance(n,str) and n.strip()]
         # A screen step written from the selected screen's use lines (not a caller) belongs to that screen: saved with it, shown only there.
         # ponytail: no per-screen freshness; a fresh request is not asked again for another screen, which sees only its caller-level screen steps until re-analysed from it.
-        own=target.partition('@routes:')[0]
+        own=parse_target(target)[0]
         for key,got in outputs.items():
             if not isinstance(got,dict):raise ValueError('Invalid route steps')
             route=inputs['routes'][key];steps=[];callers={c['file'] for c in route.get('callers',[])}
             for step in rows(got,'steps'):
-                if 'screen' in step and (not own or step['screen']!=own):raise ValueError('A step screen must be the selected screen')
+                broken=screen_step_rule(step,route,own)
+                if broken=='screen':raise ValueError(SCREEN_STEP_RULES[broken])
+                # A screen step stands only on the screen code that sends this request: here it is left out (the app run fails instead).
+                if broken:continue
                 ev=evidence({**step,'file':step.get('file',route['file'])})
-                # A screen step stands only on the screen code that sends this request.
-                if ev and step.get('lane')=='화면' and ev['file'] not in screen_files(route):continue
                 if ev and text(step,'text'):steps.append({**ev,'lane':step.get('lane') if step.get('lane') in ('서버','저장소','외부','화면') else '서버',
                                                          'text':step['text'],'uncertain':bool(step.get('uncertain')),
                                                          **({'screen':own} if step.get('lane')=='화면' and ev['file'] not in callers else {})})
@@ -1176,7 +1194,7 @@ def plan(name,branch='dev',lang='ko',repository='',overview=False,light=False):
         if any(not s.get('redirect') for s in m.get('screens',[])) and not fresh(res['groups']):add('groups',res['groups'])
         keys=[handler(r) for r in m.get('backend_routes',[]) if r.get('mounted') and r.get('function')]
         keys=[k for k in dict.fromkeys(keys) if not fresh(res['steps'].get(k))]
-        if keys:add('steps',{k:res['steps'].get(k) for k in keys},'@routes:'+json.dumps(keys,ensure_ascii=False))
+        if keys:add('steps',{k:res['steps'].get(k) for k in keys},steps_target('',keys))
     if not overview:
         try:
             view=briefing.view(name,repository,branch,lang)

@@ -586,7 +586,7 @@ def _plan(value):
         if missing:
             # A screen keeps its path, so the task still knows the screen's own files (callers first, their uses);
             # with only some of its routes missing it asks those by key after the path.
-            selected=target['target'].partition('@routes:')[0]+'@routes:'+json.dumps(missing,ensure_ascii=False) if chosen=='steps' and missing!=list(keys) else target['target']
+            selected=ai_extract.steps_target(ai_extract.parse_target(target['target'])[0],missing) if chosen=='steps' and missing!=list(keys) else target['target']
             plan['tasks'].append({'repository':rid,'task':chosen,'target':selected,'before':{k:results.get(k) for k in missing},**pin})
     return plan
 
@@ -1242,11 +1242,11 @@ def _strict_result(task,data,repo,commit,request=None,raw=None):
             for step in rows(value,'steps'):
                 if not evidence(step) or not step.get('text'):fail()
         if request:
+            own=ai_extract.parse_target(str(request.get('record_arguments',{}).get('target','')))[0]
             for key,value in routes.items():
-                screen=ai_extract.screen_files(request['input']['routes'][key])
-                if any(s.get('lane')=='화면' and s.get('file') not in screen for s in rows(value,'steps')):fail('A screen step cited code other than the screen code that sends the request')
-                own=str(request.get('record_arguments',{}).get('target','')).partition('@routes:')[0]
-                if any('screen' in s and (not own or s['screen']!=own) for s in rows(value,'steps')):fail('A step screen must be the selected screen')
+                for step in rows(value,'steps'):
+                    # Here a broken rule fails the answer (one retry); an MCP save leaves that step out.
+                    if broken:=ai_extract.screen_step_rule(step,request['input']['routes'][key],own):fail(ai_extract.SCREEN_STEP_RULES[broken])
     elif task=='jobs':
         _strict_jobs(data,(request or {}).get('input',{}).get('node',{}).get('code',[]),raw,evidence,fail)
 
