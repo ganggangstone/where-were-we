@@ -36,12 +36,14 @@ a.lnk { color:var(--color-accent); text-decoration:none; cursor:pointer } a.lnk:
 .release-notes { white-space:pre-wrap; overflow-wrap:anywhere; font:inherit; user-select:text }
 
 /* 위쪽 막대: 검정 */
-header { display:flex; flex-wrap:wrap; align-items:center; gap:var(--space-4); padding:var(--space-3) var(--space-5); background:var(--color-bg-toolbar); color:var(--color-text-on-toolbar) }
+header { display:flex; flex-wrap:wrap; align-items:center; gap:var(--space-3); padding:var(--space-3) var(--space-5); background:var(--color-bg-toolbar); color:var(--color-text-on-toolbar) }
 header > select, header > input[type=search] { font:var(--font-secondary); letter-spacing:var(--tracking-secondary); color:var(--color-text-on-toolbar); background:var(--color-bg-toolbar-control); border:var(--border-toolbar); padding:var(--space-2) var(--space-4); outline:none }
 header > select { border-radius:var(--radius-control) }
-header > input[type=search] { flex:1 1 var(--space-0); max-width:var(--size-search); min-width:var(--size-node); border-radius:var(--radius-pill) } header > input[type=search]:focus { outline:var(--outline-focus) }
+header > input[type=search] { flex:1 1 var(--space-0); max-width:var(--size-search); min-width:var(--size-bar-min); border-radius:var(--radius-pill) } header > input[type=search]:focus { outline:var(--outline-focus) }
 .seg { display:inline-flex; max-width:100%; flex-wrap:wrap; gap:var(--space-2) }
 .seg button { font:var(--font-secondary); letter-spacing:var(--tracking-secondary); color:var(--color-text-on-toolbar-muted); border:var(--border-toolbar); background:none; padding:var(--space-2) var(--space-4); border-radius:var(--radius-pill) }
+/* 가장 작은 창(960)에서도 도구 줄이 한 줄에 들어가게 머리줄의 보기 버튼은 좌우 여백을 줄인다. 찾기 칸이 먼저 줄어든다. */
+header .seg button { padding-inline:var(--space-3) }
 .seg button.on { background:var(--color-toolbar-chip-on); color:var(--color-text-on-toolbar-chip); font-weight:var(--weight-strong) }
 .seg button:active, .btn:active { transform:var(--press) }
 .seg small { margin-left:var(--space-2) }
@@ -252,9 +254,9 @@ details.list-panel > summary { margin:var(--space-0); color:var(--color-text); f
 /* Project and repository controls reuse the shared design tokens. */
 #repository-bar { display:flex; align-items:center; flex-wrap:wrap; gap:var(--space-3); padding:var(--space-3) var(--space-5); border-bottom:var(--border-hairline); background:var(--color-bg-content) }
 #repository-bar[hidden] { display:none }
+#repository-bar:not(.folded-status) #statusCount, .folded-status .chips > :not(#statusCount) { display:none }
 #repository-bar > * { min-width:var(--space-0); max-width:100% }
 #repository-bar .s { overflow-wrap:anywhere }
-#repository-bar:not(.folded-status) #statusCount, .folded-status .chips > :not(#statusCount) { display:none }
 #project-dialog fieldset { margin:var(--space-4) var(--space-0); padding:var(--space-4); border:var(--border-hairline); border-radius:var(--radius-control) }
 .repository-fields > * { min-width:var(--space-0) }
 .repository-fields { display:flex; flex-wrap:wrap; gap:var(--space-3); margin-bottom:var(--space-3) }
