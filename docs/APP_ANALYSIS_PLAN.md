@@ -59,15 +59,15 @@ Detail results are saved through the same checks as the MCP path (`ai_extract.ta
   handler file imports, each up to 60 lines around their source signals. The screen code is the map's call sites of
   the route (`callers` in the route input, `ai_extract.task_input`): the selected screen's first, at most
   `MAX_CALLERS` (3), each `CALLER_LINES` (12) lines on either side of the call. When a call site of the selected
-  screen sits in a function the screen's own files use (the map's `via` file of that screen's api function), and no
-  other screen reaches the route through any function, the route input also lists `uses`: lines in those files that
+  screen sits in a function the screen's own files use (the map's `via` file of that screen's api function), the
+  route input also lists `uses`: lines in those files that
   name the function as a whole word, at most `MAX_USES` (3) per route. Lines of import statements
   (import/from/require/use/using/include, followed across lines while a bracket stays open or a line ends with a
   comma or backslash) are skipped, and a bare name in a list comes after the other uses. Names shorter than
-  `MIN_USE_NAME` (4) are not searched. A route another screen also reaches gets callers only, because its saved
-  steps show under every screen that sends it. A use file of at most `USE_FILE_BYTES` (8 KB) goes whole, once per
-  call, with the routes it serves; a larger one goes as `USE_LINES` (8) lines on either side of each use. The prompt
-  states this limit. A target is a screen path, route keys (`@routes:[...]`, no selected screen and no uses) or a
+  `MIN_USE_NAME` (4) are not searched. A use file of at most `USE_FILE_BYTES` (16 KB, equal to `ROUTE_BYTES`) goes
+  whole, once per call, with the routes it serves; a larger one goes as `USE_LINES` (8) lines on either side of each
+  use. The prompt states this limit. Call splitting counts a route's sources together with the whole use files the
+  call does not hold yet; one route with `MAX_USES` whole files (64 KB) fits `DETAIL_BYTES`. A target is a screen path, route keys (`@routes:[...]`, no selected screen and no uses) or a
   screen path followed by some of its route keys (`/path@routes:[...]`); a screen with only some routes missing is
   asked the second way, so its callers and uses still know the screen. With several repositories the app asks each
   repository for the routes it serves: the screen's own repository gets `/path@routes:[...]`, another repository gets
@@ -77,11 +77,22 @@ Detail results are saved through the same checks as the MCP path (`ai_extract.ta
   The model writes 「화면」 (screen) steps only from the caller and use lines: what sets off the request and what
   the screen does with the answer come from the use lines, and what the user does is stated only when a shown line
   shows it; otherwise the step says only that the screen sends the request. A screen step citing any other file is
-  invalid in the app run and is dropped on the MCP path; with no callers there are no screen steps. The step picture
-  opens with a screen step the app adds only when the saved steps do not start with one. Steps are numbered 1 to N in
+  invalid in the app run and is dropped on the MCP path; with no callers there are no screen steps. A screen step
+  that cites a use file (not a caller file) is saved with `screen`, the selected screen it was written for
+  (`ai_extract.task_result`); a submitted `screen` other than the selected screen is invalid on both paths, and a
+  step without `screen` (saved before this field) belongs to every screen. The app shows a step with `screen` only
+  when the request is viewed from that screen; other screens and views with no screen show the other steps. A
+  request whose steps are fresh is not asked again because another screen views it, so that screen sees only the
+  caller-level screen steps until the request is analysed from it. The step picture opens with a screen step the
+  app adds only when the shown steps do not start with one. Steps are numbered 1 to N in
   shown order, matching the 「n/N」 counter and the app command `step` (`index` from 1); the text of AI-written steps
-  carries the 「AI 설명」 underline, the added opening step does not. Saved steps with an older `STEPS_WORDING` are
-  asked again.
+  carries the 「AI 설명」 underline, the added opening step does not. The ◀ / 다음 ▶ row and the counter stay at
+  the bottom of the right panel while stepping. Saved steps with an older `STEPS_WORDING` (now 6) or from another commit
+  are stale (`results.steps[key].stale`): the screen's 「이 동작의 과정 알아보기 (N개 남음)」 counts
+  missing and stale requests, and an opened request with stale steps offers 「다시 분석 요청」 for the same steps
+  action. Opening the panel for one task (steps, jobs or a change explanation) opens 「자동 분석」 above the overview so
+  its start button is in view; the general 「분석하기」 open keeps it folded. The target chip names a repository only
+  when the scope chip of the same row does not.
 - **Jobs.** Up to `MAX_JOB_FILES` (8) files in the program's code folders, ranked by source signals (entry points,
   schedulers, workers first), each up to 160 lines around its signals and `DETAIL_BYTES / 8`. The known routes go
   along as metadata. The saved `unknown` says how many of the program's files were read (「프로그램 파일 M개 중 N개만
