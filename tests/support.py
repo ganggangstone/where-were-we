@@ -1,5 +1,4 @@
 """Shared test harness. Importing it blocks real AI CLIs and drops an inherited settings path for the whole process."""
-from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import os
 from pathlib import Path
@@ -83,12 +82,6 @@ def dump_dom(uri, user_dir, budget=None, window=None, timeout=30, run=None, flag
     if budget:
         command.append(f'--virtual-time-budget={budget}')
     return (run or subprocess.run)([*command, '--dump-dom', uri], capture_output=True, text=True, timeout=timeout)
-
-
-def in_parallel(function, values):
-    """function(value) for each value, run at the same time (each Chrome launch is its own process and folder)."""
-    with ThreadPoolExecutor(len(values)) as pool:
-        return list(pool.map(function, values))
 
 
 UI_ASSETS = ('tokens.css', 'app.css', 'vendor/dagre.min.js', 'connection.js', 'onboarding.js', 'control.js', 'analysis-run.js')

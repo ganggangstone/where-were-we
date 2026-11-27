@@ -3,7 +3,7 @@ import json,re,subprocess,tempfile,unittest
 import support  # blocks real AI CLIs; drops an inherited WHERE_WERE_WE_SETTINGS
 from pathlib import Path
 
-from support import CHROME,ROOT,dump_dom,in_parallel,inline_assets
+from support import CHROME,ROOT,dump_dom,inline_assets
 # Two fictional projects. First has web+api code with an arbitrary compared ref; Second has one code and no compared version.
 BOOTSTRAP=r'''
 window.calls=[];window.errors=[];
@@ -94,9 +94,10 @@ def page(checks,lang='ko',query=''):
     return 'data-flow="passed"' in result.stdout,(error or [result.stdout[-1500:]])[-1][-2000:]
 
 def assert_both_languages(test,checks,query=''):
-    """Run the same checks in the ko and en UI at once, then assert each language as its own subtest."""
-    for lang,(ok,error) in zip(('ko','en'),in_parallel(lambda lang:page(checks,lang,query),('ko','en'))):
-        with test.subTest(lang=lang):test.assertTrue(ok,error)
+    """Run the same checks in the ko and en UI, asserting each language as its own subtest."""
+    for lang in ('ko','en'):
+        with test.subTest(lang=lang):
+            ok,error=page(checks,lang,query);test.assertTrue(ok,error)
 
 # Saved AI results as the stored project reports them; analyzeAll() makes the next read_project return them.
 ANALYZED=r"""
