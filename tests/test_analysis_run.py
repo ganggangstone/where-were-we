@@ -77,7 +77,7 @@ class AnalysisRun(unittest.TestCase):
         def fake(prompt,**kwargs):
             p=json.loads(prompt.split('\n',1)[1]);calls.append(p)
             self.assertEqual(set(p['input']['routes']),{'server/items.go::SaveItem'})
-            self.assertEqual({s['file'] for s in p['sources']},{'server/items.go'})
+            self.assertEqual({s['file'] for s in p['sources']},{'server/items.go','pages/items.vue'})  # the route and the screen code that sends it
             return self.fake(prompt,**kwargs)
         done=analysis_run.run(again['id'],fake)
         self.assertEqual(done['state'],'completed',done.get('error'));self.assertEqual(len(calls),1)
@@ -410,6 +410,42 @@ else:
         flows=self.raw()['dev']['task_outputs']['flows']['routes']
         self.assertTrue(flows[self.ROUTE]['steps'])
         self.assertEqual(flows[other]['steps'],[]);self.assertEqual(flows[other]['unknown'],analysis_run.NOT_READ['en'])
+
+    def test_steps_read_the_screen_code_that_sends_the_request_and_screen_steps_cite_only_it(self):
+        self.seed_map()
+        for lane_file,expected in (('router.POST','failed'),('fetch("/items"','completed')):
+            with self.subTest(screen_step=lane_file):
+                before=self.raw();calls=[]
+                def executor(prompt,**kwargs):
+                    p=self.packet(prompt);calls.append(p)
+                    self.assertEqual(p['input']['routes'][self.ROUTE]['callers'],[{'file':'pages/items.vue','line':2}])
+                    self.assertIn('pages/items.vue',{s['file'] for s in p['sources']})
+                    return {'routes':{self.ROUTE:{'name':'Save item','steps':[{'ref':self.ref(p,lane_file),'lane':'화면','text':'The screen sends the item'},
+                        {'ref':self.ref(p,'db.Table'),'lane':'저장소','text':'Store the item'}]}}}
+                done=analysis_run.run(self.prepare(intent={'task':'steps','targets':[{'repository':'service','target':'/items'}]})['id'],executor)
+                self.assertEqual(done['state'],expected,done.get('error'))
+                if expected=='failed':self.assertEqual(len(calls),2);self.assertEqual(self.raw(),before);continue
+                steps=self.raw()['dev']['task_outputs']['flows']['routes'][self.ROUTE]['steps']
+                self.assertEqual([(x['lane'],x['file'],x['line']) for x in steps],[('화면','pages/items.vue',2),('저장소','server/items.go',2)])
+
+    def test_mcp_screen_step_outside_the_callers_is_not_saved(self):
+        self.seed_map()
+        req=ai_extract.task_request('demo','steps','dev','en','service','/items')
+        self.assertEqual(req['input']['routes'][self.ROUTE]['callers'],[{'file':'pages/items.vue','line':2}])
+        self.assertIn('"화면" steps only from those caller files',req['prompt'])
+        server={'file':'server/items.go','line':4,'quote':'router.POST("/items", SaveItem)','lane':'화면','text':'Pretend screen'}
+        screen={'file':'pages/items.vue','line':2,'quote':'fetch("/items",','lane':'화면','text':'The screen sends the item'}
+        ai_extract.task_record(**req['record_arguments'],result_json=json.dumps({'routes':{self.ROUTE:{'name':'Save item','steps':[server,screen]}}}))
+        steps=self.raw()['dev']['task_outputs']['flows']['routes'][self.ROUTE]['steps']
+        self.assertEqual([(x['lane'],x['file']) for x in steps],[('화면','pages/items.vue')])
+
+    def test_callers_put_the_selected_screen_first_and_are_capped(self):
+        m={'api_functions':[{'file':f'pages/p{i}.vue','name':f'f{i}','calls':[{'line':i+1,'backend':[{'file':'server/items.go','line':4}]}]} for i in range(5)],
+           'screens':[{'path':'/chosen','api_functions':[{'file':'pages/p4.vue','name':'f4'}]}],
+           'backend_routes':[{'file':'server/items.go','line':4,'function':'SaveItem','method':'POST','path':'/items','mounted':True}]}
+        with patch.object(project,'branch_bundle',lambda raw,branch:raw):
+            got=ai_extract.task_input({'dev':m},'steps','dev','/chosen')['routes'][self.ROUTE]['callers']
+        self.assertEqual(got,[{'file':'pages/p4.vue','line':5},{'file':'pages/p0.vue','line':1},{'file':'pages/p1.vue','line':2}])
 
     def test_jobs_one_bounded_call_with_files_read_note(self):
         for i in range(20):(self.repo/f'server/pad{i:02}.txt').write_text('ordinary padding line\n'*600)

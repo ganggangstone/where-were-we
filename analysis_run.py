@@ -1239,6 +1239,10 @@ def _strict_result(task,data,repo,commit,request=None,raw=None):
         for value in routes.values():
             for step in rows(value,'steps'):
                 if not evidence(step) or not step.get('text'):fail()
+        if request:
+            for key,value in routes.items():
+                screen={c['file'] for c in request['input']['routes'][key].get('callers',[])}
+                if any(s.get('lane')=='화면' and s.get('file') not in screen for s in rows(value,'steps')):fail('A screen step cited code other than the screen code that sends the request')
     elif task=='jobs':
         _strict_jobs(data,(request or {}).get('input',{}).get('node',{}).get('code',[]),raw,evidence,fail)
 
@@ -1770,6 +1774,7 @@ def generate(value,task,request,executor,cancelled,deadline,check):
 DETAIL_BYTES = 96 * 1024       # source and evidence text of one detail call
 ROUTE_BYTES = 16 * 1024        # source of one route in a steps call
 MAX_STEPS_CALLS = 3
+CALLER_LINES = 12             # lines on each side of a screen call site in a steps call
 MAX_JOB_FILES = 8
 MAX_BRIEFING_CALLS = 4
 BRIEF_BODY_CHARS = 3000        # of each PR or issue body; a quote from the kept prefix is still a quote of the full text
@@ -1899,10 +1904,14 @@ def _detail(value,task,request,call,validate):
             route={**request['input']['routes'][key],**by_key.get(key,{})}
             start=declared.get((route['file'],route['function']),route.get('line') or 1)
             spans=[(max(1,start-2),start+120),(max(1,(route.get('line') or 1)-5),(route.get('line') or 1)+5)]
-            picks[key]=[(route['file'],spans),*((f,60) for f in dict.fromkeys([*(route.get('services') or []),*imports.get(route['file'],[])]) if f!=route['file'])]
+            # The screen code that sends the request: lines around each call site, after the route's own lines.
+            screen={}
+            for c in route.get('callers',[]):
+                if c['file']!=route['file']:screen.setdefault(c['file'],[]).append((max(1,c['line']-CALLER_LINES),c['line']+CALLER_LINES))
+            picks[key]=[(route['file'],spans),*screen.items(),*((f,60) for f in dict.fromkeys([*(route.get('services') or []),*imports.get(route['file'],[])]) if f!=route['file'])]
         lines={f['file']:f['lines'] for f in export_source(repo,commit,selected={commit:{f for p in picks.values() for f,_ in p}})[0]['files']}
         # A small service or imported file goes whole; a large one only its signal windows.
-        picks={key:[p[0],*((f,_spans(lines,signals,f,n,ROUTE_BYTES//4)) for f,n in p[1:])] for key,p in picks.items()}
+        picks={key:[(f,n) if isinstance(n,list) else (f,_spans(lines,signals,f,n,ROUTE_BYTES//4)) for f,n in p] for key,p in picks.items()}
         sources={key:_rows(lines,picks[key],ROUTE_BYTES,refs) for key in keys}
         calls=[[]];size=0
         for key in keys:

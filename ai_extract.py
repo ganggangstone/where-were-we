@@ -718,6 +718,8 @@ TASK_SCHEMAS={
                                          'unknown':'Only with steps:[] when the code does not establish the steps'}}}
 }
 
+MAX_CALLERS = 3  # screen call sites given with each route of a steps task
+
 def screen_digests(inputs):return {x['path']:digest([x['title'],x['buttons']]) for x in inputs['screens']}
 def route_keys(inputs):return [r['file']+'::'+r['function'] for r in inputs['routes']]
 
@@ -745,6 +747,7 @@ def task_input(raw,task,branch,target,repo=None,head=None):
         if not node or not node.get('code'):raise ValueError('Choose a node with repository code')
         return {'node':node,'routes':list(routes.values())}
     if not target:raise ValueError('Choose a screen or route target')
+    refs=set()
     if target.startswith('@routes:'):
         keys=json.loads(target[len('@routes:'):])
         if not isinstance(keys,list) or not keys or any(not isinstance(k,str) or k not in routes for k in keys):
@@ -757,7 +760,12 @@ def task_input(raw,task,branch,target,repo=None,head=None):
               for c in f.get('calls',[]) for b in c.get('backend',[])}
         keys=[key for key,r in routes.items() if (r['file'],r['line']) in hits]
     if not keys:raise ValueError('No server route targets in this snapshot')
-    return {'routes':{key:{k:routes[key].get(k) for k in ('file','function','method','path','line')} for key in keys}}
+    def callers(r):
+        # Screen code that sends this request (the map's call sites): the selected screen's first, at most MAX_CALLERS.
+        sites={(f['file'],c['line']):(f['file'],f['name']) not in refs for f in m['api_functions'] for c in f.get('calls',[])
+               if isinstance(c.get('line'),int) and any((b.get('file'),b.get('line'))==(r['file'],r['line']) for b in c.get('backend',[]))}
+        return [{'file':f,'line':l} for f,l in sorted(sites,key=lambda s:(sites[s],s))[:MAX_CALLERS]]
+    return {'routes':{key:{**{k:routes[key].get(k) for k in ('file','function','method','path','line')},'callers':callers(routes[key])} for key in keys}}
 
 def task_snapshot(raw,task,branch):
     raw=project.branch_bundle(raw,branch)
@@ -790,6 +798,9 @@ def task_request(name,task,branch='dev',lang='ko',repository='',target='',overvi
             'steps':'Describe ordered request steps for the supplied route keys only. Each step needs its own file, exact line and quote. Include service calls and return values. '
                      'Give each step the lane where it happens, written exactly as one of these words in any language: "화면" (something the user sees or does on the screen), "서버" (work the server does, such as checks and calculations), '
                      '"저장소" (reading or writing stored data), "외부" (calling an outside service). '
+                     'Each route lists callers: the screen code that sends this request (at most '+str(MAX_CALLERS)+' places; the selected screen\'s first). '
+                     'Write "화면" steps only from those caller files and only for what their lines show: what the user does that sends the request, before the server steps, '
+                     'and what the screen does with the answer, after them. Never invent screen behaviour; with no callers or no such lines, write no "화면" step. '
                      'Set uncertain:true only when the quoted lines leave the meaning of that step open; a step the quote states directly is not uncertain. Keep route keys unchanged.'}[task]
         schema=copy.deepcopy(TASK_SCHEMAS[task])
         if overview and task=='system':
@@ -963,6 +974,8 @@ def task_result(raw,task,branch,target,data,repo,commit,lang,configuration=None,
             route=inputs['routes'][key];steps=[]
             for step in rows(got,'steps'):
                 ev=evidence({**step,'file':step.get('file',route['file'])})
+                # A screen step stands only on the screen code that sends this request.
+                if ev and step.get('lane')=='화면' and ev['file'] not in {c['file'] for c in route.get('callers',[])}:continue
                 if ev and text(step,'text'):steps.append({**ev,'lane':step.get('lane') if step.get('lane') in ('서버','저장소','외부','화면') else '서버',
                                                          'text':step['text'],'uncertain':bool(step.get('uncertain'))})
             reason=text(got,'unknown').strip()

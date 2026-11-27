@@ -55,10 +55,16 @@ returns an invalid answer is retried once; when the retry fails too, the run fai
 Detail results are saved through the same checks as the MCP path (`ai_extract.task_record`, `briefing.record`).
 
 - **Steps.** Per route: the handler file from the handler's declaration (about 120 lines) and around the
-  registration line, then the route's service files and the files the handler file imports, each up to 60 lines
-  around their source signals. At most `ROUTE_BYTES` (16 KB) per route and `DETAIL_BYTES` (96 KB) per call. Routes
-  that do not fit `MAX_STEPS_CALLS` calls, and routes an answer leaves out, are saved with `steps: []` and an
-  `unknown` text saying their steps are not established.
+  registration line, then the screen code that sends the request, then the route's service files and the files the
+  handler file imports, each up to 60 lines around their source signals. The screen code is the map's call sites of
+  the route (`callers` in the route input, `ai_extract.task_input`): the selected screen's first, at most
+  `MAX_CALLERS` (3), each `CALLER_LINES` (12) lines on either side of the call. At most `ROUTE_BYTES` (16 KB) per
+  route and `DETAIL_BYTES` (96 KB) per call. Routes that do not fit `MAX_STEPS_CALLS` calls, and routes an answer
+  leaves out, are saved with `steps: []` and an `unknown` text saying their steps are not established.
+  The model writes 「화면」 (screen) steps only from those caller lines: what the user does that sends the request,
+  and what the screen does with the answer. A screen step citing any other file is invalid in the app run and is
+  dropped on the MCP path; with no callers there are no screen steps. The step picture opens with a screen step the
+  app adds only when the saved steps do not start with one.
 - **Jobs.** Up to `MAX_JOB_FILES` (8) files in the program's code folders, ranked by source signals (entry points,
   schedulers, workers first), each up to 160 lines around its signals and `DETAIL_BYTES / 8`. The known routes go
   along as metadata. The saved `unknown` says how many of the program's files were read (「프로그램 파일 M개 중 N개만
