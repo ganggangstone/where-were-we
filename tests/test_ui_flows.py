@@ -1539,6 +1539,22 @@ class Flows(unittest.TestCase):
  assert(!$('insp').querySelector('.detail > .flowline'),'No raw data chips above the fold');
 ''')
 
+    def test_screen_steps_from_code_replace_the_opening_step_and_lanes_go_back_and_forth(self):
+        self.check(r'''
+ S.view='map';render();document.querySelector('[data-scr="web::/items"]').click();
+ const row=document.querySelector('[data-req]');const route=requests(M(),'web::/items')[0].route;
+ const at=(lane,text,line)=>({lane,text,file:'a',line,quote:'quoted line '+line});
+ route.flow={steps:[at('화면','Press save',1),at('서버','Check the item',2),at('저장소','Save the item',3),at('서버','Answer',4),at('화면','Show the saved item',5)]};
+ row.click();
+ const steps=()=>[...$('insp').querySelectorAll('.step[data-step]')];
+ assert(steps().map(x=>x.className.match(/\bl(\d)\b/)[1]).join('')==='01210','No opening step is added before a screen step: '+steps().map(x=>x.textContent).join('|'));
+ assert(steps().slice(1).map(x=>x.querySelector('.from').textContent).join('')==='↘↘↙↙','Arrows follow the lane changes');
+ for(let i=0;i<5;i++)$('next').click();
+ assert(S.step===4 && steps()[4].classList.contains('cur'),'Stepping reaches the last screen step: '+S.step);
+ $('next').click();assert(S.step===-1,'One more press leaves step mode');
+ S.ev=0;render();assert($('insp').querySelector('.step[data-step="0"] .ev'),'The screen step shows its quoted code');
+''')
+
     def test_request_detail_names_shared_data_by_display_name(self):
         self.check(r'''
  S.branchDetails.dev.system.nodes[0].tables=['api::items'];S.view='map';render();

@@ -1298,7 +1298,8 @@ function detail(m, s, r) {
   // 단계 그림을 먼저 보이고, 입력·데이터 이름과 다른 프로그램 안내는 그 아래에 둔다.
   const facts = h.slice('<div class="detail">'.length); h = '<div class="detail">';
   if (f && f.steps.length) {
-    const steps = [{ lane: '화면', text: s.path ? (r.btn ? ui`"${r.btn}" 을 누른다` : ui`화면이 「${esc(reqLabel(r))}」 서버 요청을 보낸다`) : tr('서버가 요청을 받는다'), start: true }, ...f.steps];
+    // AI가 근거와 함께 적은 화면 단계가 맨 앞에 있으면 그것으로 시작하고, 없을 때만 시작 단계를 붙인다.
+    const steps = f.steps[0].lane === '화면' ? f.steps : [{ lane: '화면', text: s.path ? (r.btn ? ui`"${r.btn}" 을 누른다` : ui`화면이 「${esc(reqLabel(r))}」 서버 요청을 보낸다`) : tr('서버가 요청을 받는다'), start: true }, ...f.steps];
     // 단계는 일어나는 자리(화면·서버·데이터·외부) 칸에 놓고, 앞 단계에서 온 방향을 화살표로 잇는다.
     const at = (st) => LANE[st.lane] ?? 1;
     h += ui`<div class="step-lanes"><span class="screen">화면</span><span class="server">서버</span><span class="store">데이터</span><span class="external">외부 서비스</span></div>` + steps.map((st, i) => {
@@ -2411,7 +2412,7 @@ function render() {
   document.querySelectorAll('.row[data-url]').forEach(el => el.onclick = () => invoke('open_url', { url: el.dataset.url }));
   document.querySelectorAll('a[data-url], button[data-url]').forEach(a => a.onclick = (e) => { e.stopPropagation(); invoke('open_url', { url: a.dataset.url }); });
   const s = m.screens.find(x => x.path === S.sel); const rows = s ? requests(m, s.path) : [];
-  const stepCount = () => { const r = rows.find(x => x.key === S.open); const f = r && flowOf(r.route); return f ? f.steps.length : 0; };
+  const stepCount = () => { const r = rows.find(x => x.key === S.open); const f = r && flowOf(r.route); return f && f.steps.length ? f.steps.length - (f.steps[0].lane === '화면' ? 1 : 0) : 0; };
   if ($('next')) $('next').onclick = () => { S.step = S.step >= stepCount() ? -1 : S.step + 1; S.ev = -1; render(); };
   if ($('prev')) $('prev').onclick = () => { S.step = S.step <= 0 ? -1 : S.step - 1; S.ev = -1; render(); };
   const copy = async (text, el) => { await navigator.clipboard.writeText(text); el.textContent = tr('복사됨'); setTimeout(() => render(), 900); };
