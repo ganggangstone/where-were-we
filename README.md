@@ -168,7 +168,6 @@ The [license](LICENSE) permits personal use, internal business use, and free red
 - **하는 일**에서 기능 묶음·화면 지도·데이터를 그림과 한 줄 설명으로 먼저 보여 줍니다.
 - **이 동작의 과정 알아보기**는 단계를 화면·서버·데이터·외부 서비스 칸에 나눠 보여 줍니다. 화면 단계는 그 화면의 코드에서 쓰고, 단계마다 근거 코드 줄을 붙입니다.
 - **바뀐 것**은 변경마다 제목과 한 줄 설명을 담은 카드로 보여 줍니다.
-- 한 프로젝트에 여러 저장소를 연결해 저장소 사이의 요청과 서버를 한 지도에서 봅니다.
 - 앱의 문구를 저장소·서버 요청·서버 경로·외부 서비스 같은 용어로 맞추고 더 쉽게 고쳤습니다.
 - 이전 버전에서 저장한 AI 설명은 다음 **분석하기**에서 다시 만듭니다. 이때 연결한 AI의 사용량이 듭니다.
 - 저장소 하나로 만든 이전 프로젝트는 처음 열 때 자동으로 옮깁니다. 이전 파일은 따로 보관합니다.
@@ -181,7 +180,6 @@ The [license](LICENSE) permits personal use, internal business use, and free red
 - **What it does** opens features, the screen map and data with a picture and a one-line explanation.
 - **Explain this action step by step** places the steps in Screens, Server, Data and External services lanes. Screen steps are written from that screen's own code, and every step cites its code line.
 - **Changes** shows each change as a card with a title and one line.
-- Connect several repositories to one project and see the requests and servers between them on one map.
 - App wording now uses consistent terms such as repository, server request, server route and external service, and is simpler throughout.
 - AI explanations saved by earlier versions are made again on the next **Analyze**, which uses your connected AI's quota.
 - Projects made with one repository in earlier versions are moved automatically the first time you open them. The old files are kept aside.
