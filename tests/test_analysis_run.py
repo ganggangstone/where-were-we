@@ -490,9 +490,18 @@ else:
                 if expected=='failed':self.assertEqual(len(calls),2);self.assertEqual(self.raw(),before);continue
                 steps=self.raw()['dev']['task_outputs']['flows']['routes'][self.ROUTE]['steps']
                 self.assertEqual([(x['lane'],x['file'],x['line']) for x in steps],[('화면','pages/list.vue',2),('저장소','server/items.go',2)])
+                # The step from the screen's own use line is kept with that screen; the server step is shown everywhere.
+                self.assertEqual([x.get('screen') for x in steps],['/items',None])
+                composed=project.read_bundle('demo')['flows']['routes']['service/'+self.ROUTE]['steps']
+                self.assertEqual([x.get('screen') for x in composed],[project.qscreen('service','/items'),None])
         print('\nsteps packet bytes without uses',sizes['without'],'with uses',sizes['with'],file=sys.stderr)
         req=ai_extract.task_request('demo','steps','dev','en','service','/items')
         self.assertIn('state what the user does only when a shown line shows it',req['prompt'])
+        # The MCP path takes the same field: it must name the selected screen.
+        step={'file':'pages/list.vue','line':2,'quote':'saveItemNow().then','lane':'화면','text':'Saving the form sends the item'}
+        record=lambda screen:ai_extract.task_record(result_json=json.dumps({'routes':{self.ROUTE:{'name':'Save item','steps':[{**step,'screen':screen}]}}}),**req['record_arguments'])
+        with self.assertRaisesRegex(ValueError,'selected screen'):record('/other')
+        record('/items');self.assertEqual(self.raw()['dev']['task_outputs']['flows']['routes'][self.ROUTE]['steps'][0]['screen'],'/items')
 
     def wrapper_map(self,screens):
         """A wrapper loadOrders in pages/api/orders.ts sending SaveItem, used by the given screens through pages/<screen>.vue."""
@@ -513,7 +522,7 @@ else:
         # Lines 2, 6, 8 and 10 sit in import statements; line 13 is a bare name in an export list, kept after the clear uses.
         self.assertEqual(route['uses'],[{'file':'pages/orders.vue','line':n} for n in (15,16,13)])
 
-    def test_a_request_another_screen_also_reaches_gets_callers_only(self):
+    def test_a_request_another_screen_also_reaches_still_gets_this_screens_uses(self):
         (self.repo/'pages/api').mkdir()
         (self.repo/'pages/api/orders.ts').write_text('export function loadOrders() {\n  return api.get("/items")\n}\n')
         for n in ('orders','report'):(self.repo/f'pages/{n}.vue').write_text('const rows = await loadOrders()\n')
@@ -524,16 +533,15 @@ else:
             m=self.wrapper_map(['orders']);m['api_functions'].append({'file':'pages/api/report.ts','name':'fetchReport','calls':[{'line':1,'backend':[{'file':'server/items.go','line':4}]}]})
             m['screens'].append({'path':'/report','api_functions':[{'file':'pages/api/report.ts','name':'fetchReport'}]})
             other=ai_extract.task_input({'dev':m},'steps','dev','/orders',str(self.repo),head)['routes'][self.ROUTE]
-        self.assertEqual(alone['uses'],[{'file':'pages/orders.vue','line':1}])
-        # Saved steps of a request show under every screen that sends it, so only its call sites may stand for the screen.
-        self.assertEqual(both['uses'],[]);self.assertEqual(other['uses'],[])
-        self.assertEqual(ai_extract.screen_files(both),{'pages/api/orders.ts'})
+        # The selected screen's own code reaches the model even when other screens send the request; its steps are kept with it.
+        for route in (alone,both,other):self.assertEqual(route['uses'],[{'file':'pages/orders.vue','line':1}])
+        self.assertEqual(ai_extract.screen_files(both),{'pages/api/orders.ts','pages/orders.vue'})
 
-    def two_request_screen(self):
-        """/items sends SaveItem and Other from pages/list.vue through the wrapper saveItemNow."""
+    def two_request_screen(self,padding=30):
+        """/items sends SaveItem and Other from pages/list.vue (its use on line padding+2) through the wrapper saveItemNow."""
         (self.repo/'server/other.go').write_text('func Other() {}\nrouter.GET("/other", Other)\n')
         (self.repo/'pages/items.vue').write_text('<button @click="saveItem">Save item</button>\nfetch("/items", {method:"POST"})\nfetch("/other")\n')
-        (self.repo/'pages/list.vue').write_text('<form @submit="onSave">\n'+'<p>padding line of the screen</p>\n'*30+'function onSave() { saveItemNow().then(showSaved) }\n</form>\n')
+        (self.repo/'pages/list.vue').write_text('<form @submit="onSave">\n'+'<p>padding line of the screen</p>\n'*padding+'function onSave() { saveItemNow().then(showSaved) }\n</form>\n')
         self.git('add','.');self.git('commit','-qm','Screen with two requests')
         self.data['screens'][0]['calls'].append({'file':'pages/items.vue','line':3,'quote':'fetch("/other")','method':'GET','path':'/other'})
         self.data['backend_routes'].append({'file':'server/other.go','line':2,'quote':'router.GET("/other", Other)','method':'GET','path':'/other','function':'Other'})

@@ -790,15 +790,10 @@ def task_input(raw,task,branch,target,repo=None,head=None):
         for f in s.get('api_functions',[]):
             if f.get('via') and f['via']!=f['file']:via.setdefault((f['file'],f['name']),[]).append(f['via'])
     cache={}
-    # Requests another screen also reaches (through any function) get callers only: their steps are shown under every such screen.
-    elsewhere={(f['file'],f['name']) for s in m['screens'] if s not in screens for f in s.get('api_functions',[])}
-    def shared(r):
-        return any((f['file'],f['name']) in elsewhere for f in m['api_functions'] for c in f.get('calls',[])
-                   if any((b.get('file'),b.get('line'))==(r['file'],r['line']) for b in c.get('backend',[])))
     def uses(r,cs):
         # One hop up: where the selected screen's own files use the function holding a call site (word match on its name).
-        # ponytail: a shared request's screen steps stop at the call site; per-screen steps (stored per screen) would go deeper.
-        if not repo or not head or shared(r):return []
+        # A step written from these lines is stored with this screen (task_result) and shown only there.
+        if not repo or not head:return []
         clean=[];vague=[]
         for c in cs:
             name=c['function']
@@ -1029,15 +1024,20 @@ def task_result(raw,task,branch,target,data,repo,commit,lang,configuration=None,
         updated['flows']=updated.get('flows') or {'routes':{}};flows=updated['flows']['routes']
         notes=[n.get('text') if isinstance(n,dict) else n for n in data.get('unknown',[]) if isinstance(n,(str,dict))] if isinstance(data.get('unknown'),list) else []
         notes=[n.strip() for n in notes if isinstance(n,str) and n.strip()]
+        # A screen step written from the selected screen's use lines (not a caller) belongs to that screen: saved with it, shown only there.
+        # ponytail: no per-screen freshness; a fresh request is not asked again for another screen, which sees only its caller-level screen steps until re-analysed from it.
+        own=target.partition('@routes:')[0]
         for key,got in outputs.items():
             if not isinstance(got,dict):raise ValueError('Invalid route steps')
-            route=inputs['routes'][key];steps=[]
+            route=inputs['routes'][key];steps=[];callers={c['file'] for c in route.get('callers',[])}
             for step in rows(got,'steps'):
+                if 'screen' in step and (not own or step['screen']!=own):raise ValueError('A step screen must be the selected screen')
                 ev=evidence({**step,'file':step.get('file',route['file'])})
                 # A screen step stands only on the screen code that sends this request.
                 if ev and step.get('lane')=='화면' and ev['file'] not in screen_files(route):continue
                 if ev and text(step,'text'):steps.append({**ev,'lane':step.get('lane') if step.get('lane') in ('서버','저장소','외부','화면') else '서버',
-                                                         'text':step['text'],'uncertain':bool(step.get('uncertain'))})
+                                                         'text':step['text'],'uncertain':bool(step.get('uncertain')),
+                                                         **({'screen':own} if step.get('lane')=='화면' and ev['file'] not in callers else {})})
             reason=text(got,'unknown').strip()
             # Steps the code does not establish are recorded as unknown; supplied steps must still verify.
             if not steps and (got.get('steps') or not reason):raise ValueError('No usable step evidence; previous steps preserved')

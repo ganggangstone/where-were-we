@@ -386,7 +386,9 @@ def qualify_map(source,repo,table_ids):
             if isinstance(ev,dict):ev['file']=file(ev.get('file'))
         if r.get('flow'):
             r['flow']['file']=file(r['flow'].get('file'))
-            for step in r['flow'].get('steps',[]):step['file']=file(step.get('file'))
+            for step in r['flow'].get('steps',[]):
+                step['file']=file(step.get('file'))
+                if isinstance(step.get('screen'),str):step['screen']=screen(step['screen'])
         r['tests']=[file(x) for x in r.get('tests',[])]
         r['source_tables']=r.get('tables',[])
         r['tables']=[table_ids.get((rid,t),rid+'::'+t) for t in r.get('tables',[])]
@@ -572,6 +574,7 @@ def _compose(name, conf, state, raws, repository='', branch='dev'):
             if flow.get('file'):flow['file']=file(flow['file'])
             for step in flow.get('steps',[]):
                 if step.get('file'):step['file']=file(step['file'])
+                if isinstance(step.get('screen'),str):step['screen']=screen(step['screen'])
             bundle['flows']['routes'][file(key)]=flow
         sy=copy.deepcopy(raw.get('system') or {});prefix=rid+'::'
         def evidence(obj):

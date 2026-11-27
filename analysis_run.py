@@ -1245,6 +1245,8 @@ def _strict_result(task,data,repo,commit,request=None,raw=None):
             for key,value in routes.items():
                 screen=ai_extract.screen_files(request['input']['routes'][key])
                 if any(s.get('lane')=='화면' and s.get('file') not in screen for s in rows(value,'steps')):fail('A screen step cited code other than the screen code that sends the request')
+                own=str(request.get('record_arguments',{}).get('target','')).partition('@routes:')[0]
+                if any('screen' in s and (not own or s['screen']!=own) for s in rows(value,'steps')):fail('A step screen must be the selected screen')
     elif task=='jobs':
         _strict_jobs(data,(request or {}).get('input',{}).get('node',{}).get('code',[]),raw,evidence,fail)
 
