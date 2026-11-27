@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 NODE = shutil.which('node')
 UI = (ROOT / 'ui/index.html').read_text()
 RELOAD = UI[UI.index('async function reloadAnalysisOnly('):UI.index('// Manual, automatic and MCP reads')]
+TARGETS = UI[UI.index('// Steps targets are'):UI.index('function analysisCalls(')]
 HARNESS = r'''
 const assert = (value, message) => { if (!value) throw Error(message); };
 const calls = [], elements = {}, timers = new Map(), listeners = {};
@@ -79,7 +80,7 @@ const count = name=>calls.filter(c=>c.command===name).length;
 @unittest.skipUnless(NODE, 'Node is required for fake native UI checks')
 class AnalysisRunUI(unittest.TestCase):
     def check_js(self, checks):
-        source = HARNESS + '\n' + RELOAD + '\n' + (ROOT / 'ui/analysis-run.js').read_text()
+        source = HARNESS + '\n' + RELOAD + '\n' + TARGETS + '\n' + (ROOT / 'ui/analysis-run.js').read_text()
         runner = f'''const vm=require('vm');const context=vm.createContext({{}});
 vm.runInContext({json.dumps(source)},context);
 Promise.resolve(vm.runInContext({json.dumps('(async()=>{'+checks+'})()')},context)).catch(e=>{{console.error(e.stack);process.exitCode=1;}});'''
@@ -322,12 +323,12 @@ assert(!html.includes('@routes') && html.includes('/orders · Cancel an order ·
 
     def test_steps_call_for_the_screen_repository_carries_the_screen(self):
         # Two repositories: the screen's repository also serves one request, the other repository serves the second.
-        calls = UI[UI.index('function analysisCalls('):UI.index('async function invokeAction(')]
+        calls = UI[UI.index('// Steps targets are'):UI.index('async function invokeAction(')]
         script = calls + r"""
 const assert=(ok,message)=>{if(!ok)throw Error(message);};
 const tr=s=>s,route=(repository,file,fn)=>({repository,file:repository+'/'+file,function:fn});
-const save=route('web','server/items.py','save_item'),sync=route('api','app/sync.py','sync_item');
-const map={screens:[{path:'web::/items',repository:'web',source_path:'/items'}],backend_routes:[save,sync]};
+const save=route('web','server/items.py','save_item'),sync=route('api','app/sync.py','sync_item'),drop=route('web','server/items.py','drop_item');
+const map={screens:[{path:'web::/items',repository:'web',source_path:'/items'}],backend_routes:[save,sync,drop]};
 const M=()=>map,requests=(m,path)=>path==='web::/items'?[{route:save},{route:sync}]:[];
 const S={projectInfo:{repositories:[{id:'web'},{id:'api'}]}};
 for(const repository of ['web','*','']){
@@ -339,6 +340,18 @@ let got=analysisCalls('make_steps',{repository:'',screen:'web::/items@routes:'+J
 assert(got.length===1 && got[0].screen==='/items@routes:["server/items.py::save_item"]',JSON.stringify(got));
 got=analysisCalls('make_steps',{repository:'',screen:'web::/items@routes:'+JSON.stringify([sync.file+'::sync_item'])});
 assert(got.length===1 && got[0].repository==='api' && got[0].screen==='@routes:["app/sync.py::sync_item"]',JSON.stringify(got));
+// The target forms stay byte for byte: parse and build agree, keys drop only their own repository prefix.
+assert(JSON.stringify(parseTarget('/items@routes:["a.py::f"]'))==='{"screen":"/items","keys":["a.py::f"]}' && parseTarget('/items').keys===null && stepsTarget('',['a.py::f','b.py::g'])==='@routes:["a.py::f","b.py::g"]','parse and build');
+assert(routeKey(save)==='server/items.py::save_item' && routeKey({file:'x.py',function:'f'})==='x.py::f' && routeKey({file:'web/x.py',function:'f'},'api')==='web/x.py::f','route keys');
+// Several requests of one repository share one call; requests of two repositories split by repository.
+got=analysisCalls('make_steps',{repository:'',screen:'web::/items@routes:'+JSON.stringify([save.file+'::save_item',drop.file+'::drop_item'])}).map(c=>[c.repository,c.screen]);
+assert(JSON.stringify(got)==='[["web","/items@routes:[\\"server/items.py::save_item\\",\\"server/items.py::drop_item\\"]"]]',JSON.stringify(got));
+got=analysisCalls('make_steps',{repository:'',screen:'web::/items@routes:'+JSON.stringify([save.file+'::save_item',sync.file+'::sync_item'])}).map(c=>[c.repository,c.screen]);
+assert(JSON.stringify(got)===JSON.stringify([['web','/items@routes:["server/items.py::save_item"]'],['api','@routes:["app/sync.py::sync_item"]']]),JSON.stringify(got));
+// One repository with no repository list: the target the button built is sent as is.
+S.projectInfo={};const one=stepsTarget('/items',['server/items.py::save_item']);
+got=analysisCalls('make_steps',{screen:one});
+assert(got.length===1 && got[0].screen==='/items@routes:["server/items.py::save_item"]',JSON.stringify(got));
 """
         result = subprocess.run([NODE, '-e', script], text=True, capture_output=True, timeout=15)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)

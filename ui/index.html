@@ -527,19 +527,28 @@ function renderPendingActions() {
     if (pendingActions.has(command)) show(text); else if ($(log).textContent === text && !Object.keys(ACTION_UI).some(c => pendingActions.has(c) && ACTION_UI[c][1] === log)) show('');
   }
 }
+// Steps targets are '<screen path>@routes:' + JSON route keys; a route key is 'file::function' with the file relative to its repository.
+const ROUTES_MARK = '@routes:';
+const parseTarget = (target) => { const value = String(target || ''), at = value.indexOf(ROUTES_MARK); if (at < 0) return { screen: value, keys: null };
+  let keys = []; try { keys = JSON.parse(value.slice(at + ROUTES_MARK.length)); } catch {} return { screen: value.slice(0, at), keys }; };
+const stepsTarget = (screen, keys) => screen + ROUTES_MARK + JSON.stringify(keys);
+const routeKey = (r, rid = r.repository) => (rid && r.file.startsWith(rid + '/') ? r.file.slice(rid.length + 1) : r.file) + '::' + r.function;
+const analysisTargets = (command, args) => analysisCalls(command, args).map(a => ({ repository: a.repository || '', target: a.screen || a.node }));
+// 「외 N」 after the first names of a list.
+const moreText = (n) => n > 0 ? (S.lang === 'en' ? ` and ${n} more` : ` 외 ${n}`) : '';
 function analysisCalls(command, args) {
   let calls = [args];
   if (S.projectInfo?.repositories?.length && !['briefing_request','analysis_plan'].includes(command)) {
     if (command === 'make_steps') {
-      const by = new Map(), at=args.screen.indexOf('@routes:'), path=at<0?args.screen:args.screen.slice(0,at);
+      const by = new Map(), {screen:path, keys}=parseTarget(args.screen);
       const screen=path && M().screens.find(s=>s.path===path);
-      for (const row of (at>=0 ? M().backend_routes.filter(r=>JSON.parse(args.screen.slice(at+8)).includes(r.file+'::'+r.function)).map(route=>({route})) : requests(M(),args.screen))) {
+      for (const row of (keys ? M().backend_routes.filter(r=>keys.includes(r.file+'::'+r.function)).map(route=>({route})) : requests(M(),args.screen))) {
         const rid=row.route.repository; if (!by.has(rid)) by.set(rid,[]);
-        by.get(rid).push(row.route.file.slice(rid.length+1)+'::'+row.route.function);
+        by.get(rid).push(routeKey(row.route));
       }
       // The screen's own repository gets the screen too, so the steps task can read the screen code that uses each request.
       // ponytail: a request served by another repository gets '@routes:' only; the screen's files are not in that repository's git.
-      calls=[...by].map(([repository, keys])=>({...args,repository,screen:(screen?.repository===repository?screen.source_path:'')+'@routes:'+JSON.stringify(keys)}));
+      calls=[...by].map(([repository, keys])=>({...args,repository,screen:stepsTarget(screen?.repository===repository?screen.source_path:'',keys)}));
       if (!calls.length) throw Error(tr('이 화면이 보내는 서버 요청을 찾지 못했다.'));
     } else if (args.repository==='*' && !args.node) {
       calls=S.projectInfo.repositories.map(r=>({...args,repository:r.id}));
@@ -575,7 +584,7 @@ async function requestAgentAction(command,extra={},silent=false) {
   try {
     const request=JSON.parse(await invokeAction(command,{...scope,...extra}));
     if(!current())return;
-    if(!silent && ['make_steps','make_jobs'].includes(command))S.analysisChoice.targets=analysisCalls(command,{...scope,...extra}).map(a=>({repository:a.repository || '',target:a.screen || a.node}));
+    if(!silent && ['make_steps','make_jobs'].includes(command))S.analysisChoice.targets=analysisTargets(command,{...scope,...extra});
     // A request already pasted into the AI chat keeps its result check.
     const old=S.analysisRequest;
     if(silent && old?.copied && Object.keys(scope).every(key=>old.scope?.[key]===scope[key]) && !['saved','proposal','up_to_date'].includes(old.state))return request;
@@ -607,7 +616,7 @@ const SINGLE_TASKS=['make_steps','make_jobs','briefing_request'];
 function openAnalysisPanel(task=null,detailTarget='',target=analysisTarget(),area=null) {
   S.automaticPanelOpen=SINGLE_TASKS.includes(task);S.agentPurpose='analysis';S.analysisChoice={target,task,detailTarget,resultContext:{view:S.view,sel:S.sel,open:S.open,focus:S.focus,node:S.node}};
   if(area)Object.assign(S.analysisChoice,{area,maxCalls:area.resources.length});
-  if(['make_steps','make_jobs'].includes(task))S.analysisChoice.targets=analysisCalls(task,{repository:S.repository,...(task==='make_steps'?{screen:detailTarget}:{node:detailTarget})}).map(a=>({repository:a.repository || '',target:a.screen || a.node}));
+  if(['make_steps','make_jobs'].includes(task))S.analysisChoice.targets=analysisTargets(task,{repository:S.repository,...(task==='make_steps'?{screen:detailTarget}:{node:detailTarget})});
   S.agentPrompt=activeAnalysis()?.handoff ?? '';renderAgentPrompt();$('insp').scrollTop=0;
   if(typeof AnalysisRun!=='undefined' && task!=='saved_scope')AnalysisRun.open();
 }
@@ -779,7 +788,7 @@ function groupsOf(m) {
 const flowOf = (r) => r.flow || (S.flows && S.flows.routes && S.flows.routes[r.file + '::' + r.function]) || null;
 // 저장된 동작 과정이 지금 코드·문구 기준과 맞지 않으면(results.steps의 stale) 다시 알아볼 대상이다.
 const flowStale = (r) => { const rid = r.repository, info = S.projectInfo, repo = rid && info?.repositories?.find(x => x.id === rid) || info;
-  const key = (rid && r.file.startsWith(rid + '/') ? r.file.slice(rid.length + 1) : r.file) + '::' + r.function; return !!repo?.results?.[S.branch]?.steps?.[key]?.stale; };
+  return !!repo?.results?.[S.branch]?.steps?.[routeKey(r)]?.stale; };
 // 화면의 사용 줄로 쓴 단계(step.screen)는 그 화면에서 볼 때만 보인다. /m 주소는 같은 화면이다.
 const sameScreen = (a, b) => !!a && !!b && a.replace(/^\/m(?=\/)/, '') === b.replace(/^\/m(?=\/)/, '');
 const flowAt = (r, path) => { const f = flowOf(r); return f && f.steps?.some(st => st.screen) ? { ...f, steps: f.steps.filter(st => !st.screen || sameScreen(st.screen, path)) } : f; };
@@ -810,7 +819,7 @@ function requests(m, path) {
   return m._req[path] = rows;
 }
 const reqName = (r) => (S.groups && S.groups.request_names && S.groups.request_names[r.file + '::' + r.function]) || null;
-const reqLabel = (r) => { const value = (r.btn && r.btn + (r.btns.length > 1 ? (S.lang === 'en' ? ` and ${r.btns.length - 1} more` : ` 외 ${r.btns.length - 1}`) : '') + (r.dup ? ' · ' + (flowOf(r.route)?.name || reqName(r.route) || r.route.function) : '')) || flowOf(r.route)?.name || reqName(r.route) || r.route.function; return value + (r.route?.repository && !S.repository && r.route.repository !== r.home ? ' ['+connectionDisplayName(r.route.repository)+']' : ''); };
+const reqLabel = (r) => { const value = (r.btn && r.btn + moreText(r.btns.length - 1) + (r.dup ? ' · ' + (flowOf(r.route)?.name || reqName(r.route) || r.route.function) : '')) || flowOf(r.route)?.name || reqName(r.route) || r.route.function; return value + (r.route?.repository && !S.repository && r.route.repository !== r.home ? ' ['+connectionDisplayName(r.route.repository)+']' : ''); };
 const reqIsAi = (r) => !r.btn && !!(flowOf(r.route)?.name || reqName(r.route));
 const inMain = (r) => S.maps.main ? S.maps.main.backend_routes.some(x => x.method === r.method && x.path === r.path && x.mounted && x.repository === r.repository) : null;
 const openWork = (row) => (S.status ? S.status.open_prs : []).filter(p => p.files.includes(row.route.file) || p.files.includes(row.fn.file));
@@ -2435,7 +2444,7 @@ function render() {
   document.querySelectorAll('[data-copy]').forEach(b => b.onclick = () => copy(copyText(m, s, rows.find(x => x.key === b.dataset.copy)), b));
   document.querySelectorAll('[data-confirm-link]').forEach(b => b.onclick = () => editProject(false, { link: b.dataset.confirmLink.split('|') }));
   if ($('mk')) $('mk').onclick=()=>openAnalysisPanel('make_steps',S.sel);
-  document.querySelectorAll('[data-mk]').forEach(b => b.onclick = () => openAnalysisPanel('make_steps',(M().screens.some(x=>x.path===S.sel)?S.sel:'')+'@routes:'+JSON.stringify([b.dataset.mk])));
+  document.querySelectorAll('[data-mk]').forEach(b => b.onclick = () => openAnalysisPanel('make_steps',stepsTarget(M().screens.some(x=>x.path===S.sel)?S.sel:'',[b.dataset.mk])));
   if ($('makeProgramJobs')) $('makeProgramJobs').onclick=()=>openAnalysisPanel('make_jobs',S.node);
   renderPendingActions();
   if (S.agentPrompt != null) renderAgentPrompt();

@@ -13,7 +13,7 @@ const AnalysisRun = (() => {
     // The map, names, groups and service structure come from the one 「분석하기」 (full); the rest are details the user asked for.
     const task=({resource_batch:'resources',scope_overview:'overview',quick_overview:'overview',make_steps:'steps',make_jobs:'jobs',briefing_request:'briefing'})[command] || 'full';
     const args={...scope(),...(task==='steps'?{screen:choice.detailTarget}:task==='jobs'?{node:choice.detailTarget}:{})};
-    const targets=['steps','jobs'].includes(task) ? (choice.targets || analysisCalls(command,args).map(a=>({repository:a.repository || '',target:a.screen || a.node}))) : [];
+    const targets=['steps','jobs'].includes(task) ? (choice.targets || analysisTargets(command,args)) : [];
     if(task==='resources')return {task,targets:[],max_calls:choice.maxCalls,...(choice.area?{area:choice.area}:{})};
     if(task==='full')return {task,targets:[],...(Array.isArray(choice.only)?{only:choice.only}:{})};
     return {task,targets:command==='scope_overview'?[{repository:scope().repository,target:choice.detailTarget}]:targets};
@@ -21,15 +21,12 @@ const AnalysisRun = (() => {
   // A steps target is '@routes:' + route keys, optionally after the screen path they belong to; the panel shows the screen,
   // the request names the map already has and how many there are.
   function targetName(repository,target) {
-    const value=String(target || ''),at=value.indexOf('@routes:');
-    if(at<0)return value;
-    if(at>0)return value.slice(0,at)+' · '+targetName(repository,value.slice(at));
-    let keys=[];try{keys=JSON.parse(value.slice(8));}catch{}
+    const {screen,keys}=parseTarget(target);
+    if(!keys)return screen;
     const routes=(typeof M==='function' && M()?.backend_routes) || [];
-    const names=keys.map(k=>{const route=routes.find(r=>r.file+'::'+r.function===k || r.file===repository+'/'+k.split('::')[0] && r.function===k.split('::')[1]);
+    const names=keys.map(k=>{const route=routes.find(r=>routeKey(r,repository)===k);
       return route?(flowOf(route)?.name || reqName(route) || route.function):k.split('::').pop();});
-    const more=names.length>2?text(' 외 '+(names.length-2),' and '+(names.length-2)+' more'):'';
-    return names.slice(0,2).join(', ')+more+' · '+text('서버 요청','Server requests')+' '+keys.length;
+    return (screen?screen+' · ':'')+names.slice(0,2).join(', ')+moreText(names.length-2)+' · '+text('서버 요청','Server requests')+' '+keys.length;
   }
   const key = () => JSON.stringify([scope(), S.analysisChoice, S.loadToken]);
   const decode = value => typeof value === 'string' ? JSON.parse(value) : value;
