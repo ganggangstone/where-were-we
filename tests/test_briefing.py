@@ -11,6 +11,7 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import mapcore
 import project
 import briefing
+import ai_extract
 from test_multi_repo import sample
 
 class Briefing(unittest.TestCase):
@@ -55,7 +56,7 @@ class Briefing(unittest.TestCase):
             self.assertIn(f'Write explanations in {saved}; keep identifiers only in evidence quotes.',request['prompt'])
             self.assertEqual(request['record_arguments']['lang'],lang)
         # The Korean handoff keeps the no-refresh contract in Korean, without an English sentence.
-        self.assertIn('결과를 보여 주려고 refresh를 실행하지 마세요.',request_ko:=briefing.request('demo','','dev','ko')['handoff'])
+        self.assertIn(ai_extract.RETURN_TO_APP['ko'],request_ko:=briefing.request('demo','','dev','ko')['handoff'])
         self.assertNotIn('Do not call refresh',request_ko)
     def test_prompt_asks_for_the_user_visible_problem_and_a_new_wording_asks_again(self):
         prompt=self.request()['prompt']

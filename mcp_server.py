@@ -184,6 +184,8 @@ def impact(target: str, project: str = "", repository: str = "") -> str:
             if qualified in m.by_path:t=qualified
             else:return "No matching screen in repository " + repository
     rows = [(x["path"], r) for x, _ in m.visible() for r in m.requests(x["path"])]
+    from ai_extract import handler
+    def bare(r):return (None,{'key':handler(r),'name':m.req_name(r),'route':r,'btns':[]})  # a route no mapped screen sends
     untested_repositories = set()
     untested = []  # 이 답에 나온 서버 기능 중 테스트를 잇지 못한 것
     affected_files=set()
@@ -209,7 +211,7 @@ def impact(target: str, project: str = "", repository: str = "") -> str:
         screens |= set(fs)
         rs = [(p, r) for p, r in rows if r["route"]["file"] == t or t in (r["route"].get("services") or [])]
         present={r['key'] for _,r in rs}
-        rs += [(None,{'key':r['file']+'::'+str(r.get('function')),'name':m.req_name(r),'route':r,'btns':[]}) for r in m.m.get('backend_routes',[]) if (r['file']==t or t in r.get('services',[])) and r['file']+'::'+str(r.get('function')) not in present]
+        rs += [bare(r) for r in m.m.get('backend_routes',[]) if (r['file']==t or t in r.get('services',[])) and handler(r) not in present]
         o = m.owner_of(t)
         L.append(f"# 파일 {t}" + (f" — {o['name']}의 코드" if o else ""))
         if fs: L.append(f"닿는 화면 {len(fs)}: " + ", ".join(m.label(p) for p in fs[:20]) + (" …" if len(fs) > 20 else ""))
@@ -224,13 +226,13 @@ def impact(target: str, project: str = "", repository: str = "") -> str:
         if progs: L.append("서버를 거치지 않고 직접 쓰는 프로그램: " + ", ".join(progs))
         rs=[(p,r) for p,r in rows if t in (r['route'].get('tables') or [])]
         present={r['key'] for _,r in rs}
-        rs += [(None,{'key':r['file']+'::'+str(r['function']),'name':m.req_name(r),'route':r,'btns':[]}) for r in m.m.get('backend_routes',[]) if t in r.get('tables',[]) and r['file']+'::'+str(r['function']) not in present]
+        rs += [bare(r) for r in m.m.get('backend_routes',[]) if t in r.get('tables',[]) and handler(r) not in present]
         L += ["", "## 서버 기능"] + route_lines(rs)
     elif t.split(" ")[0].upper() in ("GET", "POST", "PUT", "PATCH", "DELETE"):
         meth, path = t.split(" ", 1)
         rs = [(p, r) for p, r in rows if r["route"]["method"] == meth.upper() and r["route"]["path"] == path.strip() and (not repository or r["route"].get("repository")==repository)]
         if not rs:
-            rs=[(None,{'key':r['file']+'::'+str(r['function']),'name':m.req_name(r),'route':r,'btns':[]}) for r in m.m.get('backend_routes',[]) if r['method']==meth.upper() and r['path']==path.strip() and (not repository or r.get('repository')==repository)]
+            rs=[bare(r) for r in m.m.get('backend_routes',[]) if r['method']==meth.upper() and r['path']==path.strip() and (not repository or r.get('repository')==repository)]
         if not repository and len({r['route'].get('repository') for _,r in rs})>1:raise ValueError('Ambiguous request; specify repository')
         screens.update(p for p,_ in rs if p)
         L.append(f"# 서버 기능 {t}"); L += route_lines(rs) or ["화면에서 부르는 곳이 없다."]
@@ -350,6 +352,7 @@ def change_briefing(project: str, repository: str = "", branch: str = "dev", lan
 
 @app.tool(description="이름으로 찾기: 화면·버튼·서버 기능 이름·주소·PR/이슈 번호. impact 에 넣을 대상을 고를 때 쓴다.")
 def find(query: str, project: str = "", repository: str = "") -> str:
+    from ai_extract import handler
     m = scoped_map(need(project), repository); q = query.lower().lstrip("#"); out = []
     for x, _ in m.visible():
         p = x["path"]
@@ -359,7 +362,7 @@ def find(query: str, project: str = "", repository: str = "") -> str:
     linked={r['key'] for x,_ in m.visible() for r in m.requests(x['path'])}
     for route in m.m.get('backend_routes',[]):
         if repository and route.get('repository')!=repository:continue
-        if route['file']+'::'+str(route.get('function')) in linked:continue
+        if handler(route) in linked:continue
         if q in str(route.get('function','')).lower() or q in route['path'].lower() or q in route.get('source_file',route['file']).lower():
             out.append(f"서버 기능 {m.req_name(route)} `{route['method']} {route['path']}` — {route['file']}")
     st = m.status

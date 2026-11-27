@@ -635,8 +635,8 @@ def _known_routes(selected,index,head):
     saved=selected.get('backend_routes',[]) if ai_extract.same(selected.get('commit'),head) else []
     service=index.get('service_flow') or {}
     servers=[{**r['server'],'method':r['method'],'path':r.get('server_path',r['path'])} for r in [*service.get('connections',[]),*service.get('registered_routes',[])] if r.get('server')]
-    rows=[{'key':r['file']+'::'+r['function'],'method':r.get('method',''),'path':r.get('path',''),'file':r['file']} for r in saved if r.get('mounted') and r.get('function')]
-    rows+=[{'key':r['file']+'::'+r['function'],'method':r['method'],'path':r['path'],'file':r['file']} for r in servers if r.get('function')]
+    rows=[{'key':ai_extract.handler(r),'method':r.get('method',''),'path':r.get('path',''),'file':r['file']} for r in saved if r.get('mounted') and r.get('function')]
+    rows+=[{'key':ai_extract.handler(r),'method':r['method'],'path':r['path'],'file':r['file']} for r in servers if r.get('function')]
     return list({r['key']:r for r in reversed(rows)}.values())[::-1]
 
 def _spots_of(scope,payload):

@@ -6,7 +6,7 @@
 2. collect.py 로 PR·브랜치·이슈를 모으고 AI 가 적은 것의 근거 줄을 대조한다.
 3. 설정에서 고른 기준 시각 뒤에 달라진 것을 changes.json 에 한 건으로 남긴다.
 """
-import hashlib, json, os, subprocess, sys
+import json, os, subprocess, sys
 from datetime import datetime, timezone
 from pathlib import Path
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
@@ -125,7 +125,7 @@ for branch, pinned in PINNED.items():
     # of the Git commits. Use the same effective branch details as mapcore.Map.
     details=project_store.branch_bundle({branch:cur,**{k:project_store.read(Path(HOME)/(k+'.json')) for k in ('groups','flows')}},branch)
     inputs=[os.path.realpath(REPO),base,pinned,EXTRACTOR,details.get('groups'),details.get('flows')]
-    key=hashlib.sha256(json.dumps(inputs,sort_keys=True,ensure_ascii=False).encode()).hexdigest()
+    key=project_store.digest(inputs)
     comparison_keys[branch]=key
     previous_delta=(previous_result.get('evidence') or {}).get('structure',{}).get(branch)
     if previous_delta is not None and (previous_result.get('comparison_keys') or {}).get(branch)==key:

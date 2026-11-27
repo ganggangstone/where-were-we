@@ -34,7 +34,7 @@ def _tests_conf(raw):return {**mapcore.TESTS_DEFAULT,'records':[],**(raw.get('te
 def git(repo,*args):
     return subprocess.run(['git','-C',repo,*args],capture_output=True,text=True,check=True).stdout
 
-def digest(value):return hashlib.sha256(json.dumps(value,sort_keys=True,ensure_ascii=False).encode()).hexdigest()
+digest=project.digest
 def route_id(r):
     # Endpoint identity: one per method/path/registration/handler/mount; the handler flow (file::function) is shared.
     mount=next((d['file'] for d in r.get('dependencies') or [] if isinstance(d,dict) and d.get('file')),'')
@@ -295,7 +295,7 @@ def apply_result(raw,repo,refs,branch,lang,response,commit,layout,configuration=
     updated=copy.deepcopy(raw)
     if current and current.get('commit')!=commit:updated[branch+'.prev']=current
     for route in m['backend_routes']:
-        route['flow']=flows['routes'].get(route['file']+'::'+route['function'])
+        route['flow']=flows['routes'].get(handler(route))
     updated[branch]=m
     return updated,f"AI map: {len(m['screens'])} screens, {len(m['backend_routes'])} requests; {m['analysis']['rejected']} rejected evidence items."
 
@@ -738,7 +738,7 @@ def import_lines(lines):
     return out
 
 def screen_digests(inputs):return {x['path']:digest([x['title'],x['buttons']]) for x in inputs['screens']}
-def route_keys(inputs):return [r['file']+'::'+r['function'] for r in inputs['routes']]
+def route_keys(inputs):return [handler(r) for r in inputs['routes']]
 
 def task_input(raw,task,branch,target,repo=None,head=None):
     raw=project.branch_bundle(raw,branch)
@@ -750,7 +750,7 @@ def task_input(raw,task,branch,target,repo=None,head=None):
         # Delta: only screens whose metadata changed and routes without a saved name; removals are applied by the server.
         old=previous['inputs'];changed=[p for p,d in screen_digests(inputs).items() if old['screens'].get(p)!=d]
         new=[k for k in route_keys(inputs) if k not in set(old['routes'])]
-        return {'screens':[x for x in inputs['screens'] if x['path'] in changed],'routes':[r for r in inputs['routes'] if r['file']+'::'+r['function'] in new],
+        return {'screens':[x for x in inputs['screens'] if x['path'] in changed],'routes':[r for r in inputs['routes'] if handler(r) in new],
                 'previous_groups':[{'name':g['name'],'description':g.get('description','')} for g in previous.get('groups',[])],
                 'changed_screens':changed,'new_routes':new}
     if task=='system':
@@ -839,7 +839,7 @@ def screen_step_rule(step,route,own):
 def task_snapshot(raw,task,branch):
     raw=project.branch_bundle(raw,branch)
     keys={'groups':['groups'],'system':['system','system.ai','jobs'],'jobs':['system','jobs'],'steps':['flows']}[task]
-    return hashlib.sha256(json.dumps({k:raw.get(k) for k in [branch,*keys]},sort_keys=True,ensure_ascii=False).encode()).hexdigest()
+    return digest({k:raw.get(k) for k in [branch,*keys]})
 
 def task_context(name,task,branch,repository):
     if task not in TASK_SCHEMAS:raise ValueError('Choose groups, system, jobs or steps')

@@ -23,6 +23,7 @@ LOGIN = r'[a-zA-Z0-9][a-zA-Z0-9-]{0,38}'  # a GitHub login
 STATUS_LISTS = ('open_prs','merged_prs','branches','worktrees','issues','overlaps')
 
 def now():return datetime.now(timezone.utc).isoformat()
+def digest(value):return hashlib.sha256(json.dumps(value,sort_keys=True,ensure_ascii=False).encode()).hexdigest()
 def home(name):
     import mapcore
     if not isinstance(name,str) or not name or name in ('.','..') or any(x in name for x in ('/','\\','\x00')):
@@ -322,7 +323,7 @@ def analysis_results(raw,branch):
     def metadata(value,worded=False):
         if not value or value.get('source')!='ai':return None
         stamp={key:value.get(key) for key in ('generated_at','source','provider','commit','branch','language')}
-        return {'version':hashlib.sha256(json.dumps(stamp,sort_keys=True,ensure_ascii=False).encode()).hexdigest(),
+        return {'version':digest(stamp),
                 'commit':value.get('commit'),'generated_at':value.get('generated_at'),'language':value.get('language'),'configuration':value.get('configuration'),
                 'stale':bool(value.get('stale') or worded and (value.get('wording')!=mapcore.WORDING or value.get('steps_wording',1)!=mapcore.STEPS_WORDING) or (current.get('analysis') or {}).get('stale') or
                              value.get('commit') and current.get('commit') and not
@@ -807,7 +808,7 @@ def record_test(name,rid,route,file,line,quote):
         source_file=file[len(repo['id'])+1:] if file.startswith(repo['id']+'/') else file
         result=subprocess.run(['git','-C',repo['path'],'show',m['commit']+':'+source_file],capture_output=True,text=True,check=True)
         if line<1 or not __import__('mapcore').quote_near(result.stdout.splitlines(),line,quote):raise ValueError('Test evidence does not match this repository snapshot')
-        value=raw.get('tests') or {};entry={'route':hits[0]['file']+'::'+hits[0]['function'],'file':source_file,'line':line,'quote':quote}
+        value=raw.get('tests') or {};entry={'route':__import__('ai_extract').handler(hits[0]),'file':source_file,'line':line,'quote':quote}
         if entry not in value.setdefault('records',[]):value['records'].append(entry)
         raw['tests']=value
         return 'Saved verified test evidence for '+repo['id']
