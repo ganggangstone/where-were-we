@@ -584,7 +584,9 @@ def _plan(value):
         missing=[k for k in keys if not (results.get(k) and not results[k]['stale'] and results[k].get('language')==lang
                     and ai_extract.same(results[k].get('commit'),head) and results[k].get('configuration')==pin['configuration'])]
         if missing:
-            selected='@routes:'+json.dumps(missing,ensure_ascii=False) if chosen=='steps' else target['target']
+            # A whole screen keeps its target, so the task still knows the screen's own files (callers first, their uses).
+            # ponytail: a screen with only some routes missing asks those by key, without the screen's uses.
+            selected='@routes:'+json.dumps(missing,ensure_ascii=False) if chosen=='steps' and missing!=list(keys) else target['target']
             plan['tasks'].append({'repository':rid,'task':chosen,'target':selected,'before':{k:results.get(k) for k in missing},**pin})
     return plan
 
@@ -1241,7 +1243,7 @@ def _strict_result(task,data,repo,commit,request=None,raw=None):
                 if not evidence(step) or not step.get('text'):fail()
         if request:
             for key,value in routes.items():
-                screen={c['file'] for c in request['input']['routes'][key].get('callers',[])}
+                screen=ai_extract.screen_files(request['input']['routes'][key])
                 if any(s.get('lane')=='화면' and s.get('file') not in screen for s in rows(value,'steps')):fail('A screen step cited code other than the screen code that sends the request')
     elif task=='jobs':
         _strict_jobs(data,(request or {}).get('input',{}).get('node',{}).get('code',[]),raw,evidence,fail)
@@ -1775,6 +1777,7 @@ DETAIL_BYTES = 96 * 1024       # source and evidence text of one detail call
 ROUTE_BYTES = 16 * 1024        # source of one route in a steps call
 MAX_STEPS_CALLS = 3
 CALLER_LINES = 12             # lines on each side of a screen call site in a steps call
+USE_LINES = 8                 # lines on each side of a place in the screen's files that uses that call site's function
 MAX_JOB_FILES = 8
 MAX_BRIEFING_CALLS = 4
 BRIEF_BODY_CHARS = 3000        # of each PR or issue body; a quote from the kept prefix is still a quote of the full text
@@ -1908,6 +1911,7 @@ def _detail(value,task,request,call,validate):
             screen={}
             for c in route.get('callers',[]):
                 if c['file']!=route['file']:screen.setdefault(c['file'],[]).append((max(1,c['line']-CALLER_LINES),c['line']+CALLER_LINES))
+            for u in route.get('uses',[]):screen.setdefault(u['file'],[]).append((max(1,u['line']-USE_LINES),u['line']+USE_LINES))
             picks[key]=[(route['file'],spans),*screen.items(),*((f,60) for f in dict.fromkeys([*(route.get('services') or []),*imports.get(route['file'],[])]) if f!=route['file'])]
         lines={f['file']:f['lines'] for f in export_source(repo,commit,selected={commit:{f for p in picks.values() for f,_ in p}})[0]['files']}
         # A small service or imported file goes whole; a large one only its signal windows.

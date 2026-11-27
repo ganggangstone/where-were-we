@@ -719,6 +719,8 @@ TASK_SCHEMAS={
 }
 
 MAX_CALLERS = 3  # screen call sites given with each route of a steps task
+MAX_USES = 3  # places in the selected screen's files that use the function holding a call site
+MIN_USE_NAME = 4  # shorter function names match too much text to point at a use
 
 def screen_digests(inputs):return {x['path']:digest([x['title'],x['buttons']]) for x in inputs['screens']}
 def route_keys(inputs):return [r['file']+'::'+r['function'] for r in inputs['routes']]
@@ -747,7 +749,7 @@ def task_input(raw,task,branch,target,repo=None,head=None):
         if not node or not node.get('code'):raise ValueError('Choose a node with repository code')
         return {'node':node,'routes':list(routes.values())}
     if not target:raise ValueError('Choose a screen or route target')
-    refs=set()
+    refs=set();screens=[]
     if target.startswith('@routes:'):
         keys=json.loads(target[len('@routes:'):])
         if not isinstance(keys,list) or not keys or any(not isinstance(k,str) or k not in routes for k in keys):
@@ -762,10 +764,41 @@ def task_input(raw,task,branch,target,repo=None,head=None):
     if not keys:raise ValueError('No server route targets in this snapshot')
     def callers(r):
         # Screen code that sends this request (the map's call sites): the selected screen's first, at most MAX_CALLERS.
-        sites={(f['file'],c['line']):(f['file'],f['name']) not in refs for f in m['api_functions'] for c in f.get('calls',[])
+        sites={(f['file'],c['line']):((f['file'],f['name']) not in refs,f['name']) for f in m['api_functions'] for c in f.get('calls',[])
                if isinstance(c.get('line'),int) and any((b.get('file'),b.get('line'))==(r['file'],r['line']) for b in c.get('backend',[]))}
-        return [{'file':f,'line':l} for f,l in sorted(sites,key=lambda s:(sites[s],s))[:MAX_CALLERS]]
-    return {'routes':{key:{**{k:routes[key].get(k) for k in ('file','function','method','path','line')},'callers':callers(routes[key])} for key in keys}}
+        return [{'file':f,'line':l,'function':sites[(f,l)][1],'selected':not sites[(f,l)][0]} for f,l in sorted(sites,key=lambda s:(sites[s][0],s))[:MAX_CALLERS]]
+    via={}
+    for s in screens:
+        for f in s.get('api_functions',[]):
+            if f.get('via') and f['via']!=f['file']:via.setdefault((f['file'],f['name']),[]).append(f['via'])
+    cache={}
+    def uses(cs):
+        # One hop up: where the selected screen's own files use the function holding a call site (word match on its name).
+        if not repo or not head:return []
+        out=[]
+        for c in cs:
+            name=c['function']
+            if not c['selected'] or len(name)<MIN_USE_NAME or not re.fullmatch(r'[A-Za-z_$][\w$]*',name):continue
+            word=re.compile(r'(?<![\w$])'+re.escape(name)+r'(?![\w$])')
+            for file in sorted(set(via.get((c['file'],name),[]))):
+                if file not in cache:
+                    try:cache[file]=git(repo,'show',head+':'+file).splitlines()
+                    except Exception:cache[file]=[]
+                for n,line in enumerate(cache[file],1):
+                    # ponytail: an import line names the function without using it; other declaration forms still count.
+                    if word.search(line) and not re.match(r'\s*(import|from)\b',line) and {'file':file,'line':n} not in out:
+                        out.append({'file':file,'line':n})
+                        if len(out)==MAX_USES:return out
+        return out
+    def route_input(r):
+        cs=callers(r)
+        return {**{k:r.get(k) for k in ('file','function','method','path','line')},
+                'callers':[{'file':c['file'],'line':c['line']} for c in cs],'uses':uses(cs)}
+    return {'routes':{key:route_input(routes[key]) for key in keys}}
+
+def screen_files(route):
+    """Files a 화면 step may cite: the screen code that sends the request and the screen code that uses it."""
+    return {c['file'] for c in [*route.get('callers',[]),*route.get('uses',[])]}
 
 def task_snapshot(raw,task,branch):
     raw=project.branch_bundle(raw,branch)
@@ -798,9 +831,12 @@ def task_request(name,task,branch='dev',lang='ko',repository='',target='',overvi
             'steps':'Describe ordered request steps for the supplied route keys only. Each step needs its own file, exact line and quote. Include service calls and return values. '
                      'Give each step the lane where it happens, written exactly as one of these words in any language: "화면" (something the user sees or does on the screen), "서버" (work the server does, such as checks and calculations), '
                      '"저장소" (reading or writing stored data), "외부" (calling an outside service). '
-                     'Each route lists callers: the screen code that sends this request (at most '+str(MAX_CALLERS)+' places; the selected screen\'s first). '
-                     'Write "화면" steps only from those caller files and only for what their lines show: what the user does that sends the request, before the server steps, '
-                     'and what the screen does with the answer, after them. Never invent screen behaviour; with no callers or no such lines, write no "화면" step. '
+                     'Each route lists callers: the screen code that sends this request (at most '+str(MAX_CALLERS)+' places; the selected screen\'s first), '
+                     'and uses: places in the selected screen\'s own files that use the function holding a caller (at most '+str(MAX_USES)+' places). '
+                     'Write "화면" steps only from those caller and use files and only for what their lines show. '
+                     'Take what sets off the request (before the server steps) and what the screen does with the answer (after them) from the use lines; '
+                     'state what the user does only when a shown line shows it (such as a button, a form or opening the page), otherwise say only that the screen sends the request. '
+                     'Never invent screen behaviour; with no callers or no such lines, write no "화면" step. '
                      'Set uncertain:true only when the quoted lines leave the meaning of that step open; a step the quote states directly is not uncertain. Keep route keys unchanged.'}[task]
         schema=copy.deepcopy(TASK_SCHEMAS[task])
         if overview and task=='system':
@@ -975,7 +1011,7 @@ def task_result(raw,task,branch,target,data,repo,commit,lang,configuration=None,
             for step in rows(got,'steps'):
                 ev=evidence({**step,'file':step.get('file',route['file'])})
                 # A screen step stands only on the screen code that sends this request.
-                if ev and step.get('lane')=='화면' and ev['file'] not in {c['file'] for c in route.get('callers',[])}:continue
+                if ev and step.get('lane')=='화면' and ev['file'] not in screen_files(route):continue
                 if ev and text(step,'text'):steps.append({**ev,'lane':step.get('lane') if step.get('lane') in ('서버','저장소','외부','화면') else '서버',
                                                          'text':step['text'],'uncertain':bool(step.get('uncertain'))})
             reason=text(got,'unknown').strip()

@@ -58,13 +58,19 @@ Detail results are saved through the same checks as the MCP path (`ai_extract.ta
   registration line, then the screen code that sends the request, then the route's service files and the files the
   handler file imports, each up to 60 lines around their source signals. The screen code is the map's call sites of
   the route (`callers` in the route input, `ai_extract.task_input`): the selected screen's first, at most
-  `MAX_CALLERS` (3), each `CALLER_LINES` (12) lines on either side of the call. At most `ROUTE_BYTES` (16 KB) per
-  route and `DETAIL_BYTES` (96 KB) per call. Routes that do not fit `MAX_STEPS_CALLS` calls, and routes an answer
-  leaves out, are saved with `steps: []` and an `unknown` text saying their steps are not established.
-  The model writes 「화면」 (screen) steps only from those caller lines: what the user does that sends the request,
-  and what the screen does with the answer. A screen step citing any other file is invalid in the app run and is
-  dropped on the MCP path; with no callers there are no screen steps. The step picture opens with a screen step the
-  app adds only when the saved steps do not start with one.
+  `MAX_CALLERS` (3), each `CALLER_LINES` (12) lines on either side of the call. When a call site of the selected
+  screen sits in a function the screen's own files use (the map's `via` file of that screen's api function), the route
+  input also lists `uses`: lines in those files that name the function as a whole word, skipping import lines, at
+  most `MAX_USES` (3) per route, each `USE_LINES` (8) lines on either side. Names shorter than `MIN_USE_NAME` (4)
+  are not searched, and a target of route keys has no selected screen and no uses. A screen whose routes are all
+  missing is asked with the screen as its target, so its uses are known. At most `ROUTE_BYTES` (16 KB) per route and
+  `DETAIL_BYTES` (96 KB) per call, in at most `MAX_STEPS_CALLS` (3) calls. Routes that do not fit, and routes an
+  answer leaves out, are saved with `steps: []` and an `unknown` text saying their steps are not established.
+  The model writes 「화면」 (screen) steps only from the caller and use lines: what sets off the request and what
+  the screen does with the answer come from the use lines, and what the user does is stated only when a shown line
+  shows it; otherwise the step says only that the screen sends the request. A screen step citing any other file is
+  invalid in the app run and is dropped on the MCP path; with no callers there are no screen steps. The step picture
+  opens with a screen step the app adds only when the saved steps do not start with one.
 - **Jobs.** Up to `MAX_JOB_FILES` (8) files in the program's code folders, ranked by source signals (entry points,
   schedulers, workers first), each up to 160 lines around its signals and `DETAIL_BYTES / 8`. The known routes go
   along as metadata. The saved `unknown` says how many of the program's files were read (「프로그램 파일 M개 중 N개만

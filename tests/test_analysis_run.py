@@ -432,7 +432,7 @@ else:
         self.seed_map()
         req=ai_extract.task_request('demo','steps','dev','en','service','/items')
         self.assertEqual(req['input']['routes'][self.ROUTE]['callers'],[{'file':'pages/items.vue','line':2}])
-        self.assertIn('"화면" steps only from those caller files',req['prompt'])
+        self.assertIn('"화면" steps only from those caller and use files',req['prompt'])
         server={'file':'server/items.go','line':4,'quote':'router.POST("/items", SaveItem)','lane':'화면','text':'Pretend screen'}
         screen={'file':'pages/items.vue','line':2,'quote':'fetch("/items",','lane':'화면','text':'The screen sends the item'}
         ai_extract.task_record(**req['record_arguments'],result_json=json.dumps({'routes':{self.ROUTE:{'name':'Save item','steps':[server,screen]}}}))
@@ -446,6 +446,52 @@ else:
         with patch.object(project,'branch_bundle',lambda raw,branch:raw):
             got=ai_extract.task_input({'dev':m},'steps','dev','/chosen')['routes'][self.ROUTE]['callers']
         self.assertEqual(got,[{'file':'pages/p4.vue','line':5},{'file':'pages/p0.vue','line':1},{'file':'pages/p1.vue','line':2}])
+
+    def test_uses_are_the_selected_screen_lines_that_use_the_caller_function(self):
+        (self.repo/'pages/api').mkdir()
+        (self.repo/'pages/api/orders.ts').write_text('export function loadOrders() {\n  return api.get("/items")\n}\nexport function get() { return api.get("/items") }\n')
+        (self.repo/'pages/orders.vue').write_text('import { loadOrders, get } from "./api/orders"\n'+'const rows = await loadOrders()\n'*4+'get()\nloadOrdersLater()\n')
+        self.git('add','.');self.git('commit','-qm','Wrapper and screen');head=self.git('rev-parse','HEAD').strip()
+        backend=[{'file':'server/items.go','line':4}]
+        m={'api_functions':[{'file':'pages/api/orders.ts','name':'loadOrders','calls':[{'line':2,'backend':backend}]},
+                            {'file':'pages/api/orders.ts','name':'get','calls':[{'line':4,'backend':backend}]}],
+           'screens':[{'path':'/orders','api_functions':[{'file':'pages/api/orders.ts','name':n,'via':'pages/orders.vue'} for n in ('loadOrders','get')]}],
+           'backend_routes':[{'file':'server/items.go','line':4,'function':'SaveItem','method':'POST','path':'/items','mounted':True}]}
+        with patch.object(project,'branch_bundle',lambda raw,branch:raw):
+            route=ai_extract.task_input({'dev':m},'steps','dev','/orders',str(self.repo),head)['routes'][self.ROUTE]
+            # The import line and a longer name are not uses; a name under MIN_USE_NAME is not searched; at most MAX_USES.
+            self.assertEqual(route['uses'],[{'file':'pages/orders.vue','line':n} for n in (2,3,4)])
+            self.assertEqual(ai_extract.screen_files(route),{'pages/api/orders.ts','pages/orders.vue'})
+            self.assertEqual(ai_extract.task_input({'dev':m},'steps','dev','/orders')['routes'][self.ROUTE]['uses'],[])
+            self.assertEqual(ai_extract.task_input({'dev':m},'steps','dev','@routes:["server/items.go::SaveItem"]',str(self.repo),head)['routes'][self.ROUTE]['uses'],[])
+
+    def test_steps_read_the_screen_lines_that_use_the_request_and_screen_steps_may_cite_them(self):
+        (self.repo/'pages/list.vue').write_text('<form @submit="onSave">\nfunction onSave() { saveItemNow().then(showSaved) }\n</form>\n')
+        (self.repo/'pages/other.vue').write_text('<p>saveItemNow</p>\n')
+        self.git('add','.');self.git('commit','-qm','Screen that uses the request');self.seed_map()
+        raw=self.raw();m=raw['dev']
+        for f in m['api_functions']:f['name']='saveItemNow'
+        for s in m['screens']:s['api_functions']=[{**f,'name':'saveItemNow','via':'pages/list.vue'} for f in s['api_functions']]
+        project._publish('demo','service',raw,{},collection=False)
+        sizes={}
+        for lane_file,expected in (('router.POST','failed'),('saveItemNow().then','completed')):
+            with self.subTest(screen_step=lane_file):
+                before=self.raw();calls=[]
+                def executor(prompt,**kwargs):
+                    p=self.packet(prompt);calls.append(p);sizes['with']=len(prompt.encode())
+                    sizes['without']=len(prompt.encode())-len(json.dumps([s for s in p['sources'] if s['file']=='pages/list.vue']).encode())
+                    self.assertEqual(p['input']['routes'][self.ROUTE]['uses'],[{'file':'pages/list.vue','line':2}])
+                    self.assertIn('pages/list.vue',{s['file'] for s in p['sources']});self.assertNotIn('pages/other.vue',{s['file'] for s in p['sources']})
+                    return {'routes':{self.ROUTE:{'name':'Save item','steps':[{'ref':self.ref(p,lane_file),'lane':'화면','text':'Saving the form sends the item'},
+                        {'ref':self.ref(p,'db.Table'),'lane':'저장소','text':'Store the item'}]}}}
+                done=analysis_run.run(self.prepare(intent={'task':'steps','targets':[{'repository':'service','target':'/items'}]})['id'],executor)
+                self.assertEqual(done['state'],expected,done.get('error'))
+                if expected=='failed':self.assertEqual(len(calls),2);self.assertEqual(self.raw(),before);continue
+                steps=self.raw()['dev']['task_outputs']['flows']['routes'][self.ROUTE]['steps']
+                self.assertEqual([(x['lane'],x['file'],x['line']) for x in steps],[('화면','pages/list.vue',2),('저장소','server/items.go',2)])
+        print('\nsteps packet bytes without uses',sizes['without'],'with uses',sizes['with'],file=sys.stderr)
+        req=ai_extract.task_request('demo','steps','dev','en','service','/items')
+        self.assertIn('state what the user does only when a shown line shows it',req['prompt'])
 
     def test_jobs_one_bounded_call_with_files_read_note(self):
         for i in range(20):(self.repo/f'server/pad{i:02}.txt').write_text('ordinary padding line\n'*600)
