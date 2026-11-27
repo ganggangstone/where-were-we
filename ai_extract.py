@@ -722,6 +722,21 @@ MAX_CALLERS = 3  # screen call sites given with each route of a steps task
 MAX_USES = 3  # places in the selected screen's files that use the function holding a call site
 MIN_USE_NAME = 4  # shorter function names match too much text to point at a use
 
+IMPORT_START = re.compile(r'\s*(?:#\s*)?(?:import|from|require|use|using|include)\b(?!\s*[=(.:,)\]])|.*\brequire\s*\(')
+LIST_ITEM = re.compile(r'\s*[\w$]+(?:\s+as\s+[\w$]+)?\s*,?\s*$')
+MAX_IMPORT_LINES = 60  # an import statement left open longer than this (a bracket in a string) stops being skipped
+
+def import_lines(lines):
+    """Line numbers of import statements (import/from/require/use/using/include), followed across lines
+    while a bracket stays open or a line ends with a comma or backslash. No language parsing."""
+    out=set();depth=0;open_at=0
+    for n,line in enumerate(lines,1):
+        if not open_at and not IMPORT_START.match(line):continue
+        open_at=open_at or n;out.add(n)
+        depth+=sum(line.count(c) for c in '([{')-sum(line.count(c) for c in ')]}')
+        if depth<=0 and not line.rstrip().endswith((',','\\')) or n-open_at>=MAX_IMPORT_LINES:open_at=0;depth=0
+    return out
+
 def screen_digests(inputs):return {x['path']:digest([x['title'],x['buttons']]) for x in inputs['screens']}
 def route_keys(inputs):return [r['file']+'::'+r['function'] for r in inputs['routes']]
 
@@ -749,18 +764,21 @@ def task_input(raw,task,branch,target,repo=None,head=None):
         if not node or not node.get('code'):raise ValueError('Choose a node with repository code')
         return {'node':node,'routes':list(routes.values())}
     if not target:raise ValueError('Choose a screen or route target')
+    # A target is a screen path, '@routes:' + route keys, or a screen path + '@routes:' + some of that screen's route keys.
+    screen,mark,listed=target.partition('@routes:') if '@routes:' in target else (target,'','')
     refs=set();screens=[]
-    if target.startswith('@routes:'):
-        keys=json.loads(target[len('@routes:'):])
-        if not isinstance(keys,list) or not keys or any(not isinstance(k,str) or k not in routes for k in keys):
-            raise ValueError('Choose known route targets')
-    else:
-        screens=[s for s in m['screens'] if s['path'] in (target,'/m'+target)]
+    if screen:
+        screens=[s for s in m['screens'] if s['path'] in (screen,'/m'+screen)]
         if not screens:raise ValueError('Choose a known screen target')
         refs={(f['file'],f['name']) for s in screens for f in s.get('api_functions',[])}
         hits={(b['file'],b['line']) for f in m['api_functions'] if (f['file'],f['name']) in refs
               for c in f.get('calls',[]) for b in c.get('backend',[])}
         keys=[key for key,r in routes.items() if (r['file'],r['line']) in hits]
+    if mark:
+        own=keys if screen else list(routes)
+        keys=json.loads(listed)
+        if not isinstance(keys,list) or not keys or any(not isinstance(k,str) or k not in own for k in keys):
+            raise ValueError('Choose known route targets')
     if not keys:raise ValueError('No server route targets in this snapshot')
     def callers(r):
         # Screen code that sends this request (the map's call sites): the selected screen's first, at most MAX_CALLERS.
@@ -772,10 +790,16 @@ def task_input(raw,task,branch,target,repo=None,head=None):
         for f in s.get('api_functions',[]):
             if f.get('via') and f['via']!=f['file']:via.setdefault((f['file'],f['name']),[]).append(f['via'])
     cache={}
-    def uses(cs):
+    # Requests another screen also reaches (through any function) get callers only: their steps are shown under every such screen.
+    elsewhere={(f['file'],f['name']) for s in m['screens'] if s not in screens for f in s.get('api_functions',[])}
+    def shared(r):
+        return any((f['file'],f['name']) in elsewhere for f in m['api_functions'] for c in f.get('calls',[])
+                   if any((b.get('file'),b.get('line'))==(r['file'],r['line']) for b in c.get('backend',[])))
+    def uses(r,cs):
         # One hop up: where the selected screen's own files use the function holding a call site (word match on its name).
-        if not repo or not head:return []
-        out=[]
+        # ponytail: a shared request's screen steps stop at the call site; per-screen steps (stored per screen) would go deeper.
+        if not repo or not head or shared(r):return []
+        clean=[];vague=[]
         for c in cs:
             name=c['function']
             if not c['selected'] or len(name)<MIN_USE_NAME or not re.fullmatch(r'[A-Za-z_$][\w$]*',name):continue
@@ -784,16 +808,16 @@ def task_input(raw,task,branch,target,repo=None,head=None):
                 if file not in cache:
                     try:cache[file]=git(repo,'show',head+':'+file).splitlines()
                     except Exception:cache[file]=[]
+                skip=import_lines(cache[file])
                 for n,line in enumerate(cache[file],1):
-                    # ponytail: an import line names the function without using it; other declaration forms still count.
-                    if word.search(line) and not re.match(r'\s*(import|from)\b',line) and {'file':file,'line':n} not in out:
-                        out.append({'file':file,'line':n})
-                        if len(out)==MAX_USES:return out
-        return out
+                    if n in skip or not word.search(line):continue
+                    # A bare name in a list (an import form not recognised, an export list) may not be a use: it comes after clear uses.
+                    (vague if LIST_ITEM.match(line) else clean).append({'file':file,'line':n})
+        return [u for i,u in enumerate(clean+vague) if u not in (clean+vague)[:i]][:MAX_USES]
     def route_input(r):
         cs=callers(r)
         return {**{k:r.get(k) for k in ('file','function','method','path','line')},
-                'callers':[{'file':c['file'],'line':c['line']} for c in cs],'uses':uses(cs)}
+                'callers':[{'file':c['file'],'line':c['line']} for c in cs],'uses':uses(r,cs)}
     return {'routes':{key:route_input(routes[key]) for key in keys}}
 
 def screen_files(route):

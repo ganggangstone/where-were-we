@@ -493,6 +493,91 @@ else:
         req=ai_extract.task_request('demo','steps','dev','en','service','/items')
         self.assertIn('state what the user does only when a shown line shows it',req['prompt'])
 
+    def wrapper_map(self,screens):
+        """A wrapper loadOrders in pages/api/orders.ts sending SaveItem, used by the given screens through pages/<screen>.vue."""
+        backend=[{'file':'server/items.go','line':4}]
+        return {'api_functions':[{'file':'pages/api/orders.ts','name':'loadOrders','calls':[{'line':2,'backend':backend}]}],
+                'screens':[{'path':'/'+n,'api_functions':[{'file':'pages/api/orders.ts','name':'loadOrders','via':f'pages/{n}.vue'}]} for n in screens],
+                'backend_routes':[{'file':'server/items.go','line':4,'function':'SaveItem','method':'POST','path':'/items','mounted':True}]}
+
+    def test_multi_line_imports_are_not_uses_and_bare_list_names_come_last(self):
+        (self.repo/'pages/api').mkdir()
+        (self.repo/'pages/api/orders.ts').write_text('export function loadOrders() {\n  return api.get("/items")\n}\n')
+        (self.repo/'pages/orders.vue').write_text('import {\n  loadOrders,\n  other\n} from "./api/orders"\nfrom x import (\n    loadOrders,\n)\n'
+                                                  'const { loadOrders: alias } = require("./api")\nuse orders::{\n    loadOrders,\n};\n'
+                                                  'export {\n  loadOrders,\n}\nconst rows = await loadOrders()\nwatch(id, () => loadOrders())\n')
+        self.git('add','.');self.git('commit','-qm','Screen with multi-line imports');head=self.git('rev-parse','HEAD').strip()
+        with patch.object(project,'branch_bundle',lambda raw,branch:raw):
+            route=ai_extract.task_input({'dev':self.wrapper_map(['orders'])},'steps','dev','/orders',str(self.repo),head)['routes'][self.ROUTE]
+        # Lines 2, 6, 8 and 10 sit in import statements; line 13 is a bare name in an export list, kept after the clear uses.
+        self.assertEqual(route['uses'],[{'file':'pages/orders.vue','line':n} for n in (15,16,13)])
+
+    def test_a_request_another_screen_also_reaches_gets_callers_only(self):
+        (self.repo/'pages/api').mkdir()
+        (self.repo/'pages/api/orders.ts').write_text('export function loadOrders() {\n  return api.get("/items")\n}\n')
+        for n in ('orders','report'):(self.repo/f'pages/{n}.vue').write_text('const rows = await loadOrders()\n')
+        self.git('add','.');self.git('commit','-qm','Two screens on one wrapper');head=self.git('rev-parse','HEAD').strip()
+        with patch.object(project,'branch_bundle',lambda raw,branch:raw):
+            alone=ai_extract.task_input({'dev':self.wrapper_map(['orders'])},'steps','dev','/orders',str(self.repo),head)['routes'][self.ROUTE]
+            both=ai_extract.task_input({'dev':self.wrapper_map(['orders','report'])},'steps','dev','/orders',str(self.repo),head)['routes'][self.ROUTE]
+            m=self.wrapper_map(['orders']);m['api_functions'].append({'file':'pages/api/report.ts','name':'fetchReport','calls':[{'line':1,'backend':[{'file':'server/items.go','line':4}]}]})
+            m['screens'].append({'path':'/report','api_functions':[{'file':'pages/api/report.ts','name':'fetchReport'}]})
+            other=ai_extract.task_input({'dev':m},'steps','dev','/orders',str(self.repo),head)['routes'][self.ROUTE]
+        self.assertEqual(alone['uses'],[{'file':'pages/orders.vue','line':1}])
+        # Saved steps of a request show under every screen that sends it, so only its call sites may stand for the screen.
+        self.assertEqual(both['uses'],[]);self.assertEqual(other['uses'],[])
+        self.assertEqual(ai_extract.screen_files(both),{'pages/api/orders.ts'})
+
+    def two_request_screen(self):
+        """/items sends SaveItem and Other from pages/list.vue through the wrapper saveItemNow."""
+        (self.repo/'server/other.go').write_text('func Other() {}\nrouter.GET("/other", Other)\n')
+        (self.repo/'pages/items.vue').write_text('<button @click="saveItem">Save item</button>\nfetch("/items", {method:"POST"})\nfetch("/other")\n')
+        (self.repo/'pages/list.vue').write_text('<form @submit="onSave">\n'+'<p>padding line of the screen</p>\n'*30+'function onSave() { saveItemNow().then(showSaved) }\n</form>\n')
+        self.git('add','.');self.git('commit','-qm','Screen with two requests')
+        self.data['screens'][0]['calls'].append({'file':'pages/items.vue','line':3,'quote':'fetch("/other")','method':'GET','path':'/other'})
+        self.data['backend_routes'].append({'file':'server/other.go','line':2,'quote':'router.GET("/other", Other)','method':'GET','path':'/other','function':'Other'})
+        self.seed_map();raw=self.raw();m=raw['dev']
+        for f in m['api_functions']:f['name']='saveItemNow'
+        for s in m['screens']:s['api_functions']=[{**f,'name':'saveItemNow','via':'pages/list.vue'} for f in s['api_functions']]
+        project._publish('demo','service',raw,{},collection=False)
+
+    def test_a_partly_fresh_screen_asks_its_missing_requests_with_the_screen_uses(self):
+        self.two_request_screen();other='server/other.go::Other'
+        done=analysis_run.run(self.steps()['id'],self.fake);self.assertEqual(done['state'],'completed',done.get('error'))
+        value=self.prepare(intent={'task':'steps','targets':[{'repository':'service','target':'/items'}]})
+        self.assertEqual([t['target'] for t in value['tasks']],['/items@routes:'+json.dumps([other])])
+        req=ai_extract.task_request('demo','steps','dev','en','service',value['tasks'][0]['target'])
+        self.assertEqual(list(req['input']['routes']),[other])
+        self.assertEqual(req['input']['routes'][other]['uses'],[{'file':'pages/list.vue','line':32}])
+        with self.assertRaisesRegex(ValueError,'route targets'):ai_extract.task_request('demo','steps','dev','en','service','/items@routes:["server/none.go::None"]')
+        calls=[]
+        def executor(prompt,**kwargs):
+            calls.append(self.packet(prompt));return self.fake(prompt,**kwargs)
+        done=analysis_run.run(value['id'],executor);self.assertEqual(done['state'],'completed',done.get('error'))
+        self.assertEqual(list(calls[0]['input']['routes']),[other])
+
+    def test_a_small_use_file_goes_whole_once_per_call_and_a_large_one_in_windows(self):
+        self.two_request_screen();sizes={}
+        for cap,whole in ((analysis_run.USE_FILE_BYTES,True),(100,False)):
+            with self.subTest(whole=whole):
+                calls=[]
+                def executor(prompt,**kwargs):
+                    p=self.packet(prompt);calls.append(p);sizes[whole]=len(prompt.encode())
+                    rows=[(s.get('routes') or [s.get('route')],r[1]) for s in p['sources'] if s['file']=='pages/list.vue' for r in s['lines']]
+                    if whole:
+                        # The opening form tag (31 lines above the use) is shown, once, for both requests.
+                        self.assertEqual([n for _,n in rows],list(range(1,34)));self.assertEqual(rows[0][0],[self.ROUTE,'server/other.go::Other'])
+                        self.assertIn('supplied whole',p['prompt'])
+                    else:self.assertNotIn(1,[n for _,n in rows]);self.assertIn(32,[n for _,n in rows])
+                    return self.fake(prompt,**kwargs)
+                with patch.object(analysis_run,'USE_FILE_BYTES',cap):
+                    done=analysis_run.run(self.prepare(intent={'task':'steps','targets':[{'repository':'service','target':'/items'}]})['id'],executor)
+                self.assertEqual(done['state'],'completed',done.get('error'));self.assertEqual(len(calls),1)
+                raw=self.raw();raw['dev']['task_outputs']['flows']['routes']={};raw['flows']={'routes':{}}
+                for r in raw['dev']['backend_routes']:r.pop('flow',None)
+                project._publish('demo','service',raw,{},collection=False)
+        print('\nsteps packet bytes with use windows',sizes[False],'with whole use files',sizes[True],file=sys.stderr)
+
     def test_jobs_one_bounded_call_with_files_read_note(self):
         for i in range(20):(self.repo/f'server/pad{i:02}.txt').write_text('ordinary padding line\n'*600)
         self.git('add','.');self.git('commit','-qm','Many program files');self.seed_map()

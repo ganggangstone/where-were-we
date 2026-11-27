@@ -312,7 +312,7 @@ def analysis_plan(project: str = "", branch: str = "dev", lang: str = "ko", repo
     return json.dumps(ai_extract.plan(need(project),branch,lang,repository),ensure_ascii=False)
 
 
-@app.tool(description="묶음(groups), 전체 구조(system), 프로그램 작업(jobs), 요청 단계(steps)의 분석 안내·입력·schema를 받는다. AI를 실행하지 않는다. 연결된 에이전트가 analysis_source로 코드를 읽고 record_ai_task로 제출한다. jobs target은 node ID, steps target은 화면 주소 또는 @routes:[route keys]. 멀티레포는 repository 필수.")
+@app.tool(description="묶음(groups), 전체 구조(system), 프로그램 작업(jobs), 요청 단계(steps)의 분석 안내·입력·schema를 받는다. AI를 실행하지 않는다. 연결된 에이전트가 analysis_source로 코드를 읽고 record_ai_task로 제출한다. jobs target은 node ID, steps target은 화면 주소, @routes:[route keys], 또는 화면 주소@routes:[그 화면의 route keys]. 멀티레포는 repository 필수.")
 def request_ai_task(project: str, task: str, repository: str = "", branch: str = "dev", lang: str = "ko", target: str = "") -> str:
     import ai_extract
     return json.dumps(ai_extract.task_request(need(project),task,branch,lang,repository,target),ensure_ascii=False)

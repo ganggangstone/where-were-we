@@ -584,9 +584,9 @@ def _plan(value):
         missing=[k for k in keys if not (results.get(k) and not results[k]['stale'] and results[k].get('language')==lang
                     and ai_extract.same(results[k].get('commit'),head) and results[k].get('configuration')==pin['configuration'])]
         if missing:
-            # A whole screen keeps its target, so the task still knows the screen's own files (callers first, their uses).
-            # ponytail: a screen with only some routes missing asks those by key, without the screen's uses.
-            selected='@routes:'+json.dumps(missing,ensure_ascii=False) if chosen=='steps' and missing!=list(keys) else target['target']
+            # A screen keeps its path, so the task still knows the screen's own files (callers first, their uses);
+            # with only some of its routes missing it asks those by key after the path.
+            selected=target['target'].partition('@routes:')[0]+'@routes:'+json.dumps(missing,ensure_ascii=False) if chosen=='steps' and missing!=list(keys) else target['target']
             plan['tasks'].append({'repository':rid,'task':chosen,'target':selected,'before':{k:results.get(k) for k in missing},**pin})
     return plan
 
@@ -1778,6 +1778,9 @@ ROUTE_BYTES = 16 * 1024        # source of one route in a steps call
 MAX_STEPS_CALLS = 3
 CALLER_LINES = 12             # lines on each side of a screen call site in a steps call
 USE_LINES = 8                 # lines on each side of a place in the screen's files that uses that call site's function
+USE_FILE_BYTES = ROUTE_BYTES // 2  # a use file this small is sent whole; with three per route a call still fits DETAIL_BYTES
+USE_FILE_RULE = (f' A use file of at most {USE_FILE_BYTES} bytes is supplied whole, once per call, listing the routes it serves; '
+                 'a larger one only lines around each use.')
 MAX_JOB_FILES = 8
 MAX_BRIEFING_CALLS = 4
 BRIEF_BODY_CHARS = 3000        # of each PR or issue body; a quote from the kept prefix is still a quote of the full text
@@ -1914,21 +1917,26 @@ def _detail(value,task,request,call,validate):
             for u in route.get('uses',[]):screen.setdefault(u['file'],[]).append((max(1,u['line']-USE_LINES),u['line']+USE_LINES))
             picks[key]=[(route['file'],spans),*screen.items(),*((f,60) for f in dict.fromkeys([*(route.get('services') or []),*imports.get(route['file'],[])]) if f!=route['file'])]
         lines={f['file']:f['lines'] for f in export_source(repo,commit,selected={commit:{f for p in picks.values() for f,_ in p}})[0]['files']}
+        # A use file of at most USE_FILE_BYTES goes whole, once per call (what fires the request is often elsewhere in it); a larger one its windows.
+        whole={key:[f for f in dict.fromkeys(u['file'] for u in request['input']['routes'][key].get('uses',[]))
+                    if sum(map(_row_cost,lines.get(f,[])))<=USE_FILE_BYTES] for key in keys}
+        files={f:_rows(lines,[(f,[(1,10**9)])],USE_FILE_BYTES,refs) for f in dict.fromkeys(f for w in whole.values() for f in w)}
         # A small service or imported file goes whole; a large one only its signal windows.
-        picks={key:[(f,n) if isinstance(n,list) else (f,_spans(lines,signals,f,n,ROUTE_BYTES//4)) for f,n in p] for key,p in picks.items()}
+        picks={key:[(f,n) if isinstance(n,list) else (f,_spans(lines,signals,f,n,ROUTE_BYTES//4)) for f,n in p if f not in whole[key]] for key,p in picks.items()}
         sources={key:_rows(lines,picks[key],ROUTE_BYTES,refs) for key in keys}
-        calls=[[]];size=0
+        calls=[[]];size=0;held=set()
         for key in keys:
-            n=_size(sources[key])
+            extra=[f for f in whole[key] if f not in held];n=_size(sources[key])+_size([files[f] for f in extra])
             if calls[-1] and size+n>DETAIL_BYTES:
                 if len(calls)==MAX_STEPS_CALLS:break
-                calls.append([]);size=0
-            calls[-1].append(key);size+=n
+                calls.append([]);size=0;held=set();n=_size(sources[key])+_size([files[f] for f in whole[key]])
+            calls[-1].append(key);size+=n;held|=set(whole[key])
         result={'routes':{},'unknown':[]}
         for group in calls:
             part={**request,'input':{'routes':{k:request['input']['routes'][k] for k in group}}}
-            packet={'prompt':request['prompt']+REF_RULE,'schema':schema,'input':part['input'],
-                    'sources':[{'route':k,**s} for k in group for s in sources[k]]}
+            shared=dict.fromkeys(f for k in group for f in whole[k])
+            packet={'prompt':request['prompt']+USE_FILE_RULE+REF_RULE,'schema':schema,'input':part['input'],
+                    'sources':[{'route':k,**s} for k in group for s in sources[k]]+[{'routes':[k for k in group if f in whole[k]],**s} for f in shared for s in files[f]]}
             def check(got,part=part):
                 got=_cited(got,refs);validate(got);_strict_result('steps',got,repo,commit,part,raw);return got
             got=answer(packet,check)
