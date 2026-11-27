@@ -42,8 +42,21 @@ def route_id(r):
 def screen_id(s):return 's:'+digest(s.get('path'))[:16]
 def handler(r):return str(r.get('file'))+'::'+str(r.get('function'))
 
+_PINNED={}  # (repository, commit) -> {'files': tracked paths, 'text': {path: git show output}}; a commit never changes
+def _pinned(repo,commit):
+    key=(repo,commit)
+    if key not in _PINNED:
+        if len(_PINNED)>=4:_PINNED.clear()
+        _PINNED[key]={'files':frozenset(git(repo,'ls-tree','-rz','--name-only',commit).rstrip('\0').split('\0')),'text':{}}
+    return _PINNED[key]
+def shown(repo,commit,file):
+    """git show of one file at a commit, read once per process."""
+    text=_pinned(repo,commit)['text']
+    if file not in text:text[file]=git(repo,'show',commit+':'+file)
+    return text[file]
+
 def evidence_reader(repo,commit):
-    files=set(git(repo,'ls-tree','-rz','--name-only',commit).rstrip('\0').split('\0'));cache={};rejected=0
+    files=_pinned(repo,commit)['files'];cache={};rejected=0
     def evidence(item):
         nonlocal rejected
         if not isinstance(item,dict):rejected+=1;return None
@@ -51,7 +64,7 @@ def evidence_reader(repo,commit):
         if (not isinstance(file,str) or file not in files or PurePosixPath(file).is_absolute() or '..' in PurePosixPath(file).parts
             or type(line) is not int or line<1 or not isinstance(quote,str) or len(quote.strip())<6):
             rejected+=1;return None
-        if file not in cache:cache[file]=git(repo,'show',commit+':'+file).splitlines()
+        if file not in cache:cache[file]=shown(repo,commit,file).splitlines()
         lines=cache[file]
         # Exact line and literal quote: successful text matching does not prove semantics.
         if line>len(lines) or quote not in lines[line-1]:rejected+=1;return None
@@ -779,10 +792,14 @@ def task_input(raw,task,branch,target,repo=None,head=None):
         if not isinstance(keys,list) or not keys or any(not isinstance(k,str) or k not in own for k in keys):
             raise ValueError('Choose known route targets')
     if not keys:raise ValueError('No server route targets in this snapshot')
+    by_route={}  # (route file, route line) -> {(call file, call line): (not the selected screen's, function name)}
+    for f in m['api_functions']:
+        for c in f.get('calls',[]):
+            if not isinstance(c.get('line'),int):continue
+            for b in c.get('backend',[]):by_route.setdefault((b.get('file'),b.get('line')),{})[(f['file'],c['line'])]=((f['file'],f['name']) not in refs,f['name'])
     def callers(r):
         # Screen code that sends this request (the map's call sites): the selected screen's first, at most MAX_CALLERS.
-        sites={(f['file'],c['line']):((f['file'],f['name']) not in refs,f['name']) for f in m['api_functions'] for c in f.get('calls',[])
-               if isinstance(c.get('line'),int) and any((b.get('file'),b.get('line'))==(r['file'],r['line']) for b in c.get('backend',[]))}
+        sites=by_route.get((r['file'],r['line']),{})
         return [{'file':f,'line':l,'function':sites[(f,l)][1],'selected':not sites[(f,l)][0]} for f,l in sorted(sites,key=lambda s:(sites[s][0],s))[:MAX_CALLERS]]
     via={}
     for s in screens:
@@ -800,14 +817,14 @@ def task_input(raw,task,branch,target,repo=None,head=None):
             word=re.compile(r'(?<![\w$])'+re.escape(name)+r'(?![\w$])')
             for file in sorted(set(via.get((c['file'],name),[]))):
                 if file not in cache:
-                    try:cache[file]=git(repo,'show',head+':'+file).splitlines()
+                    try:cache[file]=shown(repo,head,file).splitlines()
                     except Exception:cache[file]=[]
                 skip=import_lines(cache[file])
                 for n,line in enumerate(cache[file],1):
                     if n in skip or not word.search(line):continue
                     # A bare name in a list (an import form not recognised, an export list) may not be a use: it comes after clear uses.
                     (vague if LIST_ITEM.match(line) else clean).append({'file':file,'line':n})
-        return [u for i,u in enumerate(clean+vague) if u not in (clean+vague)[:i]][:MAX_USES]
+        return list({(u['file'],u['line']):u for u in clean+vague}.values())[:MAX_USES]  # first place of each line
     def route_input(r):
         cs=callers(r)
         return {**{k:r.get(k) for k in ('file','function','method','path','line')},
@@ -1062,7 +1079,7 @@ def task_result(raw,task,branch,target,data,repo,commit,lang,configuration=None,
             # A batch note (sources left unread) stays with every route of that answer, as jobs keep theirs.
             note=' '.join([*([reason] if not steps else []),*notes])
             flow={**meta,**({'unknown':note} if note else {}),'name':text(got,'name'),'file':route['file'],'function':route['function'],'steps':steps,
-                  'hash':hashlib.sha1(git(repo,'show',commit+':'+route['file']).encode()).hexdigest()[:12]}
+                  'hash':hashlib.sha1(shown(repo,commit,route['file']).encode()).hexdigest()[:12]}
             flows[key]=flow
             for r in updated[branch]['backend_routes']:
                 if handler(r)==key:r['flow']=flow
@@ -1124,12 +1141,14 @@ PLAN_TEXT={
        'now':'Tasks needed now and reference values:','tail':'A failed task leaves saved results intact; report which task failed and why. When all are done, tell the user to return to the app, which reads the saved results. Do not call refresh to display the result.'}}
 READ_ERRORS=(ValueError,subprocess.CalledProcessError,OSError)
 
-def pin_request(name,branch='dev',repository=''):
-    """The commit and configuration a request would pin, without reading the whole tree (no mode or recheck list)."""
+def pin_request(name,branch='dev',repository='',contexts=None):
+    """The commit and configuration a request would pin, without reading the whole tree (no mode or recheck list).
+    contexts, when given, keeps the context() read under the repository ID."""
     with project.locked(name):
-        repo,raw,rid,commit=context(name,repository,branch)
+        repo,raw,rid,commit=found=context(name,repository,branch)
         fingerprint=project.fingerprint(repo)
         if project.states(name).get(rid,{}).get('fingerprint')!=fingerprint:raise ValueError('Refresh after configuration changes first')
+    if contexts is not None:contexts[rid]=found
     return {'commit':commit,'record_arguments':{'configuration':fingerprint},'mode':None,'reason':None,'recheck':[],'inspect':[]}
 
 def warm_basic(name,branch,repos):
@@ -1141,9 +1160,10 @@ def warm_basic(name,branch,repos):
         from concurrent.futures import ThreadPoolExecutor
         with ThreadPoolExecutor(min(4,len(repos))) as pool:list(pool.map(one,repos))
 
-def plan(name,branch='dev',lang='ko',repository='',overview=False,light=False):
+def plan(name,branch='dev',lang='ko',repository='',overview=False,light=False,contexts=None):
     """Only missing or outdated analysis, for the connected agent to repeat after each save. Reads only.
-    light: pins and freshness only; the per-task mode, reason and recheck counts are left empty (no whole-tree read)."""
+    light: pins and freshness only; the per-task mode, reason and recheck counts are left empty (no whole-tree read).
+    contexts, when given, receives the context() of each pinned repository, so a caller does not read it again."""
     import briefing
     if lang not in ('ko','en'):raise ValueError('Choose ko or en')
     repository='' if repository=='*' else repository
@@ -1157,9 +1177,14 @@ def plan(name,branch='dev',lang='ko',repository='',overview=False,light=False):
         rid=repo['id']
         if not repo['refs'].get(branch):skipped.append({'repository':rid,'reason':'no_branch'});continue
         try:
-            req=pin_request(name,branch,rid) if light else request(name,branch,lang,rid)
-            with project.locked(name):_,raw,_,head=context(name,rid,branch)
+            read={}
+            if light:req=pin_request(name,branch,rid,read)  # one read gives the pin and the map
+            else:
+                req=request(name,branch,lang,rid)
+                with project.locked(name):read[rid]=context(name,rid,branch)
+            _,raw,_,head=read[rid]
             if head!=req['commit']:raise ValueError('Repository commit changed while preparing; request again')
+            if contexts is not None:contexts[rid]=read[rid]
         except READ_ERRORS as error:blocked.append({'repository':rid,'task':'analysis','reason':str(error)});continue
         config=req['record_arguments']['configuration'];pin={'commit':head,'configuration':config};pins[rid]=pin
         res=project.analysis_results(raw,branch);sel=project.branch_bundle(raw,branch);m=raw[branch]

@@ -145,7 +145,7 @@ def unit_board(project,repository='',branch='dev',lang='ko',run=None,runs=None):
     calls: the calls 분석하기 would make now (rules, labeling, structure), counted as prepare() counts them."""
     scope=_scope(project,repository,branch,lang)
     value={'project':project,'branch':branch,'lang':lang,'repository':scope['repository'],'intent':{'task':'full','targets':[]}}
-    history=[r for r in (_runs() if runs is None else runs) if all(r[k]==scope[k] for k in ('project','lang','branch'))]
+    history=[r for r in (_runs(project=project,lang=lang,branch=branch) if runs is None else runs) if all(r[k]==scope[k] for k in ('project','lang','branch'))]
     history.sort(key=lambda r:r['created_at'])
     live=run and run.get('state') in ACTIVE
     # A live run's own saves are its progress, not results to skip; a finished run's saves count like any other.
@@ -196,10 +196,10 @@ def unit_signals(project,repository='',branch='dev',lang='ko'):
     """Run (or load) the local signal scan of each pinned commit, which tells text from binary for the unit catalog. Never calls AI.
     It only fills .analysis-cache, so it runs beside the board without the run lock."""
     scope=_scope(project,repository,branch,lang)
-    plan=ai_extract.plan(project,branch,lang,scope['repository'],overview=True,light=True)
+    contexts={};plan=ai_extract.plan(project,branch,lang,scope['repository'],overview=True,light=True,contexts=contexts)
     repositories=[]
     for rid in plan['pins']:
-        conf,_,_,head=ai_extract.context(project,rid,branch)
+        conf,_,_,head=contexts[rid]
         _signals(conf['path'],head)
         repositories.append({'repository':rid,'commit':head})
     return {'ready':True,'repositories':repositories}
@@ -207,10 +207,10 @@ def unit_signals(project,repository='',branch='dev',lang='ko'):
 def unit_quick(project,repository='',branch='dev',lang='ko'):
     """The pinned commit and file counts before any unit is calculated, so the board can open at once. Reads git only."""
     scope=_scope(project,repository,branch,lang)
-    plan=ai_extract.plan(project,branch,lang,scope['repository'],overview=True,light=True)
+    contexts={};plan=ai_extract.plan(project,branch,lang,scope['repository'],overview=True,light=True,contexts=contexts)
     repositories=[]
     for rid in plan['pins']:
-        conf,_,_,head=ai_extract.context(project,rid,branch)
+        conf,_,_,head=contexts[rid]
         sizes=_tracked(conf['path'],head);reasons=collections.Counter(r for f,z in sizes.items() if (r:=_exclusion(f,z)))
         repositories.append({'repository':rid,'commit':head,'tracked':len(sizes),'excluded':dict(sorted(reasons.items()))})
     return {'quick':True,'repositories':repositories}
@@ -228,7 +228,7 @@ def unit_result(project,repository,branch,lang,target):
         catalog=_unit_catalogs({'project':project,'branch':branch,'lang':lang},{'pins':{rid:plan['pins'][rid]}}).get(rid) or {}
         unit=next((u for u in catalog.get('units',[]) if u['id']==target),None)
         if unit:local={'local':True,'commit':catalog['commit'],'files':unit['files'],'file_count':unit['file_count'],'kinds':dict(collections.Counter(source_signals.kind(f) for f in unit['files']))}
-    for record in sorted(_runs(),key=lambda r:r['created_at']):
+    for record in sorted(_runs(project=project,lang=lang,branch=branch),key=lambda r:r['created_at']):
         if all(record[k]==scope[k] for k in ('project','lang','branch')):
             for store_name in ('scope_overviews','unit_overviews'):
                 if target in (record.get(store_name,{}).get(scope['repository']) or {}):found=record[store_name][scope['repository']][target]
@@ -330,8 +330,14 @@ def _recover(value):
             return value
         finally: fcntl.flock(stream,fcntl.LOCK_UN)
 
-def _runs():
-    return [_recover(store.read(p)) for p in sorted(root().glob('*.json'))]
+def _runs(**want):
+    """Every run record, recovered. With want (field=value), only the matching runs: a run is judged on its small
+    .progress summary first (see _summary), so an unrelated ended run's full record is not read."""
+    out=[]
+    for p in sorted(root().glob('*.json')):
+        if want and any(_summary(p).get(k)!=v for k,v in want.items()):continue
+        out.append(_recover(store.read(p)))
+    return out
 
 def _summary(record):
     """An ended run's small cached progress while it is current; otherwise the full record, recovered as _runs() does."""
@@ -598,10 +604,10 @@ CALL_KINDS=('rules','labeling','structure','unit')
 
 def _full_scope(value,defer=False):
     """Pins, unit catalogs, summaries and missing reading rules of every repository of a full analysis. No AI."""
-    plan=ai_extract.plan(value['project'],value['branch'],value['lang'],value['repository'],overview=True,light=True)
+    contexts={};plan=ai_extract.plan(value['project'],value['branch'],value['lang'],value['repository'],overview=True,light=True,contexts=contexts)
     out={}
     for rid,pin in plan['pins'].items():
-        context=ai_extract.context(value['project'],rid,value['branch']);conf,raw,_,head=context
+        context=contexts[rid];conf,raw,_,head=context
         catalog=_unit_catalogs(value,{'pins':{rid:pin}},defer,context)[rid]
         index=_pinned_index(conf['path'],raw[value['branch']],head)
         sizes=_tracked(conf['path'],head);files=[f for f,z in sizes.items() if not _exclusion(f,z)]
@@ -904,7 +910,7 @@ def status(run_id=None, project=None, repository='', branch='dev', lang='ko',vie
     if view=='signals':return unit_signals(project,repository,branch,lang)
     if view=='units':
         # Only the run files are read under the lock; the board (git and the local index) is built outside it.
-        with locked():runs=_runs()
+        with locked():runs=_runs(project=project,lang=lang,branch=branch)
         return unit_board(project,repository,branch,lang,runs=runs)
     with locked():
         if view=='units_quick':return unit_quick(project,repository,branch,lang)
@@ -913,7 +919,7 @@ def status(run_id=None, project=None, repository='', branch='dev', lang='ko',vie
         if view=='resource' and (not isinstance(resource,str) or not resource.startswith('/')):raise ValueError('Choose a resource path')
         if run_id: return _recover(read(run_id))
         scope = _scope(project,repository,branch,lang)
-        values=[_summary(p) for p in sorted(root().glob('*.json'))] if view=='latest' else _runs()
+        values=[_summary(p) for p in sorted(root().glob('*.json'))] if view=='latest' else _runs(project=project)
         active_project=[v for v in values if v['project']==project and v['state'] in ACTIVE]
         matches=active_project or [v for v in values if all(v[k]==scope[k] for k in scope)]
         if not matches and view in ('catalog','resource'):
